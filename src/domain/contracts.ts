@@ -8,6 +8,8 @@ import {
   type TaskPacketInput
 } from "./types.ts";
 
+const maxQueryEmbeddingDimensions = 1536;
+
 function nonEmptyItems(values: readonly string[] | undefined, fallback: string[] = []): string[] {
   if (!values) {
     return [...fallback];
@@ -176,6 +178,16 @@ export function normalizeSearchInput(
   const query = input.query.trim();
   if (query.length === 0) {
     throw new Error("search query is required");
+  }
+
+  if (input.queryEmbedding) {
+    if (input.queryEmbedding.length === 0 || input.queryEmbedding.some((value) => !Number.isFinite(value))) {
+      throw new Error("query embedding must contain only finite numbers");
+    }
+
+    if (input.queryEmbedding.length > maxQueryEmbeddingDimensions) {
+      throw new Error(`query embedding must not exceed ${maxQueryEmbeddingDimensions} dimensions`);
+    }
   }
 
   return {

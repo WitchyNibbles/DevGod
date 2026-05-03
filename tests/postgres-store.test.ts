@@ -235,6 +235,60 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
   assert.deepEqual(capture[1]?.values, ["team", "devgod", false, "%shared orchestration%", "%shared%", "%orchestration%", 15]);
 });
 
+test("PostgresStore.searchMemory issues a vector query when query embeddings are supplied", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [
+          {
+            id: "vector-best",
+            title: "Shared retrieval note",
+            content: "candidate alpha",
+            scope: "project",
+            entryType: "pattern",
+            actor: "memory_curator",
+            reviewer: "memory_curator",
+            runId: "run-vector",
+            taskId: null,
+            sourcePath: null,
+            sourceAnchor: null,
+            projectId: "project:team:devgod",
+            createdAt: "2026-05-03T00:00:00.000Z",
+            vectorScore: 0.95
+          }
+        ]
+      ],
+      capture
+    )
+  );
+
+  const [result] = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.equal(result?.id, "vector-best");
+  assert.equal(capture.length, 3);
+  assert.match(capture[2]?.text ?? "", /m\.embedding <=> \$4::vector/);
+  assert.match(capture[2]?.text ?? "", /m\.embedding_model = \$5/);
+  assert.deepEqual(capture[2]?.values, [
+    "team",
+    "devgod",
+    false,
+    "[0.1,0.2]",
+    "text-embedding-3-small",
+    15
+  ]);
+});
+
 test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {
   const store = new PostgresStore(
     sqlClientWithRows([

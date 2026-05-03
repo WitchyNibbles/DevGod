@@ -52,6 +52,7 @@ interface SearchMemoryRow {
   sourceAnchor?: string | null;
   projectId: string | null;
   createdAt: string;
+  vectorScore?: number | null;
 }
 
 interface EmbeddingJobRow {
@@ -691,10 +692,13 @@ export class PostgresStore implements DevgodStore {
     query: string;
     limit: number;
     includeGlobal: boolean;
+    queryEmbedding?: readonly number[] | undefined;
+    embeddingModel?: string | undefined;
   }): Promise<SearchMemoryResult[]> {
     const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
     const recentLimit = Math.min(Math.max(params.limit * 5, 25), 200);
     const backfillLimit = Math.min(Math.max(params.limit * 3, 15), 100);
+    const vectorLimit = Math.min(Math.max(params.limit * 3, 15), 100);
     const lexicalClauses = buildLexicalBackfillClauses(params.query, 5);
 
     const recentResult = await this.client.query<SearchMemoryRow>(
@@ -773,10 +777,61 @@ export class PostgresStore implements DevgodStore {
       [params.workspaceSlug, params.projectSlug, params.includeGlobal, `%${params.query}%`, ...lexicalClauses.values, backfillLimit]
     );
 
-    return dedupeMemoryRows([...recentResult.rows, ...backfillResult.rows])
+    const vectorResult =
+      params.queryEmbedding && params.embeddingModel
+        ? await this.client.query<SearchMemoryRow>(
+            `with project_context as (
+               select p.id as project_id
+               from projects p
+               join workspaces w on w.id = p.workspace_id
+               where w.slug = $1 and p.slug = $2
+             )
+             select
+               m.id,
+               m.title,
+               m.content,
+               m.scope,
+               m.entry_type as "entryType",
+               m.actor,
+               m.reviewer,
+               m.run_id as "runId",
+               m.task_id as "taskId",
+               m.source_path as "sourcePath",
+               m.source_anchor as "sourceAnchor",
+               m.project_id as "projectId",
+               m.created_at as "createdAt",
+               greatest(0, 1 - (m.embedding <=> $4::vector)) as "vectorScore"
+             from memory_entries m
+             join project_context pc on true
+             join workspaces w on w.id = m.workspace_id
+             where w.slug = $1
+               and m.status = 'approved'
+               and m.embedding is not null
+               and m.embedding_model = $5
+               and (
+                 m.project_id = pc.project_id
+                 or ($3::boolean and m.scope = 'global')
+               )
+             order by
+               case when m.project_id = pc.project_id then 0 else 1 end,
+               m.embedding <=> $4::vector asc,
+               m.created_at desc
+             limit $6`,
+            [
+              params.workspaceSlug,
+              params.projectSlug,
+              params.includeGlobal,
+              formatVector(params.queryEmbedding),
+              params.embeddingModel,
+              vectorLimit
+            ]
+          )
+        : { rows: [], rowCount: 0 };
+
+    return dedupeMemoryRows([...recentResult.rows, ...backfillResult.rows, ...vectorResult.rows])
       .map((entry) => {
         const sameProject = entry.projectId === projectId;
-        return buildMemorySearchResult(
+        const baseResult = buildMemorySearchResult(
           {
             ...entry,
             taskId: entry.taskId ?? undefined,
@@ -787,6 +842,10 @@ export class PostgresStore implements DevgodStore {
           sameProject,
           sameProject ? params.projectSlug : undefined
         );
+        return {
+          ...baseResult,
+          score: baseResult.score + vectorScoreBoost(entry.vectorScore)
+        };
       })
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);
@@ -843,6 +902,18 @@ export class PostgresStore implements DevgodStore {
     );
     return result.rowCount ?? 0;
   }
+}
+
+function formatVector(values: readonly number[]): string {
+  return `[${values.join(",")}]`;
+}
+
+function vectorScoreBoost(vectorScore?: number | null): number {
+  if (vectorScore === null || vectorScore === undefined || !Number.isFinite(vectorScore)) {
+    return 0;
+  }
+
+  return Math.max(0, vectorScore) * 6;
 }
 
 function buildLexicalBackfillClauses(query: string, startParam: number): {

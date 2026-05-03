@@ -262,7 +262,9 @@ export class DevgodCoreService {
       projectSlug: normalized.projectSlug,
       query: normalized.query,
       limit: normalized.limit,
-      includeGlobal: normalized.includeGlobal
+      includeGlobal: normalized.includeGlobal,
+      queryEmbedding: normalized.queryEmbedding,
+      embeddingModel: normalized.embeddingModel
     });
   }
 

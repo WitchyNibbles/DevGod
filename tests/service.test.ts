@@ -536,6 +536,75 @@ test("searchMemory uses a stable tie-break for equivalent scores", async () => {
   assert.equal(results[1]?.title, "Zeta pattern");
 });
 
+test("searchMemory uses query embeddings to break lexical ties when a matching embedding model is supplied", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  const firstEntry = await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Shared retrieval note",
+    content: "candidate alpha",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const secondEntry = await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Shared retrieval note",
+    content: "candidate beta",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await store.queueEmbeddingJob({
+    workspaceId: firstEntry.workspaceId,
+    projectId: firstEntry.projectId,
+    sourceTable: "memory_entries",
+    sourceId: firstEntry.id,
+    embeddingModel: "text-embedding-3-small"
+  });
+  await store.queueEmbeddingJob({
+    workspaceId: secondEntry.workspaceId,
+    projectId: secondEntry.projectId,
+    sourceTable: "memory_entries",
+    sourceId: secondEntry.id,
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  const leasedJobs = await store.leaseEmbeddingJobs({ limit: 2 });
+  for (const job of leasedJobs) {
+    await store.completeEmbeddingJob({
+      jobId: job.id,
+      sourceTable: job.sourceTable,
+      sourceId: job.sourceId,
+      embeddingModel: job.embeddingModel,
+      embedding: job.sourceId === firstEntry.id ? [1, 0] : [0, 1]
+    });
+  }
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared retrieval",
+    queryEmbedding: [1, 0],
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.equal(results[0]?.id, firstEntry.id);
+  assert.equal(results[1]?.id, secondEntry.id);
+});
+
 test("searchMemory excludes project memory from other projects", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({
@@ -594,6 +663,34 @@ test("searchMemory rejects blank queries", async () => {
       query: "   "
     }),
     /search query is required/
+  );
+});
+
+test("searchMemory rejects non-finite query embeddings", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+
+  await assert.rejects(
+    service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "incident playbook",
+      queryEmbedding: [Number.NaN]
+    }),
+    /query embedding must contain only finite numbers/
+  );
+});
+
+test("searchMemory rejects oversized query embeddings", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+
+  await assert.rejects(
+    service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "incident playbook",
+      queryEmbedding: new Array(1537).fill(0)
+    }),
+    /query embedding must not exceed 1536 dimensions/
   );
 });
 

@@ -328,6 +328,8 @@ export class MemoryStore implements DevgodStore {
     query: string;
     limit: number;
     includeGlobal: boolean;
+    queryEmbedding?: readonly number[] | undefined;
+    embeddingModel?: string | undefined;
   }): Promise<SearchMemoryResult[]> {
     const projectKey = `${params.workspaceSlug}:${params.projectSlug}`;
     const project = this.projects.get(projectKey);
@@ -340,7 +342,11 @@ export class MemoryStore implements DevgodStore {
       })
       .map((entry) => {
         const sameProject = project ? entry.projectId === project.id : false;
-        return buildMemorySearchResult(entry, params.query, sameProject, sameProject ? params.projectSlug : undefined);
+        const baseResult = buildMemorySearchResult(entry, params.query, sameProject, sameProject ? params.projectSlug : undefined);
+        return {
+          ...baseResult,
+          score: baseResult.score + this.vectorScoreBoost(entry.id, params.queryEmbedding, params.embeddingModel)
+        };
       })
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);
@@ -363,4 +369,45 @@ export class MemoryStore implements DevgodStore {
   private embeddingMapFor(sourceTable: EmbeddingJobSourceTable): Map<string, EmbeddingVectorRecord> {
     return sourceTable === "artifacts" ? this.artifactEmbeddings : this.memoryEntryEmbeddings;
   }
+
+  private vectorScoreBoost(
+    entryId: string,
+    queryEmbedding?: readonly number[] | undefined,
+    embeddingModel?: string | undefined
+  ): number {
+    if (!queryEmbedding || !embeddingModel) {
+      return 0;
+    }
+
+    const embeddingRecord = this.memoryEntryEmbeddings.get(entryId);
+    if (!embeddingRecord || embeddingRecord.embeddingModel !== embeddingModel) {
+      return 0;
+    }
+
+    return cosineSimilarity(queryEmbedding, embeddingRecord.embedding) * 6;
+  }
+}
+
+function cosineSimilarity(left: readonly number[], right: readonly number[]): number {
+  if (left.length === 0 || left.length !== right.length) {
+    return 0;
+  }
+
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }

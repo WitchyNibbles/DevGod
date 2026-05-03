@@ -136,6 +136,8 @@ export interface SearchMemoryInput extends ProjectRef {
   query: string;
   limit?: number | undefined;
   includeGlobal?: boolean | undefined;
+  queryEmbedding?: readonly number[] | undefined;
+  embeddingModel?: string | undefined;
 }
 
 export interface WorkspaceRecord {

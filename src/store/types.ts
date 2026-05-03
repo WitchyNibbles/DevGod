@@ -94,5 +94,7 @@ export interface DevgodStore {
     query: string;
     limit: number;
     includeGlobal: boolean;
+    queryEmbedding?: readonly number[] | undefined;
+    embeddingModel?: string | undefined;
   }): Promise<SearchMemoryResult[]>;
 }
