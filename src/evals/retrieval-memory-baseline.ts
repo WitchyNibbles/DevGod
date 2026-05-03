@@ -1,9 +1,11 @@
+import { SEARCH_MEMORY_STALE_AFTER_DAYS } from "../core/policy.ts";
 import { DevgodCoreService } from "../core/service.ts";
+import type { MemoryEntryRecord } from "../domain/types.ts";
 import { MemoryStore } from "../store/memory-store.ts";
 
 export interface RetrievalEvalCaseResult {
   id: string;
-  goal: "recall_precision" | "provenance" | "redaction" | "freshness";
+  goal: "recall_precision" | "provenance" | "citation" | "redaction" | "freshness" | "conflict";
   passed: boolean;
   details: string;
 }
@@ -20,9 +22,26 @@ export interface RetrievalEvalReport {
   summary: RetrievalEvalSummary;
 }
 
+function mutateMemoryEntryWhere(
+  store: MemoryStore,
+  predicate: (entry: MemoryEntryRecord) => boolean,
+  mutate: (entry: MemoryEntryRecord) => MemoryEntryRecord
+): void {
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  const entry = [...memoryEntries.values()].find(predicate);
+
+  if (!entry) {
+    throw new Error("expected matching memory entry");
+  }
+
+  const nextEntry = mutate(entry);
+  memoryEntries.set(nextEntry.id, nextEntry);
+}
+
 export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport> {
   const cases: RetrievalEvalCaseResult[] = [];
-  const service = new DevgodCoreService(new MemoryStore());
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
 
   const projectRun = await service.intakeRequest({
     workspaceSlug: "team",
@@ -54,6 +73,44 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
     actor: "memory_curator@example.com"
   });
 
+  await service.promoteMemory(projectRun.id, {
+    scope: "project",
+    entryType: "lesson",
+    title: "Legacy deploy playbook",
+    content: "legacy deploy recoveries and rollback notes",
+    sourceRunId: projectRun.id,
+    sourceTaskId: "task-legacy",
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateMemoryEntryWhere(store, (entry) => entry.title === "Legacy deploy playbook", (entry) => ({
+    ...entry,
+    createdAt: "2000-01-01T00:00:00.000Z"
+  }));
+
+  await service.promoteMemory(projectRun.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Adopt pgvector retrieval",
+    content: "pgvector retrieval should be enabled for memory search",
+    sourceRunId: projectRun.id,
+    sourceTaskId: "task-conflict-enable",
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(projectRun.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Delay pgvector retrieval",
+    content: "pgvector retrieval should stay disabled until backfill passes",
+    sourceRunId: projectRun.id,
+    sourceTaskId: "task-conflict-delay",
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
   const recallResults = await service.searchMemory({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -64,7 +121,7 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
     id: "project_recall_precision",
     goal: "recall_precision",
     passed: recallTop?.title === "Incident playbook",
-    details: `top=${recallTop?.title ?? "none"}`
+    details: `top=${recallTop?.title ?? "none"} score=${recallTop?.score ?? "none"} status=${recallTop?.freshness.status ?? "none"}`
   });
 
   cases.push({
@@ -74,7 +131,18 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
       recallTop?.authority.reviewedBy === "memory_curator" &&
       recallTop?.citation.runId === projectRun.id &&
       recallTop?.provenance.taskId === "task-incident",
-    details: `reviewedBy=${recallTop?.authority.reviewedBy ?? "none"} taskId=${recallTop?.provenance.taskId ?? "none"}`
+    details: `reviewedBy=${recallTop?.authority.reviewedBy ?? "none"} runId=${recallTop?.citation.runId ?? "none"} taskId=${recallTop?.provenance.taskId ?? "none"}`
+  });
+
+  cases.push({
+    id: "project_citation_present",
+    goal: "citation",
+    passed:
+      recallTop?.citation.kind === "memory_entry" &&
+      recallTop?.citation.memoryId !== undefined &&
+      recallTop?.citation.label === "Incident playbook" &&
+      recallTop?.citation.taskId === "task-incident",
+    details: `kind=${recallTop?.citation.kind ?? "none"} memoryId=${recallTop?.citation.memoryId ?? "none"} label=${recallTop?.citation.label ?? "none"}`
   });
 
   const redactionResults = await service.searchMemory({
@@ -92,7 +160,7 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
       redactionTop.authority.reviewedBy === undefined &&
       redactionTop.citation.runId === undefined &&
       redactionTop.provenance.actor === undefined,
-    details: `scope=${redactionTop?.scope ?? "none"} reviewedBy=${redactionTop?.authority.reviewedBy ?? "redacted"}`
+    details: `scope=${redactionTop?.scope ?? "none"} reviewedBy=${redactionTop?.authority.reviewedBy ?? "redacted"} citationRunId=${redactionTop?.citation.runId ?? "redacted"}`
   });
 
   const freshnessResults = await service.searchMemory({
@@ -102,12 +170,46 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
   });
   const freshnessResult = freshnessResults[0];
   cases.push({
-    id: "freshness_age_days",
+    id: "freshness_fresh_status",
     goal: "freshness",
     passed:
+      freshnessResult?.freshness.status === "fresh" &&
       freshnessResult?.freshness.createdAt === freshnessResult?.provenance.createdAt &&
       (freshnessResult?.freshness.ageDays ?? -1) >= 0,
-    details: `ageDays=${freshnessResult?.freshness.ageDays ?? "none"}`
+    details: `status=${freshnessResult?.freshness.status ?? "none"} ageDays=${freshnessResult?.freshness.ageDays ?? "none"}`
+  });
+
+  const staleResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "legacy deploy playbook"
+  });
+  const staleTop = staleResults[0];
+  cases.push({
+    id: "freshness_stale_status",
+    goal: "freshness",
+    passed:
+      staleTop?.title === "Legacy deploy playbook" &&
+      staleTop.freshness.status === "stale" &&
+      staleTop.freshness.staleAfterDays === SEARCH_MEMORY_STALE_AFTER_DAYS &&
+      (staleTop.freshness.ageDays ?? 0) > SEARCH_MEMORY_STALE_AFTER_DAYS,
+    details: `status=${staleTop?.freshness.status ?? "none"} ageDays=${staleTop?.freshness.ageDays ?? "none"} staleAfterDays=${staleTop?.freshness.staleAfterDays ?? "none"}`
+  });
+
+  const conflictResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "pgvector retrieval"
+  });
+  const conflictTopTitles = conflictResults.slice(0, 2).map((result) => result.title).sort();
+  cases.push({
+    id: "conflict_candidates_visible",
+    goal: "conflict",
+    passed:
+      conflictTopTitles.length === 2 &&
+      conflictTopTitles[0] === "Adopt pgvector retrieval" &&
+      conflictTopTitles[1] === "Delay pgvector retrieval",
+    details: `top2=${conflictTopTitles.join(" | ")}`
   });
 
   const passedCases = cases.filter((testCase) => testCase.passed).length;
