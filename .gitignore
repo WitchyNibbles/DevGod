@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+coverage/
+dist/
+.DS_Store
+*.log
+*.key
+*.pem
+*.crt
+.devgod/state/
+.devgod/cache/
+.devgod/tmp/
+

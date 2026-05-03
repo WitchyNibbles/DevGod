@@ -1,0 +1,55 @@
+{
+  "name": "devgod",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared-core orchestration foundation for devgod.",
+  "files": [
+    ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-intake/SKILL.md",
+    ".agents/skills/devgod-memory/SKILL.md",
+    ".agents/skills/devgod-setup/SKILL.md",
+    ".codex/agents/",
+    ".codex/config.toml",
+    ".devgod/memory/README.md",
+    ".devgod/rules/",
+    ".devgod/templates/",
+    ".devgod/work/README.md",
+    ".devgod/work/briefs/README.md",
+    ".devgod/work/plans/README.md",
+    ".devgod/work/release/README.md",
+    ".devgod/work/reviews/README.md",
+    ".devgod/work/tasks/README.md",
+    ".env.example",
+    "AGENTS.md",
+    "README.md",
+    "docker-compose.yml",
+    "docs/global-setup.md",
+    "scripts/",
+    "src/"
+  ],
+  "scripts": {
+    "db:start": "docker compose up -d devgod-postgres",
+    "db:stop": "docker compose down",
+    "install:project": "node --experimental-strip-types src/install/cli.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "migrate": "node --experimental-strip-types src/admin.ts migrate",
+    "health": "node --experimental-strip-types src/admin.ts health",
+    "bootstrap": "node --experimental-strip-types src/admin.ts bootstrap-project",
+    "verify:setup": "node --experimental-strip-types src/admin.ts verify-setup",
+    "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/pg": "^8.20.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
