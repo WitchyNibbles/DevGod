@@ -132,7 +132,18 @@ export function compareMemorySearchResults(
 export function buildMemorySearchResult(
   entry: Pick<
     MemoryEntryRecord,
-    "id" | "title" | "content" | "scope" | "entryType" | "actor" | "reviewer" | "runId" | "taskId" | "createdAt"
+    | "id"
+    | "title"
+    | "content"
+    | "scope"
+    | "entryType"
+    | "actor"
+    | "reviewer"
+    | "runId"
+    | "taskId"
+    | "sourcePath"
+    | "sourceAnchor"
+    | "createdAt"
   >,
   query: string,
   sameProject: boolean,
@@ -160,6 +171,13 @@ export function buildMemorySearchResult(
       kind: "memory_entry",
       memoryId: entry.id,
       label: entry.title,
+      sourcePath: exposeSensitiveProvenance ? entry.sourcePath : undefined,
+      sourceAnchor: exposeSensitiveProvenance ? entry.sourceAnchor : undefined,
+      canonicalRef: buildCanonicalCitationRef(
+        entry.id,
+        exposeSensitiveProvenance ? entry.sourcePath : undefined,
+        exposeSensitiveProvenance ? entry.sourceAnchor : undefined
+      ),
       runId: exposeSensitiveProvenance ? entry.runId : undefined,
       taskId: exposeSensitiveProvenance ? entry.taskId : undefined
     },
@@ -172,6 +190,18 @@ export function buildMemorySearchResult(
       createdAt: entry.createdAt
     }
   };
+}
+
+function buildCanonicalCitationRef(
+  memoryId: string,
+  sourcePath?: string | undefined,
+  sourceAnchor?: string | undefined
+): string {
+  if (sourcePath) {
+    return sourceAnchor ? `${sourcePath}#${sourceAnchor}` : sourcePath;
+  }
+
+  return sourceAnchor ? `memory://entry/${memoryId}#${sourceAnchor}` : `memory://entry/${memoryId}`;
 }
 
 function tokenizeSearchText(value: string): string[] {

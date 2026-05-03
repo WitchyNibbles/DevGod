@@ -48,6 +48,8 @@ interface SearchMemoryRow {
   reviewer: string;
   runId: string;
   taskId: string | null;
+  sourcePath?: string | null;
+  sourceAnchor?: string | null;
   projectId: string | null;
   createdAt: string;
 }
@@ -500,9 +502,9 @@ export class PostgresStore implements DevgodStore {
     await this.client.query(
       `insert into memory_entries (
          id, workspace_id, project_id, run_id, task_id, scope, entry_type, title,
-         content, reviewer, actor, status
+         content, reviewer, actor, status, source_path, source_anchor
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         entry.id,
         entry.workspaceId,
@@ -515,7 +517,9 @@ export class PostgresStore implements DevgodStore {
         entry.content,
         entry.reviewer,
         entry.actor,
-        entry.status
+        entry.status,
+        entry.sourcePath ?? null,
+        entry.sourceAnchor ?? null
       ]
     );
   }
@@ -710,6 +714,8 @@ export class PostgresStore implements DevgodStore {
          m.reviewer,
          m.run_id as "runId",
          m.task_id as "taskId",
+         m.source_path as "sourcePath",
+         m.source_anchor as "sourceAnchor",
          m.project_id as "projectId",
          m.created_at as "createdAt"
        from memory_entries m
@@ -745,6 +751,8 @@ export class PostgresStore implements DevgodStore {
          m.reviewer,
          m.run_id as "runId",
          m.task_id as "taskId",
+         m.source_path as "sourcePath",
+         m.source_anchor as "sourceAnchor",
          m.project_id as "projectId",
          m.created_at as "createdAt"
        from memory_entries m
@@ -771,7 +779,9 @@ export class PostgresStore implements DevgodStore {
         return buildMemorySearchResult(
           {
             ...entry,
-            taskId: entry.taskId ?? undefined
+            taskId: entry.taskId ?? undefined,
+            sourcePath: entry.sourcePath ?? undefined,
+            sourceAnchor: entry.sourceAnchor ?? undefined
           },
           params.query,
           sameProject,

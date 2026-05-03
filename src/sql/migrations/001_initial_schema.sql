@@ -143,6 +143,8 @@ create table if not exists memory_entries (
   reviewer text not null,
   actor text not null,
   status text not null check (status in ('proposed', 'approved', 'rejected')),
+  source_path text,
+  source_anchor text,
   embedding vector(1536),
   embedding_model text,
   created_at timestamptz not null default now(),

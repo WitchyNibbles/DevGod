@@ -193,7 +193,8 @@ test("searchMemory favors title matches over content-only matches", async () => 
 });
 
 test("searchMemory returns provenance, authority, freshness, and citation metadata", async () => {
-  const service = new DevgodCoreService(new MemoryStore());
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -213,6 +214,12 @@ test("searchMemory returns provenance, authority, freshness, and citation metada
     actor: "memory_curator"
   });
 
+  mutateOnlyMemoryEntry(store, (entry) => ({
+    ...entry,
+    sourcePath: ".devgod/memory/decision-log.md",
+    sourceAnchor: "incident-playbook"
+  }));
+
   const results = await service.searchMemory({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -224,6 +231,9 @@ test("searchMemory returns provenance, authority, freshness, and citation metada
   assert.equal(results[0]?.authority.reviewedBy, "memory_curator");
   assert.equal(results[0]?.citation.kind, "memory_entry");
   assert.equal(results[0]?.citation.label, "Incident playbook");
+  assert.equal(results[0]?.citation.sourcePath, ".devgod/memory/decision-log.md");
+  assert.equal(results[0]?.citation.sourceAnchor, "incident-playbook");
+  assert.equal(results[0]?.citation.canonicalRef, ".devgod/memory/decision-log.md#incident-playbook");
   assert.equal(results[0]?.citation.runId, run.id);
   assert.equal(results[0]?.citation.taskId, "task-1");
   assert.equal(results[0]?.provenance.entryType, "decision");
@@ -269,6 +279,43 @@ test("searchMemory marks old entries as stale", async () => {
   assert.equal(results[0]?.freshness.status, "stale");
   assert.equal(results[0]?.freshness.staleAfterDays, SEARCH_MEMORY_STALE_AFTER_DAYS);
   assert.ok((results[0]?.freshness.ageDays ?? 0) > SEARCH_MEMORY_STALE_AFTER_DAYS);
+});
+
+test("searchMemory falls back to a memory URI canonical ref when only an anchor exists", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Anchor-only note",
+    content: "canonical citation fallback",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const updatedEntry = mutateOnlyMemoryEntry(store, (entry) => ({
+    ...entry,
+    sourceAnchor: "anchor-only"
+  }));
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "anchor-only note"
+  });
+
+  assert.equal(results[0]?.citation.sourcePath, undefined);
+  assert.equal(results[0]?.citation.sourceAnchor, "anchor-only");
+  assert.equal(results[0]?.citation.canonicalRef, `memory://entry/${updatedEntry.id}#anchor-only`);
 });
 
 test("searchMemory demotes invalid timestamps and returns explicit freshness status", async () => {
@@ -398,6 +445,9 @@ test("searchMemory redacts sensitive provenance for global results", async () =>
 
   assert.equal(results[0]?.scope, "global");
   assert.equal(results[0]?.authority.reviewedBy, undefined);
+  assert.equal(results[0]?.citation.sourcePath, undefined);
+  assert.equal(results[0]?.citation.sourceAnchor, undefined);
+  assert.equal(results[0]?.citation.canonicalRef, `memory://entry/${results[0]?.citation.memoryId}`);
   assert.equal(results[0]?.citation.runId, undefined);
   assert.equal(results[0]?.citation.taskId, undefined);
   assert.equal(results[0]?.provenance.actor, undefined);

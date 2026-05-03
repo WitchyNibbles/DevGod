@@ -55,3 +55,17 @@ Why:
 Tradeoff:
 
 - source-repo work artifacts are not automatically inspectable in git unless explicitly promoted elsewhere
+
+## 2026-05-04 - Keep citation provenance explicit on retrieval results
+
+We require `sourcePath`, `sourceAnchor`, and `canonicalRef` on retrieval citations, including `memory_entries` results.
+
+Why:
+
+- makes reviewed memory directly traceable back to its source
+- keeps citation refs stable for humans and downstream tools
+- preserves provenance without guessing from internal ids alone
+
+Tradeoff:
+
+- the citation contract and schema carry a little more surface area

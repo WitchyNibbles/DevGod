@@ -44,6 +44,8 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
         reviewer: "memory_curator",
         runId: "run-global",
         taskId: null,
+        sourcePath: null,
+        sourceAnchor: null,
         projectId: null,
         createdAt: "2026-05-01T00:00:00.000Z"
       },
@@ -57,6 +59,8 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
         reviewer: "memory_curator",
         runId: "run-project",
         taskId: null,
+        sourcePath: ".devgod/memory/decision-log.md",
+        sourceAnchor: "incident-playbook",
         projectId: "project:team:devgod",
         createdAt: "2026-05-03T00:00:00.000Z"
       }
@@ -77,6 +81,9 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
   assert.equal(results[0]?.authority.precedence, "retrieval_hint");
   assert.equal(results[0]?.citation.runId, "run-project");
   assert.equal(results[0]?.citation.taskId, undefined);
+  assert.equal(results[0]?.citation.sourcePath, ".devgod/memory/decision-log.md");
+  assert.equal(results[0]?.citation.sourceAnchor, "incident-playbook");
+  assert.equal(results[0]?.citation.canonicalRef, ".devgod/memory/decision-log.md#incident-playbook");
   assert.equal(results[0]?.provenance.entryType, "pattern");
   assert.equal(results[0]?.freshness.createdAt, "2026-05-03T00:00:00.000Z");
 });
@@ -112,12 +119,52 @@ test("PostgresStore.searchMemory redacts sensitive provenance for global results
   });
 
   assert.equal(result?.authority.reviewedBy, undefined);
+  assert.equal(result?.citation.sourcePath, undefined);
+  assert.equal(result?.citation.sourceAnchor, undefined);
+  assert.equal(result?.citation.canonicalRef, `memory://entry/${result?.citation.memoryId}`);
   assert.equal(result?.citation.runId, undefined);
   assert.equal(result?.citation.taskId, undefined);
   assert.equal(result?.provenance.actor, undefined);
   assert.equal(result?.provenance.reviewer, undefined);
   assert.equal(result?.provenance.runId, undefined);
   assert.equal(result?.provenance.taskId, undefined);
+});
+
+test("PostgresStore.searchMemory keeps a source path canonical ref when no anchor exists", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          id: "project-1",
+          title: "Incident playbook",
+          content: "rollback notes",
+          scope: "project",
+          entryType: "pattern",
+          actor: "memory_curator",
+          reviewer: "memory_curator",
+          runId: "run-project",
+          taskId: null,
+          sourcePath: ".devgod/memory/decision-log.md",
+          sourceAnchor: null,
+          projectId: "project:team:devgod",
+          createdAt: "2026-05-03T00:00:00.000Z"
+        }
+      ],
+      []
+    ])
+  );
+
+  const [result] = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook",
+    limit: 5,
+    includeGlobal: false
+  });
+
+  assert.equal(result?.citation.sourcePath, ".devgod/memory/decision-log.md");
+  assert.equal(result?.citation.sourceAnchor, undefined);
+  assert.equal(result?.citation.canonicalRef, ".devgod/memory/decision-log.md");
 });
 
 test("PostgresStore.searchMemory uses a stable id tie-break when titles match", async () => {

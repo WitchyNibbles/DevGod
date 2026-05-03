@@ -248,6 +248,8 @@ export interface MemoryEntryRecord {
   reviewer: string;
   actor: string;
   status: MemoryStatus;
+  sourcePath?: string | undefined;
+  sourceAnchor?: string | undefined;
   createdAt: string;
 }
 
@@ -269,6 +271,9 @@ export interface SearchMemoryCitation {
   kind: "memory_entry";
   memoryId: string;
   label: string;
+  sourcePath?: string | undefined;
+  sourceAnchor?: string | undefined;
+  canonicalRef: string;
   runId?: string | undefined;
   taskId?: string | undefined;
 }
