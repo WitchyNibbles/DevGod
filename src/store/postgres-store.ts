@@ -467,8 +467,11 @@ export class PostgresStore implements DevgodStore {
     includeGlobal: boolean;
   }): Promise<SearchMemoryResult[]> {
     const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
-    const candidateLimit = Math.min(Math.max(params.limit * 5, 25), 200);
-    const result = await this.client.query<SearchMemoryRow>(
+    const recentLimit = Math.min(Math.max(params.limit * 5, 25), 200);
+    const backfillLimit = Math.min(Math.max(params.limit * 3, 15), 100);
+    const lexicalClauses = buildLexicalBackfillClauses(params.query, 5);
+
+    const recentResult = await this.client.query<SearchMemoryRow>(
       `with project_context as (
          select p.id as project_id
          from projects p
@@ -494,10 +497,41 @@ export class PostgresStore implements DevgodStore {
          case when m.project_id = pc.project_id then 0 else 1 end,
          m.created_at desc
        limit $4`,
-      [params.workspaceSlug, params.projectSlug, params.includeGlobal, candidateLimit]
+      [params.workspaceSlug, params.projectSlug, params.includeGlobal, recentLimit]
     );
 
-    return result.rows
+    const backfillResult = await this.client.query<SearchMemoryRow>(
+      `with project_context as (
+         select p.id as project_id
+         from projects p
+         join workspaces w on w.id = p.workspace_id
+         where w.slug = $1 and p.slug = $2
+       )
+       select
+         m.id,
+         m.title,
+         m.content,
+         m.scope,
+         m.project_id as "projectId"
+       from memory_entries m
+       join project_context pc on true
+       join workspaces w on w.id = m.workspace_id
+       where w.slug = $1
+         and m.status = 'approved'
+         and (
+           m.project_id = pc.project_id
+           or ($3::boolean and m.scope = 'global')
+         )
+         and ${lexicalClauses.sql}
+       order by
+         case when m.project_id = pc.project_id then 0 else 1 end,
+         case when m.title ilike $4 then 0 else 1 end,
+         m.created_at desc
+       limit $${lexicalClauses.nextParam}`,
+      [params.workspaceSlug, params.projectSlug, params.includeGlobal, `%${params.query}%`, ...lexicalClauses.values, backfillLimit]
+    );
+
+    return dedupeMemoryRows([...recentResult.rows, ...backfillResult.rows])
       .map((entry) => {
         const sameProject = entry.projectId === projectId;
         return {
@@ -512,4 +546,26 @@ export class PostgresStore implements DevgodStore {
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);
   }
+}
+
+function buildLexicalBackfillClauses(query: string, startParam: number): {
+  sql: string;
+  values: string[];
+  nextParam: number;
+} {
+  const terms = [...new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? [])].slice(0, 5);
+  const values = terms.map((term) => `%${term}%`);
+  const clauses = values.map(
+    (_value, index) => `(m.title ilike $${startParam + index} or m.content ilike $${startParam + index})`
+  );
+
+  return {
+    sql: clauses.length > 0 ? clauses.join(" and ") : "true",
+    values,
+    nextParam: startParam + values.length
+  };
+}
+
+function dedupeMemoryRows(rows: readonly SearchMemoryRow[]): SearchMemoryRow[] {
+  return [...new Map(rows.map((row) => [row.id, row])).values()];
 }

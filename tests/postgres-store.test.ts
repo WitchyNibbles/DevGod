@@ -2,20 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PostgresStore, type SqlClient, type SqlQueryResult } from "../src/store/postgres-store.ts";
 
+interface QueryCapture {
+  text: string;
+  values: readonly unknown[] | undefined;
+}
+
 function sqlClientWithRows<Row>(
-  rows: Row[],
-  capture?: { text?: string; values?: readonly unknown[] | undefined }
+  rows: Row[] | Row[][],
+  capture?: QueryCapture[]
 ): SqlClient {
+  const responses = Array.isArray(rows[0]) ? (rows as Row[][]) : [rows as Row[]];
+  let callIndex = 0;
+
   return {
     async query<T>(text: string, values?: readonly unknown[]): Promise<SqlQueryResult<T>> {
       if (capture) {
-        capture.text = text;
-        capture.values = values;
+        capture.push({ text, values });
       }
 
+      const currentRows = responses[Math.min(callIndex, responses.length - 1)] ?? [];
+      callIndex += 1;
+
       return {
-        rows: rows as unknown as T[],
-        rowCount: rows.length
+        rows: currentRows as unknown as T[],
+        rowCount: currentRows.length
       };
     }
   };
@@ -86,7 +96,7 @@ test("PostgresStore.searchMemory uses a stable id tie-break when titles match", 
 });
 
 test("PostgresStore.searchMemory sends the expected SQL parameters", async () => {
-  const capture: { text?: string; values?: readonly unknown[] | undefined } = {};
+  const capture: QueryCapture[] = [];
   const store = new PostgresStore(sqlClientWithRows([], capture));
 
   await store.searchMemory({
@@ -97,10 +107,84 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
     includeGlobal: false
   });
 
-  assert.match(capture.text ?? "", /with project_context as/);
-  assert.match(capture.text ?? "", /where w\.slug = \$1 and p\.slug = \$2/);
-  assert.match(capture.text ?? "", /join project_context pc on true/);
-  assert.match(capture.text ?? "", /\$3::boolean and m\.scope = 'global'/);
-  assert.match(capture.text ?? "", /limit \$4/);
-  assert.deepEqual(capture.values, ["team", "devgod", false, 25]);
+  assert.equal(capture.length, 2);
+  assert.match(capture[0]?.text ?? "", /with project_context as/);
+  assert.match(capture[0]?.text ?? "", /where w\.slug = \$1 and p\.slug = \$2/);
+  assert.match(capture[0]?.text ?? "", /join project_context pc on true/);
+  assert.match(capture[0]?.text ?? "", /\$3::boolean and m\.scope = 'global'/);
+  assert.match(capture[0]?.text ?? "", /limit \$4/);
+  assert.deepEqual(capture[0]?.values, ["team", "devgod", false, 25]);
+  assert.match(capture[1]?.text ?? "", /ilike/);
+  assert.match(capture[1]?.text ?? "", /limit \$7/);
+  assert.deepEqual(capture[1]?.values, ["team", "devgod", false, "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+});
+
+test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          id: "recent-1",
+          title: "Recent note",
+          content: "incident only",
+          scope: "project",
+          projectId: "project:team:devgod"
+        }
+      ],
+      [
+        {
+          id: "older-best",
+          title: "Incident playbook",
+          content: "release rollback runbook",
+          scope: "project",
+          projectId: "project:team:devgod"
+        }
+      ]
+    ])
+  );
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook",
+    limit: 5,
+    includeGlobal: true
+  });
+
+  assert.equal(results[0]?.id, "older-best");
+});
+
+test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          id: "same-id",
+          title: "Incident playbook",
+          content: "recent copy",
+          scope: "project",
+          projectId: "project:team:devgod"
+        }
+      ],
+      [
+        {
+          id: "same-id",
+          title: "Incident playbook",
+          content: "recent copy",
+          scope: "project",
+          projectId: "project:team:devgod"
+        }
+      ]
+    ])
+  );
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook",
+    limit: 5,
+    includeGlobal: true
+  });
+
+  assert.equal(results.length, 1);
 });
