@@ -119,6 +119,216 @@ test("searchMemory ranks project entries ahead of global ones", async () => {
   assert.equal(results[0]?.scope, "project");
 });
 
+test("searchMemory favors title matches over content-only matches", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Notes",
+    content: "incident playbook for release recoveries",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Incident playbook",
+    content: "release recoveries and rollback notes",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook"
+  });
+
+  assert.equal(results[0]?.title, "Incident playbook");
+});
+
+test("searchMemory prefers fuller lexical coverage over partial matches", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Backend orchestration guide",
+    content: "shared orchestration backend planning flow",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Backend notes",
+    content: "backend only",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration backend"
+  });
+
+  assert.equal(results[0]?.title, "Backend orchestration guide");
+});
+
+test("searchMemory uses a stable tie-break for equivalent scores", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "global",
+    entryType: "pattern",
+    title: "Zeta pattern",
+    content: "shared orchestration",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "global",
+    entryType: "pattern",
+    title: "Alpha pattern",
+    content: "shared orchestration",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration",
+    includeGlobal: true
+  });
+
+  assert.equal(results[0]?.title, "Alpha pattern");
+  assert.equal(results[1]?.title, "Zeta pattern");
+});
+
+test("searchMemory excludes project memory from other projects", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  const otherRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "other-project",
+    actor: "ceo",
+    title: "Build other core",
+    request: "Ship another backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Local pattern",
+    content: "shared orchestration",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(otherRun.id, {
+    scope: "project",
+    entryType: "pattern",
+    title: "Foreign pattern",
+    content: "shared orchestration",
+    sourceRunId: otherRun.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration",
+    includeGlobal: true
+  });
+
+  assert.equal(results.some((result) => result.title === "Foreign pattern"), false);
+});
+
+test("searchMemory rejects blank queries", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+
+  await assert.rejects(
+    service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "   "
+    }),
+    /search query is required/
+  );
+});
+
+test("searchMemory returns no globals for an unknown project", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "global",
+    entryType: "pattern",
+    title: "Global pattern",
+    content: "shared orchestration",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "missing-project",
+    query: "shared orchestration",
+    includeGlobal: true
+  });
+
+  assert.deepEqual(results, []);
+});
+
 test("resumeRun returns ready tasks with satisfied dependencies", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({

@@ -173,8 +173,14 @@ export function validateMemoryPromotion(input: MemoryPromotionInput): string[] {
 export function normalizeSearchInput(
   input: SearchMemoryInput
 ): SearchMemoryInput & { limit: number; includeGlobal: boolean } {
+  const query = input.query.trim();
+  if (query.length === 0) {
+    throw new Error("search query is required");
+  }
+
   return {
     ...input,
+    query,
     limit: input.limit ?? 10,
     includeGlobal: input.includeGlobal ?? true
   };

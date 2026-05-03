@@ -41,3 +41,17 @@ Why:
 Tradeoff:
 
 - the system now has a backend dependency for shared features
+
+## 2026-05-03 - Keep source-repo `.devgod/work/*` ignored
+
+We keep live `.devgod/work/*` artifacts ignored in this source repo.
+
+Why:
+
+- source-repo work files are development artifacts for evolving `devgod` itself
+- durable knowledge should be promoted into reviewed memory, rules, docs, or reusable templates instead of shipping manager scratch state
+- source-repo scratch state should not become packaged project policy by accident
+
+Tradeoff:
+
+- source-repo work artifacts are not automatically inspectable in git unless explicitly promoted elsewhere

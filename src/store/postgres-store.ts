@@ -11,6 +11,7 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
+import { compareMemorySearchResults, scoreMemoryResult } from "../core/policy.ts";
 import type { DevgodStore } from "./types.ts";
 
 export interface SqlQueryResult<Row> {
@@ -27,6 +28,14 @@ export interface SqlClient {
 
 interface JsonRow<T> {
   payload: T;
+}
+
+interface SearchMemoryRow {
+  id: string;
+  title: string;
+  content: string;
+  scope: SearchMemoryResult["scope"];
+  projectId: string | null;
 }
 
 function now(): string {
@@ -457,9 +466,11 @@ export class PostgresStore implements DevgodStore {
     limit: number;
     includeGlobal: boolean;
   }): Promise<SearchMemoryResult[]> {
-    const result = await this.client.query<SearchMemoryResult>(
+    const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
+    const candidateLimit = Math.min(Math.max(params.limit * 5, 25), 200);
+    const result = await this.client.query<SearchMemoryRow>(
       `with project_context as (
-         select p.id as project_id, p.slug as project_slug
+         select p.id as project_id
          from projects p
          join workspaces w on w.id = p.workspace_id
          where w.slug = $1 and p.slug = $2
@@ -469,21 +480,36 @@ export class PostgresStore implements DevgodStore {
          m.title,
          m.content,
          m.scope,
-         case when m.project_id = pc.project_id then pc.project_slug else null end as "projectSlug",
-         (
-           case when m.project_id = pc.project_id then 5 else 0 end +
-           case when m.content ilike ('%' || $3 || '%') or m.title ilike ('%' || $3 || '%') then 10 else 0 end
-         )::float as score
+         m.project_id as "projectId"
        from memory_entries m
-       cross join project_context pc
+       join project_context pc on true
        join workspaces w on w.id = m.workspace_id
        where w.slug = $1
          and m.status = 'approved'
-         and ($4::boolean or m.scope = 'project')
-       order by score desc, m.created_at desc
-       limit $5`,
-      [params.workspaceSlug, params.projectSlug, params.query, params.includeGlobal, params.limit]
+         and (
+           m.project_id = pc.project_id
+           or ($3::boolean and m.scope = 'global')
+         )
+       order by
+         case when m.project_id = pc.project_id then 0 else 1 end,
+         m.created_at desc
+       limit $4`,
+      [params.workspaceSlug, params.projectSlug, params.includeGlobal, candidateLimit]
     );
-    return result.rows;
+
+    return result.rows
+      .map((entry) => {
+        const sameProject = entry.projectId === projectId;
+        return {
+          id: entry.id,
+          title: entry.title,
+          content: entry.content,
+          scope: entry.scope,
+          projectSlug: sameProject ? params.projectSlug : undefined,
+          score: scoreMemoryResult(entry, params.query, sameProject)
+        };
+      })
+      .sort(compareMemorySearchResults)
+      .slice(0, params.limit);
   }
 }

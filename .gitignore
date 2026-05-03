@@ -11,4 +11,13 @@ dist/
 .devgod/state/
 .devgod/cache/
 .devgod/tmp/
-
+.devgod/work/briefs/*
+.devgod/work/plans/*
+.devgod/work/release/*
+.devgod/work/reviews/*
+.devgod/work/tasks/*
+!.devgod/work/briefs/README.md
+!.devgod/work/plans/README.md
+!.devgod/work/release/README.md
+!.devgod/work/reviews/README.md
+!.devgod/work/tasks/README.md

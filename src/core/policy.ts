@@ -82,9 +82,57 @@ export function scoreMemoryResult(
   query: string,
   sameProject: boolean
 ): number {
-  const lowerQuery = query.toLowerCase();
-  const haystack = `${entry.title} ${entry.content}`.toLowerCase();
-  const lexicalScore = haystack.includes(lowerQuery) ? 10 : 0;
-  const projectBias = sameProject ? 5 : entry.scope === "global" ? 1 : 0;
-  return lexicalScore + projectBias;
+  const normalizedQuery = query.trim().toLowerCase();
+  const queryTerms = tokenizeSearchText(query);
+  const titleTerms = new Set(tokenizeSearchText(entry.title));
+  const contentTerms = new Set(tokenizeSearchText(entry.content));
+
+  const titlePhraseBoost = normalizedQuery.length > 0 && entry.title.toLowerCase().includes(normalizedQuery) ? 6 : 0;
+  const contentPhraseBoost = normalizedQuery.length > 0 && entry.content.toLowerCase().includes(normalizedQuery) ? 3 : 0;
+  const titleCoverageBoost = scoreTermCoverage(titleTerms, queryTerms, 6);
+  const contentCoverageBoost = scoreTermCoverage(contentTerms, queryTerms, 3);
+  const projectBias = sameProject ? 4 : entry.scope === "global" ? 1 : 0;
+
+  return titlePhraseBoost + contentPhraseBoost + titleCoverageBoost + contentCoverageBoost + projectBias;
+}
+
+export function compareMemorySearchResults(
+  left: Pick<MemoryEntryRecord, "id" | "title"> & { score: number; projectSlug?: string | undefined },
+  right: Pick<MemoryEntryRecord, "id" | "title"> & { score: number; projectSlug?: string | undefined }
+): number {
+  const leftAuthority = left.projectSlug ? 1 : 0;
+  const rightAuthority = right.projectSlug ? 1 : 0;
+  if (leftAuthority !== rightAuthority) {
+    return rightAuthority - leftAuthority;
+  }
+
+  if (left.score !== right.score) {
+    return right.score - left.score;
+  }
+
+  const titleComparison = left.title.localeCompare(right.title);
+  if (titleComparison !== 0) {
+    return titleComparison;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function tokenizeSearchText(value: string): string[] {
+  return [...new Set(value.toLowerCase().match(/[a-z0-9]+/g) ?? [])];
+}
+
+function scoreTermCoverage(haystackTerms: ReadonlySet<string>, queryTerms: readonly string[], weight: number): number {
+  if (queryTerms.length === 0) {
+    return 0;
+  }
+
+  let hits = 0;
+  for (const term of queryTerms) {
+    if (haystackTerms.has(term)) {
+      hits += 1;
+    }
+  }
+
+  return (hits / queryTerms.length) * weight;
 }
