@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { SEARCH_MEMORY_STALE_AFTER_DAYS } from "../src/core/policy.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
+import type { MemoryEntryRecord, TaskPacketInput } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
-import type { TaskPacketInput } from "../src/domain/types.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
@@ -23,6 +24,39 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
   };
+}
+
+function mutateOnlyMemoryEntry(
+  store: MemoryStore,
+  mutate: (entry: MemoryEntryRecord) => MemoryEntryRecord
+): MemoryEntryRecord {
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  const [entry] = [...memoryEntries.values()];
+
+  if (!entry) {
+    assert.fail("expected one memory entry");
+  }
+
+  const nextEntry = mutate(entry);
+  memoryEntries.set(nextEntry.id, nextEntry);
+  return nextEntry;
+}
+
+function mutateMemoryEntryWhere(
+  store: MemoryStore,
+  predicate: (entry: MemoryEntryRecord) => boolean,
+  mutate: (entry: MemoryEntryRecord) => MemoryEntryRecord
+): MemoryEntryRecord {
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  const entry = [...memoryEntries.values()].find(predicate);
+
+  if (!entry) {
+    assert.fail("expected matching memory entry");
+  }
+
+  const nextEntry = mutate(entry);
+  memoryEntries.set(nextEntry.id, nextEntry);
+  return nextEntry;
 }
 
 test("claimTask blocks overlapping write scopes", async () => {
@@ -195,8 +229,143 @@ test("searchMemory returns provenance, authority, freshness, and citation metada
   assert.equal(results[0]?.provenance.entryType, "decision");
   assert.equal(results[0]?.provenance.runId, run.id);
   assert.equal(results[0]?.provenance.taskId, "task-1");
+  assert.equal(results[0]?.freshness.staleAfterDays, SEARCH_MEMORY_STALE_AFTER_DAYS);
   assert.equal(results[0]?.freshness.createdAt, results[0]?.provenance.createdAt);
   assert.ok((results[0]?.freshness.ageDays ?? -1) >= 0);
+});
+
+test("searchMemory marks old entries as stale", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Old incident playbook",
+    content: "legacy release recoveries and rollback notes",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateOnlyMemoryEntry(store, (entry) => ({
+    ...entry,
+    createdAt: "2000-01-01T00:00:00.000Z"
+  }));
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook"
+  });
+
+  assert.equal(results[0]?.freshness.status, "stale");
+  assert.equal(results[0]?.freshness.staleAfterDays, SEARCH_MEMORY_STALE_AFTER_DAYS);
+  assert.ok((results[0]?.freshness.ageDays ?? 0) > SEARCH_MEMORY_STALE_AFTER_DAYS);
+});
+
+test("searchMemory demotes invalid timestamps and returns explicit freshness status", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Shared orchestration note",
+    content: "valid marker",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Shared orchestration note",
+    content: "shared orchestration invalid marker",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateMemoryEntryWhere(store, (entry) => entry.content === "shared orchestration invalid marker", (entry) => ({
+    ...entry,
+    createdAt: "not-a-date"
+  }));
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration"
+  });
+
+  assert.equal(results[0]?.content, "valid marker");
+  assert.equal(results[0]?.freshness.status, "fresh");
+  assert.equal(results[1]?.content, "shared orchestration invalid marker");
+  assert.equal(results[1]?.freshness.status, "invalid_timestamp");
+  assert.equal(results[1]?.freshness.ageDays, undefined);
+});
+
+test("searchMemory demotes future timestamps and returns explicit freshness status", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Release runbook",
+    content: "valid runbook",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Release runbook",
+    content: "release runbook future marker",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateMemoryEntryWhere(store, (entry) => entry.content === "release runbook future marker", (entry) => ({
+    ...entry,
+    createdAt: "9999-01-01T00:00:00.000Z"
+  }));
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "release runbook"
+  });
+
+  assert.equal(results[0]?.content, "valid runbook");
+  assert.equal(results[1]?.content, "release runbook future marker");
+  assert.equal(results[1]?.freshness.status, "future_timestamp");
+  assert.equal(results[1]?.freshness.ageDays, undefined);
 });
 
 test("searchMemory redacts sensitive provenance for global results", async () => {

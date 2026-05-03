@@ -259,8 +259,10 @@ export interface SearchMemoryAuthority {
 }
 
 export interface SearchMemoryFreshness {
+  status: "fresh" | "stale" | "invalid_timestamp" | "future_timestamp";
   createdAt: string;
-  ageDays: number;
+  ageDays?: number | undefined;
+  staleAfterDays: number;
 }
 
 export interface SearchMemoryCitation {
