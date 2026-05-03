@@ -12,7 +12,24 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import type { DevgodStore } from "./types.ts";
+import type {
+  CompleteEmbeddingJobInput,
+  DevgodStore,
+  EmbeddingJobRecord,
+  EmbeddingJobSourceTable,
+  LeaseEmbeddingJobsInput,
+  QueueEmbeddingJobInput
+} from "./types.ts";
+
+interface EmbeddingVectorRecord {
+  embedding: readonly number[];
+  embeddingModel: string;
+  updatedAt: string;
+}
+
+function embeddingJobKey(input: Pick<QueueEmbeddingJobInput, "sourceTable" | "sourceId" | "embeddingModel">): string {
+  return `${input.sourceTable}:${input.sourceId}:${input.embeddingModel}`;
+}
 
 export class MemoryStore implements DevgodStore {
   private readonly workspaces = new Map<string, WorkspaceRecord>();
@@ -25,6 +42,9 @@ export class MemoryStore implements DevgodStore {
   private readonly reviews = new Map<string, ReviewRecord>();
   private readonly approvals = new Map<string, ApprovalRecord>();
   private readonly memoryEntries = new Map<string, MemoryEntryRecord>();
+  private readonly embeddingJobs = new Map<string, EmbeddingJobRecord>();
+  private readonly artifactEmbeddings = new Map<string, EmbeddingVectorRecord>();
+  private readonly memoryEntryEmbeddings = new Map<string, EmbeddingVectorRecord>();
 
   async ensureProjectContext(params: {
     workspaceSlug: string;
@@ -156,6 +176,120 @@ export class MemoryStore implements DevgodStore {
     this.memoryEntries.set(entry.id, entry);
   }
 
+  async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
+    const timestamp = new Date().toISOString();
+    this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
+
+    const existing = [...this.embeddingJobs.values()].find(
+      (job) =>
+        job.sourceTable === input.sourceTable &&
+        job.sourceId === input.sourceId &&
+        job.embeddingModel === input.embeddingModel
+    );
+
+    if (existing) {
+      const queuedJob: EmbeddingJobRecord = {
+        ...existing,
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "pending",
+        errorMessage: undefined,
+        updatedAt: timestamp
+      };
+      this.embeddingJobs.set(existing.id, queuedJob);
+      return queuedJob;
+    }
+
+    const job: EmbeddingJobRecord = {
+      id: `embedding-job:${embeddingJobKey(input)}`,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      sourceTable: input.sourceTable,
+      sourceId: input.sourceId,
+      embeddingModel: input.embeddingModel,
+      status: "pending",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    this.embeddingJobs.set(job.id, job);
+    return job;
+  }
+
+  async leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]> {
+    const leasedAt = new Date().toISOString();
+    const pendingJobs = [...this.embeddingJobs.values()]
+      .filter((job) => job.status === "pending")
+      .sort((left, right) => {
+        const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+        if (createdAtComparison !== 0) {
+          return createdAtComparison;
+        }
+
+        return left.id.localeCompare(right.id);
+      })
+      .slice(0, input.limit)
+      .map((job) => ({
+        ...job,
+        status: "processing" as const,
+        updatedAt: leasedAt
+      }));
+
+    for (const job of pendingJobs) {
+      this.embeddingJobs.set(job.id, job);
+    }
+
+    return pendingJobs;
+  }
+
+  async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {
+    const existingJob = this.embeddingJobs.get(input.jobId);
+    const completedAt = new Date().toISOString();
+
+    if (!existingJob) {
+      throw new Error(`embedding job not found: ${input.jobId}`);
+    }
+
+    if (
+      existingJob.status !== "processing" ||
+      existingJob.sourceTable !== input.sourceTable ||
+      existingJob.sourceId !== input.sourceId ||
+      existingJob.embeddingModel !== input.embeddingModel
+    ) {
+      throw new Error(`embedding job is not leased for completion: ${input.jobId}`);
+    }
+
+    this.setDerivedEmbedding(input.sourceTable, input.sourceId, {
+      embedding: [...input.embedding],
+      embeddingModel: input.embeddingModel,
+      updatedAt: completedAt
+    });
+    this.embeddingJobs.set(input.jobId, {
+      ...existingJob,
+      status: "done",
+      errorMessage: undefined,
+      updatedAt: completedAt
+    });
+  }
+
+  async failEmbeddingJob(jobId: string, errorMessage: string): Promise<void> {
+    const existingJob = this.embeddingJobs.get(jobId);
+
+    if (!existingJob) {
+      throw new Error(`embedding job not found: ${jobId}`);
+    }
+
+    if (existingJob.status !== "processing") {
+      throw new Error(`embedding job is not leased for failure: ${jobId}`);
+    }
+
+    this.embeddingJobs.set(jobId, {
+      ...existingJob,
+      status: "failed",
+      errorMessage,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
   async searchMemory(params: {
     workspaceSlug: string;
     projectSlug: string;
@@ -180,5 +314,21 @@ export class MemoryStore implements DevgodStore {
       .slice(0, params.limit);
 
     return results;
+  }
+
+  private clearDerivedEmbedding(sourceTable: EmbeddingJobSourceTable, sourceId: string): void {
+    this.embeddingMapFor(sourceTable).delete(sourceId);
+  }
+
+  private setDerivedEmbedding(
+    sourceTable: EmbeddingJobSourceTable,
+    sourceId: string,
+    embedding: EmbeddingVectorRecord
+  ): void {
+    this.embeddingMapFor(sourceTable).set(sourceId, embedding);
+  }
+
+  private embeddingMapFor(sourceTable: EmbeddingJobSourceTable): Map<string, EmbeddingVectorRecord> {
+    return sourceTable === "artifacts" ? this.artifactEmbeddings : this.memoryEntryEmbeddings;
   }
 }

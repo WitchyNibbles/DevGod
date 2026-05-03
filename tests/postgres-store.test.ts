@@ -282,3 +282,275 @@ test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", 
 
   assert.equal(results.length, 1);
 });
+
+test("PostgresStore.queueEmbeddingJob clears derived embeddings and inserts a pending job", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [
+          {
+            id: "job-1",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "memory_entries",
+            sourceId: "memory-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "pending",
+            errorMessage: null,
+            createdAt: "2026-05-04T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ]
+      ],
+      capture
+    )
+  );
+
+  const job = await store.queueEmbeddingJob({
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    sourceTable: "memory_entries",
+    sourceId: "memory-1",
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.equal(job.id, "job-1");
+  assert.equal(job.status, "pending");
+  assert.equal(capture.length, 3);
+  assert.match(capture[0]?.text ?? "", /update memory_entries/);
+  assert.match(capture[0]?.text ?? "", /set embedding = null/);
+  assert.deepEqual(capture[0]?.values, ["memory-1"]);
+  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /status = 'pending'/);
+  assert.deepEqual(capture[1]?.values, [
+    "memory_entries",
+    "workspace:team",
+    "project:team:devgod",
+    "memory-1",
+    "text-embedding-3-small"
+  ]);
+  assert.match(capture[2]?.text ?? "", /insert into embedding_jobs/);
+});
+
+test("PostgresStore.queueEmbeddingJob reuses an existing job for the same source and model", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [
+          {
+            id: "job-existing",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "memory_entries",
+            sourceId: "memory-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "pending",
+            errorMessage: null,
+            createdAt: "2026-05-03T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ]
+      ],
+      capture
+    )
+  );
+
+  const job = await store.queueEmbeddingJob({
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    sourceTable: "memory_entries",
+    sourceId: "memory-1",
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.equal(job.id, "job-existing");
+  assert.equal(job.status, "pending");
+  assert.equal(capture.length, 2);
+  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+});
+
+test("PostgresStore.queueEmbeddingJob clears derived artifact embeddings before enqueueing", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [
+          {
+            id: "job-artifact",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "artifacts",
+            sourceId: "artifact-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "pending",
+            errorMessage: null,
+            createdAt: "2026-05-04T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ]
+      ],
+      capture
+    )
+  );
+
+  const job = await store.queueEmbeddingJob({
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    sourceTable: "artifacts",
+    sourceId: "artifact-1",
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.equal(job.sourceTable, "artifacts");
+  assert.match(capture[0]?.text ?? "", /update artifacts/);
+  assert.match(capture[0]?.text ?? "", /set embedding = null/);
+  assert.deepEqual(capture[0]?.values, ["artifact-1"]);
+});
+
+test("PostgresStore.leaseEmbeddingJobs marks pending jobs as processing", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [
+          {
+            id: "job-1",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "memory_entries",
+            sourceId: "memory-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "processing",
+            errorMessage: null,
+            createdAt: "2026-05-03T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ]
+      ],
+      capture
+    )
+  );
+
+  const jobs = await store.leaseEmbeddingJobs({ limit: 2 });
+
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.status, "processing");
+  assert.match(capture[0]?.text ?? "", /with leased as/);
+  assert.match(capture[0]?.text ?? "", /for update skip locked/);
+  assert.match(capture[0]?.text ?? "", /status = 'processing'/);
+  assert.deepEqual(capture[0]?.values, [2]);
+});
+
+test("PostgresStore.completeEmbeddingJob writes the vector and marks the job done", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [
+          {
+            id: "job-1",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "memory_entries",
+            sourceId: "memory-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "done",
+            errorMessage: null,
+            createdAt: "2026-05-03T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ],
+        [{}],
+        []
+      ],
+      capture
+    )
+  );
+
+  await store.completeEmbeddingJob({
+    jobId: "job-1",
+    sourceTable: "memory_entries",
+    sourceId: "memory-1",
+    embeddingModel: "text-embedding-3-small",
+    embedding: [0.1, 0.2, 0.3]
+  });
+
+  assert.equal(capture.length, 4);
+  assert.equal(capture[0]?.text, "begin");
+  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /status = 'done'/);
+  assert.match(capture[1]?.text ?? "", /status = 'processing'/);
+  assert.deepEqual(capture[1]?.values, ["job-1", "memory_entries", "memory-1", "text-embedding-3-small"]);
+  assert.match(capture[2]?.text ?? "", /update memory_entries/);
+  assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
+  assert.deepEqual(capture[2]?.values, ["memory-1", "[0.1,0.2,0.3]", "text-embedding-3-small"]);
+  assert.equal(capture[3]?.text, "commit");
+});
+
+test("PostgresStore.completeEmbeddingJob writes artifact vectors and marks the job done", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [
+          {
+            id: "job-artifact",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "artifacts",
+            sourceId: "artifact-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "done",
+            errorMessage: null,
+            createdAt: "2026-05-03T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ],
+        [{}],
+        []
+      ],
+      capture
+    )
+  );
+
+  await store.completeEmbeddingJob({
+    jobId: "job-artifact",
+    sourceTable: "artifacts",
+    sourceId: "artifact-1",
+    embeddingModel: "text-embedding-3-small",
+    embedding: [0.4, 0.5]
+  });
+
+  assert.equal(capture.length, 4);
+  assert.equal(capture[0]?.text, "begin");
+  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.deepEqual(capture[1]?.values, ["job-artifact", "artifacts", "artifact-1", "text-embedding-3-small"]);
+  assert.match(capture[2]?.text ?? "", /update artifacts/);
+  assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
+  assert.deepEqual(capture[2]?.values, ["artifact-1", "[0.4,0.5]", "text-embedding-3-small"]);
+  assert.equal(capture[3]?.text, "commit");
+});
+
+test("PostgresStore.failEmbeddingJob records failures without changing the source vector", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([[], [{}], []], capture));
+
+  await store.failEmbeddingJob("job-1", "provider timeout");
+
+  assert.equal(capture.length, 3);
+  assert.equal(capture[0]?.text, "begin");
+  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /status = 'failed'/);
+  assert.match(capture[1]?.text ?? "", /status = 'processing'/);
+  assert.deepEqual(capture[1]?.values, ["job-1", "provider timeout"]);
+  assert.equal(capture[2]?.text, "commit");
+});

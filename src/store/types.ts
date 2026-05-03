@@ -12,6 +12,43 @@ import type {
   WorkspaceRecord
 } from "../domain/types.ts";
 
+export type EmbeddingJobSourceTable = "artifacts" | "memory_entries";
+
+export type EmbeddingJobStatus = "pending" | "processing" | "done" | "failed";
+
+export interface EmbeddingJobRecord {
+  id: string;
+  workspaceId: string;
+  projectId?: string | undefined;
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  embeddingModel: string;
+  status: EmbeddingJobStatus;
+  errorMessage?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QueueEmbeddingJobInput {
+  workspaceId: string;
+  projectId?: string | undefined;
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  embeddingModel: string;
+}
+
+export interface LeaseEmbeddingJobsInput {
+  limit: number;
+}
+
+export interface CompleteEmbeddingJobInput {
+  jobId: string;
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  embeddingModel: string;
+  embedding: readonly number[];
+}
+
 export interface DevgodStore {
   ensureProjectContext(params: {
     workspaceSlug: string;
@@ -39,6 +76,10 @@ export interface DevgodStore {
   saveApproval(approval: ApprovalRecord): Promise<void>;
   getApprovals(taskId: string): Promise<ApprovalRecord[]>;
   saveMemoryEntry(entry: MemoryEntryRecord): Promise<void>;
+  queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord>;
+  leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]>;
+  completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void>;
+  failEmbeddingJob(jobId: string, errorMessage: string): Promise<void>;
   searchMemory(params: {
     workspaceSlug: string;
     projectSlug: string;

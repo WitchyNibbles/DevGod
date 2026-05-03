@@ -12,7 +12,14 @@ import type {
   WorkspaceRecord
 } from "../domain/types.ts";
 import { buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
-import type { DevgodStore } from "./types.ts";
+import type {
+  CompleteEmbeddingJobInput,
+  DevgodStore,
+  EmbeddingJobRecord,
+  EmbeddingJobSourceTable,
+  LeaseEmbeddingJobsInput,
+  QueueEmbeddingJobInput
+} from "./types.ts";
 
 export interface SqlQueryResult<Row> {
   rows: Row[];
@@ -44,8 +51,48 @@ interface SearchMemoryRow {
   createdAt: string;
 }
 
+interface EmbeddingJobRow {
+  id: string;
+  workspaceId: string;
+  projectId: string | null;
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  embeddingModel: string;
+  status: EmbeddingJobRecord["status"];
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 function now(): string {
   return new Date().toISOString();
+}
+
+function mapEmbeddingJobRow(row: EmbeddingJobRow): EmbeddingJobRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId ?? undefined,
+    sourceTable: row.sourceTable,
+    sourceId: row.sourceId,
+    embeddingModel: row.embeddingModel,
+    status: row.status,
+    errorMessage: row.errorMessage ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+async function withTransaction<T>(client: SqlClient, work: () => Promise<T>): Promise<T> {
+  await client.query("begin");
+  try {
+    const value = await work();
+    await client.query("commit");
+    return value;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  }
 }
 
 export class PostgresStore implements DevgodStore {
@@ -465,6 +512,164 @@ export class PostgresStore implements DevgodStore {
     );
   }
 
+  async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
+    await this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
+
+    const updatedJob = await this.client.query<EmbeddingJobRow>(
+      `update embedding_jobs
+       set workspace_id = $2,
+           project_id = $3,
+           status = 'pending',
+           error_message = null,
+           updated_at = now()
+       where id = (
+         select id
+         from embedding_jobs
+         where source_table = $1
+           and source_id = $4
+           and embedding_model = $5
+         order by created_at desc
+         limit 1
+       )
+       returning
+         id,
+         workspace_id as "workspaceId",
+         project_id as "projectId",
+         source_table as "sourceTable",
+         source_id as "sourceId",
+         embedding_model as "embeddingModel",
+         status,
+         error_message as "errorMessage",
+         created_at as "createdAt",
+         updated_at as "updatedAt"`,
+      [input.sourceTable, input.workspaceId, input.projectId ?? null, input.sourceId, input.embeddingModel]
+    );
+
+    if (updatedJob.rows[0]) {
+      return mapEmbeddingJobRow(updatedJob.rows[0]);
+    }
+
+    const insertedJob = await this.client.query<EmbeddingJobRow>(
+      `insert into embedding_jobs (
+         workspace_id, project_id, source_table, source_id, embedding_model, status
+       )
+       values ($1, $2, $3, $4, $5, 'pending')
+       returning
+         id,
+         workspace_id as "workspaceId",
+         project_id as "projectId",
+         source_table as "sourceTable",
+         source_id as "sourceId",
+         embedding_model as "embeddingModel",
+         status,
+         error_message as "errorMessage",
+         created_at as "createdAt",
+         updated_at as "updatedAt"`,
+      [input.workspaceId, input.projectId ?? null, input.sourceTable, input.sourceId, input.embeddingModel]
+    );
+
+    const [job] = insertedJob.rows;
+    if (!job) {
+      throw new Error("failed to enqueue embedding job");
+    }
+
+    return mapEmbeddingJobRow(job);
+  }
+
+  async leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]> {
+    const leasedJobs = await this.client.query<EmbeddingJobRow>(
+      `with leased as (
+         select id
+         from embedding_jobs
+         where status = 'pending'
+         order by created_at asc, id asc
+         limit $1
+         for update skip locked
+       )
+       update embedding_jobs j
+       set status = 'processing',
+           error_message = null,
+           updated_at = now()
+       where j.id in (select id from leased)
+       returning
+         j.id,
+         j.workspace_id as "workspaceId",
+         j.project_id as "projectId",
+         j.source_table as "sourceTable",
+         j.source_id as "sourceId",
+         j.embedding_model as "embeddingModel",
+         j.status,
+         j.error_message as "errorMessage",
+         j.created_at as "createdAt",
+         j.updated_at as "updatedAt"`
+      ,
+      [input.limit]
+    );
+
+    return leasedJobs.rows.map(mapEmbeddingJobRow);
+  }
+
+  async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {
+    await withTransaction(this.client, async () => {
+      const completedJob = await this.client.query<EmbeddingJobRow>(
+        `update embedding_jobs
+         set status = 'done',
+             error_message = null,
+             updated_at = now()
+         where id = $1
+           and source_table = $2
+           and source_id = $3
+           and embedding_model = $4
+           and status = 'processing'
+         returning
+           id,
+           workspace_id as "workspaceId",
+           project_id as "projectId",
+           source_table as "sourceTable",
+           source_id as "sourceId",
+           embedding_model as "embeddingModel",
+           status,
+           error_message as "errorMessage",
+           created_at as "createdAt",
+           updated_at as "updatedAt"`,
+        [input.jobId, input.sourceTable, input.sourceId, input.embeddingModel]
+      );
+
+      if (!completedJob.rows[0]) {
+        throw new Error(`embedding job is not leased for completion: ${input.jobId}`);
+      }
+
+      const updatedRows = await this.writeDerivedEmbedding(
+        input.sourceTable,
+        input.sourceId,
+        input.embedding,
+        input.embeddingModel
+      );
+
+      if (updatedRows !== 1) {
+        throw new Error(`embedding source not found for completion: ${input.sourceTable}:${input.sourceId}`);
+      }
+    });
+  }
+
+  async failEmbeddingJob(jobId: string, errorMessage: string): Promise<void> {
+    await withTransaction(this.client, async () => {
+      const result = await this.client.query(
+        `update embedding_jobs
+         set status = 'failed',
+             error_message = $2,
+             updated_at = now()
+         where id = $1
+           and status = 'processing'`,
+        [jobId, errorMessage]
+      );
+
+      if ((result.rowCount ?? 0) !== 1) {
+        throw new Error(`embedding job is not leased for failure: ${jobId}`);
+      }
+    });
+  }
+
   async searchMemory(params: {
     workspaceSlug: string;
     projectSlug: string;
@@ -564,6 +769,58 @@ export class PostgresStore implements DevgodStore {
       })
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);
+  }
+
+  private async clearDerivedEmbedding(sourceTable: EmbeddingJobSourceTable, sourceId: string): Promise<void> {
+    if (sourceTable === "memory_entries") {
+      await this.client.query(
+        `update memory_entries
+         set embedding = null,
+             embedding_model = null,
+             updated_at = now()
+         where id = $1`,
+        [sourceId]
+      );
+      return;
+    }
+
+    await this.client.query(
+      `update artifacts
+       set embedding = null,
+           embedding_model = null
+       where id = $1`,
+      [sourceId]
+    );
+  }
+
+  private async writeDerivedEmbedding(
+    sourceTable: EmbeddingJobSourceTable,
+    sourceId: string,
+    embedding: readonly number[],
+    embeddingModel: string
+  ): Promise<number> {
+    const vectorValue = `[${embedding.join(",")}]`;
+
+    if (sourceTable === "memory_entries") {
+      const result = await this.client.query(
+        `update memory_entries
+         set embedding = $2::vector,
+             embedding_model = $3,
+             updated_at = now()
+         where id = $1`,
+        [sourceId, vectorValue, embeddingModel]
+      );
+      return result.rowCount ?? 0;
+    }
+
+    const result = await this.client.query(
+      `update artifacts
+       set embedding = $2::vector,
+           embedding_model = $3
+       where id = $1`,
+      [sourceId, vectorValue, embeddingModel]
+    );
+    return result.rowCount ?? 0;
   }
 }
 
