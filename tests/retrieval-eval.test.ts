@@ -5,9 +5,9 @@ import { runRetrievalMemoryBaseline } from "../src/index.ts";
 test("retrieval memory baseline passes all seeded cases", async () => {
   const report = await runRetrievalMemoryBaseline();
 
-  assert.equal(report.summary.totalCases, 7);
+  assert.equal(report.summary.totalCases, 8);
   assert.equal(report.summary.failedCases, 0);
-  assert.equal(report.summary.passedCases, 7);
+  assert.equal(report.summary.passedCases, 8);
   assert.equal(report.summary.passRate, 1);
 });
 
@@ -22,6 +22,7 @@ test("retrieval memory baseline returns per-case results", async () => {
     "global_redaction",
     "freshness_fresh_status",
     "freshness_stale_status",
-    "conflict_candidates_visible"
+    "conflict_candidates_visible",
+    "unprovenanced_blocked"
   ]);
 });

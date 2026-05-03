@@ -188,6 +188,10 @@ export function buildMemorySearchResult(
       runId: exposeSensitiveProvenance ? entry.runId : undefined,
       taskId: exposeSensitiveProvenance ? entry.taskId : undefined,
       createdAt: entry.createdAt
+    },
+    conflict: {
+      detected: false,
+      relatedIds: []
     }
   };
 }

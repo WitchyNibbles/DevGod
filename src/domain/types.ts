@@ -300,6 +300,10 @@ export interface SearchMemoryResult {
   freshness: SearchMemoryFreshness;
   citation: SearchMemoryCitation;
   provenance: SearchMemoryProvenance;
+  conflict: {
+    detected: boolean;
+    relatedIds: string[];
+  };
 }
 
 export interface RunStatusSnapshot {

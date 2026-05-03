@@ -605,6 +605,51 @@ test("searchMemory uses query embeddings to break lexical ties when a matching e
   assert.equal(results[1]?.id, secondEntry.id);
 });
 
+test("searchMemory marks conflicting results explicitly", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  const adoptEntry = await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Adopt pgvector retrieval",
+    content: "pgvector retrieval should be enabled for memory search",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const delayEntry = await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Delay pgvector retrieval",
+    content: "pgvector retrieval should stay disabled until backfill passes",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "pgvector retrieval"
+  });
+
+  const adoptResult = results.find((result) => result.id === adoptEntry.id);
+  const delayResult = results.find((result) => result.id === delayEntry.id);
+
+  assert.equal(adoptResult?.conflict.detected, true);
+  assert.deepEqual(adoptResult?.conflict.relatedIds, [delayEntry.id]);
+  assert.equal(delayResult?.conflict.detected, true);
+  assert.deepEqual(delayResult?.conflict.relatedIds, [adoptEntry.id]);
+});
+
 test("searchMemory excludes project memory from other projects", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({
@@ -719,6 +764,41 @@ test("searchMemory returns no globals for an unknown project", async () => {
     projectSlug: "missing-project",
     query: "shared orchestration",
     includeGlobal: true
+  });
+
+  assert.deepEqual(results, []);
+});
+
+test("searchMemory blocks unprovenanced project hits", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Unprovenanced note",
+    content: "missing reviewer should block",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateOnlyMemoryEntry(store, (entry) => ({
+    ...entry,
+    reviewer: ""
+  }));
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "unprovenanced note"
   });
 
   assert.deepEqual(results, []);

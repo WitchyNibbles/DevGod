@@ -63,6 +63,22 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
   });
 
   await service.promoteMemory(projectRun.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Unprovenanced note",
+    content: "missing reviewer should block",
+    sourceRunId: projectRun.id,
+    sourceTaskId: "task-unprovenanced",
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  mutateMemoryEntryWhere(store, (entry) => entry.title === "Unprovenanced note", (entry) => ({
+    ...entry,
+    reviewer: ""
+  }));
+
+  await service.promoteMemory(projectRun.id, {
     scope: "global",
     entryType: "pattern",
     title: "Global onboarding",
@@ -207,9 +223,27 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
     goal: "conflict",
     passed:
       conflictTopTitles.length === 2 &&
+      conflictResults
+        .slice(0, 2)
+        .every((result) => result.conflict.detected && result.conflict.relatedIds.length === 1) &&
       conflictTopTitles[0] === "Adopt pgvector retrieval" &&
       conflictTopTitles[1] === "Delay pgvector retrieval",
-    details: `top2=${conflictTopTitles.join(" | ")}`
+    details: `top2=${conflictTopTitles.join(" | ")} conflictFlags=${conflictResults
+      .slice(0, 2)
+      .map((result) => result.conflict.detected)
+      .join(",")}`
+  });
+
+  const unprovenancedResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "unprovenanced note"
+  });
+  cases.push({
+    id: "unprovenanced_blocked",
+    goal: "provenance",
+    passed: unprovenancedResults.every((result) => result.title !== "Unprovenanced note"),
+    details: `titles=${unprovenancedResults.map((result) => result.title).join(" | ")}`
   });
 
   const passedCases = cases.filter((testCase) => testCase.passed).length;
