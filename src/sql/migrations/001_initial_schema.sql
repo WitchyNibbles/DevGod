@@ -167,3 +167,4 @@ create index if not exists idx_tasks_run_status on tasks(run_id, status);
 create index if not exists idx_locks_project_status on locks(project_id, status);
 create index if not exists idx_memory_scope_status on memory_entries(workspace_id, scope, status);
 create index if not exists idx_artifacts_run_kind on artifacts(run_id, kind);
+create unique index if not exists idx_embedding_jobs_source_model on embedding_jobs(source_table, source_id, embedding_model);

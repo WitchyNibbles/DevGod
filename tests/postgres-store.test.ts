@@ -289,7 +289,6 @@ test("PostgresStore.queueEmbeddingJob clears derived embeddings and inserts a pe
     sqlClientWithRows(
       [
         [],
-        [],
         [
           {
             id: "job-1",
@@ -319,20 +318,20 @@ test("PostgresStore.queueEmbeddingJob clears derived embeddings and inserts a pe
 
   assert.equal(job.id, "job-1");
   assert.equal(job.status, "pending");
-  assert.equal(capture.length, 3);
+  assert.equal(capture.length, 2);
   assert.match(capture[0]?.text ?? "", /update memory_entries/);
   assert.match(capture[0]?.text ?? "", /set embedding = null/);
   assert.deepEqual(capture[0]?.values, ["memory-1"]);
-  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /insert into embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /on conflict \(source_table, source_id, embedding_model\) do update/);
   assert.match(capture[1]?.text ?? "", /status = 'pending'/);
   assert.deepEqual(capture[1]?.values, [
-    "memory_entries",
     "workspace:team",
     "project:team:devgod",
+    "memory_entries",
     "memory-1",
     "text-embedding-3-small"
   ]);
-  assert.match(capture[2]?.text ?? "", /insert into embedding_jobs/);
 });
 
 test("PostgresStore.queueEmbeddingJob reuses an existing job for the same source and model", async () => {
@@ -371,7 +370,8 @@ test("PostgresStore.queueEmbeddingJob reuses an existing job for the same source
   assert.equal(job.id, "job-existing");
   assert.equal(job.status, "pending");
   assert.equal(capture.length, 2);
-  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /insert into embedding_jobs/);
+  assert.match(capture[1]?.text ?? "", /on conflict \(source_table, source_id, embedding_model\) do update/);
 });
 
 test("PostgresStore.queueEmbeddingJob clears derived artifact embeddings before enqueueing", async () => {
@@ -379,7 +379,6 @@ test("PostgresStore.queueEmbeddingJob clears derived artifact embeddings before 
   const store = new PostgresStore(
     sqlClientWithRows(
       [
-        [],
         [],
         [
           {

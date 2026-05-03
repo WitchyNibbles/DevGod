@@ -17,6 +17,7 @@ import type {
   DevgodStore,
   EmbeddingJobRecord,
   EmbeddingJobSourceTable,
+  EmbeddingSourceRecord,
   LeaseEmbeddingJobsInput,
   QueueEmbeddingJobInput
 } from "./types.ts";
@@ -239,6 +240,37 @@ export class MemoryStore implements DevgodStore {
     }
 
     return pendingJobs;
+  }
+
+  async getEmbeddingSource(
+    sourceTable: EmbeddingJobSourceTable,
+    sourceId: string
+  ): Promise<EmbeddingSourceRecord | undefined> {
+    if (sourceTable === "memory_entries") {
+      const entry = this.memoryEntries.get(sourceId);
+      if (!entry) {
+        return undefined;
+      }
+
+      return {
+        sourceTable,
+        sourceId,
+        title: entry.title,
+        content: entry.content
+      };
+    }
+
+    const plan = [...this.plans.values()].find((candidate) => candidate.id === sourceId);
+    if (!plan) {
+      return undefined;
+    }
+
+    return {
+      sourceTable,
+      sourceId,
+      title: plan.title,
+      content: JSON.stringify(plan.content)
+    };
   }
 
   async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {

@@ -49,6 +49,13 @@ export interface CompleteEmbeddingJobInput {
   embedding: readonly number[];
 }
 
+export interface EmbeddingSourceRecord {
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  title: string;
+  content: string;
+}
+
 export interface DevgodStore {
   ensureProjectContext(params: {
     workspaceSlug: string;
@@ -78,6 +85,7 @@ export interface DevgodStore {
   saveMemoryEntry(entry: MemoryEntryRecord): Promise<void>;
   queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord>;
   leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]>;
+  getEmbeddingSource(sourceTable: EmbeddingJobSourceTable, sourceId: string): Promise<EmbeddingSourceRecord | undefined>;
   completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void>;
   failEmbeddingJob(jobId: string, errorMessage: string): Promise<void>;
   searchMemory(params: {

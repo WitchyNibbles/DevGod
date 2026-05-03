@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Client as PgClient } from "pg";
+import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -170,6 +171,45 @@ async function verifySetup() {
   console.log("setup verified");
 }
 
+async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
+  const providerModulePath = process.env.DEVGOD_EMBEDDING_PROVIDER_MODULE;
+  if (!providerModulePath) {
+    throw new Error("DEVGOD_EMBEDDING_PROVIDER_MODULE is required for run-embedding-jobs");
+  }
+
+  const resolvedPath = path.isAbsolute(providerModulePath)
+    ? providerModulePath
+    : path.resolve(repoRoot, providerModulePath);
+  const providerModule = await import(pathToFileURL(resolvedPath).href);
+  const factory = providerModule.createEmbeddingProvider ?? providerModule.default;
+
+  if (typeof factory !== "function") {
+    throw new Error("embedding provider module must export createEmbeddingProvider() or default()");
+  }
+
+  return await factory();
+}
+
+async function runEmbeddingJobsCommand() {
+  const provider = await createEmbeddingProvider();
+  const limitArg = process.argv[3];
+  const limitValue = limitArg ?? process.env.DEVGOD_EMBEDDING_JOB_LIMIT ?? "10";
+  const limit = Number.parseInt(limitValue, 10);
+
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`Invalid embedding job limit: ${limitValue}`);
+  }
+
+  await withClient(async (client) => {
+    const result = await runEmbeddingJobs({
+      store: new PostgresStore(client),
+      provider,
+      limit
+    });
+    console.log(JSON.stringify(result));
+  });
+}
+
 async function main() {
   await loadDotEnv();
   const command = process.argv[2];
@@ -191,6 +231,11 @@ async function main() {
 
   if (command === "verify-setup") {
     await verifySetup();
+    return;
+  }
+
+  if (command === "run-embedding-jobs") {
+    await runEmbeddingJobsCommand();
     return;
   }
 

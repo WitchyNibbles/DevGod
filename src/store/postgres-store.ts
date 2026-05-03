@@ -17,6 +17,7 @@ import type {
   DevgodStore,
   EmbeddingJobRecord,
   EmbeddingJobSourceTable,
+  EmbeddingSourceRecord,
   LeaseEmbeddingJobsInput,
   QueueEmbeddingJobInput
 } from "./types.ts";
@@ -62,6 +63,13 @@ interface EmbeddingJobRow {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface EmbeddingSourceRow {
+  sourceTable: EmbeddingJobSourceTable;
+  sourceId: string;
+  title: string;
+  content: string;
 }
 
 function now(): string {
@@ -515,45 +523,17 @@ export class PostgresStore implements DevgodStore {
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
     await this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
 
-    const updatedJob = await this.client.query<EmbeddingJobRow>(
-      `update embedding_jobs
-       set workspace_id = $2,
-           project_id = $3,
-           status = 'pending',
-           error_message = null,
-           updated_at = now()
-       where id = (
-         select id
-         from embedding_jobs
-         where source_table = $1
-           and source_id = $4
-           and embedding_model = $5
-         order by created_at desc
-         limit 1
-       )
-       returning
-         id,
-         workspace_id as "workspaceId",
-         project_id as "projectId",
-         source_table as "sourceTable",
-         source_id as "sourceId",
-         embedding_model as "embeddingModel",
-         status,
-         error_message as "errorMessage",
-         created_at as "createdAt",
-         updated_at as "updatedAt"`,
-      [input.sourceTable, input.workspaceId, input.projectId ?? null, input.sourceId, input.embeddingModel]
-    );
-
-    if (updatedJob.rows[0]) {
-      return mapEmbeddingJobRow(updatedJob.rows[0]);
-    }
-
-    const insertedJob = await this.client.query<EmbeddingJobRow>(
+    const queuedJob = await this.client.query<EmbeddingJobRow>(
       `insert into embedding_jobs (
          workspace_id, project_id, source_table, source_id, embedding_model, status
        )
        values ($1, $2, $3, $4, $5, 'pending')
+       on conflict (source_table, source_id, embedding_model) do update
+       set workspace_id = excluded.workspace_id,
+           project_id = excluded.project_id,
+           status = 'pending',
+           error_message = null,
+           updated_at = now()
        returning
          id,
          workspace_id as "workspaceId",
@@ -568,7 +548,7 @@ export class PostgresStore implements DevgodStore {
       [input.workspaceId, input.projectId ?? null, input.sourceTable, input.sourceId, input.embeddingModel]
     );
 
-    const [job] = insertedJob.rows;
+    const [job] = queuedJob.rows;
     if (!job) {
       throw new Error("failed to enqueue embedding job");
     }
@@ -607,6 +587,37 @@ export class PostgresStore implements DevgodStore {
     );
 
     return leasedJobs.rows.map(mapEmbeddingJobRow);
+  }
+
+  async getEmbeddingSource(
+    sourceTable: EmbeddingJobSourceTable,
+    sourceId: string
+  ): Promise<EmbeddingSourceRecord | undefined> {
+    if (sourceTable === "memory_entries") {
+      const result = await this.client.query<EmbeddingSourceRow>(
+        `select
+           'memory_entries'::text as "sourceTable",
+           id as "sourceId",
+           title,
+           content
+         from memory_entries
+         where id = $1`,
+        [sourceId]
+      );
+      return result.rows[0];
+    }
+
+    const result = await this.client.query<EmbeddingSourceRow>(
+      `select
+         'artifacts'::text as "sourceTable",
+         id as "sourceId",
+         title,
+         content::text as content
+       from artifacts
+       where id = $1`,
+      [sourceId]
+    );
+    return result.rows[0];
   }
 
   async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {
