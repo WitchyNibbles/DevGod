@@ -1,6 +1,7 @@
 export { createActionHandlers } from "./core/actions.ts";
 export { DevgodCoreService } from "./core/service.ts";
 export { runRetrievalMemoryBaseline } from "./evals/retrieval-memory-baseline.ts";
+export { assessFreshness, runWithFreshnessGate } from "./runtime/freshness-gate.ts";
 export { MemoryStore } from "./store/memory-store.ts";
 export { PostgresStore } from "./store/postgres-store.ts";
 export * from "./domain/contracts.ts";
