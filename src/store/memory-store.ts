@@ -1,4 +1,4 @@
-import { compareMemorySearchResults, scoreMemoryResult } from "../core/policy.ts";
+import { buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
 import type {
   ApprovalRecord,
   HandoffRecord,
@@ -174,14 +174,7 @@ export class MemoryStore implements DevgodStore {
       })
       .map((entry) => {
         const sameProject = project ? entry.projectId === project.id : false;
-        return {
-          id: entry.id,
-          title: entry.title,
-          content: entry.content,
-          scope: entry.scope,
-          projectSlug: sameProject ? params.projectSlug : undefined,
-          score: scoreMemoryResult(entry, params.query, sameProject)
-        };
+        return buildMemorySearchResult(entry, params.query, sameProject, sameProject ? params.projectSlug : undefined);
       })
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);

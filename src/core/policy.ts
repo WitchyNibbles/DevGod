@@ -3,6 +3,7 @@ import {
   type LockRecord,
   type MemoryEntryRecord,
   type ReviewRecord,
+  type SearchMemoryResult,
   type TaskPacketInput,
   type TaskRecord
 } from "../domain/types.ts";
@@ -97,8 +98,8 @@ export function scoreMemoryResult(
 }
 
 export function compareMemorySearchResults(
-  left: Pick<MemoryEntryRecord, "id" | "title"> & { score: number; projectSlug?: string | undefined },
-  right: Pick<MemoryEntryRecord, "id" | "title"> & { score: number; projectSlug?: string | undefined }
+  left: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug">,
+  right: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug">
 ): number {
   const leftAuthority = left.projectSlug ? 1 : 0;
   const rightAuthority = right.projectSlug ? 1 : 0;
@@ -118,6 +119,53 @@ export function compareMemorySearchResults(
   return left.id.localeCompare(right.id);
 }
 
+export function buildMemorySearchResult(
+  entry: Pick<
+    MemoryEntryRecord,
+    "id" | "title" | "content" | "scope" | "entryType" | "actor" | "reviewer" | "runId" | "taskId" | "createdAt"
+  >,
+  query: string,
+  sameProject: boolean,
+  projectSlug?: string | undefined,
+  now: string = new Date().toISOString()
+): SearchMemoryResult {
+  const exposeSensitiveProvenance = sameProject;
+
+  return {
+    id: entry.id,
+    title: entry.title,
+    content: entry.content,
+    scope: entry.scope,
+    projectSlug,
+    score: scoreMemoryResult(entry, query, sameProject),
+    authority: {
+      source: "shared_backend_memory",
+      precedence: "retrieval_hint",
+      scope: entry.scope,
+      reviewedBy: exposeSensitiveProvenance ? entry.reviewer : undefined
+    },
+    freshness: {
+      createdAt: entry.createdAt,
+      ageDays: calculateAgeDays(entry.createdAt, now)
+    },
+    citation: {
+      kind: "memory_entry",
+      memoryId: entry.id,
+      label: entry.title,
+      runId: exposeSensitiveProvenance ? entry.runId : undefined,
+      taskId: exposeSensitiveProvenance ? entry.taskId : undefined
+    },
+    provenance: {
+      entryType: entry.entryType,
+      actor: exposeSensitiveProvenance ? entry.actor : undefined,
+      reviewer: exposeSensitiveProvenance ? entry.reviewer : undefined,
+      runId: exposeSensitiveProvenance ? entry.runId : undefined,
+      taskId: exposeSensitiveProvenance ? entry.taskId : undefined,
+      createdAt: entry.createdAt
+    }
+  };
+}
+
 function tokenizeSearchText(value: string): string[] {
   return [...new Set(value.toLowerCase().match(/[a-z0-9]+/g) ?? [])];
 }
@@ -135,4 +183,10 @@ function scoreTermCoverage(haystackTerms: ReadonlySet<string>, queryTerms: reado
   }
 
   return (hits / queryTerms.length) * weight;
+}
+
+function calculateAgeDays(createdAt: string, now: string): number {
+  const createdAtMs = Date.parse(createdAt);
+  const nowMs = Date.parse(now);
+  return Math.max(0, Math.floor((nowMs - createdAtMs) / 86_400_000));
 }

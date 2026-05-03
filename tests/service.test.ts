@@ -158,6 +158,85 @@ test("searchMemory favors title matches over content-only matches", async () => 
   assert.equal(results[0]?.title, "Incident playbook");
 });
 
+test("searchMemory returns provenance, authority, freshness, and citation metadata", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "decision",
+    title: "Incident playbook",
+    content: "release recoveries and rollback notes",
+    sourceRunId: run.id,
+    sourceTaskId: "task-1",
+    reviewer: "memory_curator",
+    actor: "memory_curator"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook"
+  });
+
+  assert.equal(results[0]?.authority.source, "shared_backend_memory");
+  assert.equal(results[0]?.authority.precedence, "retrieval_hint");
+  assert.equal(results[0]?.authority.reviewedBy, "memory_curator");
+  assert.equal(results[0]?.citation.kind, "memory_entry");
+  assert.equal(results[0]?.citation.label, "Incident playbook");
+  assert.equal(results[0]?.citation.runId, run.id);
+  assert.equal(results[0]?.citation.taskId, "task-1");
+  assert.equal(results[0]?.provenance.entryType, "decision");
+  assert.equal(results[0]?.provenance.runId, run.id);
+  assert.equal(results[0]?.provenance.taskId, "task-1");
+  assert.equal(results[0]?.freshness.createdAt, results[0]?.provenance.createdAt);
+  assert.ok((results[0]?.freshness.ageDays ?? -1) >= 0);
+});
+
+test("searchMemory redacts sensitive provenance for global results", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "global",
+    entryType: "pattern",
+    title: "Shared pattern",
+    content: "shared orchestration",
+    sourceRunId: run.id,
+    sourceTaskId: "task-global",
+    reviewer: "memory_curator@example.com",
+    actor: "memory_curator@example.com"
+  });
+
+  const results = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration",
+    includeGlobal: true
+  });
+
+  assert.equal(results[0]?.scope, "global");
+  assert.equal(results[0]?.authority.reviewedBy, undefined);
+  assert.equal(results[0]?.citation.runId, undefined);
+  assert.equal(results[0]?.citation.taskId, undefined);
+  assert.equal(results[0]?.provenance.actor, undefined);
+  assert.equal(results[0]?.provenance.reviewer, undefined);
+  assert.equal(results[0]?.provenance.runId, undefined);
+  assert.equal(results[0]?.provenance.taskId, undefined);
+});
+
 test("searchMemory prefers fuller lexical coverage over partial matches", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({

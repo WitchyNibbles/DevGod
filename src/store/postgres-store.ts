@@ -11,7 +11,7 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import { compareMemorySearchResults, scoreMemoryResult } from "../core/policy.ts";
+import { buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
 import type { DevgodStore } from "./types.ts";
 
 export interface SqlQueryResult<Row> {
@@ -35,7 +35,13 @@ interface SearchMemoryRow {
   title: string;
   content: string;
   scope: SearchMemoryResult["scope"];
+  entryType: MemoryEntryRecord["entryType"];
+  actor: string;
+  reviewer: string;
+  runId: string;
+  taskId: string | null;
   projectId: string | null;
+  createdAt: string;
 }
 
 function now(): string {
@@ -483,7 +489,13 @@ export class PostgresStore implements DevgodStore {
          m.title,
          m.content,
          m.scope,
-         m.project_id as "projectId"
+         m.entry_type as "entryType",
+         m.actor,
+         m.reviewer,
+         m.run_id as "runId",
+         m.task_id as "taskId",
+         m.project_id as "projectId",
+         m.created_at as "createdAt"
        from memory_entries m
        join project_context pc on true
        join workspaces w on w.id = m.workspace_id
@@ -512,7 +524,13 @@ export class PostgresStore implements DevgodStore {
          m.title,
          m.content,
          m.scope,
-         m.project_id as "projectId"
+         m.entry_type as "entryType",
+         m.actor,
+         m.reviewer,
+         m.run_id as "runId",
+         m.task_id as "taskId",
+         m.project_id as "projectId",
+         m.created_at as "createdAt"
        from memory_entries m
        join project_context pc on true
        join workspaces w on w.id = m.workspace_id
@@ -534,14 +552,15 @@ export class PostgresStore implements DevgodStore {
     return dedupeMemoryRows([...recentResult.rows, ...backfillResult.rows])
       .map((entry) => {
         const sameProject = entry.projectId === projectId;
-        return {
-          id: entry.id,
-          title: entry.title,
-          content: entry.content,
-          scope: entry.scope,
-          projectSlug: sameProject ? params.projectSlug : undefined,
-          score: scoreMemoryResult(entry, params.query, sameProject)
-        };
+        return buildMemorySearchResult(
+          {
+            ...entry,
+            taskId: entry.taskId ?? undefined
+          },
+          params.query,
+          sameProject,
+          sameProject ? params.projectSlug : undefined
+        );
       })
       .sort(compareMemorySearchResults)
       .slice(0, params.limit);

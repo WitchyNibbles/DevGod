@@ -39,14 +39,26 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
         title: "Global notes",
         content: "incident playbook for shared services",
         scope: "global",
-        projectId: null
+        entryType: "pattern",
+        actor: "memory_curator",
+        reviewer: "memory_curator",
+        runId: "run-global",
+        taskId: null,
+        projectId: null,
+        createdAt: "2026-05-01T00:00:00.000Z"
       },
       {
         id: "project-1",
         title: "Incident playbook",
         content: "rollback notes",
         scope: "project",
-        projectId: "project:team:devgod"
+        entryType: "pattern",
+        actor: "memory_curator",
+        reviewer: "memory_curator",
+        runId: "run-project",
+        taskId: null,
+        projectId: "project:team:devgod",
+        createdAt: "2026-05-03T00:00:00.000Z"
       }
     ])
   );
@@ -61,6 +73,51 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
 
   assert.equal(results[0]?.title, "Incident playbook");
   assert.equal(results[0]?.projectSlug, "devgod");
+  assert.equal(results[0]?.authority.scope, "project");
+  assert.equal(results[0]?.authority.precedence, "retrieval_hint");
+  assert.equal(results[0]?.citation.runId, "run-project");
+  assert.equal(results[0]?.citation.taskId, undefined);
+  assert.equal(results[0]?.provenance.entryType, "pattern");
+  assert.equal(results[0]?.freshness.createdAt, "2026-05-03T00:00:00.000Z");
+});
+
+test("PostgresStore.searchMemory redacts sensitive provenance for global results", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          id: "global-1",
+          title: "Global notes",
+          content: "shared orchestration",
+          scope: "global",
+          entryType: "pattern",
+          actor: "memory_curator@example.com",
+          reviewer: "memory_curator@example.com",
+          runId: "run-global",
+          taskId: "task-global",
+          projectId: null,
+          createdAt: "2026-05-03T00:00:00.000Z"
+        }
+      ],
+      []
+    ])
+  );
+
+  const [result] = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "shared orchestration",
+    limit: 5,
+    includeGlobal: true
+  });
+
+  assert.equal(result?.authority.reviewedBy, undefined);
+  assert.equal(result?.citation.runId, undefined);
+  assert.equal(result?.citation.taskId, undefined);
+  assert.equal(result?.provenance.actor, undefined);
+  assert.equal(result?.provenance.reviewer, undefined);
+  assert.equal(result?.provenance.runId, undefined);
+  assert.equal(result?.provenance.taskId, undefined);
 });
 
 test("PostgresStore.searchMemory uses a stable id tie-break when titles match", async () => {
@@ -71,14 +128,26 @@ test("PostgresStore.searchMemory uses a stable id tie-break when titles match", 
         title: "Shared pattern",
         content: "shared orchestration",
         scope: "global",
-        projectId: null
+        entryType: "pattern",
+        actor: "memory_curator",
+        reviewer: "memory_curator",
+        runId: "run-z",
+        taskId: null,
+        projectId: null,
+        createdAt: "2026-05-01T00:00:00.000Z"
       },
       {
         id: "a-id",
         title: "Shared pattern",
         content: "shared orchestration",
         scope: "global",
-        projectId: null
+        entryType: "pattern",
+        actor: "memory_curator",
+        reviewer: "memory_curator",
+        runId: "run-a",
+        taskId: null,
+        projectId: null,
+        createdAt: "2026-05-01T00:00:00.000Z"
       }
     ])
   );
@@ -128,7 +197,13 @@ test("PostgresStore.searchMemory backfills older lexical matches outside the rec
           title: "Recent note",
           content: "incident only",
           scope: "project",
-          projectId: "project:team:devgod"
+          entryType: "pattern",
+          actor: "memory_curator",
+          reviewer: "memory_curator",
+          runId: "run-recent",
+          taskId: null,
+          projectId: "project:team:devgod",
+          createdAt: "2026-05-03T00:00:00.000Z"
         }
       ],
       [
@@ -137,7 +212,13 @@ test("PostgresStore.searchMemory backfills older lexical matches outside the rec
           title: "Incident playbook",
           content: "release rollback runbook",
           scope: "project",
-          projectId: "project:team:devgod"
+          entryType: "pattern",
+          actor: "memory_curator",
+          reviewer: "memory_curator",
+          runId: "run-older",
+          taskId: "task-older",
+          projectId: "project:team:devgod",
+          createdAt: "2026-05-01T00:00:00.000Z"
         }
       ]
     ])
@@ -152,6 +233,7 @@ test("PostgresStore.searchMemory backfills older lexical matches outside the rec
   });
 
   assert.equal(results[0]?.id, "older-best");
+  assert.equal(results[0]?.citation.taskId, "task-older");
 });
 
 test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", async () => {
@@ -163,7 +245,13 @@ test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", 
           title: "Incident playbook",
           content: "recent copy",
           scope: "project",
-          projectId: "project:team:devgod"
+          entryType: "pattern",
+          actor: "memory_curator",
+          reviewer: "memory_curator",
+          runId: "run-1",
+          taskId: null,
+          projectId: "project:team:devgod",
+          createdAt: "2026-05-03T00:00:00.000Z"
         }
       ],
       [
@@ -172,7 +260,13 @@ test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", 
           title: "Incident playbook",
           content: "recent copy",
           scope: "project",
-          projectId: "project:team:devgod"
+          entryType: "pattern",
+          actor: "memory_curator",
+          reviewer: "memory_curator",
+          runId: "run-1",
+          taskId: null,
+          projectId: "project:team:devgod",
+          createdAt: "2026-05-03T00:00:00.000Z"
         }
       ]
     ])

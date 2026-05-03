@@ -251,6 +251,35 @@ export interface MemoryEntryRecord {
   createdAt: string;
 }
 
+export interface SearchMemoryAuthority {
+  source: "shared_backend_memory";
+  precedence: "retrieval_hint";
+  scope: MemoryScope;
+  reviewedBy?: string | undefined;
+}
+
+export interface SearchMemoryFreshness {
+  createdAt: string;
+  ageDays: number;
+}
+
+export interface SearchMemoryCitation {
+  kind: "memory_entry";
+  memoryId: string;
+  label: string;
+  runId?: string | undefined;
+  taskId?: string | undefined;
+}
+
+export interface SearchMemoryProvenance {
+  entryType: MemoryType;
+  actor?: string | undefined;
+  reviewer?: string | undefined;
+  runId?: string | undefined;
+  taskId?: string | undefined;
+  createdAt: string;
+}
+
 export interface SearchMemoryResult {
   id: string;
   title: string;
@@ -258,6 +287,10 @@ export interface SearchMemoryResult {
   scope: MemoryScope;
   projectSlug?: string | undefined;
   score: number;
+  authority: SearchMemoryAuthority;
+  freshness: SearchMemoryFreshness;
+  citation: SearchMemoryCitation;
+  provenance: SearchMemoryProvenance;
 }
 
 export interface RunStatusSnapshot {
