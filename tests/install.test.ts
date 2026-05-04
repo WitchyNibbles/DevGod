@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { mergeAgentsMd, mergeCodexConfig, mergeGitignore, mergePackageJson } from "../src/install/merge.ts";
 import { installDevgodIntoProject } from "../src/install/cli.ts";
+
+const execFileAsync = promisify(execFile);
 
 test("mergeAgentsMd appends and is idempotent", () => {
   const first = mergeAgentsMd("# Existing Rules\n");
@@ -87,9 +91,45 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
 
   const agentsMd = await readFile(path.join(targetRoot, "AGENTS.md"), "utf8");
   assert.match(agentsMd, /## Department Workflow/);
+  assert.match(agentsMd, /`reviewer`, `qa_engineer`, and `security_reviewer` gates/);
 
   const memoryReadme = await readFile(path.join(targetRoot, ".devgod/memory/README.md"), "utf8");
   assert.match(memoryReadme, /devgod memory/i);
+
+  const installedSkills = [
+    ".agents/skills/devgod-architecture/SKILL.md",
+    ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-docs-research/SKILL.md",
+    ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-intake/SKILL.md",
+    ".agents/skills/devgod-memory/SKILL.md",
+    ".agents/skills/devgod-planning/SKILL.md",
+    ".agents/skills/devgod-qa-verification/SKILL.md",
+    ".agents/skills/devgod-review/SKILL.md",
+    ".agents/skills/devgod-setup/SKILL.md"
+  ];
+
+  for (const relativePath of installedSkills) {
+    const content = await readFile(path.join(targetRoot, relativePath), "utf8");
+    assert.match(content, /^---/m, `${relativePath} should install a skill file`);
+  }
+
+  const installedAgents = [
+    ".codex/agents/devgod-build-resolver.toml",
+    ".codex/agents/devgod-docs-researcher.toml",
+    ".codex/agents/devgod-reviewer.toml"
+  ];
+
+  for (const relativePath of installedAgents) {
+    const content = await readFile(path.join(targetRoot, relativePath), "utf8");
+    assert.match(content, /^name = /m, `${relativePath} should install an agent file`);
+  }
+
+  const retrievalPolicy = await readFile(
+    path.join(targetRoot, ".devgod/rules/role-retrieval-policy.md"),
+    "utf8"
+  );
+  assert.match(retrievalPolicy, /Derived retrieval is a hint layer/i);
 
   await assert.rejects(
     readFile(path.join(targetRoot, ".devgod/memory/project-profile.md"), "utf8")
@@ -97,4 +137,30 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   await assert.rejects(
     readFile(path.join(targetRoot, ".devgod/work/briefs/brief-2026-04-25-bitbat-rebuild.md"), "utf8")
   );
+});
+
+test("npm pack dry run includes the new agent, skill, and retrieval policy surface", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], { cwd: sourceRoot });
+  const output = JSON.parse(stdout) as Array<{
+    files: Array<{ path: string }>;
+  }>;
+  const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
+
+  const expectedPaths = [
+    ".agents/skills/devgod-architecture/SKILL.md",
+    ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-docs-research/SKILL.md",
+    ".agents/skills/devgod-planning/SKILL.md",
+    ".agents/skills/devgod-qa-verification/SKILL.md",
+    ".agents/skills/devgod-review/SKILL.md",
+    ".codex/agents/build-resolver.toml",
+    ".codex/agents/docs-researcher.toml",
+    ".codex/agents/reviewer.toml",
+    ".devgod/rules/role-retrieval-policy.md"
+  ];
+
+  for (const expectedPath of expectedPaths) {
+    assert.ok(packedFiles.has(expectedPath), `${expectedPath} should be present in npm pack --dry-run output`);
+  }
 });

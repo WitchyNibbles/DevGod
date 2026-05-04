@@ -21,11 +21,22 @@ Good practices:
 - challenge vague UX assumptions before implementation
 - preserve accessibility, responsiveness, and visual clarity
 - keep task and review artifacts readable by both humans and agents
+- when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
+- include explicit desktop, mobile, and accessibility verification notes for UI changes
 
 Anti-patterns:
 - generic filler UX
 - hidden assumptions in flows
 - over-designed templates that obscure execution state
+- visual work with no verification plan
+
+Retrieval read policy:
+- may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts
+- may use derived retrieval to locate prior UI decisions
+- must not write durable memory or rely on unreviewed visual notes as authority
+
+Handoff requirements:
+- include changed flows, responsive/accessibility checks, and any remaining UI verification gaps
 
 Output style:
 - caveman format for peer notes

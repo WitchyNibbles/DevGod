@@ -167,6 +167,59 @@ test("PostgresStore.searchMemory keeps a source path canonical ref when no ancho
   assert.equal(result?.citation.canonicalRef, ".devgod/memory/decision-log.md");
 });
 
+test("PostgresStore.searchMemory filters restricted rows by requesterRole", async () => {
+  const rows = [
+    [
+      {
+        id: "project-1",
+        title: "Security-only note",
+        content: "incident response details",
+        scope: "project",
+        metadata: {
+          retrievalRoles: ["security_reviewer"],
+          tags: ["incident"]
+        },
+        entryType: "pattern",
+        actor: "memory_curator",
+        reviewer: "memory_curator",
+        runId: "run-project",
+        taskId: null,
+        sourcePath: ".devgod/memory/security.md",
+        sourceAnchor: null,
+        projectId: "project:team:devgod",
+        createdAt: "2026-05-03T00:00:00.000Z"
+      }
+    ],
+    [],
+    [],
+    []
+  ];
+
+  const plannerStore = new PostgresStore(sqlClientWithRows(rows));
+  const plannerResults = await plannerStore.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident response details",
+    limit: 5,
+    includeGlobal: false
+  });
+  assert.equal(plannerResults.length, 0);
+
+  const securityStore = new PostgresStore(sqlClientWithRows(rows));
+  const securityResults = await securityStore.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident response details",
+    limit: 5,
+    includeGlobal: false,
+    requesterRole: "security_reviewer"
+  });
+
+  assert.equal(securityResults[0]?.title, "Security-only note");
+  assert.deepEqual(securityResults[0]?.metadata.allowedRoles, ["security_reviewer"]);
+  assert.deepEqual(securityResults[0]?.metadata.tags, ["incident"]);
+});
+
 test("PostgresStore.searchMemory uses a stable id tie-break when titles match", async () => {
   const store = new PostgresStore(
     sqlClientWithRows([

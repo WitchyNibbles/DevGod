@@ -7,6 +7,7 @@ import type {
   PlanArtifact,
   ProjectRecord,
   ReviewRecord,
+  RetrievalRole,
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
@@ -103,5 +104,6 @@ export interface DevgodStore {
     includeGlobal: boolean;
     queryEmbedding?: readonly number[] | undefined;
     embeddingModel?: string | undefined;
+    requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]>;
 }

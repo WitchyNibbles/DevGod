@@ -18,16 +18,19 @@ Ship the smallest clean, secure, working increment without bypassing gates.
 3. Enforce allowed write scope before implementation.
 4. Spawn only the agents needed for the active slice.
 5. Implement locally in the main thread unless a bounded read-only subtask can run in parallel.
-6. Move completed work into handoff for blocking `qa_engineer` and `security_reviewer` review.
+6. Move completed work into handoff for blocking `reviewer`, `qa_engineer`, and `security_reviewer` review.
 7. Promote only reviewed durable memory.
 
 ## Agent routing
 
 - architecture and sequencing handoff: `solution_architect`
 - decomposition, dependencies, and worker routing: `planner`
+- documentation, release-note, and standards verification: `docs_researcher`
 - UI, flow, accessibility: `frontend_designer`
 - server logic, API, auth, data: `backend_engineer`
 - deploy, env, secrets, monitoring: `infra_engineer`
+- build, test, typecheck, or setup failure resolution: `build_resolver`
+- correctness and regression review: `reviewer`
 - threat review and abuse cases: `security_reviewer`
 - tests and regressions: `qa_engineer`
 
@@ -47,7 +50,7 @@ Do not call the slice done unless:
 
 - the code works or the exact blocker is known
 - the architect-to-planner and worker-to-review handoffs are explicit
-- required reviews passed or were explicitly waived with reason
+- required reviews (`reviewer`, `qa_engineer`, `security_reviewer`) passed or were explicitly waived with reason
 - major security concerns were checked
 - verification evidence exists
 - write locks were released

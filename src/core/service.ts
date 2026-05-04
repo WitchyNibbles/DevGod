@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   normalizeIntakeRequest,
+  normalizeRetrievalMetadata,
   normalizeSearchInput,
   validateMemoryPromotion,
   validateTaskPacket
 } from "../domain/contracts.ts";
-import { evaluateReviewDecision, findBlockingReasonsForTask } from "./policy.ts";
+import { canRoleAccessSearchResult, evaluateReviewDecision, findBlockingReasonsForTask } from "./policy.ts";
 import type {
   HandoffInput,
   IntakeRequestInput,
@@ -234,6 +235,13 @@ export class DevgodCoreService {
       throw new Error(`Memory promotion rejected: ${errors.join("; ")}`);
     }
 
+    const createdAt = timestamp();
+    const metadata = normalizeRetrievalMetadata({
+      ...input.metadata,
+      reviewedAt: input.metadata?.reviewedAt ?? createdAt,
+      authorityLevel: input.metadata?.authorityLevel ?? "reviewed_memory"
+    });
+
     const entry = {
       id: randomUUID(),
       workspaceId: run.workspaceId,
@@ -247,7 +255,8 @@ export class DevgodCoreService {
       reviewer: input.reviewer,
       actor: input.actor,
       status: "approved" as const,
-      createdAt: timestamp()
+      metadata,
+      createdAt
     };
 
     await this.store.saveMemoryEntry(entry);
@@ -264,10 +273,15 @@ export class DevgodCoreService {
       limit: normalized.limit,
       includeGlobal: normalized.includeGlobal,
       queryEmbedding: normalized.queryEmbedding,
-      embeddingModel: normalized.embeddingModel
+      embeddingModel: normalized.embeddingModel,
+      requesterRole: normalized.requesterRole
     });
 
-    return annotateConflictSignals(results.filter(isProvenancedSearchResult));
+    return annotateConflictSignals(
+      results
+        .filter((result) => canRoleAccessSearchResult(result, normalized.requesterRole))
+        .filter(isProvenancedSearchResult)
+    );
   }
 
   async getStatus(runId: string): Promise<RunStatusSnapshot> {
@@ -340,7 +354,17 @@ function annotateConflictSignals(results: readonly SearchMemoryResult[]): Search
     for (let rightIndex = leftIndex + 1; rightIndex < results.length; rightIndex += 1) {
       const left = results[leftIndex];
       const right = results[rightIndex];
-      if (!left || !right || !hasConflictingClaims(left, right)) {
+      if (!left || !right) {
+        continue;
+      }
+
+      const explicitConflict =
+        left.metadata.contradicts.includes(right.id) ||
+        right.metadata.contradicts.includes(left.id) ||
+        left.metadata.supersededBy.includes(right.id) ||
+        right.metadata.supersededBy.includes(left.id);
+
+      if (!explicitConflict && !hasConflictingClaims(left, right)) {
         continue;
       }
 

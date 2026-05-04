@@ -10,6 +10,10 @@
 
 ## Verification notes
 
+## Risks and edge cases
+
+## Rollback notes
+
 ## Blockers
 
 ## Context refs

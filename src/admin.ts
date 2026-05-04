@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -56,10 +56,17 @@ async function withClient<T>(callback: (client: PgClient) => Promise<T>): Promis
 }
 
 async function migrate() {
-  const migrationPath = path.resolve(__dirname, "sql/migrations/001_initial_schema.sql");
-  const sql = await readFile(migrationPath, "utf8");
+  const migrationsDir = path.resolve(__dirname, "sql/migrations");
+  const migrationPaths = (await readdir(migrationsDir))
+    .filter((entry) => /^\d+_.*\.sql$/i.test(entry))
+    .sort((left, right) => left.localeCompare(right))
+    .map((entry) => path.join(migrationsDir, entry));
+
   await withClient(async (client) => {
-    await client.query(sql);
+    for (const migrationPath of migrationPaths) {
+      const sql = await readFile(migrationPath, "utf8");
+      await client.query(sql);
+    }
   });
   console.log("migrations applied");
 }

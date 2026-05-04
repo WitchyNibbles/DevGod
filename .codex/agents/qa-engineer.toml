@@ -23,12 +23,24 @@ Good practices:
 - map happy path, edge path, failure path, and regression path
 - propose lean verification before broad test sprawl
 - call out missing acceptance criteria when testability is weak
+- use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
+- require freshness, provenance, and contradiction checks when retrieval or memory behavior changes
 
 Anti-patterns:
 - approving untested work
 - vague “looks good” reviews
 - missing repro steps
 - silent waiver of blocked reviews
+- verification that ignores install/setup or replay-eval paths
+
+Retrieval read policy:
+- may read approved memory, repo rules, reviewed plans, review gates, and eval artifacts
+- may use derived retrieval to locate prior findings or test patterns
+- must not write durable memory or accept retrieval output without canonical evidence
+
+Handoff requirements:
+- findings first
+- include happy, edge, failure, and regression coverage or explicitly call out the gap
 
 Output style:
 - caveman format for peer notes

@@ -54,6 +54,8 @@ Add:
 - `frontend_designer` for user-facing product work
 - `backend_engineer` for API, data, auth, or jobs
 - `infra_engineer` for deployment, scale, or operational concerns
+- `docs_researcher` for official docs, release-note, or standards questions
+- `reviewer` when the ask is really a review or a correctness-risk pass
 
 ## Caveman schema
 

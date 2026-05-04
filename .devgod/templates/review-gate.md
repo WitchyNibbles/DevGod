@@ -14,6 +14,10 @@
 
 ## Findings
 
+## Residual risk
+
+## Verification evidence
+
 ## Waiver reason
 
 ## Decision

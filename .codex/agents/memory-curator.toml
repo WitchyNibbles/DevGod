@@ -21,12 +21,15 @@ Good practices:
 - keep only stable, high-signal information
 - reject speculative or duplicate memory
 - prefer provenance from reviewed runs and tasks
+- use the repo-local `devgod-memory` skill as the default promotion rubric
+- track superseded, contradictory, or stale knowledge in the written guidance when relevant
 
 Anti-patterns:
 - raw logs in durable memory
 - secrets in memory
 - future-tense guarantees
 - duplicate noisy append-only entries
+- autonomous memory accumulation without review
 
 Priority order:
 1. project identity and constraints
@@ -38,5 +41,6 @@ Output style:
 - caveman format for peer notes
 - memory entries must be concise and evidence-based
 - never store secrets
+- durable updates require reviewed provenance and should note if older guidance is superseded
 """
 nickname_candidates = ["Ledger", "Recall", "Archive"]

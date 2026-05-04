@@ -193,7 +193,7 @@ Once the repo is configured, the intended operating rhythm is:
 - repo-local rules live under `.devgod/rules/`
 - reviewed durable memory lives under `.devgod/memory/`
 - repo-local skills live under `.agents/skills/devgod-*`
-- QA and security gates block completion for substantive work
+- reviewer, QA, and security gates block completion for substantive work
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
 

@@ -2,13 +2,26 @@ import {
   type IntakeRequestInput,
   type IntakeSummary,
   type MemoryPromotionInput,
+  type RetrievalMetadata,
+  type RetrievalRole,
   type SearchMemoryInput,
   type StopGoDecision,
+  retrievalRoles,
   stopGoDecisions,
   type TaskPacketInput
 } from "./types.ts";
 
 const maxQueryEmbeddingDimensions = 1536;
+const retrievalRoleSet = new Set<string>(retrievalRoles);
+
+export const DEFAULT_RETRIEVAL_ROLE: RetrievalRole = "planner";
+
+export interface NormalizedRetrievalMetadata extends RetrievalMetadata {
+  retrievalRoles: RetrievalRole[];
+  tags: string[];
+  supersededBy: string[];
+  contradicts: string[];
+}
 
 function nonEmptyItems(values: readonly string[] | undefined, fallback: string[] = []): string[] {
   if (!values) {
@@ -46,6 +59,48 @@ function deriveStopGo(summary: Omit<IntakeSummary, "stopGo">): StopGoDecision {
   }
 
   return "go";
+}
+
+function uniqueTrimmedItems(values: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const value of values ?? []) {
+    const normalized = value.trim();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    items.push(normalized);
+  }
+
+  return items;
+}
+
+export function isRetrievalRole(value: string): value is RetrievalRole {
+  return retrievalRoleSet.has(value);
+}
+
+export function defaultRetrievalRoles(): RetrievalRole[] {
+  return [...retrievalRoles];
+}
+
+export function normalizeRetrievalMetadata(metadata?: RetrievalMetadata): NormalizedRetrievalMetadata {
+  const retrievalRoleValues = uniqueTrimmedItems(metadata?.retrievalRoles)
+    .filter(isRetrievalRole);
+
+  return {
+    ...metadata,
+    retrievalRoles: retrievalRoleValues.length > 0 ? retrievalRoleValues : defaultRetrievalRoles(),
+    tags: uniqueTrimmedItems(metadata?.tags),
+    supersededBy: uniqueTrimmedItems(metadata?.supersededBy),
+    contradicts: uniqueTrimmedItems(metadata?.contradicts)
+  };
+}
+
+function isIsoTimestamp(value: string): boolean {
+  return !Number.isNaN(Date.parse(value));
 }
 
 export function normalizeIntakeRequest(input: IntakeRequestInput): IntakeSummary {
@@ -169,12 +224,30 @@ export function validateMemoryPromotion(input: MemoryPromotionInput): string[] {
     errors.push("sourceRunId is required");
   }
 
+  if (input.metadata) {
+    const invalidRoles = uniqueTrimmedItems(input.metadata.retrievalRoles).filter((role) => !isRetrievalRole(role));
+    if (invalidRoles.length > 0) {
+      errors.push(`invalid retrieval roles: ${invalidRoles.join(", ")}`);
+    }
+
+    if (
+      input.metadata.staleAfterDays !== undefined &&
+      (!Number.isInteger(input.metadata.staleAfterDays) || input.metadata.staleAfterDays <= 0)
+    ) {
+      errors.push("metadata.staleAfterDays must be a positive integer");
+    }
+
+    if (input.metadata.reviewedAt && !isIsoTimestamp(input.metadata.reviewedAt)) {
+      errors.push("metadata.reviewedAt must be a valid ISO timestamp");
+    }
+  }
+
   return errors;
 }
 
 export function normalizeSearchInput(
   input: SearchMemoryInput
-): SearchMemoryInput & { limit: number; includeGlobal: boolean } {
+): SearchMemoryInput & { limit: number; includeGlobal: boolean; requesterRole: RetrievalRole } {
   const query = input.query.trim();
   if (query.length === 0) {
     throw new Error("search query is required");
@@ -190,11 +263,17 @@ export function normalizeSearchInput(
     }
   }
 
+  const requesterRole = input.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
+  if (!isRetrievalRole(requesterRole)) {
+    throw new Error(`requesterRole must be one of: ${retrievalRoles.join(", ")}`);
+  }
+
   return {
     ...input,
     query,
     limit: input.limit ?? 10,
-    includeGlobal: input.includeGlobal ?? true
+    includeGlobal: input.includeGlobal ?? true,
+    requesterRole
   };
 }
 

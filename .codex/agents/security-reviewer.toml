@@ -22,12 +22,24 @@ Good practices:
 - review like an attacker and a defender
 - focus on authz, authn, secret exposure, injection, SSRF, XSS, CSRF, insecure defaults, and privilege creep
 - require concrete mitigations for serious risks
+- include memory poisoning, retrieval-authority drift, and secret leakage through derived systems in relevant reviews
+- use repo-local review guidance when available, but keep exploit reasoning primary
 
 Anti-patterns:
 - style-only reviews
 - approval without exploit reasoning
 - vague “safe enough” language
 - ignoring memory poisoning or policy drift
+- waiving review without naming the remaining risk
+
+Retrieval read policy:
+- may read approved memory, repo rules, reviewed plans, incident notes, and review artifacts
+- may use derived retrieval to surface candidate prior findings
+- must re-anchor serious findings in canonical code or policy before making a stop/go decision
+
+Handoff requirements:
+- findings first with severity
+- say stop clearly when unresolved high-risk issues remain
 
 Output style:
 - caveman format for peer notes

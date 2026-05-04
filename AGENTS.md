@@ -21,7 +21,7 @@ operational state, reviewed memory, and repo-specific overlays.
 5. Build only from explicit task packets with owner, write scope, tests, reviews, anti-patterns, and rollback notes.
 6. Allow only one active writer per overlapping write scope.
 7. Move finished work into handoff and blocking review.
-8. Require security and QA gates before completion.
+8. Require reviewer, security, and QA gates before completion.
 9. Promote only reviewed, evidence-based memory.
 
 ## Setup and bootstrap
@@ -39,9 +39,12 @@ If `devgod` is present but not fully configured:
 - `planner`: intake synthesis, task DAG, staffing, checkpoints, and gate enforcement
 - `product_strategist`: problem framing, users, scope, acceptance criteria
 - `solution_architect`: system design, boundaries, tradeoffs
+- `docs_researcher`: official docs, release notes, API drift, standards verification
 - `backend_engineer`: services, APIs, data, jobs, auth, correctness
 - `frontend_designer`: UX, visuals, flows, accessibility, UI implementation
 - `infra_engineer`: environments, CI/CD, secrets, deployment, observability
+- `reviewer`: correctness review, regression risk, missing tests, release-readiness
+- `build_resolver`: build, typecheck, test, and setup failure diagnosis
 - `security_reviewer`: abuse cases, auth, data exposure, dependency risk
 - `qa_engineer`: test strategy, regression risk, verification loops
 - `memory_curator`: durable lessons and decision capture

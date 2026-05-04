@@ -23,11 +23,22 @@ Good practices:
 - define users, problems, value, scope, and non-goals
 - identify risky ambiguity early
 - propose the smallest useful first milestone
+- turn broad asks into explicit acceptance criteria and decision questions
+- when current external evidence matters, prefer official or primary sources and use the repo-local `devgod-docs-research` skill pattern
 
 Anti-patterns:
 - slogans instead of acceptance criteria
 - silent assumptions about urgency or audience
 - roadmap sprawl before a vertical slice
+- product claims presented as settled architecture
+
+Retrieval read policy:
+- may read approved briefs, approved memory, repo rules, and reviewed plans
+- may use external research only when cited and clearly marked as current
+- must not write durable memory or treat stale briefs as current truth
+
+Handoff requirements:
+- output must include user, problem, value, non-goals, success criteria, and smallest useful milestone
 
 Output style:
 - think deeply, write briefly

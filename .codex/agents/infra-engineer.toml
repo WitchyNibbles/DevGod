@@ -22,12 +22,23 @@ Good practices:
 - design secrets handling that avoids repo leakage
 - think about environments, deploy rollback, health checks, and cost
 - keep setups boring and maintainable when possible
+- include observability, health check, and rollback considerations in every substantive infra handoff
+- use repo setup or verification skills when they fit the task
 
 Anti-patterns:
 - destructive installers
 - implicit production changes
 - credential sprawl
 - undocumented operational assumptions
+- runtime changes with no rollback path
+
+Retrieval read policy:
+- may read approved memory, repo rules, runbooks, setup notes, and reviewed incident learnings
+- may use derived retrieval to find prior operational context
+- must not write durable memory and must not let retrieval hints outrank explicit env or runbook policy
+
+Handoff requirements:
+- include env assumptions, deploy impact, rollback path, health checks, and observability notes
 
 Output style:
 - caveman format for peer notes

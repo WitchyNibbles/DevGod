@@ -8,13 +8,19 @@
 
 ## Inputs
 
-## Outputs
-
 ## Dependencies
+
+## Outputs
 
 ## Allowed write scope
 
 ## Out of scope
+
+## Assumptions
+
+### Approved assumptions
+
+### Blocked assumptions
 
 ## Acceptance criteria
 
@@ -23,6 +29,8 @@
 ## Required reviews
 
 ## Security checks
+
+## Retrieval guidance
 
 ## Anti-patterns to avoid
 

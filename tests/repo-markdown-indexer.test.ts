@@ -133,3 +133,48 @@ test("indexRepoMarkdown replaces stale markdown chunks when files are removed", 
     await rm(repoRoot, { recursive: true, force: true });
   }
 });
+
+test("indexRepoMarkdown assigns role-scoped metadata to review artifacts", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-roles-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    await mkdir(path.join(repoRoot, ".devgod", "work", "reviews"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, ".devgod", "work", "reviews", "security.md"),
+      ["# Security Review", "", "Escalate auth bypass findings through the review gate."].join("\n"),
+      "utf8"
+    );
+
+    await indexRepoMarkdown({
+      store,
+      repoRoot,
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      include: [".devgod"]
+    });
+
+    const backendResults = await service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "auth bypass findings",
+      requesterRole: "backend_engineer"
+    });
+    assert.equal(backendResults.length, 0);
+
+    const reviewerResults = await service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "auth bypass findings",
+      requesterRole: "reviewer"
+    });
+
+    assert.equal(reviewerResults[0]?.citation.sourcePath, ".devgod/work/reviews/security.md");
+    assert.ok(reviewerResults[0]?.metadata.allowedRoles.includes("reviewer"));
+    assert.ok(reviewerResults[0]?.metadata.allowedRoles.includes("security_reviewer"));
+    assert.equal(reviewerResults[0]?.authority.authorityLevel, "repo_context");
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});

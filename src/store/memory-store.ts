@@ -1,4 +1,10 @@
-import { buildArtifactSearchResult, buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
+import {
+  buildArtifactSearchResult,
+  buildMemorySearchResult,
+  canRoleAccessRetrievalMetadata,
+  compareMemorySearchResults
+} from "../core/policy.ts";
+import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
 import type {
   ApprovalRecord,
   HandoffRecord,
@@ -7,6 +13,7 @@ import type {
   MemoryEntryRecord,
   PlanArtifact,
   ProjectRecord,
+  RetrievalRole,
   ReviewRecord,
   RunRecord,
   SearchMemoryResult,
@@ -373,7 +380,9 @@ export class MemoryStore implements DevgodStore {
     includeGlobal: boolean;
     queryEmbedding?: readonly number[] | undefined;
     embeddingModel?: string | undefined;
+    requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]> {
+    const requesterRole = params.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
     const projectKey = `${params.workspaceSlug}:${params.projectSlug}`;
     const project = this.projects.get(projectKey);
     const memoryResults = [...this.memoryEntries.values()]
@@ -383,9 +392,15 @@ export class MemoryStore implements DevgodStore {
         const sameWorkspace = project ? entry.workspaceId === project.workspaceId : false;
         return sameProject || (sameWorkspace && params.includeGlobal && entry.scope === "global");
       })
+      .filter((entry) => canRoleAccessRetrievalMetadata(entry.metadata, requesterRole))
       .map((entry) => {
         const sameProject = project ? entry.projectId === project.id : false;
-        const baseResult = buildMemorySearchResult(entry, params.query, sameProject, sameProject ? params.projectSlug : undefined);
+        const baseResult = buildMemorySearchResult(
+          entry,
+          params.query,
+          sameProject,
+          sameProject ? params.projectSlug : undefined
+        );
         return {
           ...baseResult,
           score: baseResult.score + this.vectorScoreBoost(entry.id, params.queryEmbedding, params.embeddingModel)
@@ -395,6 +410,7 @@ export class MemoryStore implements DevgodStore {
     const artifactResults = project
       ? [...this.markdownArtifacts.values()]
           .filter((artifact) => artifact.projectId === project.id)
+          .filter((artifact) => canRoleAccessRetrievalMetadata(artifact.metadata, requesterRole))
           .map((artifact) => {
             const baseResult = buildArtifactSearchResult(artifact, params.query, params.projectSlug);
             return {

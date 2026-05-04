@@ -27,7 +27,7 @@ Default department chain:
 2. \`solution_architect\` for system design, boundaries, and sequencing
 3. \`planner\` for task slicing, ownership, dependencies, and worker routing
 4. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
-5. blocking \`qa_engineer\` and \`security_reviewer\` gates before the manager reports completion
+5. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
 6. \`memory_curator\` for durable capture after approved completion
 
 Additional rules:
@@ -39,7 +39,7 @@ Additional rules:
 - keep direct user replies in standard concise English unless the user asks for caveman format
 - require an intake brief for substantive work in \`.devgod/work/briefs/\`
 - require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution
-- do not claim substantive work is done without QA/security gate output in \`.devgod/work/reviews/\`
+- do not claim substantive work is done without reviewer/QA/security gate output in \`.devgod/work/reviews/\`
 
 ${AGENTS_END}`;
 

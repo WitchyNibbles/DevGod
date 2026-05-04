@@ -456,6 +456,55 @@ test("searchMemory redacts sensitive provenance for global results", async () =>
   assert.equal(results[0]?.provenance.taskId, undefined);
 });
 
+test("searchMemory enforces requesterRole for promoted memory and exposes retrieval metadata", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.promoteMemory(run.id, {
+    scope: "project",
+    entryType: "lesson",
+    title: "Security-only incident note",
+    content: "contains scoped incident review guidance",
+    sourceRunId: run.id,
+    reviewer: "memory_curator",
+    actor: "memory_curator",
+    metadata: {
+      retrievalRoles: ["security_reviewer"],
+      tags: ["incident", "security"],
+      staleAfterDays: 30
+    }
+  });
+
+  const plannerResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "scoped incident review guidance"
+  });
+  assert.equal(plannerResults.length, 0);
+
+  const securityResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "scoped incident review guidance",
+    requesterRole: "security_reviewer"
+  });
+
+  assert.equal(securityResults[0]?.title, "Security-only incident note");
+  assert.deepEqual(securityResults[0]?.authority.allowedRoles, ["security_reviewer"]);
+  assert.deepEqual(securityResults[0]?.metadata.allowedRoles, ["security_reviewer"]);
+  assert.deepEqual(securityResults[0]?.metadata.tags, ["incident", "security"]);
+  assert.equal(securityResults[0]?.metadata.staleAfterDays, 30);
+  assert.equal(securityResults[0]?.freshness.staleAfterDays, 30);
+  assert.equal(securityResults[0]?.authority.authorityLevel, "reviewed_memory");
+  assert.match(securityResults[0]?.metadata.reviewedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test("searchMemory prefers fuller lexical coverage over partial matches", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({

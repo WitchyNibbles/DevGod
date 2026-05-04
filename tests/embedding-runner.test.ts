@@ -36,6 +36,7 @@ async function saveMemoryEntry(store: MemoryStore, id: string, title: string, co
     reviewer: "memory_curator",
     actor: "memory_curator",
     status: "approved",
+    metadata: {},
     createdAt: "2026-05-04T00:00:00.000Z"
   };
 

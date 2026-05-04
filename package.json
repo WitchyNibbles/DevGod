@@ -5,11 +5,8 @@
   "type": "module",
   "description": "Shared-core orchestration foundation for devgod.",
   "files": [
-    ".agents/skills/devgod-execution/SKILL.md",
-    ".agents/skills/devgod-intake/SKILL.md",
-    ".agents/skills/devgod-memory/SKILL.md",
-    ".agents/skills/devgod-setup/SKILL.md",
-    ".codex/agents/",
+    ".agents/skills/devgod-*/**",
+    ".codex/agents/*.toml",
     ".codex/config.toml",
     ".devgod/memory/README.md",
     ".devgod/rules/",

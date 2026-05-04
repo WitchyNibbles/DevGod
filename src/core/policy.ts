@@ -1,14 +1,19 @@
 import {
+  type ArtifactKind,
   type ApprovalDecision,
   type LockRecord,
   type MarkdownArtifactRecord,
   type MemoryEntryRecord,
+  type RetrievalMetadata,
+  type RetrievalRole,
   type ReviewRecord,
   type SearchMemoryFreshness,
+  type SearchMemoryMetadata,
   type SearchMemoryResult,
   type TaskPacketInput,
   type TaskRecord
 } from "../domain/types.ts";
+import { normalizeRetrievalMetadata } from "../domain/contracts.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 
 export const SEARCH_MEMORY_STALE_AFTER_DAYS = 90;
@@ -146,6 +151,17 @@ export function scoreMemoryResult(
   return scoreSearchableResult(entry, query, sameProject);
 }
 
+export function canRoleAccessRetrievalMetadata(
+  metadata: RetrievalMetadata | undefined,
+  requesterRole: RetrievalRole
+): boolean {
+  return normalizeRetrievalMetadata(metadata).retrievalRoles.includes(requesterRole);
+}
+
+export function canRoleAccessSearchResult(result: SearchMemoryResult, requesterRole: RetrievalRole): boolean {
+  return result.metadata.allowedRoles.includes(requesterRole);
+}
+
 export function buildMemorySearchResult(
   entry: Pick<
     MemoryEntryRecord,
@@ -160,6 +176,7 @@ export function buildMemorySearchResult(
     | "taskId"
     | "sourcePath"
     | "sourceAnchor"
+    | "metadata"
     | "createdAt"
   >,
   query: string,
@@ -168,7 +185,12 @@ export function buildMemorySearchResult(
   now: string = new Date().toISOString()
 ): SearchMemoryResult {
   const exposeSensitiveProvenance = sameProject;
-  const freshness = buildSearchMemoryFreshness(entry.createdAt, now);
+  const normalizedMetadata = normalizeRetrievalMetadata(entry.metadata);
+  const freshness = buildSearchMemoryFreshness(
+    entry.createdAt,
+    now,
+    normalizedMetadata.staleAfterDays ?? SEARCH_MEMORY_STALE_AFTER_DAYS
+  );
 
   return {
     id: entry.id,
@@ -181,7 +203,9 @@ export function buildMemorySearchResult(
       source: "shared_backend_memory",
       precedence: "retrieval_hint",
       scope: entry.scope,
-      reviewedBy: exposeSensitiveProvenance ? entry.reviewer : undefined
+      reviewedBy: exposeSensitiveProvenance ? entry.reviewer : undefined,
+      authorityLevel: normalizedMetadata.authorityLevel ?? "reviewed_memory",
+      allowedRoles: [...normalizedMetadata.retrievalRoles]
     },
     freshness,
     citation: {
@@ -206,6 +230,7 @@ export function buildMemorySearchResult(
       taskId: exposeSensitiveProvenance ? entry.taskId : undefined,
       createdAt: entry.createdAt
     },
+    metadata: buildSearchMemoryMetadata(normalizedMetadata, freshness.staleAfterDays),
     conflict: {
       detected: false,
       relatedIds: []
@@ -214,14 +239,20 @@ export function buildMemorySearchResult(
 }
 
 export function buildArtifactSearchResult(
-  artifact: Pick<MarkdownArtifactRecord, "id" | "title" | "content" | "sourcePath" | "sourceAnchor" | "createdAt" | "kind"> & {
-    runId: string;
-  },
+  artifact: Pick<
+    MarkdownArtifactRecord,
+    "id" | "title" | "content" | "sourcePath" | "sourceAnchor" | "createdAt" | "kind" | "metadata" | "runId"
+  >,
   query: string,
   projectSlug: string,
   now: string = new Date().toISOString()
 ): SearchMemoryResult {
-  const freshness = buildSearchMemoryFreshness(artifact.createdAt, now);
+  const normalizedMetadata = normalizeRetrievalMetadata(artifact.metadata);
+  const freshness = buildSearchMemoryFreshness(
+    artifact.createdAt,
+    now,
+    normalizedMetadata.staleAfterDays ?? SEARCH_MEMORY_STALE_AFTER_DAYS
+  );
 
   return {
     id: artifact.id,
@@ -233,7 +264,9 @@ export function buildArtifactSearchResult(
     authority: {
       source: "repo_artifact",
       precedence: "repo_context",
-      scope: "project"
+      scope: "project",
+      authorityLevel: normalizedMetadata.authorityLevel ?? "repo_context",
+      allowedRoles: [...normalizedMetadata.retrievalRoles]
     },
     freshness,
     citation: {
@@ -246,10 +279,11 @@ export function buildArtifactSearchResult(
       runId: artifact.runId
     },
     provenance: {
-      artifactKind: artifact.kind,
+      artifactKind: artifact.kind as ArtifactKind,
       runId: artifact.runId,
       createdAt: artifact.createdAt
     },
+    metadata: buildSearchMemoryMetadata(normalizedMetadata, freshness.staleAfterDays),
     conflict: {
       detected: false,
       relatedIds: []
@@ -296,11 +330,25 @@ function scoreTermCoverage(haystackTerms: ReadonlySet<string>, queryTerms: reado
   return (hits / queryTerms.length) * weight;
 }
 
-function buildSearchMemoryFreshness(createdAt: string, now: string): SearchMemoryFreshness {
+function buildSearchMemoryMetadata(
+  metadata: ReturnType<typeof normalizeRetrievalMetadata>,
+  staleAfterDays: number
+): SearchMemoryMetadata {
+  return {
+    allowedRoles: [...metadata.retrievalRoles],
+    tags: [...metadata.tags],
+    reviewedAt: metadata.reviewedAt,
+    staleAfterDays,
+    supersededBy: [...metadata.supersededBy],
+    contradicts: [...metadata.contradicts]
+  };
+}
+
+function buildSearchMemoryFreshness(createdAt: string, now: string, staleAfterDays: number): SearchMemoryFreshness {
   const decision = assessFreshness(
     {
       createdAt,
-      maxAgeDays: SEARCH_MEMORY_STALE_AFTER_DAYS
+      maxAgeDays: staleAfterDays
     },
     now
   );
@@ -310,7 +358,7 @@ function buildSearchMemoryFreshness(createdAt: string, now: string): SearchMemor
       status: decision.status,
       createdAt,
       ageDays: decision.ageDays,
-      staleAfterDays: SEARCH_MEMORY_STALE_AFTER_DAYS
+      staleAfterDays
     };
   }
 
@@ -318,14 +366,14 @@ function buildSearchMemoryFreshness(createdAt: string, now: string): SearchMemor
     return {
       status: "future_timestamp",
       createdAt,
-      staleAfterDays: SEARCH_MEMORY_STALE_AFTER_DAYS
+      staleAfterDays
     };
   }
 
   return {
     status: "invalid_timestamp",
     createdAt,
-    staleAfterDays: SEARCH_MEMORY_STALE_AFTER_DAYS
+    staleAfterDays
   };
 }
 

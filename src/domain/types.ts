@@ -27,6 +27,20 @@ export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
 export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
 export const artifactKinds = ["plan", "markdown_chunk"] as const;
 export const stopGoDecisions = ["go", "needs_review", "stop"] as const;
+export const retrievalRoles = [
+  "planner",
+  "product_strategist",
+  "solution_architect",
+  "docs_researcher",
+  "backend_engineer",
+  "frontend_designer",
+  "infra_engineer",
+  "reviewer",
+  "build_resolver",
+  "security_reviewer",
+  "qa_engineer",
+  "memory_curator"
+] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -38,6 +52,21 @@ export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
+export type RetrievalRole = (typeof retrievalRoles)[number];
+
+export interface RetrievalMetadata {
+  retrievalRoles?: RetrievalRole[] | undefined;
+  tags?: string[] | undefined;
+  reviewedAt?: string | undefined;
+  staleAfterDays?: number | undefined;
+  supersededBy?: string[] | undefined;
+  contradicts?: string[] | undefined;
+  authorityLevel?: "policy" | "reviewed_memory" | "repo_context" | "operational_context" | undefined;
+}
+
+export interface MarkdownArtifactMetadata extends RetrievalMetadata {
+  chunkIndex?: number | undefined;
+}
 
 export interface ProjectRef {
   workspaceSlug: string;
@@ -132,6 +161,7 @@ export interface MemoryPromotionInput {
   sourceTaskId?: string | undefined;
   reviewer: string;
   actor: string;
+  metadata?: RetrievalMetadata | undefined;
 }
 
 export interface SearchMemoryInput extends ProjectRef {
@@ -140,6 +170,7 @@ export interface SearchMemoryInput extends ProjectRef {
   includeGlobal?: boolean | undefined;
   queryEmbedding?: readonly number[] | undefined;
   embeddingModel?: string | undefined;
+  requesterRole?: RetrievalRole | undefined;
 }
 
 export interface WorkspaceRecord {
@@ -254,6 +285,7 @@ export interface MemoryEntryRecord {
   status: MemoryStatus;
   sourcePath?: string | undefined;
   sourceAnchor?: string | undefined;
+  metadata: RetrievalMetadata;
   createdAt: string;
 }
 
@@ -262,6 +294,8 @@ export interface SearchMemoryAuthority {
   precedence: "retrieval_hint" | "repo_context";
   scope: MemoryScope;
   reviewedBy?: string | undefined;
+  authorityLevel?: RetrievalMetadata["authorityLevel"];
+  allowedRoles: RetrievalRole[];
 }
 
 export interface SearchMemoryFreshness {
@@ -293,6 +327,15 @@ export interface SearchMemoryProvenance {
   createdAt: string;
 }
 
+export interface SearchMemoryMetadata {
+  allowedRoles: RetrievalRole[];
+  tags: string[];
+  reviewedAt?: string | undefined;
+  staleAfterDays: number;
+  supersededBy: string[];
+  contradicts: string[];
+}
+
 export interface SearchMemoryResult {
   id: string;
   title: string;
@@ -304,6 +347,7 @@ export interface SearchMemoryResult {
   freshness: SearchMemoryFreshness;
   citation: SearchMemoryCitation;
   provenance: SearchMemoryProvenance;
+  metadata: SearchMemoryMetadata;
   conflict: {
     detected: boolean;
     relatedIds: string[];
@@ -320,7 +364,7 @@ export interface MarkdownArtifactRecord {
   content: string;
   sourcePath: string;
   sourceAnchor?: string | undefined;
-  metadata: Record<string, unknown>;
+  metadata: MarkdownArtifactMetadata;
   createdAt: string;
 }
 

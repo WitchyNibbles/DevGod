@@ -145,6 +145,7 @@ create table if not exists memory_entries (
   status text not null check (status in ('proposed', 'approved', 'rejected')),
   source_path text,
   source_anchor text,
+  metadata jsonb not null default '{}'::jsonb,
   embedding vector(1536),
   embedding_model text,
   created_at timestamptz not null default now(),
@@ -168,5 +169,7 @@ create index if not exists idx_runs_project_status on runs(project_id, status);
 create index if not exists idx_tasks_run_status on tasks(run_id, status);
 create index if not exists idx_locks_project_status on locks(project_id, status);
 create index if not exists idx_memory_scope_status on memory_entries(workspace_id, scope, status);
+create index if not exists idx_memory_entries_metadata on memory_entries using gin (metadata);
 create index if not exists idx_artifacts_run_kind on artifacts(run_id, kind);
+create index if not exists idx_artifacts_metadata on artifacts using gin (metadata);
 create unique index if not exists idx_embedding_jobs_source_model on embedding_jobs(source_table, source_id, embedding_model);

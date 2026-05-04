@@ -27,6 +27,22 @@ Capture stable knowledge in `.devgod/memory/` so future threads start smarter.
 - do not write guesses about future architecture as if already true
 - require provenance from a reviewed run or task
 - treat shared backend retrieval as lower precedence than repo policy
+- note when a prior entry is superseded, contradicted, or stale
+- do not let implementation agents write durable memory directly
+- keep promotion decisions tighter than retrieval decisions
+
+## Promotion rubric
+
+Promote only if the candidate is:
+
+- stable
+- cited
+- reviewed
+- reusable
+- non-secret
+- non-speculative
+
+If any of those fail, keep it out of durable memory.
 
 ## What belongs where
 
@@ -43,6 +59,7 @@ Capture stable knowledge in `.devgod/memory/` so future threads start smarter.
 - date or milestone
 - why the choice won
 - what tradeoff was accepted
+- whether an older decision was superseded
 
 ### patterns.md
 
@@ -56,3 +73,13 @@ Capture stable knowledge in `.devgod/memory/` so future threads start smarter.
 - cause
 - fix
 - prevention rule
+
+## Metadata guidance
+
+When relevant, include:
+
+- source run or task
+- review provenance
+- superseded-by note
+- contradiction note
+- freshness caveat

@@ -115,6 +115,21 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
   await service.promoteMemory(projectRun.id, {
     scope: "project",
     entryType: "lesson",
+    title: "Security review exception",
+    content: "private auth bypass triage flow",
+    sourceRunId: projectRun.id,
+    sourceTaskId: "task-security-exception",
+    reviewer: "memory_curator",
+    actor: "memory_curator",
+    metadata: {
+      retrievalRoles: ["security_reviewer"],
+      tags: ["security", "incident"]
+    }
+  });
+
+  await service.promoteMemory(projectRun.id, {
+    scope: "project",
+    entryType: "lesson",
     title: "Legacy deploy playbook",
     content: "legacy deploy recoveries and rollback notes",
     sourceRunId: projectRun.id,
@@ -217,6 +232,33 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
       redactionTop.citation.runId === undefined &&
       redactionTop.provenance.actor === undefined,
     details: `scope=${redactionTop?.scope ?? "none"} reviewedBy=${redactionTop?.authority.reviewedBy ?? "redacted"} citationRunId=${redactionTop?.citation.runId ?? "redacted"}`
+  });
+
+  const hiddenRestrictedResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "private auth bypass triage flow"
+  });
+  const visibleRestrictedResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "private auth bypass triage flow",
+    requesterRole: "security_reviewer"
+  });
+  cases.push({
+    id: "role_filtered_retrieval",
+    goal: "redaction",
+    passed:
+      hiddenRestrictedResults.every((result) => result.title !== "Security review exception") &&
+      visibleRestrictedResults.some(
+        (result) =>
+          result.title === "Security review exception" &&
+          result.metadata.allowedRoles.includes("security_reviewer") &&
+          !result.metadata.allowedRoles.includes("planner")
+      ),
+    details: `planner=${hiddenRestrictedResults.map((result) => result.title).join(" | ") || "none"} security=${visibleRestrictedResults
+      .map((result) => result.title)
+      .join(" | ") || "none"}`
   });
 
   const freshnessResults = await service.searchMemory({

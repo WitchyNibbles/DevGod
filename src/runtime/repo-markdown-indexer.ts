@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { MarkdownArtifactRecord, RunRecord } from "../domain/types.ts";
+import { retrievalRoles, type MarkdownArtifactRecord, type RetrievalRole, type RunRecord } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
 
 const DEFAULT_INCLUDE_PATHS = ["README.md", "docs", ".devgod"] as const;
@@ -213,9 +213,7 @@ function buildArtifactsForFile(input: {
         content,
         sourcePath: input.relativePath,
         sourceAnchor: section.sourceAnchor,
-        metadata: {
-          chunkIndex
-        },
+        metadata: buildArtifactMetadata(input.relativePath, chunkIndex),
         createdAt: new Date().toISOString()
       });
     });
@@ -256,6 +254,95 @@ function splitMarkdownSections(relativePath: string, markdown: string): Markdown
   }
 
   return sections.length > 0 ? sections : [{ title: fallbackTitle, lines: [markdown.trim()] }];
+}
+
+function buildArtifactMetadata(relativePath: string, chunkIndex: number): MarkdownArtifactRecord["metadata"] {
+  return {
+    chunkIndex,
+    authorityLevel: "repo_context",
+    retrievalRoles: rolesForMarkdownPath(relativePath),
+    tags: tagsForMarkdownPath(relativePath)
+  };
+}
+
+function rolesForMarkdownPath(relativePath: string): RetrievalRole[] {
+  if (relativePath === "README.md" || relativePath.startsWith(".devgod/rules/") || relativePath.startsWith(".devgod/memory/")) {
+    return [...retrievalRoles];
+  }
+
+  if (relativePath.startsWith(".devgod/work/reviews/")) {
+    return [
+      "planner",
+      "solution_architect",
+      "reviewer",
+      "build_resolver",
+      "security_reviewer",
+      "qa_engineer",
+      "memory_curator"
+    ];
+  }
+
+  if (relativePath.startsWith(".devgod/work/briefs/")) {
+    return [
+      "planner",
+      "product_strategist",
+      "solution_architect",
+      "docs_researcher",
+      "reviewer",
+      "security_reviewer",
+      "qa_engineer",
+      "memory_curator"
+    ];
+  }
+
+  if (
+    relativePath.startsWith(".devgod/work/plans/") ||
+    relativePath.startsWith(".devgod/work/tasks/") ||
+    relativePath.startsWith(".devgod/templates/")
+  ) {
+    return [
+      "planner",
+      "solution_architect",
+      "backend_engineer",
+      "frontend_designer",
+      "infra_engineer",
+      "reviewer",
+      "build_resolver",
+      "security_reviewer",
+      "qa_engineer",
+      "memory_curator"
+    ];
+  }
+
+  if (relativePath.startsWith("docs/")) {
+    return [
+      "planner",
+      "product_strategist",
+      "solution_architect",
+      "docs_researcher",
+      "backend_engineer",
+      "frontend_designer",
+      "infra_engineer",
+      "reviewer",
+      "build_resolver",
+      "security_reviewer",
+      "qa_engineer",
+      "memory_curator"
+    ];
+  }
+
+  return [...retrievalRoles];
+}
+
+function tagsForMarkdownPath(relativePath: string): string[] {
+  const pathParts = relativePath.split("/").filter(Boolean);
+  const tags = new Set<string>(["repo_markdown"]);
+
+  for (const part of pathParts.slice(0, 3)) {
+    tags.add(part.replace(/\.md$/i, "").replace(/[^a-z0-9]+/gi, "_").toLowerCase());
+  }
+
+  return [...tags];
 }
 
 function chunkMarkdownSection(sectionText: string): string[] {

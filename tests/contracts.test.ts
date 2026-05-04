@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeIntakeRequest,
+  normalizeSearchInput,
   validateMemoryPromotion,
   validateTaskPacket
 } from "../src/domain/contracts.ts";
@@ -60,4 +61,46 @@ test("validateMemoryPromotion rejects secrets and speculative claims", () => {
 
   assert.ok(errors.some((error) => error.includes("secret")));
   assert.ok(errors.some((error) => error.includes("speculative")));
+});
+
+test("normalizeSearchInput defaults requesterRole and rejects invalid retrieval roles", async () => {
+  const normalized = normalizeSearchInput({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "incident playbook"
+  });
+
+  assert.equal(normalized.requesterRole, "planner");
+
+  await assert.rejects(
+    async () =>
+      normalizeSearchInput({
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        query: "incident playbook",
+        requesterRole: "ceo" as "planner"
+      }),
+    /requesterRole must be one of/
+  );
+});
+
+test("validateMemoryPromotion rejects invalid retrieval metadata", () => {
+  const errors = validateMemoryPromotion({
+    scope: "project",
+    entryType: "lesson",
+    title: "Scoped note",
+    content: "incident review notes",
+    sourceRunId: "run-1",
+    reviewer: "memory_curator",
+    actor: "memory_curator",
+    metadata: {
+      retrievalRoles: ["security_reviewer", "ceo" as "planner"],
+      staleAfterDays: 0,
+      reviewedAt: "not-a-date"
+    }
+  });
+
+  assert.ok(errors.some((error) => error.includes("invalid retrieval roles")));
+  assert.ok(errors.some((error) => error.includes("staleAfterDays")));
+  assert.ok(errors.some((error) => error.includes("reviewedAt")));
 });

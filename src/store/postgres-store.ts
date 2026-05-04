@@ -6,13 +6,21 @@ import type {
   MemoryEntryRecord,
   PlanArtifact,
   ProjectRecord,
+  RetrievalMetadata,
+  RetrievalRole,
   ReviewRecord,
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import { buildArtifactSearchResult, buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
+import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
+import {
+  buildArtifactSearchResult,
+  buildMemorySearchResult,
+  canRoleAccessRetrievalMetadata,
+  compareMemorySearchResults
+} from "../core/policy.ts";
 import type {
   CompleteEmbeddingJobInput,
   DevgodStore,
@@ -45,6 +53,7 @@ interface SearchMemoryRow {
   title: string;
   content: string;
   scope: SearchMemoryResult["scope"];
+  metadata?: RetrievalMetadata | null;
   entryType?: MemoryEntryRecord["entryType"] | null;
   artifactKind?: MarkdownArtifactRecord["kind"] | null;
   actor?: string | null;
@@ -506,9 +515,9 @@ export class PostgresStore implements DevgodStore {
     await this.client.query(
       `insert into memory_entries (
          id, workspace_id, project_id, run_id, task_id, scope, entry_type, title,
-         content, reviewer, actor, status, source_path, source_anchor
+         content, reviewer, actor, status, source_path, source_anchor, metadata
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)`,
       [
         entry.id,
         entry.workspaceId,
@@ -523,7 +532,8 @@ export class PostgresStore implements DevgodStore {
         entry.actor,
         entry.status,
         entry.sourcePath ?? null,
-        entry.sourceAnchor ?? null
+        entry.sourceAnchor ?? null,
+        JSON.stringify(entry.metadata ?? {})
       ]
     );
   }
@@ -742,7 +752,9 @@ export class PostgresStore implements DevgodStore {
     includeGlobal: boolean;
     queryEmbedding?: readonly number[] | undefined;
     embeddingModel?: string | undefined;
+    requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]> {
+    const requesterRole = params.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
     const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
     const recentLimit = Math.min(Math.max(params.limit * 5, 25), 200);
     const backfillLimit = Math.min(Math.max(params.limit * 3, 15), 100);
@@ -762,6 +774,7 @@ export class PostgresStore implements DevgodStore {
          m.title,
          m.content,
          m.scope,
+         m.metadata as metadata,
          m.entry_type as "entryType",
          m.actor,
          m.reviewer,
@@ -800,6 +813,7 @@ export class PostgresStore implements DevgodStore {
          m.title,
          m.content,
          m.scope,
+         m.metadata as metadata,
          m.entry_type as "entryType",
          m.actor,
          m.reviewer,
@@ -842,6 +856,7 @@ export class PostgresStore implements DevgodStore {
                m.title,
                m.content,
                m.scope,
+               m.metadata as metadata,
                m.entry_type as "entryType",
                m.actor,
                m.reviewer,
@@ -892,6 +907,7 @@ export class PostgresStore implements DevgodStore {
          a.title,
          coalesce(a.content->>'text', a.content::text) as content,
          'project'::text as scope,
+         a.metadata as metadata,
          null::text as "entryType",
          a.kind as "artifactKind",
          null::text as actor,
@@ -929,6 +945,7 @@ export class PostgresStore implements DevgodStore {
          a.title,
          coalesce(a.content->>'text', a.content::text) as content,
          'project'::text as scope,
+         a.metadata as metadata,
          null::text as "entryType",
          a.kind as "artifactKind",
          null::text as actor,
@@ -965,6 +982,7 @@ export class PostgresStore implements DevgodStore {
                a.title,
                coalesce(a.content->>'text', a.content::text) as content,
                'project'::text as scope,
+               a.metadata as metadata,
                null::text as "entryType",
                a.kind as "artifactKind",
                null::text as actor,
@@ -995,6 +1013,7 @@ export class PostgresStore implements DevgodStore {
       ...backfillArtifactResult.rows,
       ...vectorArtifactResult.rows
     ])
+      .filter((entry) => canRoleAccessRetrievalMetadata(entry.metadata ?? undefined, requesterRole))
       .map((entry) => {
         if (entry.sourceKind === "artifact") {
           const baseResult = buildArtifactSearchResult(
@@ -1005,6 +1024,7 @@ export class PostgresStore implements DevgodStore {
               content: entry.content,
               sourcePath: entry.sourcePath ?? `artifact://${entry.id}`,
               sourceAnchor: entry.sourceAnchor ?? undefined,
+              metadata: (entry.metadata ?? {}) as MarkdownArtifactRecord["metadata"],
               createdAt: entry.createdAt,
               runId: entry.runId
             },
@@ -1031,6 +1051,7 @@ export class PostgresStore implements DevgodStore {
             taskId: entry.taskId ?? undefined,
             sourcePath: entry.sourcePath ?? undefined,
             sourceAnchor: entry.sourceAnchor ?? undefined,
+            metadata: entry.metadata ?? {},
             createdAt: entry.createdAt
           },
           params.query,

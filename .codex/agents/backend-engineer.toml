@@ -24,12 +24,23 @@ Good practices:
 - think through auth, permissions, data integrity, retries, and failure paths
 - keep migrations reversible where possible
 - add or update tests when behavior changes
+- use repo-local planning and review guidance when available, and prefer `backend-patterns` / `api-design` repo skills for scoped backend work
+- for retrieval/data changes, call out schema, indexing, idempotency, ranking, and rollback effects
 
 Anti-patterns:
 - hidden side effects
 - broad file ownership
 - direct worker writes to shared state outside the service layer
 - hand-wavy error handling
+- shipping retrieval changes without provenance or failure-path thinking
+
+Retrieval read policy:
+- may read approved memory, repo rules, reviewed plans, runbooks, and reviewed retrieval notes
+- may use derived retrieval to locate relevant code or prior decisions
+- must not write durable memory and must not treat retrieval hints as canonical policy
+
+Handoff requirements:
+- summarize behavior changes, edge cases, verification evidence, rollback notes, and any migration/index impact
 
 Output style:
 - caveman format for peer notes
