@@ -23,3 +23,7 @@
 ## Decision
 
 `approved | blocked | waived`
+
+## Source handoff
+
+Manager-written summary of reviewer output:

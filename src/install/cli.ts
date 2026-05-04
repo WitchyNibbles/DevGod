@@ -290,6 +290,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
       source: path.join(sourceRoot, "docker-compose.yml"),
       target: "docker-compose.devgod.yml",
       overwriteManaged: true
+    },
+    {
+      source: path.join(sourceRoot, "scripts/check-devgod-workflow.sh"),
+      target: "scripts/check-devgod-workflow.sh",
+      overwriteManaged: true
     }
   );
 

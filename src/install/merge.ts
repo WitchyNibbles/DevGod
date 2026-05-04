@@ -11,34 +11,49 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - use \`.devgod/rules/\` and \`.devgod/memory/\` as the local policy and durable-memory layer
 - use the repo-local devgod skills under \`.agents/skills/devgod-*/\`
 - use the repo-local devgod agent profiles under \`.codex/agents/devgod-*.toml\`
-- if devgod is not configured yet, run \`npm run devgod:setup:local\`
+- keep one canonical active marker at \`.devgod/ACTIVE\` with \`task_id=<task-id>\`, \`workflow=devgod\`, and \`state=active\`
+- if devgod is not configured yet, run \`npm run devgod:setup:local\`; if that path depends on ignored local bootstrap state, surface the dependency before relying on it
 
 ## Department Workflow
 
 For this repository, the root Codex thread acts as the engineering manager on first contact.
 
 - confirm the request, success criteria, constraints, and main risk before execution
+- manager/root owns triage, routing, synthesis, scope enforcement, and final reporting
+- manager/root must not perform deep subsystem investigation, broad code search, root-cause analysis, or implementation design directly
+- manager/root may run at most two shallow inspection commands before trivial classification or bounded investigation
 - answer trivial or administrative asks directly without department fanout
 - route every substantive build, debug, setup, or refactor ask through the department workflow
+- use \`devgod-intake\` as the default first skill for substantive work
 
 Default department chain:
 
 1. manager intake in the root thread
-2. \`solution_architect\` for system design, boundaries, and sequencing
-3. \`planner\` for task slicing, ownership, dependencies, and worker routing
-4. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
-5. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
-6. \`memory_curator\` for durable capture after approved completion
+2. bounded specialist investigation when evidence is needed
+3. \`solution_architect\` for system design, boundaries, and sequencing
+4. \`planner\` for task slicing, ownership, dependencies, and worker routing
+5. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
+6. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
+7. \`memory_curator\` for durable capture after approved completion
 
 Additional rules:
 
 - prefer repo-local custom agents under \`.codex/agents/devgod-*.toml\` when available
-- for substantive work, spawn the first coordinator agent (\`solution_architect\` or \`planner\`) after at most two local inspection commands unless a blocker makes delegation impossible
+- create or update \`.devgod/ACTIVE\` and the matching intake brief before moving past intake
+- any work that needs more than two inspection commands should go through bounded investigation
+- use a bounded investigation packet with: owner role, precise question, read scope, forbidden write scope, evidence required, max output length, stop condition
+- let \`solution_architect\` synthesize investigation evidence before planning when the evidence pass runs first
+- \`planner\` task packets must include owner role, scope, files likely touched, acceptance criteria, verification command, and review gates
+- manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks; specialist owners should handle non-trivial, risky, or subsystem-specific implementation
+- preserve the trivial fast path for single-scope wording or mechanical work that stays within the two-inspection limit
 - use the local \`caveman\` plugin/skill for manager notes, agent handoffs, QA/security gates, and other internal coordination to reduce token cost
 - default caveman target is 4-6 lines with short labels and no prose paragraphs
 - keep direct user replies in standard concise English unless the user asks for caveman format
 - require an intake brief for substantive work in \`.devgod/work/briefs/\`
 - require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution
+- require the active task id to match the current brief, plan/task, and review artifacts
+- the manager is the default writer for \`.devgod/work/reviews/\`; read-only reviewer roles still need persisted gate files
+- run \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\` before reporting substantive work complete
 - do not claim substantive work is done without reviewer/QA/security gate output in \`.devgod/work/reviews/\`
 
 ${AGENTS_END}`;
@@ -201,6 +216,7 @@ export function mergePackageJson(
   scripts["devgod:health"] = `${runtimeEntry} health`;
   scripts["devgod:bootstrap"] = `${runtimeEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${runtimeEntry} verify-setup`;
+  scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:setup:local"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 

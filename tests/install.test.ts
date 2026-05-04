@@ -17,8 +17,11 @@ test("mergeAgentsMd appends and is idempotent", () => {
 
   assert.match(first, /BEGIN DEVGOD MANAGED/);
   assert.match(first, /## Department Workflow/);
+  assert.match(first, /\.devgod\/ACTIVE/);
+  assert.match(first, /devgod-intake/);
   assert.match(first, /`solution_architect`/);
   assert.match(first, /`planner`/);
+  assert.match(first, /check-devgod-workflow\.sh --task-id/);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -28,11 +31,12 @@ test("mergeAgentsMd appends and is idempotent", () => {
 test("mergeCodexConfig preserves existing values and adds missing devgod defaults", () => {
   const merged = mergeCodexConfig(
     `model = "custom-model"\n\n[features]\npersonality = false\n`,
-    `model = "gpt-5.4"\nproject_doc_fallback_filenames = [".agents.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\n\n[agents]\nmax_threads = 8\n`
+    `model = "gpt-5.4"\nproject_doc_fallback_filenames = ["AGENTS.md", ".agents.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\n\n[agents]\nmax_threads = 8\n`
   );
 
   assert.match(merged, /model = "custom-model"/);
-  assert.match(merged, /project_doc_fallback_filenames = \[\s*"\.agents\.md"\s*\]/);
+  assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"AGENTS\.md"/);
+  assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"\.agents\.md"/);
   assert.match(merged, /multi_agent = true/);
   assert.match(merged, /enable_request_compression = true/);
   assert.match(merged, /max_threads = 8/);
@@ -67,6 +71,7 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
 
   assert.equal(merged.scripts.test, "vitest");
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\.ts migrate/);
+  assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
   assert.match(
     merged.scripts["devgod:setup:local"],
     /node_modules\/devgod\/src\/install\/setup-local\.ts/
@@ -91,7 +96,9 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
 
   const agentsMd = await readFile(path.join(targetRoot, "AGENTS.md"), "utf8");
   assert.match(agentsMd, /## Department Workflow/);
+  assert.match(agentsMd, /\.devgod\/ACTIVE/);
   assert.match(agentsMd, /`reviewer`, `qa_engineer`, and `security_reviewer` gates/);
+  assert.match(agentsMd, /check-devgod-workflow\.sh --task-id/);
 
   const memoryReadme = await readFile(path.join(targetRoot, ".devgod/memory/README.md"), "utf8");
   assert.match(memoryReadme, /devgod memory/i);
@@ -113,6 +120,12 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     const content = await readFile(path.join(targetRoot, relativePath), "utf8");
     assert.match(content, /^---/m, `${relativePath} should install a skill file`);
   }
+
+  const installedWorkflowChecker = await readFile(
+    path.join(targetRoot, "scripts/check-devgod-workflow.sh"),
+    "utf8"
+  );
+  assert.match(installedWorkflowChecker, /devgod workflow check passed/);
 
   const installedAgents = [
     ".codex/agents/devgod-build-resolver.toml",
@@ -157,7 +170,9 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".codex/agents/build-resolver.toml",
     ".codex/agents/docs-researcher.toml",
     ".codex/agents/reviewer.toml",
-    ".devgod/rules/role-retrieval-policy.md"
+    ".devgod/rules/role-retrieval-policy.md",
+    "scripts/check-devgod-workflow.sh",
+    "scripts/verify-devgod-workflow-check.sh"
   ];
 
   for (const expectedPath of expectedPaths) {

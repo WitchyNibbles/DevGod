@@ -17,9 +17,12 @@ Ship the smallest clean, secure, working increment without bypassing gates.
 2. Confirm the active task packet came from an architect-approved plan and a planner-owned decomposition handoff.
 3. Enforce allowed write scope before implementation.
 4. Spawn only the agents needed for the active slice.
-5. Implement locally in the main thread unless a bounded read-only subtask can run in parallel.
-6. Move completed work into handoff for blocking `reviewer`, `qa_engineer`, and `security_reviewer` review.
-7. Promote only reviewed durable memory.
+5. Manager/root coordinates execution. Non-trivial, risky, or subsystem-specific implementation goes to the specialist owner named in the task packet.
+6. Manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks that do not need specialist ownership.
+7. Move completed work into handoff for blocking `reviewer`, `qa_engineer`, and `security_reviewer` review.
+8. The manager persists the review gate files under `.devgod/work/reviews/` when the reviewer roles are read-only.
+9. Run `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before claiming the substantive slice is complete.
+10. Promote only reviewed durable memory.
 
 ## Agent routing
 
@@ -50,8 +53,10 @@ Do not call the slice done unless:
 
 - the code works or the exact blocker is known
 - the architect-to-planner and worker-to-review handoffs are explicit
-- required reviews (`reviewer`, `qa_engineer`, `security_reviewer`) passed or were explicitly waived with reason
+- specialist ownership matched the task packet unless the task qualified for the trivial fast path
+- required reviews (`reviewer`, `qa_engineer`, `security_reviewer`) passed when applicable; the manager cannot declare done while a blocking gate fails
 - major security concerns were checked
 - verification evidence exists
+- the workflow checker passes for the current task id
 - write locks were released
 - memory was updated with anything worth keeping

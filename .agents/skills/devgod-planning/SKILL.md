@@ -33,6 +33,7 @@ Produce a plan that is executable, reviewable, and safe to hand off.
    - rollback notes
    - handoff format
 6. Require QA and security gates for substantive work.
+7. Ensure the plan or task packet names the same current task id used by `.devgod/ACTIVE` and the intake brief.
 
 ## Rules
 
@@ -40,6 +41,7 @@ Produce a plan that is executable, reviewable, and safe to hand off.
 - do not produce giant tasks with fuzzy done bars
 - do not skip rollback notes
 - prefer a thin vertical slice over a roadmap dump
+- do not allow planning to continue against a stale active task marker
 
 ## Output
 
