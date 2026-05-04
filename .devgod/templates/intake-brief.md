@@ -4,6 +4,10 @@
 
 `brief-<date>-<slug>`
 
+## Task ID
+
+`task-<date>-<slug>`
+
 ## Request
 
 Original user ask:

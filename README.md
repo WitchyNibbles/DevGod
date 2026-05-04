@@ -97,6 +97,7 @@ It will:
 - install `.env.devgod.example`
 - install `docker-compose.devgod.yml`
 - install generated target-repo setup scripts at `scripts/devgod-setup.sh` and `scripts/devgod-setup.ps1`
+- install the workflow gate checker at `scripts/check-devgod-workflow.sh`
 - create `package.json` if missing, or merge `devgod` scripts into it if present
 - add a local `file:` dev dependency pointing back to this source repo
 - add `devgod` env ignore rules to `.gitignore`
@@ -189,11 +190,13 @@ Once the repo is configured, the intended operating rhythm is:
 
 - substantive requests become `devgod` work by default unless the user opts out
 - the root thread acts as the manager on first contact
+- `.devgod/ACTIVE` is the canonical current-task marker during substantive work
 - active briefs, plans, tasks, and reviews live under `.devgod/work/`
 - repo-local rules live under `.devgod/rules/`
 - reviewed durable memory lives under `.devgod/memory/`
 - repo-local skills live under `.agents/skills/devgod-*`
 - reviewer, QA, and security gates block completion for substantive work
+- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` is the workflow-integrity proof before a substantive completion claim
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
 
@@ -218,6 +221,7 @@ npm run migrate
 npm run health
 npm run bootstrap
 npm run verify:setup
+npm run verify:workflow
 npm test
 npm run typecheck
 ```

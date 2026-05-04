@@ -30,13 +30,28 @@ Use this for:
 ## Workflow
 
 1. Act as the manager in the root thread and normalize the request into goal, audience, constraints, risks, unknowns, success criteria, and stop/go.
-2. Create or update the intake brief under `.devgod/work/briefs/` for every substantive request.
-3. After at most two local inspection commands, consult `solution_architect` before implementation planning so boundaries and sequencing are explicit.
-4. Spawn only the needed specialist agents after the architecture pass is clear.
-5. Ask each specialist to use the local `caveman` plugin/skill and answer in strict caveman format with 4-6 lines unless escalation needs more.
-6. Resolve conflicts before planning.
-7. Hand the approved architecture result to `planner` for task slicing, ownership, and worker routing.
-8. Stop before implementation if the user asked for planning only.
+2. Keep manager/root in shallow triage mode: own routing, synthesis, scope enforcement, and final reporting, but do not perform deep subsystem investigation, broad code search, root-cause analysis, or implementation design directly.
+3. Use no more than two shallow inspection commands before either classifying the task as trivial or delegating bounded investigation.
+4. Create or update `.devgod/ACTIVE` for the current task before moving past intake. Do not let a stale active marker stand in for the current ask.
+5. Create or update the intake brief under `.devgod/work/briefs/` for every substantive request and ensure it names the current task id.
+6. Delegate bounded specialist investigation before architecture when evidence is needed for unknown ownership, unclear call flow, broad read scope, root-cause uncertainty, or behavior-contract ambiguity.
+7. Use this investigation packet format: owner role, precise question, read scope, forbidden write scope, evidence required, max output length, stop condition.
+8. After the evidence pass, consult `solution_architect` so it can synthesize boundaries, sequencing, and risks from the returned evidence.
+9. Spawn only the needed specialist agents after the architecture pass is clear.
+10. Ask each specialist to use the local `caveman` plugin/skill and answer in strict caveman format with 4-6 lines unless escalation needs more.
+11. Resolve conflicts before planning.
+12. Hand the approved architecture result to `planner` for task packet creation, ownership, and worker routing. Each task packet must include owner role, scope, files likely touched, acceptance criteria, verification command, and review gates.
+13. Preserve the trivial fast path for low-risk, single-scope, mechanical or docs-only work that stays within two shallow inspections and does not need investigation or architecture.
+14. Stop before implementation if the user asked for planning only.
+
+## Hard manager checklist
+
+- first user reply must confirm request, success criteria, constraints, and main risk
+- manager/root never exceeds two shallow inspection commands before trivial classification or delegated investigation
+- any work needing more than two inspection commands is delegated
+- current task id must exist before worker execution
+- current task must have a matching intake brief before worker execution
+- prior tasks, stale review files, or older `.devgod/ACTIVE` state never satisfy the current ask
 
 ## Default specialist set
 
@@ -81,7 +96,7 @@ Constraints:
 - keep scope honest
 - identify hidden assumptions
 - identify trust boundaries
-- make the manager handoff explicit before worker planning starts
+- make the manager handoff explicit before architect synthesis and before worker planning starts
 - do not proceed when required risk fields are unknown
 - prefer a thin vertical slice over a giant roadmap
 - if security or delivery risk is high, say so plainly

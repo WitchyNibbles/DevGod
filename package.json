@@ -30,11 +30,13 @@
     "db:stop": "docker compose down",
     "install:project": "node --experimental-strip-types src/install/cli.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "check:workflow": "bash scripts/check-devgod-workflow.sh",
     "typecheck": "tsc --noEmit",
     "migrate": "node --experimental-strip-types src/admin.ts migrate",
     "health": "node --experimental-strip-types src/admin.ts health",
     "bootstrap": "node --experimental-strip-types src/admin.ts bootstrap-project",
     "verify:setup": "node --experimental-strip-types src/admin.ts verify-setup",
+    "verify:workflow": "bash scripts/verify-devgod-workflow-check.sh",
     "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
   },
   "dependencies": {
