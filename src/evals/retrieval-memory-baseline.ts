@@ -62,6 +62,29 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
     actor: "memory_curator"
   });
 
+  await store.replaceMarkdownArtifacts({
+    workspaceId: projectRun.workspaceId,
+    projectId: projectRun.projectId,
+    runId: projectRun.id,
+    artifacts: [
+      {
+        id: "artifact-incident-playbook",
+        workspaceId: projectRun.workspaceId,
+        projectId: projectRun.projectId,
+        runId: projectRun.id,
+        kind: "markdown_chunk",
+        title: "Incident Playbook",
+        content: "Rollback checklist for release recoveries. Verify retrieval citations reference the source markdown path.",
+        sourcePath: "docs/runbook.md",
+        sourceAnchor: "incident-playbook",
+        metadata: {
+          chunkIndex: 0
+        },
+        createdAt: new Date().toISOString()
+      }
+    ]
+  });
+
   await service.promoteMemory(projectRun.id, {
     scope: "project",
     entryType: "decision",
@@ -159,6 +182,23 @@ export async function runRetrievalMemoryBaseline(): Promise<RetrievalEvalReport>
       recallTop?.citation.label === "Incident playbook" &&
       recallTop?.citation.taskId === "task-incident",
     details: `kind=${recallTop?.citation.kind ?? "none"} memoryId=${recallTop?.citation.memoryId ?? "none"} label=${recallTop?.citation.label ?? "none"}`
+  });
+
+  const markdownResults = await service.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "source markdown path"
+  });
+  const markdownTop = markdownResults[0];
+  cases.push({
+    id: "repo_markdown_context_present",
+    goal: "citation",
+    passed:
+      markdownTop?.authority.source === "repo_artifact" &&
+      markdownTop?.citation.kind === "artifact" &&
+      markdownTop?.citation.sourcePath === "docs/runbook.md" &&
+      markdownTop?.citation.canonicalRef === "docs/runbook.md#incident-playbook",
+    details: `source=${markdownTop?.authority.source ?? "none"} kind=${markdownTop?.citation.kind ?? "none"} ref=${markdownTop?.citation.canonicalRef ?? "none"}`
   });
 
   const redactionResults = await service.searchMemory({

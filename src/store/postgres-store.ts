@@ -2,6 +2,7 @@ import type {
   ApprovalRecord,
   HandoffRecord,
   LockRecord,
+  MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
   ProjectRecord,
@@ -11,7 +12,7 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import { buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
+import { buildArtifactSearchResult, buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
 import type {
   CompleteEmbeddingJobInput,
   DevgodStore,
@@ -40,12 +41,14 @@ interface JsonRow<T> {
 
 interface SearchMemoryRow {
   id: string;
+  sourceKind: "memory_entry" | "artifact";
   title: string;
   content: string;
   scope: SearchMemoryResult["scope"];
-  entryType: MemoryEntryRecord["entryType"];
-  actor: string;
-  reviewer: string;
+  entryType?: MemoryEntryRecord["entryType"] | null;
+  artifactKind?: MarkdownArtifactRecord["kind"] | null;
+  actor?: string | null;
+  reviewer?: string | null;
   runId: string;
   taskId: string | null;
   sourcePath?: string | null;
@@ -525,6 +528,51 @@ export class PostgresStore implements DevgodStore {
     );
   }
 
+  async replaceMarkdownArtifacts(input: {
+    workspaceId: string;
+    projectId: string;
+    runId: string;
+    artifacts: readonly MarkdownArtifactRecord[];
+  }): Promise<void> {
+    await withTransaction(this.client, async () => {
+      await this.client.query(
+        `delete from embedding_jobs
+         where source_table = 'artifacts'
+           and project_id = $1`,
+        [input.projectId]
+      );
+
+      await this.client.query(
+        `delete from artifacts
+         where project_id = $1
+           and kind = 'markdown_chunk'`,
+        [input.projectId]
+      );
+
+      for (const artifact of input.artifacts) {
+        await this.client.query(
+          `insert into artifacts (
+             id, workspace_id, project_id, run_id, task_id, kind, title, content, metadata
+           )
+           values ($1, $2, $3, $4, null, 'markdown_chunk', $5, $6::jsonb, $7::jsonb)`,
+          [
+            artifact.id,
+            artifact.workspaceId,
+            artifact.projectId,
+            input.runId,
+            artifact.title,
+            JSON.stringify({ text: artifact.content }),
+            JSON.stringify({
+              ...artifact.metadata,
+              sourcePath: artifact.sourcePath,
+              sourceAnchor: artifact.sourceAnchor ?? null
+            })
+          ]
+        );
+      }
+    });
+  }
+
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
     await this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
 
@@ -617,7 +665,7 @@ export class PostgresStore implements DevgodStore {
          'artifacts'::text as "sourceTable",
          id as "sourceId",
          title,
-         content::text as content
+         coalesce(content->>'text', content::text) as content
        from artifacts
        where id = $1`,
       [sourceId]
@@ -699,9 +747,9 @@ export class PostgresStore implements DevgodStore {
     const recentLimit = Math.min(Math.max(params.limit * 5, 25), 200);
     const backfillLimit = Math.min(Math.max(params.limit * 3, 15), 100);
     const vectorLimit = Math.min(Math.max(params.limit * 3, 15), 100);
-    const lexicalClauses = buildLexicalBackfillClauses(params.query, 5);
+    const lexicalClauses = buildLexicalBackfillClauses(params.query, 5, "m", "m.content");
 
-    const recentResult = await this.client.query<SearchMemoryRow>(
+    const recentMemoryResult = await this.client.query<SearchMemoryRow>(
       `with project_context as (
          select p.id as project_id
          from projects p
@@ -710,6 +758,7 @@ export class PostgresStore implements DevgodStore {
        )
        select
          m.id,
+         'memory_entry'::text as "sourceKind",
          m.title,
          m.content,
          m.scope,
@@ -738,7 +787,7 @@ export class PostgresStore implements DevgodStore {
       [params.workspaceSlug, params.projectSlug, params.includeGlobal, recentLimit]
     );
 
-    const backfillResult = await this.client.query<SearchMemoryRow>(
+    const backfillMemoryResult = await this.client.query<SearchMemoryRow>(
       `with project_context as (
          select p.id as project_id
          from projects p
@@ -747,6 +796,7 @@ export class PostgresStore implements DevgodStore {
        )
        select
          m.id,
+         'memory_entry'::text as "sourceKind",
          m.title,
          m.content,
          m.scope,
@@ -777,7 +827,7 @@ export class PostgresStore implements DevgodStore {
       [params.workspaceSlug, params.projectSlug, params.includeGlobal, `%${params.query}%`, ...lexicalClauses.values, backfillLimit]
     );
 
-    const vectorResult =
+    const vectorMemoryResult =
       params.queryEmbedding && params.embeddingModel
         ? await this.client.query<SearchMemoryRow>(
             `with project_context as (
@@ -788,6 +838,7 @@ export class PostgresStore implements DevgodStore {
              )
              select
                m.id,
+               'memory_entry'::text as "sourceKind",
                m.title,
                m.content,
                m.scope,
@@ -828,15 +879,159 @@ export class PostgresStore implements DevgodStore {
           )
         : { rows: [], rowCount: 0 };
 
-    return dedupeMemoryRows([...recentResult.rows, ...backfillResult.rows, ...vectorResult.rows])
+    const recentArtifactResult = await this.client.query<SearchMemoryRow>(
+      `with project_context as (
+         select p.id as project_id
+         from projects p
+         join workspaces w on w.id = p.workspace_id
+         where w.slug = $1 and p.slug = $2
+       )
+       select
+         a.id,
+         'artifact'::text as "sourceKind",
+         a.title,
+         coalesce(a.content->>'text', a.content::text) as content,
+         'project'::text as scope,
+         null::text as "entryType",
+         a.kind as "artifactKind",
+         null::text as actor,
+         null::text as reviewer,
+         a.run_id as "runId",
+         null::text as "taskId",
+         a.metadata->>'sourcePath' as "sourcePath",
+         a.metadata->>'sourceAnchor' as "sourceAnchor",
+         a.project_id as "projectId",
+         a.created_at as "createdAt"
+       from artifacts a
+       join project_context pc on a.project_id = pc.project_id
+       where a.kind = 'markdown_chunk'
+       order by a.created_at desc
+       limit $3`,
+      [params.workspaceSlug, params.projectSlug, recentLimit]
+    );
+
+    const artifactLexicalClauses = buildLexicalBackfillClauses(
+      params.query,
+      4,
+      "a",
+      "coalesce(a.content->>'text', a.content::text)"
+    );
+    const backfillArtifactResult = await this.client.query<SearchMemoryRow>(
+      `with project_context as (
+         select p.id as project_id
+         from projects p
+         join workspaces w on w.id = p.workspace_id
+         where w.slug = $1 and p.slug = $2
+       )
+       select
+         a.id,
+         'artifact'::text as "sourceKind",
+         a.title,
+         coalesce(a.content->>'text', a.content::text) as content,
+         'project'::text as scope,
+         null::text as "entryType",
+         a.kind as "artifactKind",
+         null::text as actor,
+         null::text as reviewer,
+         a.run_id as "runId",
+         null::text as "taskId",
+         a.metadata->>'sourcePath' as "sourcePath",
+         a.metadata->>'sourceAnchor' as "sourceAnchor",
+         a.project_id as "projectId",
+         a.created_at as "createdAt"
+       from artifacts a
+       join project_context pc on a.project_id = pc.project_id
+       where a.kind = 'markdown_chunk'
+         and ${artifactLexicalClauses.sql}
+       order by
+         case when a.title ilike $3 then 0 else 1 end,
+         a.created_at desc
+       limit $${artifactLexicalClauses.nextParam}`,
+      [`${params.workspaceSlug}`, `${params.projectSlug}`, `%${params.query}%`, ...artifactLexicalClauses.values, backfillLimit]
+    );
+
+    const vectorArtifactResult =
+      params.queryEmbedding && params.embeddingModel
+        ? await this.client.query<SearchMemoryRow>(
+            `with project_context as (
+               select p.id as project_id
+               from projects p
+               join workspaces w on w.id = p.workspace_id
+               where w.slug = $1 and p.slug = $2
+             )
+             select
+               a.id,
+               'artifact'::text as "sourceKind",
+               a.title,
+               coalesce(a.content->>'text', a.content::text) as content,
+               'project'::text as scope,
+               null::text as "entryType",
+               a.kind as "artifactKind",
+               null::text as actor,
+               null::text as reviewer,
+               a.run_id as "runId",
+               null::text as "taskId",
+               a.metadata->>'sourcePath' as "sourcePath",
+               a.metadata->>'sourceAnchor' as "sourceAnchor",
+               a.project_id as "projectId",
+               a.created_at as "createdAt",
+               greatest(0, 1 - (a.embedding <=> $3::vector)) as "vectorScore"
+             from artifacts a
+             join project_context pc on a.project_id = pc.project_id
+             where a.kind = 'markdown_chunk'
+               and a.embedding is not null
+               and a.embedding_model = $4
+             order by a.embedding <=> $3::vector asc, a.created_at desc
+             limit $5`,
+            [params.workspaceSlug, params.projectSlug, formatVector(params.queryEmbedding), params.embeddingModel, vectorLimit]
+          )
+        : { rows: [], rowCount: 0 };
+
+    return dedupeMemoryRows([
+      ...recentMemoryResult.rows,
+      ...backfillMemoryResult.rows,
+      ...vectorMemoryResult.rows,
+      ...recentArtifactResult.rows,
+      ...backfillArtifactResult.rows,
+      ...vectorArtifactResult.rows
+    ])
       .map((entry) => {
+        if (entry.sourceKind === "artifact") {
+          const baseResult = buildArtifactSearchResult(
+            {
+              id: entry.id,
+              kind: "markdown_chunk",
+              title: entry.title,
+              content: entry.content,
+              sourcePath: entry.sourcePath ?? `artifact://${entry.id}`,
+              sourceAnchor: entry.sourceAnchor ?? undefined,
+              createdAt: entry.createdAt,
+              runId: entry.runId
+            },
+            params.query,
+            params.projectSlug
+          );
+          return {
+            ...baseResult,
+            score: baseResult.score + vectorScoreBoost(entry.vectorScore)
+          };
+        }
+
         const sameProject = entry.projectId === projectId;
         const baseResult = buildMemorySearchResult(
           {
-            ...entry,
+            id: entry.id,
+            title: entry.title,
+            content: entry.content,
+            scope: entry.scope,
+            entryType: entry.entryType ?? "fact",
+            actor: entry.actor ?? "",
+            reviewer: entry.reviewer ?? "",
+            runId: entry.runId,
             taskId: entry.taskId ?? undefined,
             sourcePath: entry.sourcePath ?? undefined,
-            sourceAnchor: entry.sourceAnchor ?? undefined
+            sourceAnchor: entry.sourceAnchor ?? undefined,
+            createdAt: entry.createdAt
           },
           params.query,
           sameProject,
@@ -916,7 +1111,12 @@ function vectorScoreBoost(vectorScore?: number | null): number {
   return Math.max(0, vectorScore) * 6;
 }
 
-function buildLexicalBackfillClauses(query: string, startParam: number): {
+function buildLexicalBackfillClauses(
+  query: string,
+  startParam: number,
+  alias: string,
+  contentExpression: string
+): {
   sql: string;
   values: string[];
   nextParam: number;
@@ -924,7 +1124,7 @@ function buildLexicalBackfillClauses(query: string, startParam: number): {
   const terms = [...new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? [])].slice(0, 5);
   const values = terms.map((term) => `%${term}%`);
   const clauses = values.map(
-    (_value, index) => `(m.title ilike $${startParam + index} or m.content ilike $${startParam + index})`
+    (_value, index) => `(${alias}.title ilike $${startParam + index} or ${contentExpression} ilike $${startParam + index})`
   );
 
   return {

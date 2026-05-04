@@ -25,6 +25,7 @@ export const approvalDecisions = ["approved", "blocked", "waived"] as const;
 export const memoryScopes = ["global", "project"] as const;
 export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
 export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
+export const artifactKinds = ["plan", "markdown_chunk"] as const;
 export const stopGoDecisions = ["go", "needs_review", "stop"] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
@@ -35,6 +36,7 @@ export type ApprovalDecision = (typeof approvalDecisions)[number];
 export type MemoryScope = (typeof memoryScopes)[number];
 export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
+export type ArtifactKind = (typeof artifactKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
 
 export interface ProjectRef {
@@ -256,8 +258,8 @@ export interface MemoryEntryRecord {
 }
 
 export interface SearchMemoryAuthority {
-  source: "shared_backend_memory";
-  precedence: "retrieval_hint";
+  source: "shared_backend_memory" | "repo_artifact";
+  precedence: "retrieval_hint" | "repo_context";
   scope: MemoryScope;
   reviewedBy?: string | undefined;
 }
@@ -270,8 +272,9 @@ export interface SearchMemoryFreshness {
 }
 
 export interface SearchMemoryCitation {
-  kind: "memory_entry";
-  memoryId: string;
+  kind: "memory_entry" | "artifact";
+  memoryId?: string | undefined;
+  artifactId?: string | undefined;
   label: string;
   sourcePath?: string | undefined;
   sourceAnchor?: string | undefined;
@@ -281,7 +284,8 @@ export interface SearchMemoryCitation {
 }
 
 export interface SearchMemoryProvenance {
-  entryType: MemoryType;
+  entryType?: MemoryType | undefined;
+  artifactKind?: ArtifactKind | undefined;
   actor?: string | undefined;
   reviewer?: string | undefined;
   runId?: string | undefined;
@@ -304,6 +308,20 @@ export interface SearchMemoryResult {
     detected: boolean;
     relatedIds: string[];
   };
+}
+
+export interface MarkdownArtifactRecord {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  runId: string;
+  kind: "markdown_chunk";
+  title: string;
+  content: string;
+  sourcePath: string;
+  sourceAnchor?: string | undefined;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface RunStatusSnapshot {

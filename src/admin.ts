@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Client as PgClient } from "pg";
 import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
+import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -210,6 +211,41 @@ async function runEmbeddingJobsCommand() {
   });
 }
 
+async function indexRepoMarkdownCommand() {
+  const targetRepoRoot = process.argv[3]
+    ? path.resolve(process.cwd(), process.argv[3])
+    : process.env.DEVGOD_REPO_MARKDOWN_ROOT
+      ? path.resolve(process.cwd(), process.env.DEVGOD_REPO_MARKDOWN_ROOT)
+      : repoRoot;
+  const workspaceSlug = process.env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const workspaceName = process.env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
+  const projectSlug = process.env.DEVGOD_PROJECT_SLUG;
+  const projectName = process.env.DEVGOD_PROJECT_NAME;
+  const include = (process.env.DEVGOD_REPO_MARKDOWN_INCLUDE ?? "README.md,docs,.devgod")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const embeddingModel = process.env.DEVGOD_EMBEDDING_MODEL;
+
+  if (!projectSlug) {
+    throw new Error("DEVGOD_PROJECT_SLUG is required");
+  }
+
+  await withClient(async (client) => {
+    const result = await indexRepoMarkdown({
+      store: new PostgresStore(client),
+      repoRoot: targetRepoRoot,
+      workspaceSlug,
+      workspaceName,
+      projectSlug,
+      projectName,
+      include,
+      embeddingModel
+    });
+    console.log(JSON.stringify(result));
+  });
+}
+
 async function main() {
   await loadDotEnv();
   const command = process.argv[2];
@@ -236,6 +272,11 @@ async function main() {
 
   if (command === "run-embedding-jobs") {
     await runEmbeddingJobsCommand();
+    return;
+  }
+
+  if (command === "index-repo-markdown") {
+    await indexRepoMarkdownCommand();
     return;
   }
 

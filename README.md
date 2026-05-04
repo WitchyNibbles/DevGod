@@ -237,7 +237,7 @@ Source-of-truth split:
 
 - repo markdown: reviewed project policy, durable decisions, patterns, and lessons
 - Postgres: live operational state and audit trail
-- `pgvector`: semantic retrieval over plans, handoffs, and memory
+- `pgvector`: semantic retrieval over memory plus indexed repo markdown chunks
 
 This package owns the reusable bootstrap layer:
 
@@ -291,11 +291,16 @@ docker-compose.yml
 This is still the foundation release. It does not yet include:
 
 - a packaged MCP transport around the shared-core actions
-- automatic embedding generation jobs
 - production deployment manifests for the shared service
-- cross-project sync from repo markdown into the backend
 - extra coordinator roles such as `scrum_master` or `test_director`
 - a `devgod:codex` command wrapper
+
+Repo markdown retrieval is now available through the admin surface:
+
+- `node --experimental-strip-types src/admin.ts index-repo-markdown [repo-root]`
+- `DEVGOD_REPO_MARKDOWN_INCLUDE=README.md,docs,.devgod` controls the allowlist
+- `DEVGOD_EMBEDDING_MODEL` queues embedding jobs for indexed markdown chunks
+- `node --experimental-strip-types src/admin.ts run-embedding-jobs [limit]` writes vectors for queued chunks
 
 ## Design Rules
 

@@ -1,6 +1,7 @@
 import {
   type ApprovalDecision,
   type LockRecord,
+  type MarkdownArtifactRecord,
   type MemoryEntryRecord,
   type ReviewRecord,
   type SearchMemoryFreshness,
@@ -82,8 +83,10 @@ export function evaluateReviewDecision(
   };
 }
 
-export function scoreMemoryResult(
-  entry: Pick<MemoryEntryRecord, "content" | "title" | "scope">,
+type SearchableText = Pick<MemoryEntryRecord, "content" | "title" | "scope">;
+
+export function scoreSearchableResult(
+  entry: SearchableText,
   query: string,
   sameProject: boolean
 ): number {
@@ -102,8 +105,8 @@ export function scoreMemoryResult(
 }
 
 export function compareMemorySearchResults(
-  left: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug" | "freshness">,
-  right: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug" | "freshness">
+  left: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug" | "freshness" | "authority">,
+  right: Pick<SearchMemoryResult, "id" | "title" | "score" | "projectSlug" | "freshness" | "authority">
 ): number {
   const leftAuthority = left.projectSlug ? 1 : 0;
   const rightAuthority = right.projectSlug ? 1 : 0;
@@ -121,12 +124,26 @@ export function compareMemorySearchResults(
     return right.score - left.score;
   }
 
+  const leftSourceRank = left.authority.source === "shared_backend_memory" ? 1 : 0;
+  const rightSourceRank = right.authority.source === "shared_backend_memory" ? 1 : 0;
+  if (leftSourceRank !== rightSourceRank) {
+    return rightSourceRank - leftSourceRank;
+  }
+
   const titleComparison = left.title.localeCompare(right.title);
   if (titleComparison !== 0) {
     return titleComparison;
   }
 
   return left.id.localeCompare(right.id);
+}
+
+export function scoreMemoryResult(
+  entry: Pick<MemoryEntryRecord, "content" | "title" | "scope">,
+  query: string,
+  sameProject: boolean
+): number {
+  return scoreSearchableResult(entry, query, sameProject);
 }
 
 export function buildMemorySearchResult(
@@ -159,7 +176,7 @@ export function buildMemorySearchResult(
     content: entry.content,
     scope: entry.scope,
     projectSlug,
-    score: scoreMemoryResult(entry, query, sameProject) + freshnessScoreAdjustment(freshness.status),
+    score: scoreSearchableResult(entry, query, sameProject) + freshnessScoreAdjustment(freshness.status),
     authority: {
       source: "shared_backend_memory",
       precedence: "retrieval_hint",
@@ -196,6 +213,50 @@ export function buildMemorySearchResult(
   };
 }
 
+export function buildArtifactSearchResult(
+  artifact: Pick<MarkdownArtifactRecord, "id" | "title" | "content" | "sourcePath" | "sourceAnchor" | "createdAt" | "kind"> & {
+    runId: string;
+  },
+  query: string,
+  projectSlug: string,
+  now: string = new Date().toISOString()
+): SearchMemoryResult {
+  const freshness = buildSearchMemoryFreshness(artifact.createdAt, now);
+
+  return {
+    id: artifact.id,
+    title: artifact.title,
+    content: artifact.content,
+    scope: "project",
+    projectSlug,
+    score: scoreSearchableResult({ ...artifact, scope: "project" }, query, true) + freshnessScoreAdjustment(freshness.status),
+    authority: {
+      source: "repo_artifact",
+      precedence: "repo_context",
+      scope: "project"
+    },
+    freshness,
+    citation: {
+      kind: "artifact",
+      artifactId: artifact.id,
+      label: artifact.title,
+      sourcePath: artifact.sourcePath,
+      sourceAnchor: artifact.sourceAnchor,
+      canonicalRef: buildArtifactCanonicalCitationRef(artifact.id, artifact.sourcePath, artifact.sourceAnchor),
+      runId: artifact.runId
+    },
+    provenance: {
+      artifactKind: artifact.kind,
+      runId: artifact.runId,
+      createdAt: artifact.createdAt
+    },
+    conflict: {
+      detected: false,
+      relatedIds: []
+    }
+  };
+}
+
 function buildCanonicalCitationRef(
   memoryId: string,
   sourcePath?: string | undefined,
@@ -206,6 +267,14 @@ function buildCanonicalCitationRef(
   }
 
   return sourceAnchor ? `memory://entry/${memoryId}#${sourceAnchor}` : `memory://entry/${memoryId}`;
+}
+
+function buildArtifactCanonicalCitationRef(
+  artifactId: string,
+  sourcePath: string,
+  sourceAnchor?: string | undefined
+): string {
+  return sourceAnchor ? `${sourcePath}#${sourceAnchor}` : sourcePath || `artifact://entry/${artifactId}`;
 }
 
 function tokenizeSearchText(value: string): string[] {

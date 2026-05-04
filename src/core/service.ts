@@ -326,7 +326,7 @@ function isProvenancedSearchResult(result: SearchMemoryResult): boolean {
     return false;
   }
 
-  if (result.scope === "project") {
+  if (result.scope === "project" && result.authority.source === "shared_backend_memory") {
     return Boolean(result.authority.reviewedBy && result.authority.reviewedBy.trim().length > 0);
   }
 

@@ -3,6 +3,7 @@ import type {
   HandoffRecord,
   LockRecord,
   MemoryEntryRecord,
+  MarkdownArtifactRecord,
   PlanArtifact,
   ProjectRecord,
   ReviewRecord,
@@ -83,6 +84,12 @@ export interface DevgodStore {
   saveApproval(approval: ApprovalRecord): Promise<void>;
   getApprovals(taskId: string): Promise<ApprovalRecord[]>;
   saveMemoryEntry(entry: MemoryEntryRecord): Promise<void>;
+  replaceMarkdownArtifacts(input: {
+    workspaceId: string;
+    projectId: string;
+    runId: string;
+    artifacts: readonly MarkdownArtifactRecord[];
+  }): Promise<void>;
   queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord>;
   leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]>;
   getEmbeddingSource(sourceTable: EmbeddingJobSourceTable, sourceId: string): Promise<EmbeddingSourceRecord | undefined>;

@@ -1,8 +1,9 @@
-import { buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
+import { buildArtifactSearchResult, buildMemorySearchResult, compareMemorySearchResults } from "../core/policy.ts";
 import type {
   ApprovalRecord,
   HandoffRecord,
   LockRecord,
+  MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
   ProjectRecord,
@@ -43,6 +44,7 @@ export class MemoryStore implements DevgodStore {
   private readonly reviews = new Map<string, ReviewRecord>();
   private readonly approvals = new Map<string, ApprovalRecord>();
   private readonly memoryEntries = new Map<string, MemoryEntryRecord>();
+  private readonly markdownArtifacts = new Map<string, MarkdownArtifactRecord>();
   private readonly embeddingJobs = new Map<string, EmbeddingJobRecord>();
   private readonly artifactEmbeddings = new Map<string, EmbeddingVectorRecord>();
   private readonly memoryEntryEmbeddings = new Map<string, EmbeddingVectorRecord>();
@@ -177,6 +179,37 @@ export class MemoryStore implements DevgodStore {
     this.memoryEntries.set(entry.id, entry);
   }
 
+  async replaceMarkdownArtifacts(input: {
+    workspaceId: string;
+    projectId: string;
+    runId: string;
+    artifacts: readonly MarkdownArtifactRecord[];
+  }): Promise<void> {
+    const incomingIds = new Set(input.artifacts.map((artifact) => artifact.id));
+
+    for (const artifact of [...this.markdownArtifacts.values()]) {
+      if (artifact.projectId !== input.projectId) {
+        continue;
+      }
+
+      if (incomingIds.has(artifact.id)) {
+        continue;
+      }
+
+      this.markdownArtifacts.delete(artifact.id);
+      this.artifactEmbeddings.delete(artifact.id);
+      for (const job of [...this.embeddingJobs.values()]) {
+        if (job.sourceTable === "artifacts" && job.sourceId === artifact.id) {
+          this.embeddingJobs.delete(job.id);
+        }
+      }
+    }
+
+    for (const artifact of input.artifacts) {
+      this.markdownArtifacts.set(artifact.id, artifact);
+    }
+  }
+
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
     const timestamp = new Date().toISOString();
     this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
@@ -260,17 +293,27 @@ export class MemoryStore implements DevgodStore {
       };
     }
 
-    const plan = [...this.plans.values()].find((candidate) => candidate.id === sourceId);
-    if (!plan) {
-      return undefined;
+    const markdownArtifact = this.markdownArtifacts.get(sourceId);
+    if (markdownArtifact) {
+      return {
+        sourceTable,
+        sourceId,
+        title: markdownArtifact.title,
+        content: markdownArtifact.content
+      };
     }
 
-    return {
-      sourceTable,
-      sourceId,
-      title: plan.title,
-      content: JSON.stringify(plan.content)
-    };
+    const plan = [...this.plans.values()].find((candidate) => candidate.id === sourceId);
+    if (plan) {
+      return {
+        sourceTable,
+        sourceId,
+        title: plan.title,
+        content: JSON.stringify(plan.content)
+      };
+    }
+
+    return undefined;
   }
 
   async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {
@@ -333,7 +376,7 @@ export class MemoryStore implements DevgodStore {
   }): Promise<SearchMemoryResult[]> {
     const projectKey = `${params.workspaceSlug}:${params.projectSlug}`;
     const project = this.projects.get(projectKey);
-    const results = [...this.memoryEntries.values()]
+    const memoryResults = [...this.memoryEntries.values()]
       .filter((entry) => entry.status === "approved")
       .filter((entry) => {
         const sameProject = project ? entry.projectId === project.id : false;
@@ -347,11 +390,21 @@ export class MemoryStore implements DevgodStore {
           ...baseResult,
           score: baseResult.score + this.vectorScoreBoost(entry.id, params.queryEmbedding, params.embeddingModel)
         };
-      })
-      .sort(compareMemorySearchResults)
-      .slice(0, params.limit);
+      });
 
-    return results;
+    const artifactResults = project
+      ? [...this.markdownArtifacts.values()]
+          .filter((artifact) => artifact.projectId === project.id)
+          .map((artifact) => {
+            const baseResult = buildArtifactSearchResult(artifact, params.query, params.projectSlug);
+            return {
+              ...baseResult,
+              score: baseResult.score + this.vectorScoreBoost(artifact.id, params.queryEmbedding, params.embeddingModel, "artifacts")
+            };
+          })
+      : [];
+
+    return [...memoryResults, ...artifactResults].sort(compareMemorySearchResults).slice(0, params.limit);
   }
 
   private clearDerivedEmbedding(sourceTable: EmbeddingJobSourceTable, sourceId: string): void {
@@ -373,13 +426,14 @@ export class MemoryStore implements DevgodStore {
   private vectorScoreBoost(
     entryId: string,
     queryEmbedding?: readonly number[] | undefined,
-    embeddingModel?: string | undefined
+    embeddingModel?: string | undefined,
+    sourceTable: EmbeddingJobSourceTable = "memory_entries"
   ): number {
     if (!queryEmbedding || !embeddingModel) {
       return 0;
     }
 
-    const embeddingRecord = this.memoryEntryEmbeddings.get(entryId);
+    const embeddingRecord = this.embeddingMapFor(sourceTable).get(entryId);
     if (!embeddingRecord || embeddingRecord.embeddingModel !== embeddingModel) {
       return 0;
     }

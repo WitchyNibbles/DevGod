@@ -223,7 +223,7 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
     includeGlobal: false
   });
 
-  assert.equal(capture.length, 2);
+  assert.equal(capture.length, 4);
   assert.match(capture[0]?.text ?? "", /with project_context as/);
   assert.match(capture[0]?.text ?? "", /where w\.slug = \$1 and p\.slug = \$2/);
   assert.match(capture[0]?.text ?? "", /join project_context pc on true/);
@@ -233,6 +233,11 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
   assert.match(capture[1]?.text ?? "", /ilike/);
   assert.match(capture[1]?.text ?? "", /limit \$7/);
   assert.deepEqual(capture[1]?.values, ["team", "devgod", false, "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+  assert.match(capture[2]?.text ?? "", /from artifacts a/);
+  assert.match(capture[2]?.text ?? "", /where a\.kind = 'markdown_chunk'/);
+  assert.deepEqual(capture[2]?.values, ["team", "devgod", 25]);
+  assert.match(capture[3]?.text ?? "", /coalesce\(a\.content->>'text', a\.content::text\) ilike/);
+  assert.deepEqual(capture[3]?.values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
 });
 
 test("PostgresStore.searchMemory issues a vector query when query embeddings are supplied", async () => {
@@ -276,7 +281,7 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
   });
 
   assert.equal(result?.id, "vector-best");
-  assert.equal(capture.length, 3);
+  assert.equal(capture.length, 6);
   assert.match(capture[2]?.text ?? "", /m\.embedding <=> \$4::vector/);
   assert.match(capture[2]?.text ?? "", /m\.embedding_model = \$5/);
   assert.deepEqual(capture[2]?.values, [
@@ -287,6 +292,9 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
     "text-embedding-3-small",
     15
   ]);
+  assert.match(capture[5]?.text ?? "", /a\.embedding <=> \$3::vector/);
+  assert.match(capture[5]?.text ?? "", /a\.embedding_model = \$4/);
+  assert.deepEqual(capture[5]?.values, ["team", "devgod", "[0.1,0.2]", "text-embedding-3-small", 15]);
 });
 
 test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {
