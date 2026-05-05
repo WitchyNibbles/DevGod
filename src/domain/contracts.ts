@@ -5,9 +5,9 @@ import {
   type IntakeRequestInput,
   type IntakeSummary,
   type MemoryPromotionInput,
-  type ReviewActionContext,
   type ReviewInput,
   type ReviewRecord,
+  type TrustedReviewActionContext,
   type RetrievalMetadata,
   type RetrievalRole,
   type ReviewWaiverAuthority,
@@ -24,6 +24,7 @@ import {
   stopGoDecisions,
   type TaskPacketInput
 } from "./types.ts";
+import { isTrustedReviewActionContext } from "../core/review-context.ts";
 
 const maxQueryEmbeddingDimensions = 1536;
 const retrievalRoleSet = new Set<string>(retrievalRoles);
@@ -389,8 +390,13 @@ export function validateHandoff(input: HandoffInput): string[] {
   return errors;
 }
 
-export function validateReviewAction(context: ReviewActionContext, review: ReviewInput): string[] {
+export function validateReviewAction(context: TrustedReviewActionContext, review: ReviewInput): string[] {
   const errors: string[] = [];
+
+  if (!isTrustedReviewActionContext(context)) {
+    return ["review context must come from the trusted runtime review identity resolver"];
+  }
+
   const normalizedActor = context.actor.trim();
   const waiverAuthority = context.waiverAuthority ?? "none";
 
@@ -451,8 +457,24 @@ export function canReviewRecordSatisfyGate(review: ReviewRecord): boolean {
     return false;
   }
 
+  if (review.actor.trim().length === 0) {
+    return false;
+  }
+
+  if (!isRetrievalRole(review.actorRole)) {
+    return false;
+  }
+
+  if (!isGateReviewRole(review.reviewerRole)) {
+    return false;
+  }
+
+  if (!isReviewWaiverAuthority(review.waiverAuthority)) {
+    return false;
+  }
+
   if (review.state === "passed") {
-    return true;
+    return review.actorRole === review.reviewerRole && review.waiverAuthority === "none";
   }
 
   if (review.state !== "waived") {
@@ -460,6 +482,10 @@ export function canReviewRecordSatisfyGate(review: ReviewRecord): boolean {
   }
 
   if (!review.waiverReason || review.waiverReason.trim().length === 0) {
+    return false;
+  }
+
+  if (review.waiverAuthority === "none") {
     return false;
   }
 

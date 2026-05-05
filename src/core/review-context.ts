@@ -1,18 +1,19 @@
 import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
-import {
-  isRetrievalRole,
-  isReviewWaiverAuthority
-} from "../domain/contracts.ts";
 import type {
   GateReviewRole,
   RetrievalRole,
   ReviewActionContext,
   ReviewState,
+  TrustedReviewActionContext,
   ReviewWaiverAuthority
 } from "../domain/types.ts";
-import { reviewStates } from "../domain/types.ts";
+import { reviewStates, retrievalRoles as retrievalRoleValues, reviewWaiverAuthorities as waiverAuthorityValues } from "../domain/types.ts";
 import { deriveWaiverContext } from "./review-context-waiver.ts";
+
+const retrievalRoleSet = new Set<string>(retrievalRoleValues);
+const reviewWaiverAuthoritySet = new Set<string>(waiverAuthorityValues);
+const trustedReviewActionContexts = new WeakSet<object>();
 
 export interface ReviewActionContextResolverInput {
   runId: string;
@@ -24,7 +25,7 @@ export interface ReviewActionContextResolverInput {
 
 export type ResolveReviewActionContext = (
   input: ReviewActionContextResolverInput
-) => ReviewActionContext | Promise<ReviewActionContext>;
+) => TrustedReviewActionContext | Promise<TrustedReviewActionContext>;
 
 export interface AuthenticatedPrincipal {
   provider: string;
@@ -114,6 +115,49 @@ export interface ReviewIdentityVerificationResult {
   passed: number;
   failed: number;
   failures: ReviewIdentityVerificationFailure[];
+}
+
+function isRetrievalRole(value: string): value is RetrievalRole {
+  return retrievalRoleSet.has(value);
+}
+
+function isReviewWaiverAuthority(value: string): value is ReviewWaiverAuthority {
+  return reviewWaiverAuthoritySet.has(value);
+}
+
+function createTrustedReviewActionContext(
+  context: ReviewActionContext
+): TrustedReviewActionContext {
+  const trustedContext = Object.freeze({
+    actor: context.actor,
+    actorRole: context.actorRole,
+    waiverAuthority: context.waiverAuthority ?? "none",
+    identityAssurance: "authenticated" as const
+  });
+
+  trustedReviewActionContexts.add(trustedContext);
+  return trustedContext as TrustedReviewActionContext;
+}
+
+export function isTrustedReviewActionContext(
+  context: ReviewActionContext | TrustedReviewActionContext | Record<string, unknown>
+): context is TrustedReviewActionContext {
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    (context as Record<string, unknown>).identityAssurance === "authenticated" &&
+    trustedReviewActionContexts.has(context)
+  );
+}
+
+export function toReviewActionContextSnapshot(
+  context: ReviewActionContext | TrustedReviewActionContext
+): ReviewActionContext {
+  return {
+    actor: context.actor,
+    actorRole: context.actorRole,
+    waiverAuthority: context.waiverAuthority
+  };
 }
 
 function normalizeBindings(
@@ -414,18 +458,18 @@ export function createReviewActionContextResolver(
     const actorBinding = resolveActorBinding(principal, bindings, input.actor);
 
     if (input.reviewState === "waived") {
-      return deriveWaiverContext(actorBinding, input.reviewerRole);
+      return createTrustedReviewActionContext(deriveWaiverContext(actorBinding, input.reviewerRole));
     }
 
     if (!actorBinding.roles.includes(input.reviewerRole)) {
       throw new Error(`Actor ${actorBinding.actor} is not allowed to record ${input.reviewerRole}`);
     }
 
-    return {
+    return createTrustedReviewActionContext({
       actor: actorBinding.actor,
       actorRole: input.reviewerRole,
       waiverAuthority: "none"
-    };
+    });
   };
 }
 
@@ -491,10 +535,12 @@ export async function verifyReviewIdentityAdapter<AuthContext>(
         continue;
       }
 
-      if (!isDeepStrictEqual(context, fixture.expect.context)) {
+      if (!isDeepStrictEqual(toReviewActionContextSnapshot(context), fixture.expect.context)) {
         failures.push({
           fixture: fixture.name,
-          message: `context mismatch: expected ${JSON.stringify(fixture.expect.context)} got ${JSON.stringify(context)}`
+          message: `context mismatch: expected ${JSON.stringify(fixture.expect.context)} got ${JSON.stringify(
+            toReviewActionContextSnapshot(context)
+          )}`
         });
         continue;
       }

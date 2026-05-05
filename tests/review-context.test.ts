@@ -6,14 +6,17 @@ import test from "node:test";
 import {
   createReviewPrincipalAdapter,
   createReviewActionContextResolver,
+  isTrustedReviewActionContext,
   loadReviewIdentityBindings,
   loadReviewIdentityFixtures,
+  toReviewActionContextSnapshot,
   validateReviewIdentityFixtures,
   verifyReviewIdentityAdapter,
   validateReviewIdentityBindings,
   type ReviewIdentityBindings,
   type ReviewIdentityFixtureDocument
 } from "../src/core/review-context.ts";
+import { validateReviewAction } from "../src/domain/contracts.ts";
 
 test("validateReviewIdentityBindings rejects duplicate actors and invalid waiver authorities", () => {
   const errors = validateReviewIdentityBindings({
@@ -228,11 +231,96 @@ test("createReviewActionContextResolver derives waiver authority from reviewed b
     reviewState: "waived"
   });
 
-  assert.deepEqual(context, {
+  assert.deepEqual(toReviewActionContextSnapshot(context), {
     actor: "release-manager",
     actorRole: "planner",
     waiverAuthority: "manager"
   });
+});
+
+test("createReviewActionContextResolver returns trusted runtime-backed context for valid waivers", async () => {
+  const resolver = createReviewActionContextResolver({
+    bindings: {
+      bindings: [
+        {
+          principal: {
+            provider: "github",
+            subject: "manager-1"
+          },
+          actors: [
+            {
+              actor: "release-manager",
+              roles: ["planner"],
+              waiverAuthorities: ["manager"]
+            }
+          ]
+        }
+      ]
+    },
+    resolveAuthenticatedPrincipal() {
+      return {
+        provider: "github",
+        subject: "manager-1",
+        verified: true
+      };
+    }
+  });
+
+  const context = await resolver({
+    runId: "run-1",
+    taskId: "task-1",
+    actor: "release-manager",
+    reviewerRole: "qa_engineer",
+    reviewState: "waived"
+  });
+
+  assert.equal(isTrustedReviewActionContext(context), true);
+  assert.equal(
+    isTrustedReviewActionContext({
+      ...toReviewActionContextSnapshot(context),
+      identityAssurance: "authenticated"
+    }),
+    false
+  );
+  assert.deepEqual(
+    validateReviewAction(context, {
+      reviewerRole: "qa_engineer",
+      state: "waived",
+      severity: "low",
+      findings: ["documented exception"],
+      waiverReason: "managed exception"
+    }),
+    []
+  );
+  assert.deepEqual(
+    validateReviewAction(
+      {
+        ...toReviewActionContextSnapshot(context),
+        identityAssurance: "authenticated"
+      } as never,
+      {
+        reviewerRole: "qa_engineer",
+        state: "waived",
+        severity: "low",
+        findings: ["documented exception"],
+        waiverReason: "managed exception"
+      }
+    ),
+    ["review context must come from the trusted runtime review identity resolver"]
+  );
+  assert.deepEqual(
+    validateReviewAction(
+      toReviewActionContextSnapshot(context) as never,
+      {
+        reviewerRole: "qa_engineer",
+        state: "waived",
+        severity: "low",
+        findings: ["documented exception"],
+        waiverReason: "managed exception"
+      }
+    ),
+    ["review context must come from the trusted runtime review identity resolver"]
+  );
 });
 
 test("createReviewActionContextResolver rejects waived reviews from unverified principals before waiver resolution", async () => {

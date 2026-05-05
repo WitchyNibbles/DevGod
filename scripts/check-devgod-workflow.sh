@@ -73,6 +73,16 @@ require_allowed_value() {
   fail "unexpected value in ${path#"$repo_root"/}: ${value}"
 }
 
+require_runtime_proof_reference() {
+  local block="$1"
+  local path="$2"
+  local heading="$3"
+
+  printf '%s\n' "$block" |
+    grep -Eq '^[[:space:]-]*Runtime proof:[[:space:]]*[^[:space:]<].*$' ||
+    fail "specialist_verified runtime_verified summaries must cite Runtime proof in ${heading} of ${path#"$repo_root"/}"
+}
+
 extract_section_value() {
   local heading="$1"
   local path="$2"
@@ -380,6 +390,7 @@ for role in "${roles[@]}"; do
   specialist_execution_evidence="$(extract_section_value "## Specialist execution evidence" "$review_file")"
   quality_gate_evidence="$(extract_section_value "## Quality gate evidence" "$review_file")"
   verification_evidence="$(extract_section_value "## Verification evidence" "$review_file")"
+  verification_evidence_block="$(extract_section_block "## Verification evidence" "$review_file")"
   [[ -n "$findings" ]] || fail "missing findings in ${review_file#"$repo_root"/}"
   [[ -n "$residual_risk" ]] || fail "missing residual risk in ${review_file#"$repo_root"/}"
   if [[ "$task_completion_standard" == "specialist_verified" ]]; then
@@ -388,7 +399,12 @@ for role in "${roles[@]}"; do
   fi
   [[ -n "$verification_evidence" ]] || fail "missing verification evidence in ${review_file#"$repo_root"/}"
   source_handoff="$(extract_section_value "## Source handoff" "$review_file")"
+  source_handoff_block="$(extract_section_block "## Source handoff" "$review_file")"
   [[ -n "$source_handoff" ]] || fail "missing source handoff in ${review_file#"$repo_root"/}"
+  if [[ "$task_completion_standard" == "specialist_verified" && "$provenance_status" == "runtime_verified" ]]; then
+    require_runtime_proof_reference "$verification_evidence_block" "$review_file" "## Verification evidence"
+    require_runtime_proof_reference "$source_handoff_block" "$review_file" "## Source handoff"
+  fi
 done
 
 printf 'devgod workflow artifact check passed for %s\n' "$task_id"

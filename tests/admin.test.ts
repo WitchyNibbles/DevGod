@@ -127,3 +127,30 @@ export default createReviewPrincipalAdapter(async ({ authContext }) => ({
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("verify-review-identity command uses repo template defaults when no env adapter is configured", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const adminPath = path.join(sourceRoot, "src/admin.ts");
+  const env = { ...process.env };
+
+  delete env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
+  delete env.DEVGOD_REVIEW_IDENTITY_BINDINGS;
+  delete env.DEVGOD_REVIEW_IDENTITY_FIXTURES;
+
+  const { stdout } = await execFileAsync(
+    "node",
+    ["--experimental-strip-types", adminPath, "verify-review-identity"],
+    {
+      cwd: sourceRoot,
+      env
+    }
+  );
+
+  const result = JSON.parse(stdout) as {
+    passed: number;
+    failed: number;
+  };
+
+  assert.equal(result.passed, 2);
+  assert.equal(result.failed, 0);
+});

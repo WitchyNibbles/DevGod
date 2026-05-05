@@ -248,7 +248,6 @@ export function mergePackageJson(
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:verify:migrations:live"] = `${runtimeEntry} verify-live-migrations`;
   scripts["devgod:verify:review-identity"] = `${runtimeEntry} verify-review-identity`;
-  scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:setup:local"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 

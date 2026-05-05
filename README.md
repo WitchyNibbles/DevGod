@@ -5,42 +5,57 @@
 ## Quick Start
 
 This repo is the source of truth. Keep it cloned on the same machine as any project you want to bless with `devgod`.
+The shipped posture is an opt-in overlay with production-oriented package checks.
 
-Why: the current installer adds `devgod` to the target project as a local `file:` dependency. This is not a published npm package yet.
+Phase 5 install contract:
 
-Minimum ingredients:
+- the supported installer is host-run from a checked-out `devgod` repo or unpacked package copy
+- the installer merges files and prints next steps; it does not run `npm install`, Docker, migrations, or bootstrap side effects
+- the target project gets a local `file:` dev dependency pointing back to the source path you ran from
+- the direct Node CLI has an explicit `init --apply` mutating path and `init --dry-run` no-write path
+- the legacy direct CLI form without `init` is dry-run-only compatibility; it must not write
+- the package remains `private`; use `npm pack --dry-run` as the packaging smoke check for this phase, not npm publish
+
+Host prerequisites:
 
 - Node.js `>=22`
 - `npm`
-- Docker for the shipped local setup path
-- a clone of this repo in a stable local path
+- Bash for `scripts/install-devgod.sh`, or PowerShell for `scripts/install-devgod.ps1`
+- Docker only if you later choose the shipped local setup path
+- a clone of this repo in a stable local path, or an unpacked package copy with the same installer assets
+
+Supported CLI inventory:
+
+- `npm run install:project -- init --apply --target /absolute/path/to/project`
+- `node --experimental-strip-types src/install/cli.ts init --apply --target /absolute/path/to/project`
+- `node --experimental-strip-types src/install/cli.ts init --dry-run --target /absolute/path/to/project`
+- `node --experimental-strip-types src/install/cli.ts --dry-run --target /absolute/path/to/project`
+
+Legacy note:
+
+- bare direct invocation without `init`, such as `node --experimental-strip-types src/install/cli.ts --target /absolute/path/to/project`, is rejected for writes
+- `init --apply` is the only mutating direct CLI path
 
 Fast path:
 
 1. Clone this repo somewhere permanent.
 2. Install `devgod` into the target project.
 3. In the target project, run `npm install`.
-4. In the target project, run `npm run devgod:setup:local`.
-5. Let `npm run devgod:verify:setup` be the setup/database proof that the basic bootstrap path is working.
+4. If you want the shipped local Docker bootstrap path, run `npm run devgod:setup:local`.
+5. Let `npm run devgod:verify:setup` be the setup/database proof only after you intentionally run the setup/bootstrap path.
 
 ## Install Into An Existing Project
-
-From this `devgod` source repo:
-
-```bash
-bash scripts/install-devgod.sh /absolute/path/to/existing-project
-```
-
-PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install-devgod.ps1 -TargetPath C:\path\to\existing-project
-```
 
 Direct Node entrypoint:
 
 ```bash
-npm run install:project -- --target /absolute/path/to/existing-project
+npm run install:project -- init --apply --target /absolute/path/to/existing-project
+```
+
+No-write report:
+
+```bash
+node --experimental-strip-types src/install/cli.ts init --dry-run --target /absolute/path/to/existing-project
 ```
 
 Then move into the target repo and finish the setup:
@@ -48,6 +63,11 @@ Then move into the target repo and finish the setup:
 ```bash
 cd /absolute/path/to/existing-project
 npm install
+```
+
+Optional local bootstrap path:
+
+```bash
 npm run devgod:setup:local
 ```
 
@@ -64,13 +84,7 @@ git init
 Now return to this `devgod` source repo and install into that new path:
 
 ```bash
-bash scripts/install-devgod.sh /absolute/path/to/new-project
-```
-
-Or:
-
-```bash
-npm run install:project -- --target /absolute/path/to/new-project
+npm run install:project -- init --apply --target /absolute/path/to/new-project
 ```
 
 Then finish setup inside the new project:
@@ -78,6 +92,11 @@ Then finish setup inside the new project:
 ```bash
 cd /absolute/path/to/new-project
 npm install
+```
+
+Optional local bootstrap path:
+
+```bash
 npm run devgod:setup:local
 ```
 
@@ -102,17 +121,19 @@ It will:
 - add a local `file:` dev dependency pointing back to this source repo
 - add `devgod` env ignore rules to `.gitignore`
 - back up overwritten managed files into `.devgod/install-backups/`
+- print a structured install report; in `--dry-run` mode that report is no-write
 
 It will not:
 
-- publish anything to npm
+- claim that package install also means host setup, Docker bootstrap, or review-trust wiring is complete
+- run `npm install`, Docker, migrations, or bootstrap for you
 - copy live `.devgod/work/` history from this source repo into the target repo
 - copy reviewed durable memory content into the target repo
 - invent project-specific policy for the target repo
 
 ## Setup After Install
 
-Inside the target repo, `npm run devgod:setup:local` is the one command a Codex agent should prefer when the repo has been installed but not configured yet.
+Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped Docker-first setup path.
 
 That command runs `src/install/setup-local.ts`, which dispatches to the generated target-repo setup script, and then does this:
 
@@ -125,7 +146,7 @@ That command runs `src/install/setup-local.ts`, which dispatches to the generate
 7. runs `npm run devgod:bootstrap`
 8. runs `npm run devgod:verify:setup`
 
-The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml`.
+The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml`. That behavior is separate from the installer itself.
 
 If you need a managed database today, use a dedicated non-production database, set the target repo environment explicitly, and run the admin commands manually:
 
@@ -335,16 +356,38 @@ npm run migrate
 npm run health
 npm run bootstrap
 npm run verify:setup
+npm run verify:release-overlay
 npm run verify:workflow
 npm run verify:migrations:live
 npm test
 npm run typecheck
 ```
 
+## Production Overlay Release Posture
+
+This roadmap now concludes at a repo-local release posture. `devgod` is an opt-in overlay for consuming repos, and this source repo only proves production-oriented package checks plus trusted review/auth contract checks. It does not claim live production readiness for a downstream deployment.
+
+The repo-local release overlay proof is:
+
+- `npm run verify:release-overlay`
+- CI `test` on Ubuntu
+- CI `migration-replay` against a dedicated CI database
+- CI `windows-setup-smoke` for the generated PowerShell bootstrap path
+
+`npm run verify:release-overlay` runs tests, typecheck, workflow-fixture validation, `npm audit --omit=dev`, `npm pack --dry-run`, and review-identity verification. The CI `test` job adds `npm run check:coverage` ahead of that helper so pull requests still block on aggregate coverage regressions at the repo's 80% floor. `npm run verify:migrations:live` remains the separate live-database replay proof and should use a dedicated local or CI database, not a shared or production instance.
+
+Operator approvals and downstream repo choices still own:
+
+- installing the overlay into a target repo
+- target-repo environment files and secrets
+- database targets and bootstrap intent
+- deploy pipelines and runtime hosting
+- any claim that a consuming repo is fit for production use
+
 Release path assumptions:
 
 - this repo is still installed as a local `file:` dependency from a checked-out source clone
-- CI hardens the verify path with pinned Actions, read-only workflow tokens, `npm ci`, and `npm pack --dry-run`
+- CI hardens the verify path with pinned Actions, read-only workflow tokens, `npm ci`, and production-oriented package checks via `npm pack --dry-run`
 - if a future publish workflow is added, it should use trusted publishing/provenance with job-scoped write permissions only for the publish step
 
 `npm run verify:migrations:live` is the live-database replay proof. It reruns migrations for idempotence, checks database health, bootstraps a project, and re-verifies the required schema surface. Use a dedicated local or CI database for that command, not a shared or production instance.
@@ -415,7 +458,7 @@ docker-compose.yml
 
 ## Current Limits
 
-This is still the foundation release. It does not yet include:
+This is the Phase 5 opt-in overlay. It does not yet include:
 
 - a packaged MCP transport around the shared-core actions
 - production deployment manifests for the shared service

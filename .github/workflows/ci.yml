@@ -26,9 +26,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
       - run: npm run check:coverage
-      - run: npm run check:quality
+      - run: npm run verify:release-overlay
 
   migration-replay:
     runs-on: ubuntu-latest

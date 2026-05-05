@@ -191,13 +191,14 @@ test("validateHandoff rejects empty evidence fields", () => {
   assert.ok(errors.includes("handoff contextRefs must contain at least one non-empty item"));
 });
 
-test("validateReviewAction rejects spoofed gate claims and invalid waivers", () => {
-  const passErrors = validateReviewAction(
+test("validateReviewAction rejects forged caller-authenticated review contexts", () => {
+  const forgedAuthenticatedErrors = validateReviewAction(
     {
       actor: "planner-1",
       actorRole: "planner",
-      waiverAuthority: "none"
-    },
+      waiverAuthority: "none",
+      identityAssurance: "authenticated"
+    } as never,
     {
       reviewerRole: "qa_engineer",
       state: "passed",
@@ -206,59 +207,43 @@ test("validateReviewAction rejects spoofed gate claims and invalid waivers", () 
     }
   );
   assert.ok(
-    passErrors.includes("actorRole planner cannot record qa_engineer review state passed")
+    forgedAuthenticatedErrors.includes("review context must come from the trusted runtime review identity resolver")
   );
 
-  const waiveErrors = validateReviewAction(
+  const summaryOnlyErrors = validateReviewAction(
     {
-      actor: "planner-1",
-      actorRole: "planner",
-      waiverAuthority: "manager"
-    },
+      actor: "reviewer-1",
+      actorRole: "reviewer",
+      waiverAuthority: "none"
+    } as never,
     {
-      reviewerRole: "security_reviewer",
-      state: "waived",
+      reviewerRole: "reviewer",
+      state: "passed",
       severity: "low",
-      findings: [],
-      waiverReason: "skip security"
+      findings: []
     }
   );
   assert.ok(
-    waiveErrors.includes("actorRole planner is not allowed to waive security_reviewer")
+    summaryOnlyErrors.includes("review context must come from the trusted runtime review identity resolver")
   );
-});
 
-test("validateReviewAction accepts matching reviewer roles and valid security waivers", () => {
-  const passErrors = validateReviewAction(
+  const legacyBackfillErrors = validateReviewAction(
     {
-      actor: "security-1",
-      actorRole: "security_reviewer",
-      waiverAuthority: "none"
-    },
+      actor: "reviewer-1",
+      actorRole: "reviewer",
+      waiverAuthority: "none",
+      identityAssurance: "legacy_backfill"
+    } as never,
     {
-      reviewerRole: "security_reviewer",
+      reviewerRole: "reviewer",
       state: "passed",
       severity: "low",
-      findings: ["checked auth"]
+      findings: []
     }
   );
-  assert.deepEqual(passErrors, []);
-
-  const waiveErrors = validateReviewAction(
-    {
-      actor: "security-1",
-      actorRole: "security_reviewer",
-      waiverAuthority: "security_exception"
-    },
-    {
-      reviewerRole: "security_reviewer",
-      state: "waived",
-      severity: "low",
-      findings: ["accepted"],
-      waiverReason: "documented exception"
-    }
+  assert.ok(
+    legacyBackfillErrors.includes("review context must come from the trusted runtime review identity resolver")
   );
-  assert.deepEqual(waiveErrors, []);
 });
 
 test("canReviewRecordSatisfyGate rejects legacy-backfilled review provenance", () => {
@@ -275,6 +260,84 @@ test("canReviewRecordSatisfyGate rejects legacy-backfilled review provenance", (
       severity: "low",
       findings: [],
       waiverAuthority: "none",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+});
+
+test("canReviewRecordSatisfyGate rejects malformed authenticated passed rows", () => {
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-2",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "qa_engineer",
+      actor: "planner-1",
+      actorRole: "planner",
+      identityAssurance: "authenticated",
+      state: "passed",
+      severity: "low",
+      findings: [],
+      waiverAuthority: "none",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-3",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "reviewer",
+      actor: "reviewer-1",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      state: "passed",
+      severity: "low",
+      findings: [],
+      waiverAuthority: "manager",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+});
+
+test("canReviewRecordSatisfyGate rejects malformed authenticated waived rows", () => {
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-4",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "qa_engineer",
+      actor: "planner-1",
+      actorRole: "planner",
+      identityAssurance: "authenticated",
+      state: "waived",
+      severity: "low",
+      findings: [],
+      waiverReason: "documented exception",
+      waiverAuthority: "none",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-5",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "security_reviewer",
+      actor: "planner-1",
+      actorRole: "planner",
+      identityAssurance: "authenticated",
+      state: "waived",
+      severity: "low",
+      findings: [],
+      waiverReason: "documented exception",
+      waiverAuthority: "manager",
       createdAt: "2026-05-05T00:00:00.000Z"
     }),
     false

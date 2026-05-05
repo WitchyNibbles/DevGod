@@ -188,6 +188,13 @@ export interface ReviewActionContext {
   waiverAuthority?: ReviewWaiverAuthority | undefined;
 }
 
+declare const trustedReviewActionContextBrand: unique symbol;
+
+export interface TrustedReviewActionContext extends ReviewActionContext {
+  identityAssurance: "authenticated";
+  readonly [trustedReviewActionContextBrand]: true;
+}
+
 export interface MemoryPromotionInput {
   scope: MemoryScope;
   entryType: MemoryType;

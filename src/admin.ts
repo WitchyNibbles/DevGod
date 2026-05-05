@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -209,7 +209,7 @@ async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
 async function createReviewIdentityAdapter(): Promise<ReviewPrincipalAdapter<unknown>> {
   const adapterModulePath = process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
   if (!adapterModulePath) {
-    throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity");
+    return createReviewIdentityFixtureAdapter();
   }
 
   const resolvedPath = path.isAbsolute(adapterModulePath)
@@ -233,19 +233,69 @@ async function createReviewIdentityAdapter(): Promise<ReviewPrincipalAdapter<unk
   throw new Error("review identity adapter module must export default(adapter) or createReviewIdentityAdapter()");
 }
 
+function createReviewIdentityFixtureAdapter(): ReviewPrincipalAdapter<unknown> {
+  return async ({ authContext }) => {
+    const candidate =
+      typeof authContext === "object" && authContext !== null
+        ? (authContext as Record<string, unknown>)
+        : {};
+
+    return {
+      provider: String(candidate.provider ?? ""),
+      subject: String(candidate.subject ?? ""),
+      verified: candidate.verified === true
+    };
+  };
+}
+
+async function resolveReviewIdentityFilePath(options: {
+  envVarValue: string | undefined;
+  liveRelativePath: string;
+  templateRelativePath: string;
+}): Promise<string> {
+  if (options.envVarValue) {
+    return path.isAbsolute(options.envVarValue)
+      ? options.envVarValue
+      : path.resolve(process.cwd(), options.envVarValue);
+  }
+
+  const livePath = path.resolve(process.cwd(), options.liveRelativePath);
+  try {
+    await access(livePath);
+    return livePath;
+  } catch {
+    return path.resolve(repoRoot, options.templateRelativePath);
+  }
+}
+
+function isRepoTemplateReviewIdentityPath(filePath: string): boolean {
+  const relative = path.relative(repoRoot, filePath);
+  return (
+    !relative.startsWith("..") &&
+    !path.isAbsolute(relative) &&
+    (relative === ".devgod/templates/review-identity-bindings.json" ||
+      relative === ".devgod/templates/review-identity-adapter.fixture.json")
+  );
+}
+
 async function verifyReviewIdentityCommand() {
-  const bindingsPath = path.isAbsolute(process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS ?? "")
-    ? (process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS as string)
-    : path.resolve(
-        process.cwd(),
-        process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS ?? ".devgod/review-identity-bindings.json"
-      );
-  const fixturesPath = path.isAbsolute(process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES ?? "")
-    ? (process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES as string)
-    : path.resolve(
-        process.cwd(),
-        process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES ?? ".devgod/review-identity-adapter.fixture.json"
-      );
+  const bindingsPath = await resolveReviewIdentityFilePath({
+    envVarValue: process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS,
+    liveRelativePath: ".devgod/review-identity-bindings.json",
+    templateRelativePath: ".devgod/templates/review-identity-bindings.json"
+  });
+  const fixturesPath = await resolveReviewIdentityFilePath({
+    envVarValue: process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES,
+    liveRelativePath: ".devgod/review-identity-adapter.fixture.json",
+    templateRelativePath: ".devgod/templates/review-identity-adapter.fixture.json"
+  });
+
+  if (
+    !process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE &&
+    (!isRepoTemplateReviewIdentityPath(bindingsPath) || !isRepoTemplateReviewIdentityPath(fixturesPath))
+  ) {
+    throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity");
+  }
 
   const [bindings, fixtures, adapter] = await Promise.all([
     loadReviewIdentityBindings(bindingsPath),

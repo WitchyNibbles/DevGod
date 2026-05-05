@@ -1,19 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { mergeAgentsMd, mergeCodexConfig, mergeGitignore, mergePackageJson } from "../src/install/merge.ts";
-import { installDevgodIntoProject } from "../src/install/cli.ts";
+import {
+  installDevgodIntoProject,
+  upgradeDevgodInProject,
+  verifyDevgodInstall
+} from "../src/install/cli.ts";
 
 const execFileAsync = promisify(execFile);
 
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   await chmod(filePath, 0o755);
+}
+
+const driftFixtureTarget = "scripts/check-devgod-workflow.sh";
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 test("mergeAgentsMd appends and is idempotent", () => {
@@ -119,10 +130,34 @@ test("ci workflow pins external actions and keeps read-only permissions", async 
   assert.doesNotMatch(ciWorkflow, /id-token: write/);
 });
 
+test("ci workflow routes the release posture through the release overlay gate", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const ciWorkflow = await readFile(path.join(sourceRoot, ".github/workflows/ci.yml"), "utf8");
+
+  assert.match(ciWorkflow, /jobs:\n  test:/);
+  assert.match(ciWorkflow, /npm run check:coverage/);
+  assert.match(ciWorkflow, /npm run verify:release-overlay/);
+  assert.doesNotMatch(ciWorkflow, /- run: npm test/);
+  assert.doesNotMatch(ciWorkflow, /- run: npm run check:quality/);
+});
+
+test("README frames devgod as an opt-in overlay with production-oriented package checks", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const readme = await readFile(path.join(sourceRoot, "README.md"), "utf8");
+
+  assert.match(readme, /opt-in overlay/i);
+  assert.match(readme, /production-oriented package checks/i);
+  assert.doesNotMatch(readme, /production ready/i);
+});
+
 test("package.json keeps shipped skills and agent configs explicit", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const pkg = JSON.parse(await readFile(path.join(sourceRoot, "package.json"), "utf8")) as {
+    description?: string;
+    license?: string;
     files: string[];
+    private?: boolean;
+    scripts: Record<string, string>;
   };
 
   const expectedSkillFiles = [
@@ -161,10 +196,619 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
 
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
+  const overlayPortableAssets = [
+    ".env.example",
+    "README.md",
+    "docker-compose.yml",
+    "docs/global-setup.md",
+    "scripts/check-quality.sh",
+    "scripts/check-devgod-workflow-live.sh",
+    "scripts/check-devgod-workflow.sh",
+    "scripts/install-devgod.ps1",
+    "scripts/install-devgod.sh",
+    "scripts/setup-devgod.ps1",
+    "scripts/setup-devgod.sh",
+    "scripts/verify-devgod-workflow-check.sh",
+    "scripts/verify-release-overlay.sh",
+    "src/admin.ts",
+    "src/admin/",
+    "src/core/",
+    "src/domain/",
+    "src/index.ts",
+    "src/install/cli.ts",
+    "src/install/merge.ts",
+    "src/install/setup-local.ts",
+    "src/install/types.ts",
+    "src/runtime/",
+    "src/sql/migrations/",
+    "src/store/"
+  ];
+  const excludedOverlayFiles = [
+    ".devgod/install-backups/",
+    ".devgod/work/2026-05-04-project-state-review/BRIEF.md",
+    "scripts/",
+    "scripts/check-coverage.ts",
+    "src/"
+  ];
 
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
   assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
+  assert.equal(pkg.private, true);
+  assert.equal(pkg.license, "MIT");
+  assert.match(pkg.description ?? "", /opt-in overlay/i);
+  assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
+  for (const relativePath of overlayPortableAssets) {
+    assert.ok(pkg.files.includes(relativePath), `${relativePath} should be shipped for the opt-in overlay`);
+  }
+  for (const relativePath of excludedOverlayFiles) {
+    assert.ok(!pkg.files.includes(relativePath), `${relativePath} should stay out of the overlay package manifest`);
+  }
   assert.ok(pkg.files.every((file) => !file.includes("*")));
+});
+
+test("installDevgodIntoProject dry-run reports planned changes without writing", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-dry-run-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    const initialPackageJson = '{ "name": "fixture", "private": true }\n';
+    await writeFile(path.join(targetRoot, "package.json"), initialPackageJson, "utf8");
+
+    const summary = await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot,
+      dryRun: true
+    });
+
+    assert.equal(summary.mode, "dry-run");
+    assert.equal(summary.writesPerformed, false);
+    assert.match(summary.nextSteps.join("\n"), /Rerun in apply mode to write changes/);
+    assert.ok(summary.created.includes("AGENTS.md"));
+    assert.ok(summary.created.includes("scripts/devgod-setup.sh"));
+    assert.ok(summary.updated.includes("package.json"));
+    assert.equal(summary.backups.length, 0);
+    assert.equal(summary.plannedBackups.length, 1);
+    assert.match(summary.plannedBackups[0], /\.devgod\/install-backups\/.+\/package\.json/);
+
+    assert.equal(await readFile(path.join(targetRoot, "package.json"), "utf8"), initialPackageJson);
+    await assert.rejects(readFile(path.join(targetRoot, "AGENTS.md"), "utf8"));
+    await assert.rejects(readFile(path.join(targetRoot, "scripts/devgod-setup.sh"), "utf8"));
+    await assert.rejects(readFile(path.join(targetRoot, ".codex/config.toml"), "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("install CLI rejects flag-like values passed after --target", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  await assert.rejects(
+    execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "--target", "--dry-run"],
+      { cwd: sourceRoot }
+    ),
+    (error: unknown) => {
+      assert.equal(typeof error, "object");
+      assert.ok(error !== null);
+      assert.match(String((error as { stderr?: string }).stderr ?? ""), /Target path must follow --target/);
+      return true;
+    }
+  );
+});
+
+test("legacy direct install CLI invocation cannot mutate", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-legacy-"));
+
+  try {
+    const initialPackageJson = '{ "name": "fixture", "private": true }\n';
+    await writeFile(path.join(targetRoot, "package.json"), initialPackageJson, "utf8");
+
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["--experimental-strip-types", "src/install/cli.ts", "--target", targetRoot],
+        { cwd: sourceRoot }
+      ),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /Mutating installs require 'init --apply'/
+        );
+        return true;
+      }
+    );
+
+    assert.equal(await readFile(path.join(targetRoot, "package.json"), "utf8"), initialPackageJson);
+    await assert.rejects(readFile(path.join(targetRoot, "AGENTS.md"), "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("install CLI init requires an explicit mode before writing", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-init-mode-"));
+
+  try {
+    const initialPackageJson = '{ "name": "fixture", "private": true }\n';
+    await writeFile(path.join(targetRoot, "package.json"), initialPackageJson, "utf8");
+
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["--experimental-strip-types", "src/install/cli.ts", "init", "--target", targetRoot],
+        { cwd: sourceRoot }
+      ),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /init requires exactly one of --apply or --dry-run/
+        );
+        return true;
+      }
+    );
+
+    assert.equal(await readFile(path.join(targetRoot, "package.json"), "utf8"), initialPackageJson);
+    await assert.rejects(readFile(path.join(targetRoot, "AGENTS.md"), "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installDevgodIntoProject first apply backs up divergent managed content", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-backup-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const originalPackageJson = JSON.stringify(
+    {
+      name: "fixture",
+      private: true,
+      scripts: {
+        test: "vitest"
+      }
+    },
+    null,
+    2
+  ) + "\n";
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), originalPackageJson, "utf8");
+
+    const summary = await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.mode, "apply");
+    assert.equal(summary.backups.length, 1);
+    assert.match(summary.backups[0], /^\.devgod\/install-backups\/.+\/package\.json$/);
+
+    const backupContent = await readFile(path.join(targetRoot, summary.backups[0]), "utf8");
+    assert.equal(backupContent, originalPackageJson);
+
+    const installedPackageJson = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8")
+    ) as { devDependencies: Record<string, string>; scripts: Record<string, string> };
+    assert.equal(installedPackageJson.scripts.test, "vitest");
+    assert.ok(installedPackageJson.devDependencies.devgod);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("install CLI init --apply is explicit, replay-safe, and does not run docker", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-apply-"));
+  const binDir = path.join(targetRoot, "bin");
+  const dockerSentinel = path.join(targetRoot, "docker-called");
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    await writeExecutable(
+      path.join(binDir, "docker"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        `: > "${dockerSentinel}"`,
+        "exit 0"
+      ].join("\n")
+    );
+
+    const firstRun = await execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "init", "--apply", "--target", targetRoot],
+      {
+        cwd: sourceRoot,
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`
+        }
+      }
+    );
+
+    assert.match(firstRun.stdout, /devgod installed into /);
+    assert.match(firstRun.stdout, /mode: apply/);
+    assert.match(firstRun.stdout, /writes performed: yes/);
+
+    const installedPackageJson = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8")
+    ) as { devDependencies: Record<string, string> };
+    assert.ok(installedPackageJson.devDependencies.devgod);
+
+    const reviewIdentityAdapter = await readFile(
+      path.join(targetRoot, "devgod/review-identity-adapter.ts"),
+      "utf8"
+    );
+    assert.match(reviewIdentityAdapter, /Implement devgod\/review-identity-adapter\.ts/);
+
+    await assert.rejects(readFile(path.join(targetRoot, ".env"), "utf8"));
+    await assert.rejects(readFile(dockerSentinel, "utf8"));
+
+    const secondRun = await execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "init", "--apply", "--target", targetRoot],
+      {
+        cwd: sourceRoot,
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`
+        }
+      }
+    );
+
+    assert.match(secondRun.stdout, /mode: apply/);
+    assert.match(secondRun.stdout, /created: 0/);
+    assert.match(secondRun.stdout, /updated: 0/);
+    assert.match(secondRun.stdout, /backups created: 0/);
+    assert.match(secondRun.stdout, /writes performed: no/);
+    await assert.rejects(readFile(dockerSentinel, "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject dry-run reports managed drift without writing", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-dry-run-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const driftedContent = "#!/usr/bin/env bash\necho drifted-managed-file\n";
+  const unmanagedFile = path.join(targetRoot, "notes.txt");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, driftFixtureTarget), driftedContent, "utf8");
+    await writeFile(unmanagedFile, "leave me alone\n", "utf8");
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot,
+      dryRun: true
+    });
+
+    assert.equal(summary.mode, "dry-run");
+    assert.equal(summary.writesPerformed, false);
+    assert.ok(summary.updated.includes(driftFixtureTarget));
+    assert.equal(summary.backups.length, 0);
+    assert.equal(summary.plannedBackups.length, 1);
+    assert.match(
+      summary.plannedBackups[0],
+      /^\.devgod\/install-backups\/.+\/scripts\/check-devgod-workflow\.sh$/
+    );
+    assert.equal(await readFile(path.join(targetRoot, driftFixtureTarget), "utf8"), driftedContent);
+    assert.equal(await readFile(unmanagedFile, "utf8"), "leave me alone\n");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject apply restores managed drift and backs it up", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-apply-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const driftedContent = "#!/usr/bin/env bash\necho drifted-managed-file\n";
+  const unmanagedFile = path.join(targetRoot, "notes.txt");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, driftFixtureTarget), driftedContent, "utf8");
+    await writeFile(unmanagedFile, "leave me alone\n", "utf8");
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.mode, "apply");
+    assert.ok(summary.updated.includes(driftFixtureTarget));
+    assert.equal(summary.backups.length, 1);
+    assert.match(summary.backups[0], /^\.devgod\/install-backups\/.+\/scripts\/check-devgod-workflow\.sh$/);
+
+    const backupContent = await readFile(path.join(targetRoot, summary.backups[0]), "utf8");
+    assert.equal(backupContent, driftedContent);
+    assert.equal(
+      await readFile(path.join(targetRoot, driftFixtureTarget), "utf8"),
+      await readFile(path.join(sourceRoot, driftFixtureTarget), "utf8")
+    );
+    assert.equal(await readFile(unmanagedFile, "utf8"), "leave me alone\n");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject replay apply is a no-op after drift is reconciled", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-replay-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, driftFixtureTarget), "#!/usr/bin/env bash\necho drifted-managed-file\n", "utf8");
+
+    await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    const replay = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(replay.mode, "apply");
+    assert.equal(replay.created.length, 0);
+    assert.equal(replay.updated.length, 0);
+    assert.equal(replay.backups.length, 0);
+    assert.equal(replay.plannedBackups.length, 0);
+    assert.equal(replay.writesPerformed, false);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall passes when managed files match the install manifest", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-pass-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, true);
+    assert.deepEqual(summary.missing, []);
+    assert.deepEqual(summary.modified, []);
+    assert.deepEqual(summary.orphans, []);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall reports missing managed files", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-missing-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await rm(path.join(targetRoot, driftFixtureTarget));
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, false);
+    assert.ok(summary.missing.includes(driftFixtureTarget));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall reports modified managed files", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-modified-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, driftFixtureTarget), "#!/usr/bin/env bash\necho drifted-managed-file\n", "utf8");
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, false);
+    assert.ok(summary.modified.includes(driftFixtureTarget));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verify CLI succeeds for legacy installs without an install manifest", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-cli-legacy-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
+
+    const result = await execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "verify", "--target", targetRoot],
+      { cwd: sourceRoot }
+    );
+
+    assert.match(result.stdout, /devgod verify for /);
+    assert.match(result.stdout, /status: ok/);
+    assert.match(result.stdout, /missing: 0/);
+    assert.match(result.stdout, /modified: 0/);
+    assert.match(result.stdout, /orphans: 0/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject legacy installs backfill the manifest and count manifest-only writes", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-legacy-backfill-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.mode, "apply");
+    assert.equal(summary.created.length, 0);
+    assert.equal(summary.updated.length, 0);
+    assert.equal(summary.backups.length, 0);
+    assert.equal(summary.writesPerformed, true);
+
+    const manifest = JSON.parse(
+      await readFile(path.join(targetRoot, ".devgod", "install-manifest.json"), "utf8")
+    ) as { files: Array<{ target: string }> };
+    assert.ok(manifest.files.some((entry) => entry.target === driftFixtureTarget));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject reports orphaned manifest-managed files", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-orphans-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const orphanTarget = "scripts/legacy-managed.sh";
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, orphanTarget), "#!/usr/bin/env bash\necho orphan\n", "utf8");
+
+    const manifestPath = path.join(targetRoot, ".devgod", "install-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      files: Array<{ contentHash: string; strategy: "merge" | "replace"; target: string }>;
+      version: number;
+    };
+    manifest.files.push({
+      target: orphanTarget,
+      strategy: "replace",
+      contentHash: hashContent("#!/usr/bin/env bash\necho orphan\n")
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot,
+      dryRun: true
+    });
+
+    assert.deepEqual(summary.orphans, [orphanTarget]);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject reports conflicts when the manifest baseline diverges from target and desired content", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-conflict-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(path.join(targetRoot, driftFixtureTarget), "#!/usr/bin/env bash\necho local-drift\n", "utf8");
+
+    const manifestPath = path.join(targetRoot, ".devgod", "install-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      files: Array<{ contentHash: string; strategy: "merge" | "replace"; target: string }>;
+      version: number;
+    };
+    const record = manifest.files.find((entry) => entry.target === driftFixtureTarget);
+    assert.ok(record);
+    record.contentHash = hashContent("#!/usr/bin/env bash\necho stale-baseline\n");
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot,
+      dryRun: true
+    });
+
+    assert.deepEqual(summary.conflicts, [driftFixtureTarget]);
+    assert.equal(summary.updated.length, 0);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall treats managed symlinks as drift and does not read through them", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-symlink-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "devgod-outside-"));
+  const outsideFile = path.join(outsideRoot, "outside-check-devgod-workflow.sh");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(outsideFile, "#!/usr/bin/env bash\necho outside\n", "utf8");
+    await rm(path.join(targetRoot, driftFixtureTarget));
+    await symlink(outsideFile, path.join(targetRoot, driftFixtureTarget));
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, false);
+    assert.ok(summary.modified.includes(driftFixtureTarget));
+    assert.equal(await readFile(outsideFile, "utf8"), "#!/usr/bin/env bash\necho outside\n");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject refuses to follow managed symlinks outside the target root", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-symlink-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-symlink-outside-"));
+  const outsideFile = path.join(outsideRoot, "outside-check-devgod-workflow.sh");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(outsideFile, "#!/usr/bin/env bash\necho outside\n", "utf8");
+    await rm(path.join(targetRoot, driftFixtureTarget));
+    await symlink(outsideFile, path.join(targetRoot, driftFixtureTarget));
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.deepEqual(summary.conflicts, [driftFixtureTarget]);
+    assert.equal(summary.updated.length, 0);
+    assert.equal(summary.writesPerformed, false);
+    assert.equal(await readFile(outsideFile, "utf8"), "#!/usr/bin/env bash\necho outside\n");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
 });
 
 test("installDevgodIntoProject seeds scaffolding but not live work or reviewed memory", async () => {
@@ -621,8 +1265,23 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".devgod/templates/review-identity-adapter.fixture.json",
     "scripts/check-devgod-workflow.sh",
     "scripts/check-devgod-workflow-live.sh",
-    "scripts/verify-devgod-workflow-check.sh"
+    "scripts/check-quality.sh",
+    "scripts/verify-devgod-workflow-check.sh",
+    "scripts/verify-release-overlay.sh",
+    "src/admin.ts",
+    "src/index.ts",
+    "src/install/cli.ts",
+    "src/install/setup-local.ts",
+    "src/sql/migrations/001_initial_schema.sql"
   ]) {
     assert.ok(packedFiles.has(expectedPath), `${expectedPath} should be present in npm pack --dry-run output`);
+  }
+
+  for (const excludedPath of [
+    ".devgod/work/2026-05-04-project-state-review/BRIEF.md",
+    "scripts/check-coverage.ts",
+    "tests/install.test.ts"
+  ]) {
+    assert.ok(!packedFiles.has(excludedPath), `${excludedPath} should not be present in npm pack --dry-run output`);
   }
 });

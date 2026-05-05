@@ -48,6 +48,8 @@ List the evidence used to trust the declared quality gates for this task.
 
 List exact commands, fixtures, or repro steps used for this gate.
 
+When `Provenance status` is `runtime_verified` for `specialist_verified` work, include at least one `Runtime proof:` line here that names the authenticated runtime artifact or check summarized by this markdown.
+
 ## Waiver authority
 
 `none | manager | security_exception`
@@ -65,3 +67,5 @@ Do not waive a required gate without actor, actor role, authority, and explicit 
 ## Source handoff
 
 Manager-written summary of reviewer output. Cite the trusted source here when `Provenance status` is `runtime_verified`, because the markdown file alone is not proof.
+
+For `specialist_verified` work with `runtime_verified` provenance, include a `Runtime proof:` line here that points to the same authenticated runtime artifact summarized above.
