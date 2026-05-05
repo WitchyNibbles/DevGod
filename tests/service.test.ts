@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SEARCH_MEMORY_STALE_AFTER_DAYS } from "../src/core/policy.ts";
+import {
+  createReviewActionContextResolver,
+  type AuthenticatedPrincipal,
+  type ReviewIdentityBindings
+} from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
-import type { MemoryEntryRecord, TaskPacketInput } from "../src/domain/types.ts";
+import type { MemoryEntryRecord, ReviewActionContext, ReviewRecord, TaskPacketInput } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
@@ -18,7 +23,7 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     outOfScope: overrides.outOfScope ?? ["production deploys"],
     acceptanceCriteria: overrides.acceptanceCriteria ?? ["task packet exists"],
     verificationSteps: overrides.verificationSteps ?? ["review generated packet"],
-    requiredReviews: overrides.requiredReviews ?? ["security_reviewer", "qa_engineer"],
+    requiredReviews: overrides.requiredReviews ?? ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
@@ -59,8 +64,160 @@ function mutateMemoryEntryWhere(
   return nextEntry;
 }
 
+function mutateTaskWhere(
+  store: MemoryStore,
+  predicate: (task: TaskPacketInput) => boolean,
+  mutate: (task: TaskPacketInput) => TaskPacketInput
+): void {
+  const tasks = (store as unknown as { tasks: Map<string, { packet: TaskPacketInput }> }).tasks;
+  const entry = [...tasks.entries()].find(([, task]) => predicate(task.packet));
+
+  if (!entry) {
+    assert.fail("expected matching task");
+  }
+
+  const [taskId, task] = entry;
+  tasks.set(taskId, {
+    ...task,
+    packet: mutate(task.packet)
+  });
+}
+
+function mutateReviewWhere(
+  store: MemoryStore,
+  predicate: (review: ReviewRecord) => boolean,
+  mutate: (review: ReviewRecord) => ReviewRecord
+): void {
+  const reviews = (store as unknown as { reviews: Map<string, ReviewRecord> }).reviews;
+  const entry = [...reviews.entries()].find(([, review]) => predicate(review));
+
+  if (!entry) {
+    assert.fail("expected matching review");
+  }
+
+  const [reviewId, review] = entry;
+  reviews.set(reviewId, mutate(review));
+}
+
+function reviewContext(
+  actorRole: ReviewActionContext["actorRole"],
+  overrides: Partial<ReviewActionContext> = {}
+): ReviewActionContext {
+  return {
+    actor: overrides.actor ?? `${actorRole}-actor`,
+    actorRole,
+    waiverAuthority: overrides.waiverAuthority ?? "none"
+  };
+}
+
+function deriveActorRole(actor: string): ReviewActionContext["actorRole"] {
+  const normalized = actor.replace(/-actor$/, "").replace(/-\d+$/, "").replace(/-/g, "_");
+  switch (normalized) {
+    case "planner":
+    case "product_strategist":
+    case "solution_architect":
+    case "docs_researcher":
+    case "backend_engineer":
+    case "frontend_designer":
+    case "infra_engineer":
+    case "reviewer":
+    case "build_resolver":
+    case "security_reviewer":
+    case "qa_engineer":
+    case "tdd_guide":
+      return normalized === "tdd_guide" ? "tdd-guide" : normalized;
+    case "e2e_runner":
+      return "e2e-runner";
+    case "release_readiness":
+      return "release-readiness";
+    case "memory_curator":
+      return "memory_curator";
+    default:
+      return "planner";
+  }
+}
+
+function createService(store: MemoryStore = new MemoryStore()) {
+  const registeredContexts = new Map<string, ReviewActionContext>();
+  const registeredPrincipals = new Map<string, AuthenticatedPrincipal>();
+  const bindings: ReviewIdentityBindings = { bindings: [] };
+
+  function upsertBinding(actor: string, context: ReviewActionContext, principal: AuthenticatedPrincipal) {
+    let principalBinding = bindings.bindings.find(
+      (binding) =>
+        binding.principal.provider === principal.provider && binding.principal.subject === principal.subject
+    );
+
+    if (!principalBinding) {
+      principalBinding = {
+        principal: {
+          provider: principal.provider,
+          subject: principal.subject
+        },
+        actors: []
+      };
+      bindings.bindings.push(principalBinding);
+    }
+
+    const actorBinding = principalBinding.actors.find((binding) => binding.actor === actor);
+    const nextActorBinding = {
+      actor,
+      roles: [context.actorRole],
+      waiverAuthorities:
+        context.waiverAuthority && context.waiverAuthority !== "none"
+          ? [context.waiverAuthority]
+          : undefined
+    };
+
+    if (!actorBinding) {
+      principalBinding.actors.push(nextActorBinding);
+      return;
+    }
+
+    actorBinding.roles = nextActorBinding.roles;
+    actorBinding.waiverAuthorities = nextActorBinding.waiverAuthorities;
+  }
+
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings,
+      resolveAuthenticatedPrincipal(input) {
+        const context = registeredContexts.get(input.actor) ?? {
+          actor: input.actor,
+          actorRole: deriveActorRole(input.actor),
+          waiverAuthority: "none" as const
+        };
+        const principal = registeredPrincipals.get(input.actor) ?? {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+        upsertBinding(input.actor, context, principal);
+        return principal;
+      }
+    })
+  });
+
+  return {
+    service,
+    registerReviewContext(
+      context: ReviewActionContext,
+      principal: AuthenticatedPrincipal = {
+        provider: "test",
+        subject: context.actor,
+        verified: true
+      }
+    ): string {
+      registeredContexts.set(context.actor, context);
+      registeredPrincipals.set(context.actor, principal);
+      upsertBinding(context.actor, context, principal);
+      return context.actor;
+    }
+  };
+}
+
 test("claimTask blocks overlapping write scopes", async () => {
-  const service = new DevgodCoreService(new MemoryStore());
+  const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -83,7 +240,7 @@ test("claimTask blocks overlapping write scopes", async () => {
 });
 
 test("recordReview keeps task blocked on high severity finding", async () => {
-  const service = new DevgodCoreService(new MemoryStore());
+  const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -103,15 +260,533 @@ test("recordReview keeps task blocked on high severity finding", async () => {
     contextRefs: ["brief-1"]
   });
 
-  const result = await service.recordReview(run.id, "task-1", {
+  const result = await service.recordReview(
+    run.id,
+    "task-1",
+    reviewContext("security_reviewer").actor,
+    {
+      reviewerRole: "security_reviewer",
+      state: "blocked",
+      severity: "high",
+      findings: ["write scope too broad"]
+    }
+  );
+
+  assert.equal(result.task.status, "review_blocked");
+  assert.ok(result.blockers.includes("required review not passed: security_reviewer is blocked"));
+});
+
+test("recordReview rejects approval attempts before a handoff exists", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+
+  await assert.rejects(
+    service.recordReview(
+      run.id,
+      "task-1",
+      reviewContext("reviewer").actor,
+      {
+        reviewerRole: "reviewer",
+        state: "passed",
+        severity: "low",
+        findings: []
+      }
+    ),
+    /must be review_blocked/
+  );
+});
+
+test("submitHandoff rejects empty verification evidence", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+
+  await assert.rejects(
+    service.submitHandoff(run.id, "task-1", {
+      actor: "planner",
+      summary: "ready for review",
+      changedFiles: [],
+      blockers: [],
+      verificationNotes: [],
+      contextRefs: []
+    }),
+    /Invalid handoff/
+  );
+});
+
+test("recordReview keeps task blocked when the latest required review is pending", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await service.recordReview(run.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "task-1", reviewContext("security_reviewer").actor, {
     reviewerRole: "security_reviewer",
-    state: "blocked",
-    severity: "high",
-    findings: ["write scope too broad"]
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.recordReview(run.id, "task-1", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "pending",
+    severity: "low",
+    findings: []
   });
 
   assert.equal(result.task.status, "review_blocked");
-  assert.ok(result.blockers.some((blocker) => blocker.includes("high")));
+  assert.ok(result.blockers.includes("required review not passed: qa_engineer is pending"));
+});
+
+test("recordReview approves only after reviewer, security, and QA all pass", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await service.recordReview(run.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "task-1", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.recordReview(run.id, "task-1", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  assert.equal(result.task.status, "approved");
+  assert.deepEqual(result.blockers, []);
+});
+
+test("recordReview rejects spoofed actor roles", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await assert.rejects(
+    service.recordReview(run.id, "task-1", reviewContext("planner").actor, {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    }),
+    /Invalid review action/
+  );
+});
+
+test("recordReview allows manager waiver for qa gate with provenance", async () => {
+  const { service, registerReviewContext } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await service.recordReview(run.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "task-1", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.recordReview(
+    run.id,
+    "task-1",
+    registerReviewContext(reviewContext("planner", {
+      actor: "planner-1",
+      waiverAuthority: "manager"
+    })),
+    {
+      reviewerRole: "qa_engineer",
+      state: "waived",
+      severity: "low",
+      findings: ["qa waiver documented"],
+      waiverReason: "managed exception"
+    }
+  );
+
+  assert.equal(result.task.status, "approved");
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.review.actor, "planner-1");
+  assert.equal(result.review.waiverAuthority, "manager");
+});
+
+test("recordReview still requires reviewer gate for legacy task packets", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  mutateTaskWhere(store, (task) => task.taskId === "task-1", (task) => ({
+    ...task,
+    requiredReviews: ["security_reviewer", "qa_engineer"]
+  }));
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await service.recordReview(run.id, "task-1", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.recordReview(run.id, "task-1", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  assert.equal(result.task.status, "review_blocked");
+  assert.ok(result.blockers.includes("missing required review: reviewer"));
+});
+
+test("recordReview rejects manager waiver for security gate", async () => {
+  const { service, registerReviewContext } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+
+  await assert.rejects(
+    service.recordReview(
+      run.id,
+      "task-1",
+      registerReviewContext(reviewContext("planner", {
+        actor: "planner-1",
+        waiverAuthority: "manager"
+      })),
+      {
+        reviewerRole: "security_reviewer",
+        state: "waived",
+        severity: "low",
+        findings: ["security waiver documented"],
+        waiverReason: "managed exception"
+      }
+    ),
+    /not allowed to waive security_reviewer/
+  );
+});
+
+test("recordReview ignores reviews from other runs with the same task key", async () => {
+  const { service } = createService();
+
+  const firstRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "First run",
+    request: "Ship the shared orchestration backend."
+  });
+  const secondRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Second run",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(firstRun.id, [taskPacket()]);
+  await service.createTaskGraph(secondRun.id, [taskPacket()]);
+
+  await service.claimTask(firstRun.id, "task-1", "planner");
+  await service.submitHandoff(firstRun.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/policy.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(firstRun.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(firstRun.id, "task-1", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(firstRun.id, "task-1", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  await service.claimTask(secondRun.id, "task-1", "planner");
+  await service.submitHandoff(secondRun.id, "task-1", {
+    actor: "planner",
+    summary: "ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-2"]
+  });
+
+  const result = await service.recordReview(secondRun.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  assert.equal(result.task.status, "review_blocked");
+  assert.ok(result.blockers.includes("missing required review: security_reviewer"));
+  assert.ok(result.blockers.includes("missing required review: qa_engineer"));
+});
+
+test("claimTask blocks dependencies with stale approved legacy review state", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "plan" }),
+    taskPacket({
+      taskId: "build",
+      dependencies: ["plan"],
+      allowedWriteScope: ["src/store"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    summary: "legacy plan ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-legacy-review"]
+  });
+
+  mutateTaskWhere(store, (task) => task.taskId === "plan", (task) => ({
+    ...task,
+    requiredReviews: ["security_reviewer", "qa_engineer"]
+  }));
+  const tasks = (store as unknown as { tasks: Map<string, { packet: TaskPacketInput; status: string }> }).tasks;
+  const planEntry = [...tasks.entries()].find(([, task]) => task.packet.taskId === "plan");
+  if (!planEntry) {
+    assert.fail("expected matching plan task");
+  }
+
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  tasks.set(planEntry[0], {
+    ...tasks.get(planEntry[0])!,
+    status: "approved"
+  });
+
+  await assert.rejects(
+    service.claimTask(run.id, "build", "backend_engineer"),
+    /stale approval: missing required review: reviewer/
+  );
+});
+
+test("claimTask blocks dependencies with legacy-backfilled review provenance", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "plan" }),
+    taskPacket({
+      taskId: "build",
+      dependencies: ["plan"],
+      allowedWriteScope: ["src/store"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    summary: "plan ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    contextRefs: ["brief-auth-assurance"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  mutateReviewWhere(
+    store,
+    (review) => review.taskId === "plan" && review.reviewerRole === "reviewer",
+    (review) => ({
+      ...review,
+      identityAssurance: "legacy_backfill"
+    })
+  );
+
+  await assert.rejects(
+    service.claimTask(run.id, "build", "backend_engineer"),
+    /stale approval: required review provenance unauthenticated: reviewer/
+  );
 });
 
 test("searchMemory ranks project entries ahead of global ones", async () => {
@@ -854,7 +1529,7 @@ test("searchMemory blocks unprovenanced project hits", async () => {
 });
 
 test("resumeRun returns ready tasks with satisfied dependencies", async () => {
-  const service = new DevgodCoreService(new MemoryStore());
+  const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -884,13 +1559,19 @@ test("resumeRun returns ready tasks with satisfied dependencies", async () => {
     verificationNotes: ["plan reviewed"],
     contextRefs: ["brief-1"]
   });
-  await service.recordReview(run.id, "plan", {
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
     reviewerRole: "security_reviewer",
     state: "passed",
     severity: "low",
     findings: []
   });
-  await service.recordReview(run.id, "plan", {
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",

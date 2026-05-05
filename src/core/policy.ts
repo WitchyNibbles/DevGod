@@ -13,7 +13,11 @@ import {
   type TaskPacketInput,
   type TaskRecord
 } from "../domain/types.ts";
-import { normalizeRetrievalMetadata } from "../domain/contracts.ts";
+import {
+  canReviewRecordSatisfyGate,
+  effectiveRequiredReviews,
+  normalizeRetrievalMetadata
+} from "../domain/contracts.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 
 export const SEARCH_MEMORY_STALE_AFTER_DAYS = 90;
@@ -64,22 +68,34 @@ export function evaluateReviewDecision(
 ): { decision: ApprovalDecision; blockers: string[] } {
   const blockers: string[] = [];
 
-  for (const requiredReview of task.packet.requiredReviews) {
+  for (const requiredReview of effectiveRequiredReviews(task.packet.requiredReviews)) {
     const matchingReviews = reviews.filter((review) => review.reviewerRole === requiredReview);
     if (matchingReviews.length === 0) {
       blockers.push(`missing required review: ${requiredReview}`);
       continue;
     }
 
-    for (const review of matchingReviews) {
-      if (review.state === "waived" && !review.waiverReason) {
-        blockers.push(`waived review missing reason: ${requiredReview}`);
-      }
-
-      if (review.state === "blocked" && ["critical", "high"].includes(review.severity)) {
-        blockers.push(`${requiredReview} review blocked with ${review.severity} severity`);
-      }
+    const latestReview = matchingReviews[matchingReviews.length - 1];
+    if (canReviewRecordSatisfyGate(latestReview)) {
+      continue;
     }
+
+    if (latestReview.identityAssurance !== "authenticated") {
+      blockers.push(`required review provenance unauthenticated: ${requiredReview}`);
+      continue;
+    }
+
+    if (latestReview.state === "waived" && !latestReview.waiverReason) {
+      blockers.push(`waived review missing reason: ${requiredReview}`);
+      continue;
+    }
+
+    if (latestReview.state === "waived") {
+      blockers.push(`required review waiver unauthorized: ${requiredReview}`);
+      continue;
+    }
+
+    blockers.push(`required review not passed: ${requiredReview} is ${latestReview.state}`);
   }
 
   return {

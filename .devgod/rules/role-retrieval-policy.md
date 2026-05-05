@@ -44,6 +44,18 @@ Derived retrieval is a hint layer for `devgod`. It is not authority.
 
 - may read approved memory, repo rules, review gates, and eval artifacts
 
+### `tdd-guide`
+
+- may read approved memory, repo rules, reviewed plans, task packets, and verification artifacts
+
+### `e2e-runner`
+
+- may read approved memory, repo rules, reviewed plans, setup notes, and test artifacts
+
+### `release-readiness`
+
+- may read approved memory, repo rules, reviewed plans, setup notes, release notes, and review artifacts
+
 ### `docs_researcher`
 
 - may read approved memory, repo rules, approved briefs, and local technical notes before external lookup

@@ -5,6 +5,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Client as PgClient } from "pg";
 import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
+import {
+  loadReviewIdentityBindings,
+  loadReviewIdentityFixtures,
+  verifyReviewIdentityAdapter,
+  type ReviewPrincipalAdapter
+} from "./core/review-context.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -163,6 +169,39 @@ async function verifySetup() {
       throw new Error(`Missing required tables: ${[...requiredTables].join(", ")}`);
     }
 
+    const columnsResult = await client.query<{ table_name: string; column_name: string }>(
+      `select table_name, column_name
+       from information_schema.columns
+       where table_schema = 'public'
+         and (
+           (table_name = 'artifacts' and column_name in ('metadata'))
+           or (table_name = 'memory_entries' and column_name in ('metadata'))
+           or
+           (table_name = 'reviews' and column_name in ('actor', 'actor_role', 'waiver_authority', 'identity_assurance'))
+           or (table_name = 'approvals' and column_name in ('actor', 'actor_role', 'identity_assurance'))
+         )`
+    );
+
+    const requiredColumns = new Set([
+      "artifacts.metadata",
+      "memory_entries.metadata",
+      "reviews.actor",
+      "reviews.actor_role",
+      "reviews.waiver_authority",
+      "reviews.identity_assurance",
+      "approvals.actor",
+      "approvals.actor_role",
+      "approvals.identity_assurance"
+    ]);
+
+    for (const row of columnsResult.rows) {
+      requiredColumns.delete(`${row.table_name}.${row.column_name}`);
+    }
+
+    if (requiredColumns.size > 0) {
+      throw new Error(`Missing required columns: ${[...requiredColumns].join(", ")}`);
+    }
+
     const projectResult = await client.query<{ slug: string }>(
       `select p.slug
        from projects p
@@ -177,6 +216,15 @@ async function verifySetup() {
   });
 
   console.log("setup verified");
+}
+
+async function verifyLiveMigrations() {
+  await migrate();
+  await migrate();
+  await health();
+  await bootstrapProject();
+  await verifySetup();
+  console.log("live migrations verified");
 }
 
 async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
@@ -196,6 +244,70 @@ async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
   }
 
   return await factory();
+}
+
+async function createReviewIdentityAdapter(): Promise<ReviewPrincipalAdapter<unknown>> {
+  const adapterModulePath = process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
+  if (!adapterModulePath) {
+    throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity");
+  }
+
+  const resolvedPath = path.isAbsolute(adapterModulePath)
+    ? adapterModulePath
+    : path.resolve(process.cwd(), adapterModulePath);
+  const adapterModule = await import(pathToFileURL(resolvedPath).href);
+  const factory = adapterModule.createReviewIdentityAdapter;
+
+  if (typeof factory === "function") {
+    const created = await factory();
+    if (typeof created !== "function") {
+      throw new Error("createReviewIdentityAdapter() must return a function");
+    }
+    return created as ReviewPrincipalAdapter<unknown>;
+  }
+
+  if (typeof adapterModule.default === "function") {
+    return adapterModule.default as ReviewPrincipalAdapter<unknown>;
+  }
+
+  throw new Error("review identity adapter module must export default(adapter) or createReviewIdentityAdapter()");
+}
+
+async function verifyReviewIdentityCommand() {
+  const bindingsPath = path.isAbsolute(process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS ?? "")
+    ? (process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS as string)
+    : path.resolve(
+        process.cwd(),
+        process.env.DEVGOD_REVIEW_IDENTITY_BINDINGS ?? ".devgod/review-identity-bindings.json"
+      );
+  const fixturesPath = path.isAbsolute(process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES ?? "")
+    ? (process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES as string)
+    : path.resolve(
+        process.cwd(),
+        process.env.DEVGOD_REVIEW_IDENTITY_FIXTURES ?? ".devgod/review-identity-adapter.fixture.json"
+      );
+
+  const [bindings, fixtures, adapter] = await Promise.all([
+    loadReviewIdentityBindings(bindingsPath),
+    loadReviewIdentityFixtures(fixturesPath),
+    createReviewIdentityAdapter()
+  ]);
+
+  const result = await verifyReviewIdentityAdapter({
+    bindings,
+    fixtures,
+    adapter
+  });
+
+  if (result.failed > 0) {
+    throw new Error(
+      `Review identity verification failed: ${result.failures
+        .map((failure) => `${failure.fixture}: ${failure.message}`)
+        .join("; ")}`
+    );
+  }
+
+  console.log(JSON.stringify(result));
 }
 
 async function runEmbeddingJobsCommand() {
@@ -277,8 +389,18 @@ async function main() {
     return;
   }
 
+  if (command === "verify-live-migrations") {
+    await verifyLiveMigrations();
+    return;
+  }
+
   if (command === "run-embedding-jobs") {
     await runEmbeddingJobsCommand();
+    return;
+  }
+
+  if (command === "verify-review-identity") {
+    await verifyReviewIdentityCommand();
     return;
   }
 

@@ -31,6 +31,88 @@ function sqlClientWithRows<Row>(
   };
 }
 
+test("PostgresStore.saveReview persists actor provenance and waiver authority", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.saveReview({
+    id: "review-1",
+    runId: "run-1",
+    taskId: "task-1",
+    reviewerRole: "qa_engineer",
+    actor: "planner-1",
+    actorRole: "planner",
+    identityAssurance: "authenticated",
+    state: "waived",
+    severity: "low",
+    findings: ["waiver recorded"],
+    waiverReason: "managed exception",
+    waiverAuthority: "manager",
+    createdAt: "2026-05-05T00:00:00.000Z"
+  });
+
+  assert.match(capture[0]?.text ?? "", /actor_role/);
+  assert.deepEqual(capture[0]?.values?.slice(3), [
+    "qa_engineer",
+    "planner-1",
+    "planner",
+    "authenticated",
+    "waived",
+    "low",
+    ["waiver recorded"],
+    "managed exception",
+    "manager"
+  ]);
+});
+
+test("PostgresStore.saveApproval persists actor role", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.saveApproval({
+    id: "approval-1",
+    runId: "run-1",
+    taskId: "task-1",
+    actor: "planner-1",
+    actorRole: "planner",
+    identityAssurance: "authenticated",
+    decision: "approved",
+    rationale: "All required reviews passed",
+    createdAt: "2026-05-05T00:00:00.000Z"
+  });
+
+  assert.match(capture[0]?.text ?? "", /actor_role/);
+  assert.deepEqual(capture[0]?.values?.slice(3), [
+    "planner-1",
+    "planner",
+    "authenticated",
+    "approved",
+    "All required reviews passed"
+  ]);
+});
+
+test("PostgresStore.getReviews scopes reads by run and task", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.getReviews("run-1", "task-1");
+
+  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
+  assert.match(capture[0]?.text ?? "", /and task_id = \$2/);
+  assert.deepEqual(capture[0]?.values, ["run-1", "task-1"]);
+});
+
+test("PostgresStore.getApprovals scopes reads by run and task", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.getApprovals("run-1", "task-1");
+
+  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
+  assert.match(capture[0]?.text ?? "", /and task_id = \$2/);
+  assert.deepEqual(capture[0]?.values, ["run-1", "task-1"]);
+});
+
 test("PostgresStore.searchMemory maps and ranks results consistently", async () => {
   const store = new PostgresStore(
     sqlClientWithRows([

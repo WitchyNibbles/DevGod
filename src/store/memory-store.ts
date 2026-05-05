@@ -162,24 +162,24 @@ export class MemoryStore implements DevgodStore {
     this.handoffs.set(handoff.id, handoff);
   }
 
-  async getHandoffs(taskId: string): Promise<HandoffRecord[]> {
-    return [...this.handoffs.values()].filter((handoff) => handoff.taskId === taskId);
+  async getHandoffs(runId: string, taskId: string): Promise<HandoffRecord[]> {
+    return [...this.handoffs.values()].filter((handoff) => handoff.runId === runId && handoff.taskId === taskId);
   }
 
   async saveReview(review: ReviewRecord): Promise<void> {
     this.reviews.set(review.id, review);
   }
 
-  async getReviews(taskId: string): Promise<ReviewRecord[]> {
-    return [...this.reviews.values()].filter((review) => review.taskId === taskId);
+  async getReviews(runId: string, taskId: string): Promise<ReviewRecord[]> {
+    return [...this.reviews.values()].filter((review) => review.runId === runId && review.taskId === taskId);
   }
 
   async saveApproval(approval: ApprovalRecord): Promise<void> {
     this.approvals.set(approval.id, approval);
   }
 
-  async getApprovals(taskId: string): Promise<ApprovalRecord[]> {
-    return [...this.approvals.values()].filter((approval) => approval.taskId === taskId);
+  async getApprovals(runId: string, taskId: string): Promise<ApprovalRecord[]> {
+    return [...this.approvals.values()].filter((approval) => approval.runId === runId && approval.taskId === taskId);
   }
 
   async saveMemoryEntry(entry: MemoryEntryRecord): Promise<void> {

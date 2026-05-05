@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm pack --dry-run
+
+  migration-replay:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_DB: devgod
+          POSTGRES_USER: devgod
+          POSTGRES_PASSWORD: devgod
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devgod -d devgod"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DEVGOD_CORE_DATABASE_URL: postgresql://devgod:devgod@127.0.0.1:5432/devgod
+      DEVGOD_WORKSPACE_SLUG: ci
+      DEVGOD_WORKSPACE_NAME: CI Workspace
+      DEVGOD_PROJECT_SLUG: devgod-ci
+      DEVGOD_PROJECT_NAME: devgod-ci
+      DEVGOD_PROJECT_REPO_PATH: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:migrations:live

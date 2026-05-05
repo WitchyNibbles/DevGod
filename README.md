@@ -133,6 +133,7 @@ If you need a managed database today, use a dedicated non-production database, s
 npm run devgod:migrate
 npm run devgod:bootstrap
 npm run devgod:verify:setup
+npm run devgod:verify:migrations:live
 ```
 
 Do not point this flow at a shared or production database unless that write path is explicitly intended and approved. `migrate` and `bootstrap` write schema and project state to `DEVGOD_CORE_DATABASE_URL`.
@@ -200,6 +201,119 @@ Once the repo is configured, the intended operating rhythm is:
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
 
+## Trusted Review Identity Resolution
+
+The package now ships a provider-agnostic trust kit for review and waiver authz. Use it instead of trusting raw request-body actor claims.
+
+The package-owned pieces are:
+
+- `createReviewPrincipalAdapter(...)`
+- `createReviewActionContextResolver(...)`
+- `loadReviewIdentityBindings(...)`
+- `loadReviewIdentityFixtures(...)`
+- `verifyReviewIdentityAdapter(...)`
+- `validateReviewIdentityBindings(...)`
+- `validateReviewIdentityFixtures(...)`
+- `.devgod/rules/review-identity-policy.md`
+- `.devgod/templates/review-identity-bindings.json`
+- `.devgod/templates/review-identity-adapter.fixture.json`
+
+The consuming repo still owns principal authentication. The package owns how an authenticated principal maps to allowed `devgod` review actors, review roles, and waiver authorities.
+
+Minimal server-side pattern:
+
+```ts
+import {
+  DevgodCoreService,
+  createReviewPrincipalAdapter,
+  createReviewActionContextResolver,
+  loadReviewIdentityBindings
+} from "devgod/src/index.ts";
+
+const reviewIdentityBindings = await loadReviewIdentityBindings(
+  ".devgod/review-identity-bindings.json"
+);
+
+const reviewIdentityAdapter = createReviewPrincipalAdapter(async ({ authContext }) => {
+  const session = authContext as {
+    provider?: string;
+    userId?: string;
+    verified?: boolean;
+    email?: string;
+  };
+
+  if (session.verified !== true || !session.provider || !session.userId) {
+    throw new Error("missing verified server-side session");
+  }
+
+  return {
+    provider: session.provider,
+    subject: session.userId,
+    verified: true,
+    email: session.email
+  };
+});
+
+const service = new DevgodCoreService(store, {
+  resolveReviewActionContext: createReviewActionContextResolver({
+    bindings: reviewIdentityBindings,
+    async resolveAuthenticatedPrincipal(input) {
+      return reviewIdentityAdapter({
+        ...input,
+        authContext: await requireTrustedSessionForRequest()
+      });
+    }
+  })
+});
+```
+
+Binding file shape:
+
+```json
+{
+  "bindings": [
+    {
+      "principal": {
+        "provider": "github",
+        "subject": "alice"
+      },
+      "actors": [
+        {
+          "actor": "alice-reviewer",
+          "roles": ["reviewer"]
+        },
+        {
+          "actor": "alice-release-manager",
+          "roles": ["qa_engineer"],
+          "waiverAuthorities": ["manager"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Trust-boundary rules:
+
+- authenticate the principal before calling `recordReview`
+- keep authenticated-principal extraction in a repo-owned adapter module, not in request-body parsing
+- keep the binding file server-owned and reviewed in git
+- keep review-identity fixtures reviewed in git and replay them through the package verifier
+- never derive review authority from raw request body fields alone
+- fail closed when the principal is unverified, unbound, or requests an unauthorized role
+- treat waiver authority as explicit policy, not as an implication of a broad admin role
+
+Installed target repos also get:
+
+- `.devgod/review-identity-bindings.json`
+- `.devgod/review-identity-adapter.fixture.json`
+- `devgod/review-identity-adapter.ts`
+- `npm run devgod:verify:review-identity`
+
+The installed adapter stub fails closed until you replace it with real server-side principal lookup. The verifier command loads your adapter, reviewed bindings, and reviewed fixtures, then exits nonzero if an allow/deny case is bypassed.
+
+The shipped templates are starting points, not live policy. Review the bindings and fixtures, implement the adapter, and keep all three under normal repo review.
+
 ## Source Repo Setup
 
 This section is for maintaining the `devgod` package itself, not for configuring a target repo.
@@ -222,9 +336,12 @@ npm run health
 npm run bootstrap
 npm run verify:setup
 npm run verify:workflow
+npm run verify:migrations:live
 npm test
 npm run typecheck
 ```
+
+`npm run verify:migrations:live` is the live-database replay proof. It reruns migrations for idempotence, checks database health, bootstraps a project, and re-verifies the required schema surface. Use a dedicated local or CI database for that command, not a shared or production instance.
 
 ## Architecture In Brief
 

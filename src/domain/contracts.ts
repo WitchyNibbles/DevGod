@@ -1,11 +1,21 @@
 import {
+  type HandoffInput,
+  type GateReviewRole,
+  type IdentityAssurance,
   type IntakeRequestInput,
   type IntakeSummary,
   type MemoryPromotionInput,
+  type ReviewActionContext,
+  type ReviewInput,
+  type ReviewRecord,
   type RetrievalMetadata,
   type RetrievalRole,
+  type ReviewWaiverAuthority,
   type SearchMemoryInput,
   type StopGoDecision,
+  identityAssurances,
+  reviewWaiverAuthorities,
+  requiredGateReviews,
   retrievalRoles,
   stopGoDecisions,
   type TaskPacketInput
@@ -13,6 +23,10 @@ import {
 
 const maxQueryEmbeddingDimensions = 1536;
 const retrievalRoleSet = new Set<string>(retrievalRoles);
+const requiredGateReviewSet = new Set<string>(requiredGateReviews);
+const reviewWaiverAuthoritySet = new Set<string>(reviewWaiverAuthorities);
+const identityAssuranceSet = new Set<string>(identityAssurances);
+const managerWaiverRoles = new Set<RetrievalRole>(["planner", "solution_architect"]);
 
 export const DEFAULT_RETRIEVAL_ROLE: RetrievalRole = "planner";
 
@@ -78,12 +92,71 @@ function uniqueTrimmedItems(values: readonly string[] | undefined): string[] {
   return items;
 }
 
+function duplicateTrimmedItems(values: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const value of values ?? []) {
+    const normalized = value.trim();
+    if (normalized.length === 0) {
+      continue;
+    }
+
+    if (seen.has(normalized)) {
+      duplicates.add(normalized);
+      continue;
+    }
+
+    seen.add(normalized);
+  }
+
+  return [...duplicates];
+}
+
 export function isRetrievalRole(value: string): value is RetrievalRole {
   return retrievalRoleSet.has(value);
 }
 
+export function isGateReviewRole(value: string): value is GateReviewRole {
+  return requiredGateReviewSet.has(value);
+}
+
+export function isReviewWaiverAuthority(value: string): value is ReviewWaiverAuthority {
+  return reviewWaiverAuthoritySet.has(value);
+}
+
+export function isIdentityAssurance(value: string): value is IdentityAssurance {
+  return identityAssuranceSet.has(value);
+}
+
+export function canActorWaiveReview(input: {
+  actorRole: RetrievalRole;
+  reviewerRole: GateReviewRole;
+  waiverAuthority: ReviewWaiverAuthority;
+}): boolean {
+  if (input.waiverAuthority === "manager") {
+    return managerWaiverRoles.has(input.actorRole) && input.reviewerRole !== "security_reviewer";
+  }
+
+  if (input.waiverAuthority === "security_exception") {
+    return input.actorRole === "security_reviewer" && input.reviewerRole === "security_reviewer";
+  }
+
+  return false;
+}
+
 export function defaultRetrievalRoles(): RetrievalRole[] {
   return [...retrievalRoles];
+}
+
+export function effectiveRequiredReviews(requiredReviews: readonly GateReviewRole[] | undefined): GateReviewRole[] {
+  const effective = new Set<GateReviewRole>(requiredGateReviews);
+  for (const role of requiredReviews ?? []) {
+    if (isGateReviewRole(role)) {
+      effective.add(role);
+    }
+  }
+  return [...effective];
 }
 
 export function normalizeRetrievalMetadata(metadata?: RetrievalMetadata): NormalizedRetrievalMetadata {
@@ -131,13 +204,17 @@ export function normalizeIntakeRequest(input: IntakeRequestInput): IntakeSummary
 
 export function validateTaskPacket(packet: TaskPacketInput): string[] {
   const errors: string[] = [];
+  const normalizedOwnerRole = packet.ownerRole.trim();
+  const normalizedRequiredReviews = uniqueTrimmedItems(packet.requiredReviews);
 
   if (packet.taskId.trim().length === 0) {
     errors.push("taskId is required");
   }
 
-  if (packet.ownerRole.trim().length === 0) {
+  if (normalizedOwnerRole.length === 0) {
     errors.push("ownerRole is required");
+  } else if (!isRetrievalRole(normalizedOwnerRole)) {
+    errors.push(`ownerRole must be one of: ${retrievalRoles.join(", ")}`);
   }
 
   if (packet.goal.trim().length === 0) {
@@ -158,6 +235,21 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
 
   if (packet.requiredReviews.length === 0) {
     errors.push("requiredReviews is required");
+  } else {
+    if (normalizedRequiredReviews.length !== packet.requiredReviews.length) {
+      errors.push("requiredReviews must not contain empty or duplicate values");
+    }
+
+    const invalidRequiredReviews = normalizedRequiredReviews.filter((role) => !requiredGateReviewSet.has(role));
+    if (invalidRequiredReviews.length > 0) {
+      errors.push(`requiredReviews must be limited to: ${requiredGateReviews.join(", ")}`);
+    }
+
+    for (const requiredReview of requiredGateReviews) {
+      if (!normalizedRequiredReviews.includes(requiredReview)) {
+        errors.push(`missing required review gate: ${requiredReview}`);
+      }
+    }
   }
 
   if (packet.securityChecks.length === 0) {
@@ -176,15 +268,122 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
     errors.push("handoffFormat is required");
   }
 
-  const duplicateWriteScope = new Set<string>();
-  for (const path of packet.allowedWriteScope) {
-    if (duplicateWriteScope.has(path)) {
-      errors.push(`duplicate write scope: ${path}`);
-    }
-    duplicateWriteScope.add(path);
+  const duplicateWriteScope = duplicateTrimmedItems(packet.allowedWriteScope);
+  for (const path of duplicateWriteScope) {
+    errors.push(`duplicate write scope: ${path}`);
   }
 
   return errors;
+}
+
+export function validateHandoff(input: HandoffInput): string[] {
+  const errors: string[] = [];
+
+  if (input.actor.trim().length === 0) {
+    errors.push("handoff actor is required");
+  }
+
+  if (input.summary.trim().length === 0) {
+    errors.push("handoff summary is required");
+  }
+
+  if (uniqueTrimmedItems(input.changedFiles).length !== input.changedFiles.length || input.changedFiles.length === 0) {
+    errors.push("handoff changedFiles must contain at least one non-empty path");
+  }
+
+  if (
+    uniqueTrimmedItems(input.verificationNotes).length !== input.verificationNotes.length ||
+    input.verificationNotes.length === 0
+  ) {
+    errors.push("handoff verificationNotes must contain at least one non-empty item");
+  }
+
+  if (uniqueTrimmedItems(input.contextRefs).length !== input.contextRefs.length || input.contextRefs.length === 0) {
+    errors.push("handoff contextRefs must contain at least one non-empty item");
+  }
+
+  return errors;
+}
+
+export function validateReviewAction(context: ReviewActionContext, review: ReviewInput): string[] {
+  const errors: string[] = [];
+  const normalizedActor = context.actor.trim();
+  const waiverAuthority = context.waiverAuthority ?? "none";
+
+  if (normalizedActor.length === 0) {
+    errors.push("review actor is required");
+  }
+
+  if (!isRetrievalRole(context.actorRole)) {
+    errors.push(`review actorRole must be one of: ${retrievalRoles.join(", ")}`);
+  }
+
+  if (!isGateReviewRole(review.reviewerRole)) {
+    errors.push(`reviewerRole must be one of: ${requiredGateReviews.join(", ")}`);
+  }
+
+  if (!isReviewWaiverAuthority(waiverAuthority)) {
+    errors.push(`waiverAuthority must be one of: ${reviewWaiverAuthorities.join(", ")}`);
+  }
+
+  if (review.findings.some((finding) => finding.trim().length === 0)) {
+    errors.push("review findings must not contain empty items");
+  }
+
+  if (review.state === "waived") {
+    if (!review.waiverReason || review.waiverReason.trim().length === 0) {
+      errors.push("waived reviews require waiverReason");
+    }
+
+    if (waiverAuthority === "none") {
+      errors.push("waived reviews require waiverAuthority");
+    } else if (
+      isRetrievalRole(context.actorRole) &&
+      isGateReviewRole(review.reviewerRole) &&
+      isReviewWaiverAuthority(waiverAuthority) &&
+      !canActorWaiveReview({
+        actorRole: context.actorRole,
+        reviewerRole: review.reviewerRole,
+        waiverAuthority
+      })
+    ) {
+      errors.push(`actorRole ${context.actorRole} is not allowed to waive ${review.reviewerRole}`);
+    }
+  } else {
+    if (waiverAuthority !== "none") {
+      errors.push("non-waived reviews must use waiverAuthority none");
+    }
+
+    if (isRetrievalRole(context.actorRole) && context.actorRole !== review.reviewerRole) {
+      errors.push(`actorRole ${context.actorRole} cannot record ${review.reviewerRole} review state ${review.state}`);
+    }
+  }
+
+  return errors;
+}
+
+export function canReviewRecordSatisfyGate(review: ReviewRecord): boolean {
+  if (review.identityAssurance !== "authenticated") {
+    return false;
+  }
+
+  if (review.state === "passed") {
+    return true;
+  }
+
+  if (review.state !== "waived") {
+    return false;
+  }
+
+  if (!review.waiverReason || review.waiverReason.trim().length === 0) {
+    return false;
+  }
+
+  return canActorWaiveReview({
+    actorRole: review.actorRole,
+    reviewerRole: review.reviewerRole,
+    waiverAuthority: review.waiverAuthority
+  });
 }
 
 const secretPatterns = [

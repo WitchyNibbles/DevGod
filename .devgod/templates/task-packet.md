@@ -28,6 +28,11 @@
 
 ## Required reviews
 
+Include all three blocking gates for substantive work:
+- `reviewer`
+- `security_reviewer`
+- `qa_engineer`
+
 ## Security checks
 
 ## Retrieval guidance

@@ -49,6 +49,9 @@ Additional rules:
 - use the local \`caveman\` plugin/skill for manager notes, agent handoffs, QA/security gates, and other internal coordination to reduce token cost
 - default caveman target is 4-6 lines with short labels and no prose paragraphs
 - keep direct user replies in standard concise English unless the user asks for caveman format
+- use \`tdd-guide\` for new feature or bugfix slices that should start with failing tests
+- use \`e2e-runner\` for critical user, setup, install, and upgrade flows
+- use \`release-readiness\` before package, migration, installer, or rollout-oriented changes
 - require an intake brief for substantive work in \`.devgod/work/briefs/\`
 - require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution
 - require the active task id to match the current brief, plan/task, and review artifacts
@@ -216,6 +219,9 @@ export function mergePackageJson(
   scripts["devgod:health"] = `${runtimeEntry} health`;
   scripts["devgod:bootstrap"] = `${runtimeEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${runtimeEntry} verify-setup`;
+  scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
+  scripts["devgod:verify:migrations:live"] = `${runtimeEntry} verify-live-migrations`;
+  scripts["devgod:verify:review-identity"] = `${runtimeEntry} verify-review-identity`;
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:setup:local"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";

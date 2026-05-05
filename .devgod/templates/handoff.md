@@ -8,7 +8,11 @@
 
 ## Changed files
 
+List at least one path.
+
 ## Verification notes
+
+List at least one concrete command or replay step.
 
 ## Risks and edge cases
 
@@ -17,3 +21,5 @@
 ## Blockers
 
 ## Context refs
+
+List at least one brief, plan, task, review, or design reference.

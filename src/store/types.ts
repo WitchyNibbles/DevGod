@@ -79,11 +79,11 @@ export interface DevgodStore {
   releaseLocksForTask(runId: string, taskId: string, releasedAt: string): Promise<void>;
   getActiveLocks(projectId: string): Promise<LockRecord[]>;
   saveHandoff(handoff: HandoffRecord): Promise<void>;
-  getHandoffs(taskId: string): Promise<HandoffRecord[]>;
+  getHandoffs(runId: string, taskId: string): Promise<HandoffRecord[]>;
   saveReview(review: ReviewRecord): Promise<void>;
-  getReviews(taskId: string): Promise<ReviewRecord[]>;
+  getReviews(runId: string, taskId: string): Promise<ReviewRecord[]>;
   saveApproval(approval: ApprovalRecord): Promise<void>;
-  getApprovals(taskId: string): Promise<ApprovalRecord[]>;
+  getApprovals(runId: string, taskId: string): Promise<ApprovalRecord[]>;
   saveMemoryEntry(entry: MemoryEntryRecord): Promise<void>;
   replaceMarkdownArtifacts(input: {
     workspaceId: string;

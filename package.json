@@ -37,6 +37,8 @@
     "bootstrap": "node --experimental-strip-types src/admin.ts bootstrap-project",
     "verify:setup": "node --experimental-strip-types src/admin.ts verify-setup",
     "verify:workflow": "bash scripts/verify-devgod-workflow-check.sh",
+    "verify:migrations:live": "node --experimental-strip-types src/admin.ts verify-live-migrations",
+    "verify:review-identity": "node --experimental-strip-types src/admin.ts verify-review-identity",
     "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
   },
   "dependencies": {

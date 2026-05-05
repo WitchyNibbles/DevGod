@@ -1,12 +1,4 @@
-import type {
-  HandoffInput,
-  IntakeRequestInput,
-  MemoryPromotionInput,
-  PlanInput,
-  ReviewInput,
-  SearchMemoryInput,
-  TaskPacketInput
-} from "../domain/types.ts";
+import type { HandoffInput, IntakeRequestInput, MemoryPromotionInput, PlanInput, ReviewInput, SearchMemoryInput, TaskPacketInput } from "../domain/types.ts";
 import { DevgodCoreService } from "./service.ts";
 
 export interface DevgodActionHandlers {
@@ -22,7 +14,7 @@ export interface DevgodActionHandlers {
   submit_handoff(input: { runId: string; taskId: string; handoff: HandoffInput }): ReturnType<
     DevgodCoreService["submitHandoff"]
   >;
-  record_review(input: { runId: string; taskId: string; review: ReviewInput }): ReturnType<
+  record_review(input: { runId: string; taskId: string; actor: string; review: ReviewInput }): ReturnType<
     DevgodCoreService["recordReview"]
   >;
   promote_memory(input: { runId: string; memory: MemoryPromotionInput }): ReturnType<
@@ -51,7 +43,7 @@ export function createActionHandlers(service: DevgodCoreService): DevgodActionHa
       return service.submitHandoff(input.runId, input.taskId, input.handoff);
     },
     record_review(input) {
-      return service.recordReview(input.runId, input.taskId, input.review);
+      return service.recordReview(input.runId, input.taskId, input.actor, input.review);
     },
     promote_memory(input) {
       return service.promoteMemory(input.runId, input.memory);

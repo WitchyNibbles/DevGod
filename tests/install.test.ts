@@ -22,6 +22,9 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /`solution_architect`/);
   assert.match(first, /`planner`/);
   assert.match(first, /check-devgod-workflow\.sh --task-id/);
+  assert.match(first, /`tdd-guide`/);
+  assert.match(first, /`e2e-runner`/);
+  assert.match(first, /`release-readiness`/);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -73,6 +76,14 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\.ts migrate/);
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
   assert.match(
+    merged.scripts["devgod:verify:migrations:live"],
+    /node_modules\/devgod\/src\/admin\.ts verify-live-migrations/
+  );
+  assert.match(
+    merged.scripts["devgod:verify:review-identity"],
+    /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+  );
+  assert.match(
     merged.scripts["devgod:setup:local"],
     /node_modules\/devgod\/src\/install\/setup-local\.ts/
   );
@@ -112,8 +123,11 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-memory/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-qa-verification/SKILL.md",
+    ".agents/skills/devgod-release-readiness/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
-    ".agents/skills/devgod-setup/SKILL.md"
+    ".agents/skills/devgod-setup/SKILL.md",
+    ".agents/skills/devgod-tdd/SKILL.md",
+    ".agents/skills/devgod-e2e/SKILL.md"
   ];
 
   for (const relativePath of installedSkills) {
@@ -130,7 +144,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   const installedAgents = [
     ".codex/agents/devgod-build-resolver.toml",
     ".codex/agents/devgod-docs-researcher.toml",
-    ".codex/agents/devgod-reviewer.toml"
+    ".codex/agents/devgod-reviewer.toml",
+    ".codex/agents/devgod-tdd-guide.toml",
+    ".codex/agents/devgod-e2e-runner.toml",
+    ".codex/agents/devgod-release-readiness.toml"
   ];
 
   for (const relativePath of installedAgents) {
@@ -143,6 +160,32 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     "utf8"
   );
   assert.match(retrievalPolicy, /Derived retrieval is a hint layer/i);
+
+  const reviewIdentityBindings = await readFile(
+    path.join(targetRoot, ".devgod/review-identity-bindings.json"),
+    "utf8"
+  );
+  assert.match(reviewIdentityBindings, /replace-with-authenticated-user-id/);
+
+  const reviewIdentityFixtures = await readFile(
+    path.join(targetRoot, ".devgod/review-identity-adapter.fixture.json"),
+    "utf8"
+  );
+  assert.match(reviewIdentityFixtures, /deny unverified principal/);
+
+  const reviewIdentityAdapter = await readFile(
+    path.join(targetRoot, "devgod/review-identity-adapter.ts"),
+    "utf8"
+  );
+  assert.match(reviewIdentityAdapter, /Implement devgod\/review-identity-adapter\.ts/);
+
+  const targetPackageJson = JSON.parse(
+    await readFile(path.join(targetRoot, "package.json"), "utf8")
+  ) as { scripts: Record<string, string> };
+  assert.match(
+    targetPackageJson.scripts["devgod:verify:review-identity"],
+    /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+  );
 
   await assert.rejects(
     readFile(path.join(targetRoot, ".devgod/memory/project-profile.md"), "utf8")
@@ -164,13 +207,21 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
+    ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-qa-verification/SKILL.md",
+    ".agents/skills/devgod-release-readiness/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
+    ".agents/skills/devgod-tdd/SKILL.md",
     ".codex/agents/build-resolver.toml",
     ".codex/agents/docs-researcher.toml",
+    ".codex/agents/e2e-runner.toml",
+    ".codex/agents/release-readiness.toml",
     ".codex/agents/reviewer.toml",
+    ".codex/agents/tdd-guide.toml",
     ".devgod/rules/role-retrieval-policy.md",
+    ".devgod/templates/review-identity-bindings.json",
+    ".devgod/templates/review-identity-adapter.fixture.json",
     "scripts/check-devgod-workflow.sh",
     "scripts/verify-devgod-workflow-check.sh"
   ];

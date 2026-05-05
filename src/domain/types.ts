@@ -22,6 +22,7 @@ export const taskStatuses = [
 export const reviewSeverities = ["low", "medium", "high", "critical"] as const;
 export const reviewStates = ["pending", "passed", "blocked", "waived"] as const;
 export const approvalDecisions = ["approved", "blocked", "waived"] as const;
+export const identityAssurances = ["authenticated", "legacy_backfill"] as const;
 export const memoryScopes = ["global", "project"] as const;
 export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
 export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
@@ -39,20 +40,28 @@ export const retrievalRoles = [
   "build_resolver",
   "security_reviewer",
   "qa_engineer",
+  "tdd-guide",
+  "e2e-runner",
+  "release-readiness",
   "memory_curator"
 ] as const;
+export const requiredGateReviews = ["reviewer", "security_reviewer", "qa_engineer"] as const;
+export const reviewWaiverAuthorities = ["none", "manager", "security_exception"] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
 export type ReviewSeverity = (typeof reviewSeverities)[number];
 export type ReviewState = (typeof reviewStates)[number];
 export type ApprovalDecision = (typeof approvalDecisions)[number];
+export type IdentityAssurance = (typeof identityAssurances)[number];
 export type MemoryScope = (typeof memoryScopes)[number];
 export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
 export type RetrievalRole = (typeof retrievalRoles)[number];
+export type GateReviewRole = (typeof requiredGateReviews)[number];
+export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -128,7 +137,7 @@ export interface TaskPacketInput {
   outOfScope: string[];
   acceptanceCriteria: string[];
   verificationSteps: string[];
-  requiredReviews: string[];
+  requiredReviews: GateReviewRole[];
   securityChecks: string[];
   antiPatterns: string[];
   rollbackNotes: string;
@@ -145,11 +154,17 @@ export interface HandoffInput {
 }
 
 export interface ReviewInput {
-  reviewerRole: string;
+  reviewerRole: GateReviewRole;
   state: ReviewState;
   severity: ReviewSeverity;
   findings: string[];
   waiverReason?: string | undefined;
+}
+
+export interface ReviewActionContext {
+  actor: string;
+  actorRole: RetrievalRole;
+  waiverAuthority?: ReviewWaiverAuthority | undefined;
 }
 
 export interface MemoryPromotionInput {
@@ -252,11 +267,15 @@ export interface ReviewRecord {
   id: string;
   runId: string;
   taskId: string;
-  reviewerRole: string;
+  reviewerRole: GateReviewRole;
+  actor: string;
+  actorRole: RetrievalRole;
+  identityAssurance: IdentityAssurance;
   state: ReviewState;
   severity: ReviewSeverity;
   findings: string[];
   waiverReason?: string | undefined;
+  waiverAuthority: ReviewWaiverAuthority;
   createdAt: string;
 }
 
@@ -265,6 +284,8 @@ export interface ApprovalRecord {
   runId: string;
   taskId: string;
   actor: string;
+  actorRole: RetrievalRole;
+  identityAssurance: IdentityAssurance;
   decision: ApprovalDecision;
   rationale: string;
   createdAt: string;

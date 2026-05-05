@@ -78,6 +78,9 @@ If `devgod` is present but not fully configured:
 - `build_resolver`: build, typecheck, test, and setup failure diagnosis
 - `security_reviewer`: abuse cases, auth, data exposure, dependency risk
 - `qa_engineer`: test strategy, regression risk, verification loops
+- `tdd-guide`: red-green-refactor sequencing, failing test design, and test-first discipline
+- `e2e-runner`: critical user-flow, setup-flow, and regression journey verification
+- `release-readiness`: package shipment, migration, rollback, and install/bootstrap readiness
 - `memory_curator`: durable lessons and decision capture
 
 ## Package boundary
@@ -123,7 +126,9 @@ Ask the user before:
 - missing required review blocks completion
 - missing acceptance criteria or verification evidence blocks completion
 - missing workflow-checker proof blocks completion
+- required reviews must have authenticated actor provenance to satisfy a gate
 - waived reviews require explicit actor and reason
+- waived reviews require explicit actor, authority, and reason, and unauthorized or legacy-backfilled waivers block completion
 - manager/root must not declare done while a blocking gate fails
 - substantive work must keep the current task id aligned across `.devgod/ACTIVE`, the current brief, the current plan or task packet, and the required review gates
 - workers must not edit `AGENTS.md`, `.codex/`, `.agents/`, or `.devgod/memory/` unless the task packet explicitly assigns that scope

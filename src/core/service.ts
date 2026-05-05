@@ -1,19 +1,32 @@
 import { randomUUID } from "node:crypto";
 import {
+  validateReviewAction,
+  validateHandoff,
   normalizeIntakeRequest,
   normalizeRetrievalMetadata,
   normalizeSearchInput,
   validateMemoryPromotion,
   validateTaskPacket
 } from "../domain/contracts.ts";
-import { canRoleAccessSearchResult, evaluateReviewDecision, findBlockingReasonsForTask } from "./policy.ts";
+import {
+  canRoleAccessSearchResult,
+  evaluateReviewDecision,
+  findBlockingReasonsForTask,
+  findTaskDependencies
+} from "./policy.ts";
+import type {
+  ResolveReviewActionContext,
+  ReviewActionContextResolverInput
+} from "./review-context.ts";
 import type {
   HandoffInput,
   IntakeRequestInput,
+  LockRecord,
   MemoryPromotionInput,
   PlanArtifact,
   PlanInput,
   ReviewInput,
+  ReviewRecord,
   RunRecord,
   RunStatusSnapshot,
   SearchMemoryInput,
@@ -23,15 +36,21 @@ import type {
 } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
 
+export interface DevgodCoreServiceOptions {
+  resolveReviewActionContext?: ResolveReviewActionContext | undefined;
+}
+
 function timestamp(): string {
   return new Date().toISOString();
 }
 
 export class DevgodCoreService {
   private readonly store: DevgodStore;
+  private readonly resolveReviewActionContext?: ResolveReviewActionContext | undefined;
 
-  constructor(store: DevgodStore) {
+  constructor(store: DevgodStore, options: DevgodCoreServiceOptions = {}) {
     this.store = store;
+    this.resolveReviewActionContext = options.resolveReviewActionContext;
   }
 
   async intakeRequest(input: IntakeRequestInput): Promise<RunRecord> {
@@ -122,7 +141,7 @@ export class DevgodCoreService {
 
     const allTasks = await this.store.getTasksByRun(runId);
     const activeLocks = await this.store.getActiveLocks(task.projectId);
-    const blockers = findBlockingReasonsForTask(task, allTasks, activeLocks);
+    const blockers = await this.findTaskBlockers(task, allTasks, activeLocks);
 
     if (blockers.length > 0) {
       throw new Error(`Task cannot be claimed: ${blockers.join("; ")}`);
@@ -156,6 +175,11 @@ export class DevgodCoreService {
       throw new Error(`Task ${taskId} must be in progress before handoff`);
     }
 
+    const validationErrors = validateHandoff(handoff);
+    if (validationErrors.length > 0) {
+      throw new Error(`Invalid handoff: ${validationErrors.join("; ")}`);
+    }
+
     const record = {
       id: randomUUID(),
       runId,
@@ -179,29 +203,62 @@ export class DevgodCoreService {
     return record;
   }
 
-  async recordReview(runId: string, taskId: string, review: ReviewInput) {
+  async recordReview(runId: string, taskId: string, actor: string, review: ReviewInput) {
+    if (!this.resolveReviewActionContext) {
+      throw new Error("recordReview requires a trusted review action context resolver");
+    }
+
     const task = await this.requireTask(runId, taskId);
-    const reviewRecord = {
+    if (task.status !== "review_blocked") {
+      throw new Error(`Task ${taskId} must be review_blocked before reviews can be recorded`);
+    }
+
+    let context;
+    try {
+      context = await this.resolveReviewActionContext({
+        runId,
+        taskId,
+        actor,
+        reviewerRole: review.reviewerRole,
+        reviewState: review.state
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid review action: ${message}`);
+    }
+
+    const validationErrors = validateReviewAction(context, review);
+    if (validationErrors.length > 0) {
+      throw new Error(`Invalid review action: ${validationErrors.join("; ")}`);
+    }
+
+    const reviewRecord: ReviewRecord = {
       id: randomUUID(),
       runId,
       taskId,
       reviewerRole: review.reviewerRole,
+      actor: context.actor,
+      actorRole: context.actorRole,
+      identityAssurance: "authenticated",
       state: review.state,
       severity: review.severity,
       findings: [...review.findings],
       waiverReason: review.waiverReason,
+      waiverAuthority: context.waiverAuthority ?? "none",
       createdAt: timestamp()
     };
 
     await this.store.saveReview(reviewRecord);
-    const reviews = await this.store.getReviews(taskId);
+    const reviews = await this.store.getReviews(runId, taskId);
     const decision = evaluateReviewDecision(task, reviews);
 
     await this.store.saveApproval({
       id: randomUUID(),
       runId,
       taskId,
-      actor: review.reviewerRole,
+      actor: context.actor,
+      actorRole: context.actorRole,
+      identityAssurance: "authenticated",
       decision: decision.decision,
       rationale:
         decision.blockers.length > 0 ? decision.blockers.join("; ") : "All required reviews passed",
@@ -289,9 +346,16 @@ export class DevgodCoreService {
     const plan = await this.store.getPlan(runId);
     const tasks = await this.store.getTasksByRun(runId);
     const activeLocks = await this.store.getActiveLocks(run.projectId);
-    const blockers = tasks.flatMap((task) => findBlockingReasonsForTask(task, tasks, activeLocks));
+    const blockerEntries = await Promise.all(
+      tasks.map(async (task) => ({
+        taskId: task.packet.taskId,
+        blockers: await this.findTaskBlockers(task, tasks, activeLocks)
+      }))
+    );
+    const blockers = blockerEntries.flatMap((entry) => entry.blockers);
+    const blockerMap = new Map(blockerEntries.map((entry) => [entry.taskId, entry.blockers]));
     const nextTaskIds = tasks
-      .filter((task) => findBlockingReasonsForTask(task, tasks, activeLocks).length === 0)
+      .filter((task) => (blockerMap.get(task.packet.taskId) ?? []).length === 0)
       .filter((task) => task.status === "ready")
       .map((task) => task.packet.taskId);
 
@@ -332,6 +396,32 @@ export class DevgodCoreService {
       status,
       updatedAt: timestamp()
     });
+  }
+
+  private async findTaskBlockers(
+    task: TaskRecord,
+    allTasks: readonly TaskRecord[],
+    activeLocks: readonly LockRecord[]
+  ): Promise<string[]> {
+    const blockers = findBlockingReasonsForTask(task, allTasks, activeLocks);
+
+    for (const dependency of findTaskDependencies(task.packet, allTasks)) {
+      if (dependency.status !== "approved") {
+        continue;
+      }
+
+      const reviews = await this.store.getReviews(dependency.runId, dependency.packet.taskId);
+      const decision = evaluateReviewDecision(dependency, reviews);
+      if (decision.decision === "approved") {
+        continue;
+      }
+
+      blockers.push(
+        `dependency ${dependency.packet.taskId} has stale approval: ${decision.blockers.join("; ")}`
+      );
+    }
+
+    return blockers;
   }
 }
 

@@ -165,6 +165,12 @@ create table if not exists embedding_jobs (
   updated_at timestamptz not null default now()
 );
 
+alter table artifacts
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
+
+alter table memory_entries
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
+
 create index if not exists idx_runs_project_status on runs(project_id, status);
 create index if not exists idx_tasks_run_status on tasks(run_id, status);
 create index if not exists idx_locks_project_status on locks(project_id, status);

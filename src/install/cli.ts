@@ -80,6 +80,7 @@ echo "devgod local setup complete"
 echo "workspace: \${DEVGOD_WORKSPACE_SLUG}"
 echo "project: \${DEVGOD_PROJECT_SLUG}"
 echo "database: configured"
+echo "review identity: run npm run devgod:verify:review-identity after implementing devgod/review-identity-adapter.ts"
 `;
 
 const generatedPowerShellSetupScript = `Set-StrictMode -Version Latest
@@ -161,6 +162,16 @@ Write-Host "devgod local setup complete"
 Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"
+Write-Host "review identity: run npm run devgod:verify:review-identity after implementing devgod/review-identity-adapter.ts"
+`;
+
+const generatedReviewIdentityAdapter = `import { createReviewPrincipalAdapter } from "devgod/src/index.ts";
+
+export default createReviewPrincipalAdapter(async () => {
+  throw new Error(
+    "Implement devgod/review-identity-adapter.ts with your server-side authenticated principal lookup before trusting review actions"
+  );
+});
 `;
 
 function usage(): never {
@@ -298,6 +309,25 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     }
   );
 
+  const installedPolicyFiles: InstallFile[] = [
+    {
+      source: path.join(sourceRoot, ".devgod/templates/review-identity-bindings.json"),
+      target: ".devgod/review-identity-bindings.json",
+      overwriteManaged: false
+    },
+    {
+      source: path.join(sourceRoot, ".devgod/templates/review-identity-adapter.fixture.json"),
+      target: ".devgod/review-identity-adapter.fixture.json",
+      overwriteManaged: false
+    }
+  ];
+
+  for (const file of installedPolicyFiles) {
+    if (await fileExists(file.source)) {
+      manifest.push(file);
+    }
+  }
+
   return manifest;
 }
 
@@ -374,6 +404,23 @@ async function copyManagedFile(
   summary.updated.push(file.target);
 }
 
+async function writeScaffoldFileIfMissing(
+  targetRoot: string,
+  relativePath: string,
+  content: string,
+  summary: InstallSummary
+): Promise<void> {
+  const targetPath = path.join(targetRoot, relativePath);
+  if (await fileExists(targetPath)) {
+    summary.skipped.push(relativePath);
+    return;
+  }
+
+  await ensureDirectory(targetPath);
+  await writeFile(targetPath, content, "utf8");
+  summary.created.push(relativePath);
+}
+
 export async function installDevgodIntoProject(options: InstallOptions): Promise<InstallSummary> {
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetRoot = path.resolve(options.targetRoot);
@@ -441,6 +488,13 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
     summary
   );
 
+  await writeScaffoldFileIfMissing(
+    targetRoot,
+    "devgod/review-identity-adapter.ts",
+    generatedReviewIdentityAdapter,
+    summary
+  );
+
   return summary;
 }
 
@@ -470,6 +524,7 @@ async function main() {
   console.log("1. cd into the target project");
   console.log("2. npm install");
   console.log("3. npm run devgod:setup:local");
+  console.log("4. implement devgod/review-identity-adapter.ts and run npm run devgod:verify:review-identity");
 }
 
 const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : "";

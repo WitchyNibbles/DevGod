@@ -420,7 +420,7 @@ export class PostgresStore implements DevgodStore {
     );
   }
 
-  async getHandoffs(taskId: string): Promise<HandoffRecord[]> {
+  async getHandoffs(runId: string, taskId: string): Promise<HandoffRecord[]> {
     const result = await this.client.query<JsonRow<HandoffRecord>>(
       `select jsonb_build_object(
           'id', id,
@@ -435,17 +435,21 @@ export class PostgresStore implements DevgodStore {
           'createdAt', created_at
        ) as payload
        from handoffs
-       where task_id = $1
+       where run_id = $1
+         and task_id = $2
        order by created_at asc`,
-      [taskId]
+      [runId, taskId]
     );
     return result.rows.map((row) => row.payload);
   }
 
   async saveReview(review: ReviewRecord): Promise<void> {
     await this.client.query(
-      `insert into reviews (id, workspace_id, project_id, run_id, task_id, reviewer_role, state, severity, findings, waiver_reason)
-       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8
+      `insert into reviews (
+         id, workspace_id, project_id, run_id, task_id, reviewer_role, actor, actor_role,
+         identity_assurance, state, severity, findings, waiver_reason, waiver_authority
+       )
+       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
        from runs r
        where r.id = $2`,
       [
@@ -453,60 +457,83 @@ export class PostgresStore implements DevgodStore {
         review.runId,
         review.taskId,
         review.reviewerRole,
+        review.actor,
+        review.actorRole,
+        review.identityAssurance,
         review.state,
         review.severity,
         review.findings,
-        review.waiverReason ?? null
+        review.waiverReason ?? null,
+        review.waiverAuthority
       ]
     );
   }
 
-  async getReviews(taskId: string): Promise<ReviewRecord[]> {
+  async getReviews(runId: string, taskId: string): Promise<ReviewRecord[]> {
     const result = await this.client.query<JsonRow<ReviewRecord>>(
       `select jsonb_build_object(
           'id', id,
           'runId', run_id,
           'taskId', task_id,
           'reviewerRole', reviewer_role,
+          'actor', actor,
+          'actorRole', actor_role,
+          'identityAssurance', identity_assurance,
           'state', state,
           'severity', severity,
           'findings', findings,
           'waiverReason', waiver_reason,
+          'waiverAuthority', waiver_authority,
           'createdAt', created_at
        ) as payload
        from reviews
-       where task_id = $1
+       where run_id = $1
+         and task_id = $2
        order by created_at asc`,
-      [taskId]
+      [runId, taskId]
     );
     return result.rows.map((row) => row.payload);
   }
 
   async saveApproval(approval: ApprovalRecord): Promise<void> {
     await this.client.query(
-      `insert into approvals (id, workspace_id, project_id, run_id, task_id, actor, decision, rationale)
-       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6
+      `insert into approvals (
+         id, workspace_id, project_id, run_id, task_id, actor, actor_role, identity_assurance, decision, rationale
+       )
+       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8
        from runs r
        where r.id = $2`,
-      [approval.id, approval.runId, approval.taskId, approval.actor, approval.decision, approval.rationale]
+      [
+        approval.id,
+        approval.runId,
+        approval.taskId,
+        approval.actor,
+        approval.actorRole,
+        approval.identityAssurance,
+        approval.decision,
+        approval.rationale
+      ]
     );
   }
 
-  async getApprovals(taskId: string): Promise<ApprovalRecord[]> {
+  async getApprovals(runId: string, taskId: string): Promise<ApprovalRecord[]> {
     const result = await this.client.query<JsonRow<ApprovalRecord>>(
       `select jsonb_build_object(
           'id', id,
           'runId', run_id,
           'taskId', task_id,
           'actor', actor,
+          'actorRole', actor_role,
+          'identityAssurance', identity_assurance,
           'decision', decision,
           'rationale', rationale,
           'createdAt', created_at
        ) as payload
        from approvals
-       where task_id = $1
+       where run_id = $1
+         and task_id = $2
        order by created_at asc`,
-      [taskId]
+      [runId, taskId]
     );
     return result.rows.map((row) => row.payload);
   }
