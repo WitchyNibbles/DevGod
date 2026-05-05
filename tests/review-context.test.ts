@@ -51,6 +51,30 @@ test("validateReviewIdentityBindings rejects duplicate actors and invalid waiver
   assert.match(errors.join(" | "), /invalid waiver authority none/);
 });
 
+test("validateReviewIdentityBindings rejects missing principal fields and empty role bindings", () => {
+  const errors = validateReviewIdentityBindings({
+    bindings: [
+      {
+        principal: {
+          provider: " ",
+          subject: ""
+        },
+        actors: [
+          {
+            actor: " ",
+            roles: []
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.match(errors.join(" | "), /principal\.provider is required/);
+  assert.match(errors.join(" | "), /principal\.subject is required/);
+  assert.match(errors.join(" | "), /actor is required/);
+  assert.match(errors.join(" | "), /at least one role is required/);
+});
+
 test("createReviewActionContextResolver rejects unverified principals and unauthorized review roles", async () => {
   const resolver = createReviewActionContextResolver({
     bindings: {
@@ -138,6 +162,33 @@ test("createReviewActionContextResolver accepts array bindings and rejects missi
         reviewState: "passed"
       }),
     /No review identity binding for github:bob/
+  );
+});
+
+test("createReviewActionContextResolver rejects invalid binding documents up front", () => {
+  assert.throws(
+    () =>
+      createReviewActionContextResolver({
+        bindings: {
+          bindings: [
+            {
+              principal: {
+                provider: "github",
+                subject: "alice"
+              },
+              actors: []
+            }
+          ]
+        },
+        resolveAuthenticatedPrincipal() {
+          return {
+            provider: "github",
+            subject: "alice",
+            verified: true
+          };
+        }
+      }),
+    /Invalid review identity bindings/
   );
 });
 
@@ -519,6 +570,42 @@ test("createReviewPrincipalAdapter normalizes principals and rejects invalid ada
       }),
     /Authenticated principal provider is required/
   );
+
+  const invalidSubjectAdapter = createReviewPrincipalAdapter(async () => ({
+    provider: "github",
+    subject: "",
+    verified: true
+  }));
+  await assert.rejects(
+    async () =>
+      invalidSubjectAdapter({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "alice-reviewer",
+        reviewerRole: "reviewer",
+        reviewState: "passed",
+        authContext: {}
+      }),
+    /Authenticated principal subject is required/
+  );
+
+  const invalidVerifiedAdapter = createReviewPrincipalAdapter(async () => ({
+    provider: "github",
+    subject: "alice",
+    verified: "yes" as never
+  }));
+  await assert.rejects(
+    async () =>
+      invalidVerifiedAdapter({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "alice-reviewer",
+        reviewerRole: "reviewer",
+        reviewState: "passed",
+        authContext: {}
+      }),
+    /verified must be a boolean/
+  );
 });
 
 test("verifyReviewIdentityAdapter reports allow and deny mismatches", async () => {
@@ -593,6 +680,79 @@ test("verifyReviewIdentityAdapter reports allow and deny mismatches", async () =
   assert.equal(result.failed, 2);
   assert.match(result.failures[0]?.message ?? "", /principal mismatch/);
   assert.match(result.failures[1]?.message ?? "", /expected deny but resolver allowed/);
+});
+
+test("verifyReviewIdentityAdapter reports context mismatches and deny mismatch details", async () => {
+  const result = await verifyReviewIdentityAdapter({
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-reviewer",
+            roles: ["reviewer"]
+          }
+        ]
+      }
+    ],
+    adapter: async ({ authContext }) => ({
+      provider: authContext.provider,
+      subject: authContext.subject,
+      verified: authContext.verified
+    }),
+    fixtures: [
+      {
+        name: "context mismatch",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "allow",
+          principal: {
+            provider: "github",
+            subject: "alice",
+            verified: true
+          },
+          context: {
+            actor: "someone-else",
+            actorRole: "reviewer",
+            waiverAuthority: "none"
+          }
+        }
+      },
+      {
+        name: "deny mismatch details",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: false
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "deny",
+          errorIncludes: ["not allowed"]
+        }
+      }
+    ]
+  });
+
+  assert.equal(result.failed, 2);
+  assert.match(result.failures[0]?.message ?? "", /context mismatch/);
+  assert.match(result.failures[1]?.message ?? "", /deny mismatch/);
 });
 
 test("loadReviewIdentityFixtures reads reviewed fixture files", async () => {

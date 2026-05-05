@@ -119,6 +119,26 @@ test("isProvenancedSearchResult requires reviewed project backend memory", () =>
   assert.equal(isProvenancedSearchResult(globalBackendResult), true);
 });
 
+test("isProvenancedSearchResult accepts repo artifacts without backend reviewer provenance", () => {
+  const artifactResult = buildResult("artifact-1", "Runbook", "rollback checklist", {
+    authority: {
+      source: "repo_artifact",
+      precedence: "repo_context",
+      scope: "project",
+      authorityLevel: "repo_context",
+      allowedRoles: []
+    },
+    citation: {
+      kind: "artifact",
+      artifactId: "artifact-1",
+      label: "Runbook",
+      canonicalRef: "docs/runbook.md"
+    }
+  });
+
+  assert.equal(isProvenancedSearchResult(artifactResult), true);
+});
+
 test("annotateConflictSignals marks explicit contradicts edges", () => {
   const left = buildResult("left", "Adopt pgvector", "enable pgvector", {
     metadata: {
@@ -189,6 +209,17 @@ test("annotateConflictSignals does not mark opposing verbs without a shared topi
     { detected: false, relatedIds: [] },
     { detected: false, relatedIds: [] }
   ]);
+});
+
+test("annotateConflictSignals skips sparse array gaps safely", () => {
+  const left = buildResult("left", "Adopt pgvector retrieval", "enable pgvector");
+  const right = buildResult("right", "Delay pgvector retrieval", "disable pgvector");
+  const sparseResults = [left, undefined, right] as unknown as SearchMemoryResult[];
+
+  const results = annotateConflictSignals(sparseResults);
+
+  assert.equal(results[0]?.conflict.detected, true);
+  assert.equal(results[1]?.conflict.detected, true);
 });
 
 test("searchMemory drops unprovenanced hits before conflict annotation", async () => {

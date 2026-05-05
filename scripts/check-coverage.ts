@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
-  parseCoverageSummary,
-  validateCoverageThresholds,
+  parseCoverageReport,
+  validatePerFileCoverage,
   type CoverageThresholds
 } from "../src/runtime/coverage-thresholds.ts";
 
@@ -25,10 +26,32 @@ function readThreshold(name: string, fallback: number): number {
   return parsed;
 }
 
+async function listSourceFiles(root: string): Promise<string[]> {
+  const results: string[] = [];
+
+  async function walk(currentRoot: string): Promise<void> {
+    const entries = await readdir(currentRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolutePath = path.join(currentRoot, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+        continue;
+      }
+
+      if (entry.isFile() && absolutePath.endsWith(".ts")) {
+        results.push(path.relative(repoRoot, absolutePath).replaceAll(path.sep, "/"));
+      }
+    }
+  }
+
+  await walk(root);
+  return results.sort();
+}
+
 const thresholds: CoverageThresholds = {
-  line: readThreshold("DEVGOD_MIN_LINE_COVERAGE", 85),
-  branch: readThreshold("DEVGOD_MIN_BRANCH_COVERAGE", 80),
-  funcs: readThreshold("DEVGOD_MIN_FUNCTION_COVERAGE", 85)
+  line: readThreshold("DEVGOD_MIN_LINE_COVERAGE", 100),
+  branch: readThreshold("DEVGOD_MIN_BRANCH_COVERAGE", 100),
+  funcs: readThreshold("DEVGOD_MIN_FUNCTION_COVERAGE", 100)
 };
 
 const command =
@@ -52,12 +75,16 @@ if (result.status !== 0) {
 }
 
 const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-const summary = parseCoverageSummary(output);
-if (!summary) {
+const report = parseCoverageReport(output);
+if (!report.aggregate) {
   throw new Error("Coverage summary not found in test output");
 }
-
-const failures = validateCoverageThresholds(summary, thresholds);
+const expectedFiles = await listSourceFiles(path.join(repoRoot, "src"));
+const failures = validatePerFileCoverage({
+  files: report.files.filter((file) => file.file.startsWith("src/")),
+  expectedFiles,
+  requiredCoverage: thresholds
+});
 if (failures.length > 0) {
   for (const failure of failures) {
     console.error(failure);
@@ -66,5 +93,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `coverage thresholds passed: lines ${summary.line.toFixed(2)}%, branches ${summary.branch.toFixed(2)}%, functions ${summary.funcs.toFixed(2)}%`
+  `src per-file coverage passed; aggregate all-files coverage is lines ${report.aggregate.line.toFixed(2)}%, branches ${report.aggregate.branch.toFixed(2)}%, functions ${report.aggregate.funcs.toFixed(2)}%`
 );

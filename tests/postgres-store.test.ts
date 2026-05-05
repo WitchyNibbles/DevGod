@@ -1,5 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type {
+  LockRecord,
+  MarkdownArtifactRecord,
+  MemoryEntryRecord,
+  PlanArtifact,
+  RunRecord,
+  TaskRecord
+} from "../src/domain/types.ts";
 import { PostgresStore, type SqlClient, type SqlQueryResult } from "../src/store/postgres-store.ts";
 
 interface QueryCapture {
@@ -28,6 +36,142 @@ function sqlClientWithRows<Row>(
         rowCount: currentRows.length
       };
     }
+  };
+}
+
+function createRunRecord(): RunRecord {
+  return {
+    id: "run-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    actor: "manager",
+    title: "Ship feature",
+    request: "Do the thing",
+    summary: {
+      goal: "Ship feature",
+      audience: ["repo maintainer"],
+      constraints: ["preserve policy"],
+      risks: ["regression"],
+      unknowns: [],
+      successCriteria: ["works"],
+      outOfScope: ["deploy"],
+      trustBoundaries: ["repo-local policy"],
+      destructiveActions: [],
+      externalIntegrations: [],
+      stopGo: "go"
+    },
+    status: "planned",
+    createdAt: "2026-05-05T00:00:00.000Z",
+    updatedAt: "2026-05-05T00:00:00.000Z"
+  };
+}
+
+function createPlanArtifact(): PlanArtifact {
+  return {
+    id: "plan-1",
+    runId: "run-1",
+    kind: "plan",
+    title: "Plan",
+    content: {
+      runId: "run-1",
+      title: "Plan",
+      summary: "summary",
+      milestones: ["m1"],
+      decisions: ["d1"],
+      residualRisks: ["r1"],
+      acceptanceCriteria: ["a1"]
+    },
+    createdAt: "2026-05-05T00:00:00.000Z"
+  };
+}
+
+function createTaskRecord(): TaskRecord {
+  return {
+    id: "task-record-1",
+    runId: "run-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    packet: {
+      taskId: "task-1",
+      title: "Implement task",
+      ownerRole: "backend_engineer",
+      completionStandard: "specialist_verified",
+      requiredSpecialistRoles: ["backend_engineer"],
+      qualityGates: ["tdd_required"],
+      goal: "Implement the thing",
+      inputs: ["brief"],
+      outputs: ["code"],
+      dependencies: ["dep-1"],
+      allowedWriteScope: ["src/core"],
+      outOfScope: ["deploy"],
+      acceptanceCriteria: ["works"],
+      verificationSteps: ["npm test"],
+      requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
+      securityChecks: ["no secrets"],
+      antiPatterns: ["broad edits"],
+      rollbackNotes: "revert patch",
+      handoffFormat: "summary"
+    },
+    status: "ready",
+    claimedBy: undefined,
+    createdAt: "2026-05-05T00:00:00.000Z",
+    updatedAt: "2026-05-05T00:00:00.000Z"
+  };
+}
+
+function createLockRecord(): LockRecord {
+  return {
+    id: "lock-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    taskId: "task-1",
+    scopePaths: ["src/core/service.ts"],
+    status: "active",
+    createdAt: "2026-05-05T00:00:00.000Z"
+  };
+}
+
+function createMemoryEntryRecord(): MemoryEntryRecord {
+  return {
+    id: "memory-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    taskId: "task-1",
+    scope: "project",
+    entryType: "decision",
+    title: "Decision log",
+    content: "Use the contract-first path.",
+    reviewer: "reviewer-1",
+    actor: "memory_curator",
+    status: "approved",
+    sourcePath: ".devgod/memory/decision-log.md",
+    sourceAnchor: "decision-log",
+    metadata: {
+      retrievalRoles: ["planner"],
+      tags: ["decision"]
+    },
+    createdAt: "2026-05-05T00:00:00.000Z"
+  };
+}
+
+function createMarkdownArtifactRecord(): MarkdownArtifactRecord {
+  return {
+    id: "artifact-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    kind: "markdown_chunk",
+    title: "Runbook",
+    content: "Rollback steps",
+    sourcePath: "docs/runbook.md",
+    sourceAnchor: "runbook",
+    metadata: {
+      retrievalRoles: ["reviewer"],
+      chunkIndex: 0
+    },
+    createdAt: "2026-05-05T00:00:00.000Z"
   };
 }
 
@@ -60,6 +204,288 @@ test("sqlClientWithRows reuses the final batch when calls exceed seeded response
     capture.map((query) => query.text),
     ["select first", "select second", "select third"]
   );
+});
+
+test("PostgresStore.ensureProjectContext upserts workspace and project metadata", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  const result = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    workspaceName: "Team Workspace",
+    projectSlug: "devgod",
+    projectName: "Devgod",
+    repoPath: "/repo/devgod"
+  });
+
+  assert.equal(result.workspace.id, "workspace:team");
+  assert.equal(result.project.id, "project:team:devgod");
+  assert.match(capture[0]?.text ?? "", /insert into workspaces/);
+  assert.match(capture[0]?.text ?? "", /do update set name = excluded.name/);
+  assert.deepEqual(capture[0]?.values, ["workspace:team", "team", "Team Workspace"]);
+  assert.match(capture[1]?.text ?? "", /insert into projects/);
+  assert.match(capture[1]?.text ?? "", /repo_path = excluded.repo_path/);
+  assert.deepEqual(capture[1]?.values, [
+    "project:team:devgod",
+    "workspace:team",
+    "devgod",
+    "Devgod",
+    "/repo/devgod"
+  ]);
+});
+
+test("PostgresStore.createRun, getRun, and updateRun persist run summaries", async () => {
+  const run = createRunRecord();
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: run }],
+        []
+      ],
+      capture
+    )
+  );
+
+  await store.createRun(run);
+  const loaded = await store.getRun(run.id);
+  await store.updateRun({
+    ...run,
+    actor: "manager-2",
+    status: "in_progress"
+  });
+
+  assert.deepEqual(loaded, run);
+  assert.match(capture[0]?.text ?? "", /insert into runs/);
+  assert.equal(capture[0]?.values?.[6], JSON.stringify(run.summary));
+  assert.match(capture[1]?.text ?? "", /from runs/);
+  assert.deepEqual(capture[1]?.values, ["run-1"]);
+  assert.match(capture[2]?.text ?? "", /update runs/);
+  assert.equal(capture[2]?.values?.[1], "manager-2");
+  assert.equal(capture[2]?.values?.[5], "in_progress");
+});
+
+test("PostgresStore.savePlan and getPlan round-trip plan artifacts", async () => {
+  const plan = createPlanArtifact();
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: plan }]
+      ],
+      capture
+    )
+  );
+
+  await store.savePlan(plan);
+  const loaded = await store.getPlan(plan.runId);
+
+  assert.deepEqual(loaded, plan);
+  assert.match(capture[0]?.text ?? "", /insert into artifacts/);
+  assert.deepEqual(capture[0]?.values, [
+    "plan-1",
+    "run-1",
+    "Plan",
+    JSON.stringify(plan.content),
+    JSON.stringify({ kind: "plan" })
+  ]);
+  assert.match(capture[1]?.text ?? "", /where run_id = \$1 and kind = 'plan'/);
+});
+
+test("PostgresStore.replaceTasks rewrites tasks and dependencies", async () => {
+  const task = createTaskRecord();
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([[], [], [], []], capture));
+
+  await store.replaceTasks([task]);
+
+  assert.match(capture[0]?.text ?? "", /delete from task_dependencies/);
+  assert.deepEqual(capture[0]?.values, ["run-1"]);
+  assert.match(capture[1]?.text ?? "", /delete from tasks/);
+  assert.deepEqual(capture[1]?.values, ["run-1"]);
+  assert.match(capture[2]?.text ?? "", /insert into tasks/);
+  assert.equal(capture[2]?.values?.[17], JSON.stringify(task.packet));
+  assert.equal(capture[2]?.values?.[18], null);
+  assert.match(capture[3]?.text ?? "", /insert into task_dependencies/);
+  assert.deepEqual(capture[3]?.values, ["task-record-1", "dep-1"]);
+});
+
+test("PostgresStore.replaceTasks ignores empty task lists", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.replaceTasks([]);
+
+  assert.equal(capture.length, 0);
+});
+
+test("PostgresStore.getTasksByRun, getTask, and updateTask preserve claimed ownership", async () => {
+  const task = createTaskRecord();
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [{ payload: task }],
+        [{ payload: task }],
+        []
+      ],
+      capture
+    )
+  );
+
+  const tasks = await store.getTasksByRun(task.runId);
+  const loaded = await store.getTask(task.runId, task.packet.taskId);
+  await store.updateTask({
+    ...task,
+    status: "in_progress",
+    claimedBy: "backend-1"
+  });
+
+  assert.deepEqual(tasks, [task]);
+  assert.deepEqual(loaded, task);
+  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
+  assert.deepEqual(capture[0]?.values, ["run-1"]);
+  assert.match(capture[1]?.text ?? "", /where run_id = \$1 and task_key = \$2/);
+  assert.deepEqual(capture[1]?.values, ["run-1", "task-1"]);
+  assert.match(capture[2]?.text ?? "", /update tasks/);
+  assert.deepEqual(capture[2]?.values, [
+    "task-record-1",
+    "in_progress",
+    "backend-1",
+    JSON.stringify(task.packet)
+  ]);
+});
+
+test("PostgresStore lock methods persist and release active locks", async () => {
+  const lock = createLockRecord();
+  const capture: QueryCapture[] = [];
+  const releasedLock: LockRecord = {
+    ...lock,
+    releasedAt: "2026-05-05T01:00:00.000Z"
+  };
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [{ payload: releasedLock }]
+      ],
+      capture
+    )
+  );
+
+  await store.createLock(lock);
+  await store.releaseLocksForTask("run-1", "task-1", "2026-05-05T01:00:00.000Z");
+  const locks = await store.getActiveLocks(lock.projectId);
+
+  assert.match(capture[0]?.text ?? "", /insert into locks/);
+  assert.deepEqual(capture[0]?.values, [
+    "lock-1",
+    "workspace:team",
+    "project:team:devgod",
+    "run-1",
+    "task-1",
+    ["src/core/service.ts"],
+    "active"
+  ]);
+  assert.match(capture[1]?.text ?? "", /set status = 'released'/);
+  assert.deepEqual(capture[1]?.values, ["run-1", "task-1", "2026-05-05T01:00:00.000Z"]);
+  assert.deepEqual(locks, [releasedLock]);
+});
+
+test("PostgresStore.saveMemoryEntry serializes metadata and optional fields", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+  const entry = createMemoryEntryRecord();
+
+  await store.saveMemoryEntry(entry);
+
+  assert.match(capture[0]?.text ?? "", /insert into memory_entries/);
+  assert.deepEqual(capture[0]?.values, [
+    "memory-1",
+    "workspace:team",
+    "project:team:devgod",
+    "run-1",
+    "task-1",
+    "project",
+    "decision",
+    "Decision log",
+    "Use the contract-first path.",
+    "reviewer-1",
+    "memory_curator",
+    "approved",
+    ".devgod/memory/decision-log.md",
+    "decision-log",
+    JSON.stringify(entry.metadata)
+  ]);
+});
+
+test("PostgresStore.replaceMarkdownArtifacts replaces stale rows inside a transaction", async () => {
+  const capture: QueryCapture[] = [];
+  const artifact = createMarkdownArtifactRecord();
+  const store = new PostgresStore(sqlClientWithRows([[], [], [], [], []], capture));
+
+  await store.replaceMarkdownArtifacts({
+    workspaceId: artifact.workspaceId,
+    projectId: artifact.projectId,
+    runId: artifact.runId,
+    artifacts: [artifact]
+  });
+
+  assert.equal(capture[0]?.text, "begin");
+  assert.match(capture[1]?.text ?? "", /delete from embedding_jobs/);
+  assert.deepEqual(capture[1]?.values, ["project:team:devgod"]);
+  assert.match(capture[2]?.text ?? "", /delete from artifacts/);
+  assert.deepEqual(capture[2]?.values, ["project:team:devgod"]);
+  assert.match(capture[3]?.text ?? "", /insert into artifacts/);
+  assert.deepEqual(capture[3]?.values, [
+    "artifact-1",
+    "workspace:team",
+    "project:team:devgod",
+    "run-1",
+    "Runbook",
+    JSON.stringify({ text: "Rollback steps" }),
+    JSON.stringify({
+      retrievalRoles: ["reviewer"],
+      chunkIndex: 0,
+      sourcePath: "docs/runbook.md",
+      sourceAnchor: "runbook"
+    })
+  ]);
+  assert.equal(capture[4]?.text, "commit");
+});
+
+test("PostgresStore.replaceMarkdownArtifacts rolls back when artifact persistence fails", async () => {
+  const capture: QueryCapture[] = [];
+  const artifact = createMarkdownArtifactRecord();
+  const client: SqlClient = {
+    async query<Row>(text: string, values?: readonly unknown[]): Promise<SqlQueryResult<Row>> {
+      capture.push({ text, values });
+      if (text.includes("insert into artifacts")) {
+        throw new Error("insert failed");
+      }
+      return {
+        rows: [],
+        rowCount: 0
+      };
+    }
+  };
+  const store = new PostgresStore(client);
+
+  await assert.rejects(
+    store.replaceMarkdownArtifacts({
+      workspaceId: artifact.workspaceId,
+      projectId: artifact.projectId,
+      runId: artifact.runId,
+      artifacts: [artifact]
+    }),
+    /insert failed/
+  );
+
+  assert.equal(capture[0]?.text, "begin");
+  assert.equal(capture[capture.length - 1]?.text, "rollback");
 });
 
 test("PostgresStore.saveReview persists actor provenance and waiver authority", async () => {
@@ -806,6 +1232,45 @@ test("PostgresStore.leaseEmbeddingJobs marks pending jobs as processing", async 
   assert.match(capture[0]?.text ?? "", /for update skip locked/);
   assert.match(capture[0]?.text ?? "", /status = 'processing'/);
   assert.deepEqual(capture[0]?.values, [2]);
+});
+
+test("PostgresStore.getEmbeddingSource delegates memory and artifact lookups", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          sourceTable: "memory_entries",
+          sourceId: "memory-1",
+          title: "Memory title",
+          content: "Memory content"
+        }
+      ],
+      [
+        {
+          sourceTable: "artifacts",
+          sourceId: "artifact-1",
+          title: "Artifact title",
+          content: "Artifact content"
+        }
+      ]
+    ])
+  );
+
+  const memorySource = await store.getEmbeddingSource("memory_entries", "memory-1");
+  const artifactSource = await store.getEmbeddingSource("artifacts", "artifact-1");
+
+  assert.deepEqual(memorySource, {
+    sourceTable: "memory_entries",
+    sourceId: "memory-1",
+    title: "Memory title",
+    content: "Memory content"
+  });
+  assert.deepEqual(artifactSource, {
+    sourceTable: "artifacts",
+    sourceId: "artifact-1",
+    title: "Artifact title",
+    content: "Artifact content"
+  });
 });
 
 test("PostgresStore.completeEmbeddingJob writes the vector and marks the job done", async () => {

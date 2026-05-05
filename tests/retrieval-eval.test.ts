@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runRetrievalMemoryBaseline } from "../src/index.ts";
+import { mutateMemoryEntryWhere, runRetrievalMemoryBaseline } from "../src/evals/retrieval-memory-baseline.ts";
+import type { MemoryEntryRecord } from "../src/domain/types.ts";
+import { MemoryStore } from "../src/store/memory-store.ts";
 
 test("retrieval memory baseline passes all seeded cases", async () => {
   const report = await runRetrievalMemoryBaseline();
@@ -27,4 +29,45 @@ test("retrieval memory baseline returns per-case results", async () => {
     "conflict_candidates_visible",
     "unprovenanced_blocked"
   ]);
+});
+
+test("mutateMemoryEntryWhere updates matching entries and rejects missing ones", () => {
+  const store = new MemoryStore();
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  memoryEntries.set("memory-1", {
+    id: "memory-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    taskId: "task-1",
+    scope: "project",
+    entryType: "decision",
+    title: "Incident playbook",
+    content: "rollback checklist",
+    reviewer: "memory_curator",
+    actor: "memory_curator",
+    status: "approved",
+    metadata: {},
+    createdAt: "2026-05-05T00:00:00.000Z"
+  });
+
+  mutateMemoryEntryWhere(
+    store,
+    (entry) => entry.title === "Incident playbook",
+    (entry) => ({
+      ...entry,
+      reviewer: ""
+    })
+  );
+  assert.equal(memoryEntries.get("memory-1")?.reviewer, "");
+
+  assert.throws(
+    () =>
+      mutateMemoryEntryWhere(
+        store,
+        (entry) => entry.title === "missing",
+        (entry) => entry
+      ),
+    /expected matching memory entry/
+  );
 });

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCoverageSummary, validateCoverageThresholds } from "../src/runtime/coverage-thresholds.ts";
+import {
+  parseCoverageReport,
+  parseCoverageSummary,
+  validateCoverageThresholds,
+  validatePerFileCoverage
+} from "../src/runtime/coverage-thresholds.ts";
 
 test("parseCoverageSummary extracts the aggregate coverage row", () => {
   const summary = parseCoverageSummary(`
@@ -20,6 +25,51 @@ test("parseCoverageSummary returns null when the aggregate row is missing", () =
   const summary = parseCoverageSummary("# no aggregate coverage row present");
 
   assert.equal(summary, null);
+});
+
+test("parseCoverageReport extracts src file rows and ignores directory rows", () => {
+  const report = parseCoverageReport(`
+# start of coverage report
+# -------------------------------------------------------------------
+# file                             | line % | branch % | funcs % | uncovered lines
+# -------------------------------------------------------------------
+# src                              |        |          |         |
+#  admin.ts                        | 100.00 |   100.00 |  100.00 |
+#  install                         |        |          |         |
+#   cli.ts                         |  98.50 |    97.00 |  100.00 | 12-14
+# tests                            |        |          |         |
+#  admin.test.ts                   | 100.00 |   100.00 |  100.00 |
+# -------------------------------------------------------------------
+# all files                        |  99.12 |    98.50 |  100.00 |
+# -------------------------------------------------------------------
+# end of coverage report
+`);
+
+  assert.deepEqual(report.aggregate, {
+    line: 99.12,
+    branch: 98.5,
+    funcs: 100
+  });
+  assert.deepEqual(report.files, [
+    {
+      file: "src/admin.ts",
+      line: 100,
+      branch: 100,
+      funcs: 100
+    },
+    {
+      file: "src/install/cli.ts",
+      line: 98.5,
+      branch: 97,
+      funcs: 100
+    },
+    {
+      file: "tests/admin.test.ts",
+      line: 100,
+      branch: 100,
+      funcs: 100
+    }
+  ]);
 });
 
 test("validateCoverageThresholds reports only the failing dimensions", () => {
@@ -72,4 +122,58 @@ test("validateCoverageThresholds reports function failures and accepts passing s
   );
 
   assert.deepEqual(passing, []);
+});
+
+test("validatePerFileCoverage reports missing files and per-dimension failures", () => {
+  const failures = validatePerFileCoverage({
+    files: [
+      {
+        file: "src/admin.ts",
+        line: 100,
+        branch: 99.99,
+        funcs: 100
+      },
+      {
+        file: "src/install/cli.ts",
+        line: 100,
+        branch: 100,
+        funcs: 100
+      }
+    ],
+    expectedFiles: ["src/admin.ts", "src/core/service.ts"],
+    requiredCoverage: {
+      line: 100,
+      branch: 100,
+      funcs: 100
+    }
+  });
+
+  assert.deepEqual(failures, [
+    "src/admin.ts branch coverage 99.99% is below 100.00%",
+    "missing coverage for src/core/service.ts"
+  ]);
+});
+
+test("validatePerFileCoverage reports line and function failures independently", () => {
+  const failures = validatePerFileCoverage({
+    files: [
+      {
+        file: "src/admin.ts",
+        line: 99.99,
+        branch: 100,
+        funcs: 99.5
+      }
+    ],
+    expectedFiles: ["src/admin.ts"],
+    requiredCoverage: {
+      line: 100,
+      branch: 100,
+      funcs: 100
+    }
+  });
+
+  assert.deepEqual(failures, [
+    "src/admin.ts line coverage 99.99% is below 100.00%",
+    "src/admin.ts function coverage 99.50% is below 100.00%"
+  ]);
 });

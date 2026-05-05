@@ -9,6 +9,105 @@ import {
 import { DevgodCoreService } from "../src/core/service.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
+test("createActionHandlers forwards every action to the matching service method", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const service = {
+    intakeRequest(input: unknown) {
+      calls.push({ method: "intakeRequest", args: [input] });
+      return Promise.resolve("intake");
+    },
+    createPlan(input: unknown) {
+      calls.push({ method: "createPlan", args: [input] });
+      return Promise.resolve("plan");
+    },
+    createTaskGraph(runId: string, taskPackets: unknown[]) {
+      calls.push({ method: "createTaskGraph", args: [runId, taskPackets] });
+      return Promise.resolve("graph");
+    },
+    claimTask(runId: string, taskId: string, actor: string) {
+      calls.push({ method: "claimTask", args: [runId, taskId, actor] });
+      return Promise.resolve("claim");
+    },
+    submitHandoff(runId: string, taskId: string, handoff: unknown) {
+      calls.push({ method: "submitHandoff", args: [runId, taskId, handoff] });
+      return Promise.resolve("handoff");
+    },
+    recordReview(runId: string, taskId: string, actor: string, review: unknown) {
+      calls.push({ method: "recordReview", args: [runId, taskId, actor, review] });
+      return Promise.resolve("review");
+    },
+    promoteMemory(runId: string, memory: unknown) {
+      calls.push({ method: "promoteMemory", args: [runId, memory] });
+      return Promise.resolve("memory");
+    },
+    searchMemory(input: unknown) {
+      calls.push({ method: "searchMemory", args: [input] });
+      return Promise.resolve("search");
+    },
+    getStatus(runId: string) {
+      calls.push({ method: "getStatus", args: [runId] });
+      return Promise.resolve("status");
+    },
+    resumeRun(runId: string) {
+      calls.push({ method: "resumeRun", args: [runId] });
+      return Promise.resolve("resume");
+    }
+  } as unknown as DevgodCoreService;
+
+  const handlers = createActionHandlers(service);
+
+  assert.equal(await handlers.intake_request({ request: "x" } as never), "intake");
+  assert.equal(await handlers.create_plan({ plan: "x" } as never), "plan");
+  assert.equal(
+    await handlers.create_task_graph({
+      runId: "run-1",
+      taskPackets: [{ taskId: "task-1" }] as never
+    }),
+    "graph"
+  );
+  assert.equal(await handlers.claim_task({ runId: "run-1", taskId: "task-1", actor: "worker" }), "claim");
+  assert.equal(
+    await handlers.submit_handoff({
+      runId: "run-1",
+      taskId: "task-1",
+      handoff: { actor: "worker" } as never
+    }),
+    "handoff"
+  );
+  assert.equal(
+    await handlers.record_review({
+      runId: "run-1",
+      taskId: "task-1",
+      actor: "reviewer",
+      review: { reviewerRole: "reviewer" } as never
+    }),
+    "review"
+  );
+  assert.equal(
+    await handlers.promote_memory({
+      runId: "run-1",
+      memory: { title: "note" } as never
+    }),
+    "memory"
+  );
+  assert.equal(await handlers.search_memory({ query: "note" } as never), "search");
+  assert.equal(await handlers.get_status({ runId: "run-1" }), "status");
+  assert.equal(await handlers.resume_run({ runId: "run-1" }), "resume");
+
+  assert.deepEqual(calls, [
+    { method: "intakeRequest", args: [{ request: "x" }] },
+    { method: "createPlan", args: [{ plan: "x" }] },
+    { method: "createTaskGraph", args: ["run-1", [{ taskId: "task-1" }]] },
+    { method: "claimTask", args: ["run-1", "task-1", "worker"] },
+    { method: "submitHandoff", args: ["run-1", "task-1", { actor: "worker" }] },
+    { method: "recordReview", args: ["run-1", "task-1", "reviewer", { reviewerRole: "reviewer" }] },
+    { method: "promoteMemory", args: ["run-1", { title: "note" }] },
+    { method: "searchMemory", args: [{ query: "note" }] },
+    { method: "getStatus", args: ["run-1"] },
+    { method: "resumeRun", args: ["run-1"] }
+  ]);
+});
+
 function createServiceAndRun(
   overrides: {
     bindings?: ReviewIdentityBindings | undefined;

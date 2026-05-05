@@ -22,7 +22,7 @@ export interface RetrievalEvalReport {
   summary: RetrievalEvalSummary;
 }
 
-function mutateMemoryEntryWhere(
+export function mutateMemoryEntryWhere(
   store: MemoryStore,
   predicate: (entry: MemoryEntryRecord) => boolean,
   mutate: (entry: MemoryEntryRecord) => MemoryEntryRecord

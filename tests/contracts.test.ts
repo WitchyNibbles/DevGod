@@ -1,12 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canActorWaiveReview,
+  defaultRetrievalRoles,
+  effectiveRequiredReviews,
+  findSecretSignals,
+  hasFutureTenseClaim,
+  isCompletionStandard,
+  isGateReviewRole,
+  isIdentityAssurance,
+  isQualityGate,
+  isRetrievalRole,
+  isReviewWaiverAuthority,
+  isValidStopGoDecision,
   canReviewRecordSatisfyGate,
-  validateReviewAction,
-  validateHandoff,
+  normalizeRetrievalMetadata,
   normalizeIntakeRequest,
   normalizeSearchInput,
   validateMemoryPromotion,
+  validateReviewAction,
+  validateHandoff,
   validateTaskPacket
 } from "../src/domain/contracts.ts";
 
@@ -24,6 +37,22 @@ test("normalizeIntakeRequest returns required intake fields", () => {
   assert.ok(summary.risks.length > 0);
   assert.ok(summary.unknowns.length > 0);
   assert.equal(summary.stopGo, "needs_review");
+});
+
+test("normalizeIntakeRequest derives goal and go stopGo from explicit safe inputs", () => {
+  const summary = normalizeIntakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "   ",
+    request: "   Capture the final docs wording.   ",
+    goal: "  polish docs  ",
+    risks: ["minor doc drift"],
+    unknowns: []
+  });
+
+  assert.equal(summary.goal, "polish docs");
+  assert.equal(summary.stopGo, "go");
 });
 
 test("validateTaskPacket rejects missing operational controls", () => {
@@ -112,6 +141,34 @@ test("validateTaskPacket accepts newly shipped specialist roles", () => {
   assert.ok(!errors.some((error) => error.includes("ownerRole must be one of")));
 });
 
+test("validateTaskPacket rejects duplicate gates, roles, and write scope", () => {
+  const errors = validateTaskPacket({
+    taskId: "task-1",
+    title: "Bad task",
+    ownerRole: "backend_engineer",
+    completionStandard: "artifact_complete",
+    requiredSpecialistRoles: ["backend_engineer", "backend_engineer"],
+    qualityGates: ["tdd_required", "tdd_required"],
+    goal: "ship something",
+    inputs: ["brief"],
+    outputs: ["handoff"],
+    dependencies: [],
+    allowedWriteScope: ["src/core", "src/core"],
+    outOfScope: [],
+    acceptanceCriteria: ["done"],
+    verificationSteps: ["npm test"],
+    requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
+    securityChecks: ["no secrets"],
+    antiPatterns: ["broad edits"],
+    rollbackNotes: "revert patch",
+    handoffFormat: "summary"
+  });
+
+  assert.ok(errors.includes("requiredSpecialistRoles must not contain empty or duplicate values"));
+  assert.ok(errors.includes("qualityGates must not contain empty or duplicate values"));
+  assert.ok(errors.includes("duplicate write scope: src/core"));
+});
+
 test("validateHandoff rejects empty evidence fields", () => {
   const errors = validateHandoff({
     actor: "planner",
@@ -171,6 +228,39 @@ test("validateReviewAction rejects spoofed gate claims and invalid waivers", () 
   );
 });
 
+test("validateReviewAction accepts matching reviewer roles and valid security waivers", () => {
+  const passErrors = validateReviewAction(
+    {
+      actor: "security-1",
+      actorRole: "security_reviewer",
+      waiverAuthority: "none"
+    },
+    {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: ["checked auth"]
+    }
+  );
+  assert.deepEqual(passErrors, []);
+
+  const waiveErrors = validateReviewAction(
+    {
+      actor: "security-1",
+      actorRole: "security_reviewer",
+      waiverAuthority: "security_exception"
+    },
+    {
+      reviewerRole: "security_reviewer",
+      state: "waived",
+      severity: "low",
+      findings: ["accepted"],
+      waiverReason: "documented exception"
+    }
+  );
+  assert.deepEqual(waiveErrors, []);
+});
+
 test("canReviewRecordSatisfyGate rejects legacy-backfilled review provenance", () => {
   assert.equal(
     canReviewRecordSatisfyGate({
@@ -204,6 +294,68 @@ test("validateMemoryPromotion rejects secrets and speculative claims", () => {
 
   assert.ok(errors.some((error) => error.includes("secret")));
   assert.ok(errors.some((error) => error.includes("speculative")));
+});
+
+test("normalizeRetrievalMetadata defaults roles and deduplicates metadata arrays", () => {
+  const metadata = normalizeRetrievalMetadata({
+    retrievalRoles: ["planner", "planner", "invalid" as "planner"],
+    tags: ["ops", "ops", " docs "],
+    supersededBy: ["a", "a", "b"],
+    contradicts: ["x", "x", "y"]
+  });
+
+  assert.deepEqual(metadata.retrievalRoles, ["planner"]);
+  assert.deepEqual(metadata.tags, ["ops", "docs"]);
+  assert.deepEqual(metadata.supersededBy, ["a", "b"]);
+  assert.deepEqual(metadata.contradicts, ["x", "y"]);
+});
+
+test("default helpers and type guards expose the shipped workflow vocabulary", () => {
+  assert.ok(defaultRetrievalRoles().includes("planner"));
+  assert.deepEqual(effectiveRequiredReviews(["reviewer"]), ["reviewer", "security_reviewer", "qa_engineer"]);
+  assert.equal(isRetrievalRole("planner"), true);
+  assert.equal(isRetrievalRole("ceo"), false);
+  assert.equal(isGateReviewRole("reviewer"), true);
+  assert.equal(isGateReviewRole("planner"), false);
+  assert.equal(isReviewWaiverAuthority("manager"), true);
+  assert.equal(isReviewWaiverAuthority("bad"), false);
+  assert.equal(isIdentityAssurance("authenticated"), true);
+  assert.equal(isIdentityAssurance("bad"), false);
+  assert.equal(isCompletionStandard("specialist_verified"), true);
+  assert.equal(isCompletionStandard("bad"), false);
+  assert.equal(isQualityGate("tdd_required"), true);
+  assert.equal(isQualityGate("bad"), false);
+  assert.equal(isValidStopGoDecision("go"), true);
+  assert.equal(isValidStopGoDecision("later"), false);
+});
+
+test("waiver and secret helpers classify supported policy cases", () => {
+  assert.equal(
+    canActorWaiveReview({
+      actorRole: "planner",
+      reviewerRole: "qa_engineer",
+      waiverAuthority: "manager"
+    }),
+    true
+  );
+  assert.equal(
+    canActorWaiveReview({
+      actorRole: "planner",
+      reviewerRole: "security_reviewer",
+      waiverAuthority: "manager"
+    }),
+    false
+  );
+  assert.equal(
+    canActorWaiveReview({
+      actorRole: "security_reviewer",
+      reviewerRole: "security_reviewer",
+      waiverAuthority: "security_exception"
+    }),
+    true
+  );
+  assert.ok(findSecretSignals("-----BEGIN RSA PRIVATE KEY-----").length > 0);
+  assert.equal(hasFutureTenseClaim("This system will always self-modify."), true);
 });
 
 test("normalizeSearchInput defaults requesterRole and rejects invalid retrieval roles", async () => {

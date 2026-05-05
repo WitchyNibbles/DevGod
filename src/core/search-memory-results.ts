@@ -45,13 +45,21 @@ export function annotateConflictSignals(
     }
   }
 
-  return results.map((result) => ({
-    ...result,
-    conflict: {
-      detected: (conflictMap.get(result.id)?.size ?? 0) > 0,
-      relatedIds: [...(conflictMap.get(result.id) ?? new Set<string>())].sort()
+  return results.flatMap((result) => {
+    if (!result) {
+      return [];
     }
-  }));
+
+    return [
+      {
+        ...result,
+        conflict: {
+          detected: (conflictMap.get(result.id)?.size ?? 0) > 0,
+          relatedIds: [...(conflictMap.get(result.id) ?? new Set<string>())].sort()
+        }
+      }
+    ];
+  });
 }
 
 const conflictPairs = [
