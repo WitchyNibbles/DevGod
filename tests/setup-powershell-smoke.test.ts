@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,11 +137,17 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
     assert.ok(inspectCalls.every((call) => call === "inspect -f {{.State.Health.Status}} alpha-container"));
 
     const capturedEnv = await readFile(npmEnvCapture, "utf8");
+    const capturedProjectRepoPath =
+      capturedEnv
+        .split(/\r?\n/)
+        .find((line) => line.startsWith("DEVGOD_PROJECT_REPO_PATH="))
+        ?.slice("DEVGOD_PROJECT_REPO_PATH=".length) ?? "";
+
     assert.match(capturedEnv, /DEVGOD_WORKSPACE_SLUG=team/);
     assert.match(capturedEnv, /DEVGOD_WORKSPACE_NAME=Alpha Team/);
     assert.match(capturedEnv, /DEVGOD_PROJECT_SLUG=alpha/);
     assert.match(capturedEnv, /DEVGOD_PROJECT_NAME=Alpha Project/);
-    assert.match(capturedEnv, new RegExp(`DEVGOD_PROJECT_REPO_PATH=${targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.equal(await realpath(capturedProjectRepoPath), await realpath(targetRoot));
     assert.match(capturedEnv, /DEVGOD_DOCKER_CONTAINER_NAME=alpha-container/);
 
     const copiedEnv = await readFile(join(targetRoot, ".env"), "utf8");
