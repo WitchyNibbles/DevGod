@@ -38,6 +38,10 @@ validate_task_id() {
   [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "task_id must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: ${value}"
 }
 
+if [[ -n "$requested_task_id" ]]; then
+  validate_task_id "$requested_task_id"
+fi
+
 require_file() {
   local path="$1"
   [[ -f "$path" ]] || fail "missing file: ${path#"$repo_root"/}"
@@ -200,10 +204,6 @@ active_lines=("${active_lines[@]%$'\r'}")
 task_id="${active_lines[0]#task_id=}"
 task_id="${task_id%$'\r'}"
 [[ -n "$task_id" ]] || fail "task_id must not be empty in .devgod/ACTIVE"
-
-if [[ -n "$requested_task_id" ]]; then
-  validate_task_id "$requested_task_id"
-fi
 validate_task_id "$task_id"
 
 if [[ -n "$requested_task_id" && "$requested_task_id" != "$task_id" ]]; then
