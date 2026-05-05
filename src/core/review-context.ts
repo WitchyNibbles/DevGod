@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import {
-  canActorWaiveReview,
   isRetrievalRole,
   isReviewWaiverAuthority
 } from "../domain/contracts.ts";
@@ -13,6 +12,7 @@ import type {
   ReviewWaiverAuthority
 } from "../domain/types.ts";
 import { reviewStates } from "../domain/types.ts";
+import { deriveWaiverContext } from "./review-context-waiver.ts";
 
 export interface ReviewActionContextResolverInput {
   runId: string;
@@ -394,51 +394,6 @@ function resolveActorBinding(
   }
 
   return actorBinding;
-}
-
-function deriveWaiverContext(
-  actorBinding: ReviewIdentityActorBinding,
-  reviewerRole: GateReviewRole
-): ReviewActionContext {
-  const candidates: Array<{
-    actorRole: RetrievalRole;
-    waiverAuthority: Exclude<ReviewWaiverAuthority, "none">;
-  }> = [];
-
-  for (const actorRole of actorBinding.roles) {
-    for (const waiverAuthority of actorBinding.waiverAuthorities ?? []) {
-      if (
-        canActorWaiveReview({
-          actorRole,
-          reviewerRole,
-          waiverAuthority
-        })
-      ) {
-        candidates.push({ actorRole, waiverAuthority });
-      }
-    }
-  }
-
-  if (candidates.length === 0) {
-    throw new Error(`Actor ${actorBinding.actor} is not allowed to waive ${reviewerRole}`);
-  }
-
-  const [candidate] = candidates;
-  const ambiguous = candidates.some(
-    (nextCandidate) =>
-      nextCandidate.actorRole !== candidate.actorRole ||
-      nextCandidate.waiverAuthority !== candidate.waiverAuthority
-  );
-
-  if (ambiguous) {
-    throw new Error(`Actor ${actorBinding.actor} has ambiguous waiver authority for ${reviewerRole}`);
-  }
-
-  return {
-    actor: actorBinding.actor,
-    actorRole: candidate.actorRole,
-    waiverAuthority: candidate.waiverAuthority
-  };
 }
 
 export function createReviewActionContextResolver(

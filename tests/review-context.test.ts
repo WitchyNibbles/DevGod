@@ -146,6 +146,88 @@ test("createReviewActionContextResolver derives waiver authority from reviewed b
   });
 });
 
+test("createReviewActionContextResolver rejects waived reviews from unverified principals before waiver resolution", async () => {
+  const resolver = createReviewActionContextResolver({
+    bindings: {
+      bindings: [
+        {
+          principal: {
+            provider: "github",
+            subject: "manager-1"
+          },
+          actors: [
+            {
+              actor: "release-manager",
+              roles: ["planner"],
+              waiverAuthorities: ["manager"]
+            }
+          ]
+        }
+      ]
+    },
+    resolveAuthenticatedPrincipal() {
+      return {
+        provider: "github",
+        subject: "manager-1",
+        verified: false
+      };
+    }
+  });
+
+  await assert.rejects(
+    async () =>
+      resolver({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "release-manager",
+        reviewerRole: "qa_engineer",
+        reviewState: "waived"
+      }),
+    /not verified/
+  );
+});
+
+test("createReviewActionContextResolver resolves actor binding before waived review authority checks", async () => {
+  const resolver = createReviewActionContextResolver({
+    bindings: {
+      bindings: [
+        {
+          principal: {
+            provider: "github",
+            subject: "manager-1"
+          },
+          actors: [
+            {
+              actor: "release-manager",
+              roles: ["planner"],
+              waiverAuthorities: ["manager"]
+            }
+          ]
+        }
+      ]
+    },
+    resolveAuthenticatedPrincipal() {
+      return {
+        provider: "github",
+        subject: "manager-1",
+        verified: true
+      };
+    }
+  });
+
+  await assert.rejects(
+    async () =>
+      resolver({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "missing-manager",
+        reviewerRole: "qa_engineer",
+        reviewState: "waived"
+      }),
+    /Actor missing-manager is not bound to github:manager-1/
+  );
+});
+
 test("loadReviewIdentityBindings reads reviewed binding files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "devgod-review-bindings-"));
   const filePath = join(directory, "review-identity-bindings.json");
