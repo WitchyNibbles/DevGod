@@ -1,0 +1,56 @@
+# Task Packet: Trusted Review Context 01 Contract Helper
+
+- task_id: `trusted-review-context-01`
+- owner: `backend_engineer`
+- goal: Add a reusable package-native contract/helper for trusted review-context resolution without re-opening the review authority trust gap
+- inputs:
+  - `.devgod/work/briefs/2026-05-05-trusted-review-context-resolution.md`
+  - `.devgod/work/plans/2026-05-05-trusted-review-context-resolution.md`
+  - `src/core/service.ts`
+  - `src/domain/types.ts`
+  - `tests/actions.test.ts`
+  - `tests/service.test.ts`
+- dependencies:
+  - none
+- allowed write scope:
+  - `src/core/review-context.ts`
+  - `src/core/service.ts`
+  - `src/domain/types.ts`
+  - `src/index.ts`
+  - `tests/actions.test.ts`
+  - `tests/service.test.ts`
+- out_of_scope:
+  - auth-provider adapters
+  - store, policy, or SQL migration changes
+  - consumer-repo files outside package docs or exported package surface
+- acceptance_criteria:
+  - public package surface exports one standard helper/contract for trusted review-context resolution
+  - helper shape makes authenticated principal input explicit and authority-bearing output controlled by package code or explicit server-owned mapping
+  - callers cannot derive approval power from arbitrary review payload claims
+  - existing service failure on missing resolver still guards direct service usage
+- verification:
+  - `npm run typecheck`
+  - `node --experimental-strip-types --test tests/actions.test.ts tests/service.test.ts`
+- required_reviews:
+  - reviewer
+  - security_reviewer
+  - qa_engineer
+- security_checks:
+  - verify no helper parameter accepts unchecked `waiverAuthority`
+  - verify reviewer role resolution stays server-trusted
+  - verify helper docs/types do not imply built-in authentication
+- anti_patterns:
+  - wrapping the raw callback type without adding a safer contract
+  - moving provider-specific auth logic into `src/`
+  - weakening the missing-resolver error path for convenience
+- rollback_notes:
+  - revert helper, service, export, and test changes as one slice
+  - leave broader residual-risk closure artifacts untouched
+- handoff_format:
+  - `role: backend`
+  - `goal: helper shipped`
+  - `done: contract export, tests`
+  - `risk: loose trust input`
+  - `blk: none or blocker`
+  - `next: docs and gate review`
+

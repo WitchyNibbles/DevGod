@@ -1,0 +1,51 @@
+# Task Packet: Trusted Review Context 02 Adoption Surface
+
+- task_id: `trusted-review-context-02`
+- owner: `backend_engineer`
+- goal: Document and verify the standard consumer adoption path for the trusted review-context helper
+- inputs:
+  - `trusted-review-context-01` handoff
+  - `.devgod/work/briefs/2026-05-05-trusted-review-context-resolution.md`
+  - `README.md`
+  - `tests/actions.test.ts`
+  - `tests/service.test.ts`
+- dependencies:
+  - `trusted-review-context-01`
+- allowed write scope:
+  - `README.md`
+  - `tests/actions.test.ts`
+  - `tests/service.test.ts`
+- out_of_scope:
+  - installer or template scaffolding unless explicitly approved later
+  - auth-provider-specific setup guides
+  - runtime behavior changes outside coverage required by the documented path
+- acceptance_criteria:
+  - README includes a concise package-native resolver example based on authenticated principal input
+  - docs state the trust boundary: package resolves review context, consumer proves identity
+  - tests mirror the documented adoption path and fail if caller claims bypass trusted mapping
+  - package dry-run output remains clean and reusable
+- verification:
+  - `node --experimental-strip-types --test tests/actions.test.ts tests/service.test.ts`
+  - `npm pack --dry-run`
+- required_reviews:
+  - reviewer
+  - security_reviewer
+  - qa_engineer
+- security_checks:
+  - verify example code does not trust raw request payload actor claims
+  - verify docs do not suggest storing secrets or tokens in package config
+  - verify no example blurs authenticated principal data with user-submitted review data
+- anti_patterns:
+  - README prose with no executable regression coverage
+  - provider-branded examples that reduce package reuse
+  - mixing future installer automation into this slice
+- rollback_notes:
+  - revert docs and example-test changes only
+  - keep contract/helper runtime slice isolated if docs need follow-up
+- handoff_format:
+  - `role: backend`
+  - `goal: adoption path clear`
+  - `done: docs, example tests`
+  - `risk: consumer misuse`
+  - `blk: none or blocker`
+  - `next: reviewer sec qa gates`

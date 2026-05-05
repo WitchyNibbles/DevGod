@@ -1,0 +1,65 @@
+# Task Packet: Review Identity Adapter Hardening 01 Additive Slice
+
+- task_id: `review-identity-adapter-hardening-01`
+- owner: `backend_engineer`
+- goal: Ship one provider-agnostic review-principal adapter and one fail-closed verification path that installed repos can run before trusting review writes.
+- inputs:
+  - `.devgod/work/briefs/2026-05-05-review-identity-adapter-hardening.md`
+  - `src/core/review-context.ts`
+  - `src/admin.ts`
+  - `src/install/merge.ts`
+  - `.devgod/templates/review-identity-bindings.json`
+  - `tests/review-context.test.ts`
+  - `tests/install.test.ts`
+- dependencies:
+  - none
+- allowed write scope:
+  - `src/core/review-context.ts`
+  - `src/admin.ts`
+  - `src/index.ts`
+  - `src/install/merge.ts`
+  - `package.json`
+  - `.devgod/templates/review-identity-bindings.json`
+  - `.devgod/templates/review-identity-fixtures/**`
+  - `README.md`
+  - `tests/review-context.test.ts`
+  - `tests/install.test.ts`
+  - `tests/admin.test.ts`
+- out_of_scope:
+  - transport or framework middleware
+  - provider-specific auth/session code
+  - review store, policy, or SQL migration changes
+  - any relaxation of the existing fail-closed `recordReview` boundary
+- acceptance_criteria:
+  - package exports `createReviewPrincipalAdapter(...)` that turns consumer-authenticated principal lookup into the existing package-owned review-context path without adding provider logic
+  - package exports `verifyReviewIdentityAdapter(...)` that runs reviewed allow and deny fixtures against a consumer adapter and fails closed on unverified, unbound, actor-mismatched, or unauthorized-role cases
+  - admin surface exposes a `verify-review-identity` command, and installed repos receive a `devgod:verify:review-identity` script
+  - installer-shipped template surface includes reviewed bindings plus additive verification fixtures suitable for copy-and-review in consuming repos
+  - README states the trust boundary clearly: consumer proves identity, package maps identity to review authority, verification is mandatory before trusting wiring
+- verification:
+  - `npm run typecheck`
+  - `node --experimental-strip-types --test tests/review-context.test.ts tests/install.test.ts tests/admin.test.ts`
+  - `npm pack --dry-run`
+- required_reviews:
+  - `reviewer`
+  - `security_reviewer`
+  - `qa_engineer`
+- security_checks:
+  - verify adapter API never accepts caller-supplied `actorRole` or `waiverAuthority`
+  - verify fixture verification exercises both allow and deny cases and fails non-zero on bypassable wiring
+  - verify docs and templates never imply package-owned authentication
+- anti_patterns:
+  - adding express/nextjs/github-specific middleware or session parsing
+  - shipping a verification command that only checks file presence or schema shape
+  - letting fixtures pass when actor, principal subject, verification state, or reviewer role are mismatched
+  - widening write scope into service/store/migration code for convenience
+- rollback_notes:
+  - revert adapter, admin command, export, templates, docs, and tests as one additive slice
+  - leave existing trusted review-context helper and fail-closed service boundary intact
+- handoff_format:
+  - `role: backend`
+  - `goal: adapter verify slice`
+  - `done: runtime, cmd, fixtures, tests`
+  - `risk: fake verify path`
+  - `blk: none or blocker`
+  - `next: reviewer sec qa gates`
