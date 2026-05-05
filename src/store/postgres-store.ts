@@ -6,7 +6,6 @@ import type {
   MemoryEntryRecord,
   PlanArtifact,
   ProjectRecord,
-  RetrievalMetadata,
   RetrievalRole,
   ReviewRecord,
   RunRecord,
@@ -14,13 +13,8 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
-import {
-  buildArtifactSearchResult,
-  buildMemorySearchResult,
-  canRoleAccessRetrievalMetadata,
-  compareMemorySearchResults
-} from "../core/policy.ts";
+import { PostgresEmbeddingJobs } from "./postgres-embedding-jobs.ts";
+import { searchMemory } from "./postgres-memory-search.ts";
 import type {
   CompleteEmbeddingJobInput,
   DevgodStore,
@@ -47,63 +41,8 @@ interface JsonRow<T> {
   payload: T;
 }
 
-interface SearchMemoryRow {
-  id: string;
-  sourceKind: "memory_entry" | "artifact";
-  title: string;
-  content: string;
-  scope: SearchMemoryResult["scope"];
-  metadata?: RetrievalMetadata | null;
-  entryType?: MemoryEntryRecord["entryType"] | null;
-  artifactKind?: MarkdownArtifactRecord["kind"] | null;
-  actor?: string | null;
-  reviewer?: string | null;
-  runId: string;
-  taskId: string | null;
-  sourcePath?: string | null;
-  sourceAnchor?: string | null;
-  projectId: string | null;
-  createdAt: string;
-  vectorScore?: number | null;
-}
-
-interface EmbeddingJobRow {
-  id: string;
-  workspaceId: string;
-  projectId: string | null;
-  sourceTable: EmbeddingJobSourceTable;
-  sourceId: string;
-  embeddingModel: string;
-  status: EmbeddingJobRecord["status"];
-  errorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface EmbeddingSourceRow {
-  sourceTable: EmbeddingJobSourceTable;
-  sourceId: string;
-  title: string;
-  content: string;
-}
-
 function now(): string {
   return new Date().toISOString();
-}
-
-function mapEmbeddingJobRow(row: EmbeddingJobRow): EmbeddingJobRecord {
-  return {
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId ?? undefined,
-    sourceTable: row.sourceTable,
-    sourceId: row.sourceId,
-    embeddingModel: row.embeddingModel,
-    status: row.status,
-    errorMessage: row.errorMessage ?? undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  };
 }
 
 async function withTransaction<T>(client: SqlClient, work: () => Promise<T>): Promise<T> {
@@ -120,9 +59,11 @@ async function withTransaction<T>(client: SqlClient, work: () => Promise<T>): Pr
 
 export class PostgresStore implements DevgodStore {
   private readonly client: SqlClient;
+  private readonly embeddingJobs: PostgresEmbeddingJobs;
 
   constructor(client: SqlClient) {
     this.client = client;
+    this.embeddingJobs = new PostgresEmbeddingJobs(client);
   }
 
   async ensureProjectContext(params: {
@@ -611,164 +552,26 @@ export class PostgresStore implements DevgodStore {
   }
 
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
-    await this.clearDerivedEmbedding(input.sourceTable, input.sourceId);
-
-    const queuedJob = await this.client.query<EmbeddingJobRow>(
-      `insert into embedding_jobs (
-         workspace_id, project_id, source_table, source_id, embedding_model, status
-       )
-       values ($1, $2, $3, $4, $5, 'pending')
-       on conflict (source_table, source_id, embedding_model) do update
-       set workspace_id = excluded.workspace_id,
-           project_id = excluded.project_id,
-           status = 'pending',
-           error_message = null,
-           updated_at = now()
-       returning
-         id,
-         workspace_id as "workspaceId",
-         project_id as "projectId",
-         source_table as "sourceTable",
-         source_id as "sourceId",
-         embedding_model as "embeddingModel",
-         status,
-         error_message as "errorMessage",
-         created_at as "createdAt",
-         updated_at as "updatedAt"`,
-      [input.workspaceId, input.projectId ?? null, input.sourceTable, input.sourceId, input.embeddingModel]
-    );
-
-    const [job] = queuedJob.rows;
-    if (!job) {
-      throw new Error("failed to enqueue embedding job");
-    }
-
-    return mapEmbeddingJobRow(job);
+    return this.embeddingJobs.queueEmbeddingJob(input);
   }
 
   async leaseEmbeddingJobs(input: LeaseEmbeddingJobsInput): Promise<EmbeddingJobRecord[]> {
-    const leasedJobs = await this.client.query<EmbeddingJobRow>(
-      `with leased as (
-         select id
-         from embedding_jobs
-         where status = 'pending'
-         order by created_at asc, id asc
-         limit $1
-         for update skip locked
-       )
-       update embedding_jobs j
-       set status = 'processing',
-           error_message = null,
-           updated_at = now()
-       where j.id in (select id from leased)
-       returning
-         j.id,
-         j.workspace_id as "workspaceId",
-         j.project_id as "projectId",
-         j.source_table as "sourceTable",
-         j.source_id as "sourceId",
-         j.embedding_model as "embeddingModel",
-         j.status,
-         j.error_message as "errorMessage",
-         j.created_at as "createdAt",
-         j.updated_at as "updatedAt"`
-      ,
-      [input.limit]
-    );
-
-    return leasedJobs.rows.map(mapEmbeddingJobRow);
+    return this.embeddingJobs.leaseEmbeddingJobs(input);
   }
 
   async getEmbeddingSource(
     sourceTable: EmbeddingJobSourceTable,
     sourceId: string
   ): Promise<EmbeddingSourceRecord | undefined> {
-    if (sourceTable === "memory_entries") {
-      const result = await this.client.query<EmbeddingSourceRow>(
-        `select
-           'memory_entries'::text as "sourceTable",
-           id as "sourceId",
-           title,
-           content
-         from memory_entries
-         where id = $1`,
-        [sourceId]
-      );
-      return result.rows[0];
-    }
-
-    const result = await this.client.query<EmbeddingSourceRow>(
-      `select
-         'artifacts'::text as "sourceTable",
-         id as "sourceId",
-         title,
-         coalesce(content->>'text', content::text) as content
-       from artifacts
-       where id = $1`,
-      [sourceId]
-    );
-    return result.rows[0];
+    return this.embeddingJobs.getEmbeddingSource(sourceTable, sourceId);
   }
 
   async completeEmbeddingJob(input: CompleteEmbeddingJobInput): Promise<void> {
-    await withTransaction(this.client, async () => {
-      const completedJob = await this.client.query<EmbeddingJobRow>(
-        `update embedding_jobs
-         set status = 'done',
-             error_message = null,
-             updated_at = now()
-         where id = $1
-           and source_table = $2
-           and source_id = $3
-           and embedding_model = $4
-           and status = 'processing'
-         returning
-           id,
-           workspace_id as "workspaceId",
-           project_id as "projectId",
-           source_table as "sourceTable",
-           source_id as "sourceId",
-           embedding_model as "embeddingModel",
-           status,
-           error_message as "errorMessage",
-           created_at as "createdAt",
-           updated_at as "updatedAt"`,
-        [input.jobId, input.sourceTable, input.sourceId, input.embeddingModel]
-      );
-
-      if (!completedJob.rows[0]) {
-        throw new Error(`embedding job is not leased for completion: ${input.jobId}`);
-      }
-
-      const updatedRows = await this.writeDerivedEmbedding(
-        input.sourceTable,
-        input.sourceId,
-        input.embedding,
-        input.embeddingModel
-      );
-
-      if (updatedRows !== 1) {
-        throw new Error(`embedding source not found for completion: ${input.sourceTable}:${input.sourceId}`);
-      }
-    });
+    return this.embeddingJobs.completeEmbeddingJob(input);
   }
 
   async failEmbeddingJob(jobId: string, errorMessage: string): Promise<void> {
-    await withTransaction(this.client, async () => {
-      const result = await this.client.query(
-        `update embedding_jobs
-         set status = 'failed',
-             error_message = $2,
-             updated_at = now()
-         where id = $1
-           and status = 'processing'`,
-        [jobId, errorMessage]
-      );
-
-      if ((result.rowCount ?? 0) !== 1) {
-        throw new Error(`embedding job is not leased for failure: ${jobId}`);
-      }
-    });
+    return this.embeddingJobs.failEmbeddingJob(jobId, errorMessage);
   }
 
   async searchMemory(params: {
@@ -781,407 +584,7 @@ export class PostgresStore implements DevgodStore {
     embeddingModel?: string | undefined;
     requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]> {
-    const requesterRole = params.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
-    const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
-    const recentLimit = Math.min(Math.max(params.limit * 5, 25), 200);
-    const backfillLimit = Math.min(Math.max(params.limit * 3, 15), 100);
-    const vectorLimit = Math.min(Math.max(params.limit * 3, 15), 100);
-    const lexicalClauses = buildLexicalBackfillClauses(params.query, 5, "m", "m.content");
-
-    const recentMemoryResult = await this.client.query<SearchMemoryRow>(
-      `with project_context as (
-         select p.id as project_id
-         from projects p
-         join workspaces w on w.id = p.workspace_id
-         where w.slug = $1 and p.slug = $2
-       )
-       select
-         m.id,
-         'memory_entry'::text as "sourceKind",
-         m.title,
-         m.content,
-         m.scope,
-         m.metadata as metadata,
-         m.entry_type as "entryType",
-         m.actor,
-         m.reviewer,
-         m.run_id as "runId",
-         m.task_id as "taskId",
-         m.source_path as "sourcePath",
-         m.source_anchor as "sourceAnchor",
-         m.project_id as "projectId",
-         m.created_at as "createdAt"
-       from memory_entries m
-       join project_context pc on true
-       join workspaces w on w.id = m.workspace_id
-       where w.slug = $1
-         and m.status = 'approved'
-         and (
-           m.project_id = pc.project_id
-           or ($3::boolean and m.scope = 'global')
-         )
-       order by
-         case when m.project_id = pc.project_id then 0 else 1 end,
-         m.created_at desc
-       limit $4`,
-      [params.workspaceSlug, params.projectSlug, params.includeGlobal, recentLimit]
-    );
-
-    const backfillMemoryResult = await this.client.query<SearchMemoryRow>(
-      `with project_context as (
-         select p.id as project_id
-         from projects p
-         join workspaces w on w.id = p.workspace_id
-         where w.slug = $1 and p.slug = $2
-       )
-       select
-         m.id,
-         'memory_entry'::text as "sourceKind",
-         m.title,
-         m.content,
-         m.scope,
-         m.metadata as metadata,
-         m.entry_type as "entryType",
-         m.actor,
-         m.reviewer,
-         m.run_id as "runId",
-         m.task_id as "taskId",
-         m.source_path as "sourcePath",
-         m.source_anchor as "sourceAnchor",
-         m.project_id as "projectId",
-         m.created_at as "createdAt"
-       from memory_entries m
-       join project_context pc on true
-       join workspaces w on w.id = m.workspace_id
-       where w.slug = $1
-         and m.status = 'approved'
-         and (
-           m.project_id = pc.project_id
-           or ($3::boolean and m.scope = 'global')
-         )
-         and ${lexicalClauses.sql}
-       order by
-         case when m.project_id = pc.project_id then 0 else 1 end,
-         case when m.title ilike $4 then 0 else 1 end,
-         m.created_at desc
-       limit $${lexicalClauses.nextParam}`,
-      [params.workspaceSlug, params.projectSlug, params.includeGlobal, `%${params.query}%`, ...lexicalClauses.values, backfillLimit]
-    );
-
-    const vectorMemoryResult =
-      params.queryEmbedding && params.embeddingModel
-        ? await this.client.query<SearchMemoryRow>(
-            `with project_context as (
-               select p.id as project_id
-               from projects p
-               join workspaces w on w.id = p.workspace_id
-               where w.slug = $1 and p.slug = $2
-             )
-             select
-               m.id,
-               'memory_entry'::text as "sourceKind",
-               m.title,
-               m.content,
-               m.scope,
-               m.metadata as metadata,
-               m.entry_type as "entryType",
-               m.actor,
-               m.reviewer,
-               m.run_id as "runId",
-               m.task_id as "taskId",
-               m.source_path as "sourcePath",
-               m.source_anchor as "sourceAnchor",
-               m.project_id as "projectId",
-               m.created_at as "createdAt",
-               greatest(0, 1 - (m.embedding <=> $4::vector)) as "vectorScore"
-             from memory_entries m
-             join project_context pc on true
-             join workspaces w on w.id = m.workspace_id
-             where w.slug = $1
-               and m.status = 'approved'
-               and m.embedding is not null
-               and m.embedding_model = $5
-               and (
-                 m.project_id = pc.project_id
-                 or ($3::boolean and m.scope = 'global')
-               )
-             order by
-               case when m.project_id = pc.project_id then 0 else 1 end,
-               m.embedding <=> $4::vector asc,
-               m.created_at desc
-             limit $6`,
-            [
-              params.workspaceSlug,
-              params.projectSlug,
-              params.includeGlobal,
-              formatVector(params.queryEmbedding),
-              params.embeddingModel,
-              vectorLimit
-            ]
-          )
-        : { rows: [], rowCount: 0 };
-
-    const recentArtifactResult = await this.client.query<SearchMemoryRow>(
-      `with project_context as (
-         select p.id as project_id
-         from projects p
-         join workspaces w on w.id = p.workspace_id
-         where w.slug = $1 and p.slug = $2
-       )
-       select
-         a.id,
-         'artifact'::text as "sourceKind",
-         a.title,
-         coalesce(a.content->>'text', a.content::text) as content,
-         'project'::text as scope,
-         a.metadata as metadata,
-         null::text as "entryType",
-         a.kind as "artifactKind",
-         null::text as actor,
-         null::text as reviewer,
-         a.run_id as "runId",
-         null::text as "taskId",
-         a.metadata->>'sourcePath' as "sourcePath",
-         a.metadata->>'sourceAnchor' as "sourceAnchor",
-         a.project_id as "projectId",
-         a.created_at as "createdAt"
-       from artifacts a
-       join project_context pc on a.project_id = pc.project_id
-       where a.kind = 'markdown_chunk'
-       order by a.created_at desc
-       limit $3`,
-      [params.workspaceSlug, params.projectSlug, recentLimit]
-    );
-
-    const artifactLexicalClauses = buildLexicalBackfillClauses(
-      params.query,
-      4,
-      "a",
-      "coalesce(a.content->>'text', a.content::text)"
-    );
-    const backfillArtifactResult = await this.client.query<SearchMemoryRow>(
-      `with project_context as (
-         select p.id as project_id
-         from projects p
-         join workspaces w on w.id = p.workspace_id
-         where w.slug = $1 and p.slug = $2
-       )
-       select
-         a.id,
-         'artifact'::text as "sourceKind",
-         a.title,
-         coalesce(a.content->>'text', a.content::text) as content,
-         'project'::text as scope,
-         a.metadata as metadata,
-         null::text as "entryType",
-         a.kind as "artifactKind",
-         null::text as actor,
-         null::text as reviewer,
-         a.run_id as "runId",
-         null::text as "taskId",
-         a.metadata->>'sourcePath' as "sourcePath",
-         a.metadata->>'sourceAnchor' as "sourceAnchor",
-         a.project_id as "projectId",
-         a.created_at as "createdAt"
-       from artifacts a
-       join project_context pc on a.project_id = pc.project_id
-       where a.kind = 'markdown_chunk'
-         and ${artifactLexicalClauses.sql}
-       order by
-         case when a.title ilike $3 then 0 else 1 end,
-         a.created_at desc
-       limit $${artifactLexicalClauses.nextParam}`,
-      [`${params.workspaceSlug}`, `${params.projectSlug}`, `%${params.query}%`, ...artifactLexicalClauses.values, backfillLimit]
-    );
-
-    const vectorArtifactResult =
-      params.queryEmbedding && params.embeddingModel
-        ? await this.client.query<SearchMemoryRow>(
-            `with project_context as (
-               select p.id as project_id
-               from projects p
-               join workspaces w on w.id = p.workspace_id
-               where w.slug = $1 and p.slug = $2
-             )
-             select
-               a.id,
-               'artifact'::text as "sourceKind",
-               a.title,
-               coalesce(a.content->>'text', a.content::text) as content,
-               'project'::text as scope,
-               a.metadata as metadata,
-               null::text as "entryType",
-               a.kind as "artifactKind",
-               null::text as actor,
-               null::text as reviewer,
-               a.run_id as "runId",
-               null::text as "taskId",
-               a.metadata->>'sourcePath' as "sourcePath",
-               a.metadata->>'sourceAnchor' as "sourceAnchor",
-               a.project_id as "projectId",
-               a.created_at as "createdAt",
-               greatest(0, 1 - (a.embedding <=> $3::vector)) as "vectorScore"
-             from artifacts a
-             join project_context pc on a.project_id = pc.project_id
-             where a.kind = 'markdown_chunk'
-               and a.embedding is not null
-               and a.embedding_model = $4
-             order by a.embedding <=> $3::vector asc, a.created_at desc
-             limit $5`,
-            [params.workspaceSlug, params.projectSlug, formatVector(params.queryEmbedding), params.embeddingModel, vectorLimit]
-          )
-        : { rows: [], rowCount: 0 };
-
-    return dedupeMemoryRows([
-      ...recentMemoryResult.rows,
-      ...backfillMemoryResult.rows,
-      ...vectorMemoryResult.rows,
-      ...recentArtifactResult.rows,
-      ...backfillArtifactResult.rows,
-      ...vectorArtifactResult.rows
-    ])
-      .filter((entry) => canRoleAccessRetrievalMetadata(entry.metadata ?? undefined, requesterRole))
-      .map((entry) => {
-        if (entry.sourceKind === "artifact") {
-          const baseResult = buildArtifactSearchResult(
-            {
-              id: entry.id,
-              kind: "markdown_chunk",
-              title: entry.title,
-              content: entry.content,
-              sourcePath: entry.sourcePath ?? `artifact://${entry.id}`,
-              sourceAnchor: entry.sourceAnchor ?? undefined,
-              metadata: (entry.metadata ?? {}) as MarkdownArtifactRecord["metadata"],
-              createdAt: entry.createdAt,
-              runId: entry.runId
-            },
-            params.query,
-            params.projectSlug
-          );
-          return {
-            ...baseResult,
-            score: baseResult.score + vectorScoreBoost(entry.vectorScore)
-          };
-        }
-
-        const sameProject = entry.projectId === projectId;
-        const baseResult = buildMemorySearchResult(
-          {
-            id: entry.id,
-            title: entry.title,
-            content: entry.content,
-            scope: entry.scope,
-            entryType: entry.entryType ?? "fact",
-            actor: entry.actor ?? "",
-            reviewer: entry.reviewer ?? "",
-            runId: entry.runId,
-            taskId: entry.taskId ?? undefined,
-            sourcePath: entry.sourcePath ?? undefined,
-            sourceAnchor: entry.sourceAnchor ?? undefined,
-            metadata: entry.metadata ?? {},
-            createdAt: entry.createdAt
-          },
-          params.query,
-          sameProject,
-          sameProject ? params.projectSlug : undefined
-        );
-        return {
-          ...baseResult,
-          score: baseResult.score + vectorScoreBoost(entry.vectorScore)
-        };
-      })
-      .sort(compareMemorySearchResults)
-      .slice(0, params.limit);
+    return searchMemory(this.client, params);
   }
 
-  private async clearDerivedEmbedding(sourceTable: EmbeddingJobSourceTable, sourceId: string): Promise<void> {
-    if (sourceTable === "memory_entries") {
-      await this.client.query(
-        `update memory_entries
-         set embedding = null,
-             embedding_model = null,
-             updated_at = now()
-         where id = $1`,
-        [sourceId]
-      );
-      return;
-    }
-
-    await this.client.query(
-      `update artifacts
-       set embedding = null,
-           embedding_model = null
-       where id = $1`,
-      [sourceId]
-    );
-  }
-
-  private async writeDerivedEmbedding(
-    sourceTable: EmbeddingJobSourceTable,
-    sourceId: string,
-    embedding: readonly number[],
-    embeddingModel: string
-  ): Promise<number> {
-    const vectorValue = `[${embedding.join(",")}]`;
-
-    if (sourceTable === "memory_entries") {
-      const result = await this.client.query(
-        `update memory_entries
-         set embedding = $2::vector,
-             embedding_model = $3,
-             updated_at = now()
-         where id = $1`,
-        [sourceId, vectorValue, embeddingModel]
-      );
-      return result.rowCount ?? 0;
-    }
-
-    const result = await this.client.query(
-      `update artifacts
-       set embedding = $2::vector,
-           embedding_model = $3
-       where id = $1`,
-      [sourceId, vectorValue, embeddingModel]
-    );
-    return result.rowCount ?? 0;
-  }
-}
-
-function formatVector(values: readonly number[]): string {
-  return `[${values.join(",")}]`;
-}
-
-function vectorScoreBoost(vectorScore?: number | null): number {
-  if (vectorScore === null || vectorScore === undefined || !Number.isFinite(vectorScore)) {
-    return 0;
-  }
-
-  return Math.max(0, vectorScore) * 6;
-}
-
-function buildLexicalBackfillClauses(
-  query: string,
-  startParam: number,
-  alias: string,
-  contentExpression: string
-): {
-  sql: string;
-  values: string[];
-  nextParam: number;
-} {
-  const terms = [...new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? [])].slice(0, 5);
-  const values = terms.map((term) => `%${term}%`);
-  const clauses = values.map(
-    (_value, index) => `(${alias}.title ilike $${startParam + index} or ${contentExpression} ilike $${startParam + index})`
-  );
-
-  return {
-    sql: clauses.length > 0 ? clauses.join(" and ") : "true",
-    values,
-    nextParam: startParam + values.length
-  };
-}
-
-function dedupeMemoryRows(rows: readonly SearchMemoryRow[]): SearchMemoryRow[] {
-  return [...new Map(rows.map((row) => [row.id, row])).values()];
 }
