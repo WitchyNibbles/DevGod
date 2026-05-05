@@ -174,6 +174,148 @@ test("check-devgod-workflow-live accepts CRLF active files", async () => {
   }
 });
 
+test("check-devgod-workflow-live rejects requested task ids that do not match the active task", async () => {
+  const targetRoot = await mkdtemp(join(tmpdir(), "devgod-live-task-mismatch-"));
+  const taskId = "DG-LIVE-MATCH";
+
+  try {
+    await writeFile(join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
+
+    await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
+
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "briefs", `brief-${taskId}.md`),
+      `## Task ID\n\n\`${taskId}\`\n`,
+      "utf8"
+    );
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+      [
+        "## Task ID",
+        "",
+        `\`${taskId}\``,
+        "",
+        "## Owner role",
+        "",
+        "`qa_engineer`",
+        "",
+        "## Completion standard",
+        "",
+        "`artifact_complete`",
+        "",
+        "## Acceptance criteria",
+        "",
+        "- task-id alignment is enforced",
+        "",
+        "## Verification steps",
+        "",
+        "- bash scripts/check-devgod-workflow-live.sh --task-id DG-LIVE-MATCH",
+        "",
+        "## Required reviews",
+        "",
+        "- reviewer",
+        "- qa_engineer",
+        "- security_reviewer",
+        "",
+        "## Rollback notes",
+        "",
+        "- delete the fixture"
+      ].join("\n"),
+      "utf8"
+    );
+
+    for (const [role, actorRole] of [
+      ["reviewer", "reviewer"],
+      ["qa_engineer", "qa_engineer"],
+      ["security_reviewer", "security_reviewer"]
+    ] as const) {
+      await writeFile(
+        join(targetRoot, ".devgod", "work", "reviews", `review-${taskId}-${role}.md`),
+        [
+          "# Review Gate",
+          "",
+          "## Task ID",
+          "",
+          `\`${taskId}\``,
+          "",
+          "## Reviewer role",
+          "",
+          `\`${role}\``,
+          "",
+          "## Actor",
+          "",
+          "`synthetic-actor`",
+          "",
+          "## Actor role",
+          "",
+          `\`${actorRole}\``,
+          "",
+          "## Provenance status",
+          "",
+          "`summary_only`",
+          "",
+          "## Review state",
+          "",
+          "`passed`",
+          "",
+          "## Severity",
+          "",
+          "`low`",
+          "",
+          "## Findings",
+          "",
+          "No findings.",
+          "",
+          "## Residual risk",
+          "",
+          "No material residual risk.",
+          "",
+          "## Verification evidence",
+          "",
+          "- synthetic proof",
+          "",
+          "## Waiver authority",
+          "",
+          "`none`",
+          "",
+          "## Waiver reason",
+          "",
+          "None.",
+          "",
+          "## Decision",
+          "",
+          "`approved`",
+          "",
+          "## Source handoff",
+          "",
+          "Manager summary of the fixture."
+        ].join("\n"),
+        "utf8"
+      );
+    }
+
+    await writeFile(
+      join(targetRoot, ".devgod", "ACTIVE"),
+      `task_id=${taskId}\nworkflow=devgod\nstate=active\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot, "--task-id", "DG-LIVE-OTHER"],
+        { cwd: repoRoot }
+      ),
+      /requested task id DG-LIVE-OTHER does not match active task DG-LIVE-MATCH/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-workflow rejects passed security reviews with high severity", async () => {
   const targetRoot = await mkdtemp(join(tmpdir(), "devgod-security-high-"));
   const taskId = "DG-SEC-HIGH";

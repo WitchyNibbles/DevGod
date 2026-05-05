@@ -100,6 +100,11 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:verify:migrations:live"],
     /node_modules\/devgod\/src\/admin\.ts verify-live-migrations/
   );
+  assert.equal(
+    merged.scripts["devgod:scaffold-workflow"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target ."
+  );
+  assert.equal(merged.scripts["devgod:check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
   assert.match(
     merged.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
@@ -202,6 +207,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "docker-compose.yml",
     "docs/global-setup.md",
     "scripts/check-quality.sh",
+    "scripts/check-devgod-happy-path.sh",
     "scripts/check-devgod-workflow-live.sh",
     "scripts/check-devgod-workflow.sh",
     "scripts/install-devgod.ps1",
@@ -236,6 +242,11 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   assert.equal(pkg.private, true);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
+  assert.equal(pkg.scripts["check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
+  assert.equal(
+    pkg.scripts["scaffold:workflow"],
+    "node --experimental-strip-types src/install/cli.ts scaffold-workflow --target ."
+  );
   assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
   for (const relativePath of overlayPortableAssets) {
     assert.ok(pkg.files.includes(relativePath), `${relativePath} should be shipped for the opt-in overlay`);

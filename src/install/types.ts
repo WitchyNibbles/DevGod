@@ -25,3 +25,18 @@ export interface VerifySummary {
   modified: string[];
   orphans: string[];
 }
+
+export interface WorkflowScaffoldOptions {
+  sourceRoot: string;
+  targetRoot: string;
+  taskId: string;
+  force?: boolean;
+  forceActive?: boolean;
+}
+
+export interface WorkflowScaffoldSummary {
+  created: string[];
+  updated: string[];
+  nextSteps: string[];
+  taskId: string;
+}

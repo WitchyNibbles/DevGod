@@ -9,7 +9,14 @@ import {
   mergeGitignore,
   mergePackageJson
 } from "./merge.ts";
-import type { InstallMode, InstallOptions, InstallSummary, VerifySummary } from "./types.ts";
+import type {
+  InstallMode,
+  InstallOptions,
+  InstallSummary,
+  VerifySummary,
+  WorkflowScaffoldOptions,
+  WorkflowScaffoldSummary
+} from "./types.ts";
 
 interface InstallFile {
   source: string;
@@ -63,7 +70,15 @@ interface ParsedVerifyCommand {
   targetArg: string;
 }
 
-type ParsedCliArgs = ParsedInstallCommand | ParsedVerifyCommand;
+interface ParsedScaffoldCommand {
+  command: "scaffold-workflow";
+  targetArg: string;
+  taskId: string;
+  force: boolean;
+  forceActive: boolean;
+}
+
+type ParsedCliArgs = ParsedInstallCommand | ParsedVerifyCommand | ParsedScaffoldCommand;
 
 const installManifestRelativePath = ".devgod/install-manifest.json";
 const installManifestVersion = 1;
@@ -82,7 +97,8 @@ function usage(): never {
     "Usage: node --experimental-strip-types src/install/cli.ts --dry-run --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>"
+      "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]"
   );
 }
 
@@ -473,6 +489,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
       overwriteManaged: true
     },
     {
+      source: path.join(sourceRoot, "scripts/check-devgod-happy-path.sh"),
+      target: "scripts/check-devgod-happy-path.sh",
+      overwriteManaged: true
+    },
+    {
       source: path.join(sourceRoot, "scripts/check-devgod-workflow.sh"),
       target: "scripts/check-devgod-workflow.sh",
       overwriteManaged: true
@@ -628,6 +649,68 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   };
 }
 
+function parseTaskId(args: string[]): string {
+  const taskIdIndex = args.indexOf("--task-id");
+
+  if (taskIdIndex === -1) {
+    throw new Error("scaffold-workflow requires --task-id <task-id>.");
+  }
+
+  const taskId = args[taskIdIndex + 1];
+  if (!taskId || taskId.startsWith("-")) {
+    throw new Error("Task id must follow --task-id and cannot start with '-'.");
+  }
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(taskId)) {
+    throw new Error(`task_id must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: ${taskId}`);
+  }
+
+  return taskId;
+}
+
+function parseScaffoldCommand(args: string[]): ParsedScaffoldCommand {
+  if (args.includes("--apply") || args.includes("--dry-run")) {
+    throw new Error("scaffold-workflow does not support --apply or --dry-run.");
+  }
+
+  const resolveScaffoldTarget = (): string => {
+    const targetIndex = args.indexOf("--target");
+
+    if (targetIndex !== -1) {
+      const targetArg = args[targetIndex + 1];
+      if (!targetArg || targetArg.startsWith("-")) {
+        throw new Error("Target path must follow --target and cannot start with '-'.");
+      }
+      return targetArg;
+    }
+
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index];
+      if (arg === "--task-id") {
+        index += 1;
+        continue;
+      }
+      if (arg === "--force" || arg === "--force-active") {
+        continue;
+      }
+      if (!arg.startsWith("-")) {
+        return arg;
+      }
+      usage();
+    }
+
+    usage();
+  };
+
+  return {
+    command: "scaffold-workflow",
+    targetArg: resolveScaffoldTarget(),
+    taskId: parseTaskId(args),
+    force: args.includes("--force"),
+    forceActive: args.includes("--force-active")
+  };
+}
+
 function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   const command = rawArgs[0];
 
@@ -645,6 +728,10 @@ function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
       command: "verify",
       targetArg: resolveCliTarget(commandArgs)
     };
+  }
+
+  if (command === "scaffold-workflow") {
+    return parseScaffoldCommand(rawArgs.slice(1));
   }
 
   if (rawArgs.includes("--apply")) {
@@ -1102,11 +1189,245 @@ function printVerifySummary(targetRoot: string, summary: VerifySummary): void {
   }
 }
 
+function printWorkflowScaffoldSummary(targetRoot: string, summary: WorkflowScaffoldSummary): void {
+  console.log(`devgod scaffold-workflow for ${targetRoot}`);
+  console.log(`task_id: ${summary.taskId}`);
+  console.log(`created: ${summary.created.length}`);
+  console.log(`updated: ${summary.updated.length}`);
+
+  if (summary.created.length > 0) {
+    console.log("Created:");
+    for (const filePath of summary.created) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  if (summary.updated.length > 0) {
+    console.log("Updated:");
+    for (const filePath of summary.updated) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  console.log("Next steps:");
+  for (const [index, step] of summary.nextSteps.entries()) {
+    console.log(`${index + 1}. ${step}`);
+  }
+}
+
+function replaceTemplateTaskId(templateContent: string, taskId: string): string {
+  return templateContent.replaceAll("<task-id>", taskId);
+}
+
+function buildBriefFromTemplate(templateContent: string, taskId: string): string {
+  return replaceTemplateTaskId(templateContent, taskId).replace(
+    "Original user ask:",
+    "Original user ask:\n\nFill in the substantive user request here."
+  );
+}
+
+function buildTaskFromTemplate(templateContent: string, taskId: string): string {
+  return replaceTemplateTaskId(templateContent, taskId)
+    .replace("`<owner-role>`", "`planner`")
+    .replace("`artifact_complete | specialist_verified`", "`artifact_complete`");
+}
+
+function buildReviewFromTemplate(
+  templateContent: string,
+  taskId: string,
+  reviewerRole: "reviewer" | "qa_engineer" | "security_reviewer"
+): string {
+  return replaceTemplateTaskId(templateContent, taskId)
+    .replace("`reviewer | qa_engineer | security_reviewer`", `\`${reviewerRole}\``)
+    .replace("`<recorded-actor-id>`", "`pending-review`")
+    .replace(
+      "`reviewer | qa_engineer | security_reviewer | planner | solution_architect`",
+      `\`${reviewerRole}\``
+    )
+    .replace("`summary_only | runtime_verified | legacy_backfill`", "`summary_only`")
+    .replace("`pending | passed | blocked | waived`", "`pending`")
+    .replace("`low | medium | high | critical`", "`low`")
+    .replace("`none | manager | security_exception`", "`none`")
+    .replace("`approved | blocked | waived`", "`blocked`")
+    .replace(
+      "## Specialist execution evidence\n\nList the evidence used to trust the claimed specialist ownership for this task.\n",
+      "## Specialist execution evidence\n\nPending specialist execution evidence.\n"
+    )
+    .replace(
+      "## Quality gate evidence\n\nList the evidence used to trust the declared quality gates for this task.\n",
+      "## Quality gate evidence\n\nPending quality gate evidence.\n"
+    )
+    .replace(
+      "## Findings\n",
+      "## Findings\n\nReview has not run yet.\n\n"
+    )
+    .replace(
+      "## Residual risk\n",
+      "## Residual risk\n\nWorkflow remains blocked until this review is completed.\n\n"
+    )
+    .replace(
+      "## Verification evidence\n\nList exact commands, fixtures, or repro steps used for this gate.\n",
+      "## Verification evidence\n\nPending review execution.\n"
+    )
+    .replace(
+      "## Waiver reason\n\nDo not waive a required gate without actor, actor role, authority, and explicit reason. Unauthorized waivers remain blocking.\n",
+      "## Waiver reason\n\nNone.\n"
+    )
+    .replace(
+      "## Source handoff\n\nManager-written summary of reviewer output. Cite the trusted source here when `Provenance status` is `runtime_verified`, because the markdown file alone is not proof.\n\nFor `specialist_verified` work with `runtime_verified` provenance, include a `Runtime proof:` line here that points to the same authenticated runtime artifact summarized above.\n",
+      "## Source handoff\n\nPending reviewer handoff.\n"
+    );
+}
+
+async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+  const targetRoot = path.resolve(options.targetRoot);
+  const activeRelativePath = ".devgod/ACTIVE";
+  const briefRelativePath = `.devgod/work/briefs/brief-${options.taskId}.md`;
+  const taskRelativePath = `.devgod/work/tasks/task-${options.taskId}.md`;
+  const reviewRelativePaths = {
+    reviewer: `.devgod/work/reviews/review-${options.taskId}-reviewer.md`,
+    qa_engineer: `.devgod/work/reviews/review-${options.taskId}-qa_engineer.md`,
+    security_reviewer: `.devgod/work/reviews/review-${options.taskId}-security_reviewer.md`
+  } as const;
+
+  const activeInspection = await inspectManagedTarget(targetRoot, activeRelativePath);
+  if (activeInspection.invalidReason) {
+    throw new Error(`refusing to scaffold ${activeRelativePath}: ${activeInspection.invalidReason}`);
+  }
+
+  if (activeInspection.content) {
+    const activeTaskId = activeInspection.content
+      .split("\n")
+      .map((line) => line.replace("\r", ""))
+      .find((line) => line.startsWith("task_id="))
+      ?.slice("task_id=".length);
+
+    if (activeTaskId && activeTaskId !== options.taskId && !options.forceActive) {
+      throw new Error(
+        `refusing to replace active task ${activeTaskId} without --force-active`
+      );
+    }
+  }
+
+  const artifactPaths = [
+    activeRelativePath,
+    briefRelativePath,
+    taskRelativePath,
+    reviewRelativePaths.reviewer,
+    reviewRelativePaths.qa_engineer,
+    reviewRelativePaths.security_reviewer
+  ];
+  const existingArtifacts: string[] = [];
+  const resolvedArtifactPaths = new Map<string, string>();
+
+  for (const artifactPath of artifactPaths) {
+    const inspection = await inspectManagedTarget(targetRoot, artifactPath);
+    if (inspection.invalidReason) {
+      throw new Error(`refusing to scaffold ${artifactPath}: ${inspection.invalidReason}`);
+    }
+    resolvedArtifactPaths.set(artifactPath, inspection.absolutePath);
+    if (inspection.exists) {
+      existingArtifacts.push(artifactPath);
+    }
+  }
+
+  if (existingArtifacts.length > 0 && !options.force) {
+    throw new Error(
+      `refusing to overwrite existing workflow artifacts without --force: ${existingArtifacts.join(", ")}`
+    );
+  }
+
+  const briefTemplate = await readFile(
+    path.join(options.sourceRoot, ".devgod", "templates", "intake-brief.md"),
+    "utf8"
+  );
+  const taskTemplate = await readFile(
+    path.join(options.sourceRoot, ".devgod", "templates", "task-packet.md"),
+    "utf8"
+  );
+  const reviewTemplate = await readFile(
+    path.join(options.sourceRoot, ".devgod", "templates", "review-gate.md"),
+    "utf8"
+  );
+
+  const writes: Array<{ absolutePath: string; content: string }> = [
+    {
+      absolutePath: resolvedArtifactPaths.get(activeRelativePath) ?? path.join(targetRoot, activeRelativePath),
+      content: `task_id=${options.taskId}\nworkflow=devgod\nstate=active\n`
+    },
+    {
+      absolutePath: resolvedArtifactPaths.get(briefRelativePath) ?? path.join(targetRoot, briefRelativePath),
+      content: `${buildBriefFromTemplate(briefTemplate, options.taskId).trimEnd()}\n`
+    },
+    {
+      absolutePath: resolvedArtifactPaths.get(taskRelativePath) ?? path.join(targetRoot, taskRelativePath),
+      content: `${buildTaskFromTemplate(taskTemplate, options.taskId).trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.reviewer) ??
+        path.join(targetRoot, reviewRelativePaths.reviewer),
+      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "reviewer").trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.qa_engineer) ??
+        path.join(targetRoot, reviewRelativePaths.qa_engineer),
+      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "qa_engineer").trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.security_reviewer) ??
+        path.join(targetRoot, reviewRelativePaths.security_reviewer),
+      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "security_reviewer").trimEnd()}\n`
+    }
+  ];
+
+  const created: string[] = [];
+  const updated: string[] = [];
+
+  for (const write of writes) {
+    await ensureDirectory(write.absolutePath);
+    const existed = await fileExists(write.absolutePath);
+    await writeFile(write.absolutePath, write.content, "utf8");
+    const relativePath = path.relative(targetRoot, write.absolutePath);
+    if (existed) {
+      updated.push(relativePath);
+    } else {
+      created.push(relativePath);
+    }
+  }
+
+  return {
+    taskId: options.taskId,
+    created,
+    updated,
+    nextSteps: [
+      "Fill in the brief and task packet with real request, scope, and verification details.",
+      "Run specialists and replace pending review skeletons with real gate output.",
+      `Run bash scripts/check-devgod-workflow.sh --task-id ${options.taskId} after required reviews pass.`,
+      `Use npm run devgod:check:happy-path -- --task-id ${options.taskId} only after the workflow is review-complete.`
+    ]
+  };
+}
+
 async function main() {
   const parsedArgs = parseCliArgs(process.argv.slice(2));
 
   const sourceRoot = path.resolve(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
   const targetRoot = path.resolve(parsedArgs.targetArg);
+
+  if (parsedArgs.command === "scaffold-workflow") {
+    const summary = await scaffoldWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId: parsedArgs.taskId,
+      force: parsedArgs.force,
+      forceActive: parsedArgs.forceActive
+    });
+    printWorkflowScaffoldSummary(targetRoot, summary);
+    return;
+  }
 
   if (parsedArgs.command === "verify") {
     const summary = await verifyDevgodInstall({
