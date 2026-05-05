@@ -9,15 +9,88 @@ if (-not (Test-Path -LiteralPath ".env") -and (Test-Path -LiteralPath ".env.exam
     Write-Host "created .env from .env.example"
 }
 
-Get-Content ".env" | ForEach-Object {
-    if ($_ -match '^\s*#' -or $_ -notmatch '=') {
+function Test-DevgodSafeEnvKey {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    return $Name -match '^DEVGOD_[A-Z0-9_]+$'
+}
+
+function Trim-DevgodLeadingWhitespace {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return ($Value -replace '^\s+', '')
+}
+
+function Trim-DevgodTrailingWhitespace {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return ($Value -replace '\s+$', '')
+}
+
+function Strip-DevgodUnquotedComment {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $builder = [System.Text.StringBuilder]::new()
+    $previousWasWhitespace = $false
+
+    for ($i = 0; $i -lt $Value.Length; $i++) {
+        $ch = $Value[$i]
+        if ($ch -eq '#' -and ($builder.Length -eq 0 -or $previousWasWhitespace)) {
+            break
+        }
+
+        [void]$builder.Append($ch)
+        $previousWasWhitespace = [char]::IsWhiteSpace($ch)
+    }
+
+    return (Trim-DevgodTrailingWhitespace $builder.ToString())
+}
+
+function Unescape-DevgodDoubleQuotedValue {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $Value = $Value.Replace('\\', '\')
+    $Value = $Value.Replace('\"', '"')
+    $Value = $Value.Replace('\n', "`n")
+    $Value = $Value.Replace('\r', "`r")
+    $Value = $Value.Replace('\t', "`t")
+    $Value = $Value.Replace('\$', '$')
+
+    return $Value
+}
+
+function Import-DevgodEnvFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
         return
     }
 
-    $parts = $_ -split '=', 2
-    $value = $parts[1].Trim('"')
-    [System.Environment]::SetEnvironmentVariable($parts[0], $value)
+    Get-Content -LiteralPath $Path | ForEach-Object {
+        $line = $_.TrimEnd()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) {
+            return
+        }
+
+        if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
+            $name = $Matches[1]
+            if (Test-DevgodSafeEnvKey -Name $name) {
+                $value = Trim-DevgodLeadingWhitespace $Matches[2]
+                if ($value -match '^"((?:\\.|[^"])*)"(?:\s+#.*)?$') {
+                    $value = Unescape-DevgodDoubleQuotedValue $Matches[1]
+                } elseif ($value -match "^'([^']*)'(?:\s+#.*)?$") {
+                    $value = $Matches[1]
+                } else {
+                    $value = Strip-DevgodUnquotedComment $value
+                }
+
+                Set-Item -Path "Env:$name" -Value $value
+            }
+        }
+    }
 }
+
+Import-DevgodEnvFile -Path ".env"
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "docker is required for local setup unless you provide a managed Postgres backend"
@@ -34,7 +107,7 @@ if (-not $env:DEVGOD_PROJECT_REPO_PATH -or $env:DEVGOD_PROJECT_REPO_PATH -eq "/a
 }
 
 if (-not $env:DEVGOD_PROJECT_SLUG) {
-    $env:DEVGOD_PROJECT_SLUG = Split-Path -Leaf $repoRoot
+    $env:DEVGOD_PROJECT_SLUG = (Split-Path -Leaf $repoRoot).ToLowerInvariant()
 }
 
 if (-not $env:DEVGOD_PROJECT_NAME) {

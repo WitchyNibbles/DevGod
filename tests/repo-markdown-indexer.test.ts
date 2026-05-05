@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DevgodCoreService, MemoryStore, indexRepoMarkdown, runEmbeddingJobs } from "../src/index.ts";
@@ -176,5 +176,94 @@ test("indexRepoMarkdown assigns role-scoped metadata to review artifacts", async
     assert.equal(reviewerResults[0]?.authority.authorityLevel, "repo_context");
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("indexRepoMarkdown rejects include paths outside the repository root", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-traversal-"));
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-outside-"));
+  const store = new MemoryStore();
+
+  try {
+    await writeFile(path.join(outsideRoot, "escape.md"), "# Escape\n\nTraversal should not be reachable.\n", "utf8");
+
+    await assert.rejects(
+      indexRepoMarkdown({
+        store,
+        repoRoot,
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        include: ["../" + path.basename(outsideRoot)]
+      }),
+      /outside the repository root|within the repository root/
+    );
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("indexRepoMarkdown allows a legitimate in-repo ..name path", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-dotdot-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    await mkdir(path.join(repoRoot, "..name"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, "..name", "guide.md"),
+      "# Dot Dot Name\n\nThis path stays inside the repository.\n",
+      "utf8"
+    );
+
+    const indexResult = await indexRepoMarkdown({
+      store,
+      repoRoot,
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      include: ["..name"]
+    });
+
+    assert.equal(indexResult.filesIndexed, 1);
+
+    const results = await service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "stays inside the repository"
+    });
+
+    assert.equal(results[0]?.citation.sourcePath, "..name/guide.md");
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("indexRepoMarkdown rejects symlinked markdown files that escape the repository root", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-symlink-"));
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-symlink-outside-"));
+  const store = new MemoryStore();
+
+  try {
+    await mkdir(path.join(repoRoot, "docs"), { recursive: true });
+    await writeFile(
+      path.join(outsideRoot, "escape.md"),
+      "# Escape\n\nTraversal should not be reachable.\n",
+      "utf8"
+    );
+    await symlink(path.join(outsideRoot, "escape.md"), path.join(repoRoot, "docs", "escape.md"));
+
+    await assert.rejects(
+      indexRepoMarkdown({
+        store,
+        repoRoot,
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        include: ["docs"]
+      }),
+      /outside the repository root|refusing to read markdown outside the repository root/
+    );
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
   }
 });

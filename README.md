@@ -341,6 +341,12 @@ npm test
 npm run typecheck
 ```
 
+Release path assumptions:
+
+- this repo is still installed as a local `file:` dependency from a checked-out source clone
+- CI hardens the verify path with pinned Actions, read-only workflow tokens, `npm ci`, and `npm pack --dry-run`
+- if a future publish workflow is added, it should use trusted publishing/provenance with job-scoped write permissions only for the publish step
+
 `npm run verify:migrations:live` is the live-database replay proof. It reruns migrations for idempotence, checks database health, bootstraps a project, and re-verifies the required schema surface. Use a dedicated local or CI database for that command, not a shared or production instance.
 
 ## Architecture In Brief

@@ -21,9 +21,127 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-set -a
-source ./.env
-set +a
+is_safe_env_key() {
+  [[ "$1" =~ ^DEVGOD_[A-Z0-9_]+$ ]]
+}
+
+trim_leading_whitespace() {
+  local value="$1"
+  while [[ "$value" == [[:space:]]* ]]; do
+    value="${value#?}"
+  done
+  printf '%s' "$value"
+}
+
+trim_trailing_whitespace() {
+  local value="$1"
+  while [[ "$value" == *[[:space:]] ]]; do
+    value="${value%?}"
+  done
+  printf '%s' "$value"
+}
+
+strip_unquoted_comment() {
+  local input="$1"
+  local output=""
+  local previous=""
+  local i ch
+
+  for ((i = 0; i < ${#input}; i++)); do
+    ch="${input:i:1}"
+    if [[ "$ch" == "#" && ( -z "$output" || "$previous" =~ [[:space:]] ) ]]; then
+      break
+    fi
+    output+="$ch"
+    previous="$ch"
+  done
+
+  output="$(trim_trailing_whitespace "$output")"
+  printf '%s' "$output"
+}
+
+unescape_double_quoted_value() {
+  local value="$1"
+  value="${value//\\\\/\\}"
+  value="${value//\\\"/\"}"
+  value="${value//\\n/$'\n'}"
+  value="${value//\\r/$'\r'}"
+  value="${value//\\t/$'\t'}"
+  value="${value//\\$/\$}"
+  printf '%s' "$value"
+}
+
+extract_double_quoted_inner() {
+  local input="$1"
+  local output=""
+  local escaped=0
+  local i ch
+
+  for ((i = 1; i < ${#input}; i++)); do
+    ch="${input:i:1}"
+    if [[ $escaped -eq 1 ]]; then
+      output+="\\$ch"
+      escaped=0
+      continue
+    fi
+
+    if [[ "$ch" == "\\" ]]; then
+      escaped=1
+      continue
+    fi
+
+    if [[ "$ch" == '"' ]]; then
+      break
+    fi
+
+    output+="$ch"
+  done
+
+  printf '%s' "$output"
+}
+
+load_env_file() {
+  local env_file="$1"
+  local line key raw_value value
+
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+      key="${BASH_REMATCH[2]}"
+      raw_value="${BASH_REMATCH[3]}"
+      if ! is_safe_env_key "$key"; then
+        continue
+      fi
+
+      value="$(trim_leading_whitespace "$raw_value")"
+
+      if [[ "${value:0:1}" == '"' ]]; then
+        value="$(extract_double_quoted_inner "$value")"
+        value="$(unescape_double_quoted_value "$value")"
+      elif [[ "${value:0:1}" == "'" ]]; then
+        value="${value:1}"
+        if [[ "$value" == *"'"* ]]; then
+          value="${value%%"'"*}"
+        fi
+      else
+        value="$(strip_unquoted_comment "$value")"
+      fi
+
+      printf -v "$key" '%s' "$value"
+      export "$key"
+    fi
+  done < "$env_file"
+}
+
+load_env_file ./.env
 
 if [[ -z "${DEVGOD_PROJECT_REPO_PATH:-}" || "${DEVGOD_PROJECT_REPO_PATH}" == "/absolute/path/to/repo" ]]; then
   export DEVGOD_PROJECT_REPO_PATH="$REPO_ROOT"

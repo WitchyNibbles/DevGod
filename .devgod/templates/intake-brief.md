@@ -2,11 +2,11 @@
 
 ## Brief ID
 
-`brief-<date>-<slug>`
+`brief-<task-id>`
 
 ## Task ID
 
-`task-<date>-<slug>`
+`<task-id>`
 
 ## Request
 
@@ -22,13 +22,13 @@ Original user ask:
 
 ## Unknowns
 
-## Success criteria
+## Success Criteria
 
 ## Out of scope
 
 ## Trust boundaries
 
-## Stop/go
+## Stop Go
 
 `go | needs_review | stop`
 

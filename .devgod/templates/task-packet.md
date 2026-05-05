@@ -2,7 +2,11 @@
 
 ## Task ID
 
+`<task-id>`
+
 ## Owner role
+
+`<owner-role>`
 
 ## Goal
 

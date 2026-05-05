@@ -16,155 +16,6 @@ interface InstallFile {
   overwriteManaged: boolean;
 }
 
-const generatedSetupScript = `#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ ! -f .env.devgod && -f .env.devgod.example ]]; then
-  cp .env.devgod.example .env.devgod
-  echo "created .env.devgod from .env.devgod.example"
-fi
-
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required for local devgod setup unless you provide a managed Postgres backend" >&2
-  exit 1
-fi
-
-if ! docker version >/dev/null 2>&1; then
-  echo "docker is installed but not usable from this environment; enable Docker Desktop integration or provide a managed Postgres backend" >&2
-  exit 1
-fi
-
-set -a
-source ./.env.devgod
-set +a
-
-if [[ -z "\${DEVGOD_PROJECT_REPO_PATH:-}" || "\${DEVGOD_PROJECT_REPO_PATH}" == "/absolute/path/to/repo" ]]; then
-  export DEVGOD_PROJECT_REPO_PATH="$(pwd)"
-fi
-
-if [[ -z "\${DEVGOD_PROJECT_SLUG:-}" ]]; then
-  export DEVGOD_PROJECT_SLUG="$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')"
-fi
-
-if [[ -z "\${DEVGOD_PROJECT_NAME:-}" ]]; then
-  export DEVGOD_PROJECT_NAME="\${DEVGOD_PROJECT_SLUG}"
-fi
-
-if [[ -z "\${DEVGOD_DOCKER_CONTAINER_NAME:-}" ]]; then
-  export DEVGOD_DOCKER_CONTAINER_NAME="devgod-postgres-\${DEVGOD_PROJECT_SLUG}"
-fi
-
-docker compose -f docker-compose.devgod.yml up -d devgod-postgres
-
-echo "waiting for devgod-postgres to become healthy"
-for _ in {1..60}; do
-  if [[ "$(docker inspect -f '{{.State.Health.Status}}' "\${DEVGOD_DOCKER_CONTAINER_NAME}" 2>/dev/null || true)" == "healthy" ]]; then
-    break
-  fi
-  sleep 2
-done
-
-if [[ "$(docker inspect -f '{{.State.Health.Status}}' "\${DEVGOD_DOCKER_CONTAINER_NAME}" 2>/dev/null || true)" != "healthy" ]]; then
-  echo "devgod-postgres did not become healthy" >&2
-  docker logs "\${DEVGOD_DOCKER_CONTAINER_NAME}" --tail 100 >&2 || true
-  exit 1
-fi
-
-npm install
-npm run devgod:migrate
-npm run devgod:bootstrap
-npm run devgod:verify:setup
-
-echo ""
-echo "devgod local setup complete"
-echo "workspace: \${DEVGOD_WORKSPACE_SLUG}"
-echo "project: \${DEVGOD_PROJECT_SLUG}"
-echo "database: configured"
-echo "review identity: run npm run devgod:verify:review-identity after implementing devgod/review-identity-adapter.ts"
-`;
-
-const generatedPowerShellSetupScript = `Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-
-if (-not (Test-Path -LiteralPath ".env.devgod") -and (Test-Path -LiteralPath ".env.devgod.example")) {
-    Copy-Item -LiteralPath ".env.devgod.example" -Destination ".env.devgod"
-    Write-Host "created .env.devgod from .env.devgod.example"
-}
-
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "docker is required for local devgod setup unless you provide a managed Postgres backend"
-}
-
-try {
-    docker version | Out-Null
-} catch {
-    throw "docker is installed but not usable from this environment; enable Docker Desktop integration or provide a managed Postgres backend"
-}
-
-Get-Content ".env.devgod" | ForEach-Object {
-    if ($_ -match '^\\s*#' -or $_ -notmatch '=') {
-        return
-    }
-
-    $parts = $_ -split '=', 2
-    $value = $parts[1].Trim('"')
-    [System.Environment]::SetEnvironmentVariable($parts[0], $value)
-}
-
-if (-not $env:DEVGOD_PROJECT_REPO_PATH -or $env:DEVGOD_PROJECT_REPO_PATH -eq "/absolute/path/to/repo") {
-    $env:DEVGOD_PROJECT_REPO_PATH = (Get-Location).Path
-}
-
-if (-not $env:DEVGOD_PROJECT_SLUG) {
-    $env:DEVGOD_PROJECT_SLUG = Split-Path -Leaf (Get-Location)
-}
-
-if (-not $env:DEVGOD_PROJECT_NAME) {
-    $env:DEVGOD_PROJECT_NAME = $env:DEVGOD_PROJECT_SLUG
-}
-
-if (-not $env:DEVGOD_DOCKER_CONTAINER_NAME) {
-    $env:DEVGOD_DOCKER_CONTAINER_NAME = "devgod-postgres-$($env:DEVGOD_PROJECT_SLUG)"
-}
-
-docker compose -f docker-compose.devgod.yml up -d devgod-postgres
-
-Write-Host "waiting for devgod-postgres to become healthy"
-$healthy = $false
-for ($i = 0; $i -lt 60; $i++) {
-    $status = ""
-    try {
-        $status = docker inspect -f "{{.State.Health.Status}}" $env:DEVGOD_DOCKER_CONTAINER_NAME 2>$null
-    } catch {
-        $status = ""
-    }
-
-    if ($status -eq "healthy") {
-        $healthy = $true
-        break
-    }
-
-    Start-Sleep -Seconds 2
-}
-
-if (-not $healthy) {
-    docker logs $env:DEVGOD_DOCKER_CONTAINER_NAME --tail 100
-    throw "devgod-postgres did not become healthy"
-}
-
-npm install
-npm run devgod:migrate
-npm run devgod:bootstrap
-npm run devgod:verify:setup
-
-Write-Host ""
-Write-Host "devgod local setup complete"
-Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
-Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
-Write-Host "database: configured"
-Write-Host "review identity: run npm run devgod:verify:review-identity after implementing devgod/review-identity-adapter.ts"
-`;
-
 const generatedReviewIdentityAdapter = `import { createReviewPrincipalAdapter } from "devgod/src/index.ts";
 
 export default createReviewPrincipalAdapter(async () => {
@@ -305,6 +156,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     {
       source: path.join(sourceRoot, "scripts/check-devgod-workflow.sh"),
       target: "scripts/check-devgod-workflow.sh",
+      overwriteManaged: true
+    },
+    {
+      source: path.join(sourceRoot, "scripts/check-devgod-workflow-live.sh"),
+      target: "scripts/check-devgod-workflow-live.sh",
       overwriteManaged: true
     }
   );
@@ -475,7 +331,7 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   await writeMergedFile(
     targetRoot,
     "scripts/devgod-setup.sh",
-    generatedSetupScript,
+    await readFile(path.join(sourceRoot, "scripts/setup-devgod.sh"), "utf8"),
     timestamp,
     summary
   );
@@ -483,7 +339,7 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   await writeMergedFile(
     targetRoot,
     "scripts/devgod-setup.ps1",
-    generatedPowerShellSetupScript,
+    await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8"),
     timestamp,
     summary
   );

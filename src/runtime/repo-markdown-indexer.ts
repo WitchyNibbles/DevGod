@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { retrievalRoles, type MarkdownArtifactRecord, type RetrievalRole, type RunRecord } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
@@ -56,7 +56,7 @@ export async function indexRepoMarkdown(input: IndexRepoMarkdownInput): Promise<
   const artifacts: MarkdownArtifactRecord[] = [];
 
   for (const relativePath of relativePaths) {
-    const markdown = await readFile(path.join(input.repoRoot, relativePath), "utf8");
+    const markdown = await readMarkdownFileWithinRepo(input.repoRoot, relativePath);
     const sections = splitMarkdownSections(relativePath, markdown);
 
     for (const artifact of buildArtifactsForFile({
@@ -141,8 +141,7 @@ async function collectMarkdownFiles(repoRoot: string, includePaths: readonly str
   const results = new Set<string>();
 
   for (const includePath of includePaths) {
-    const absolutePath = path.resolve(repoRoot, includePath);
-    const relativePath = normalizeRelativePath(repoRoot, absolutePath);
+    const { absolutePath, relativePath } = resolveIncludePath(repoRoot, includePath);
     const stats = await safeStatKind(absolutePath);
     if (!stats) {
       continue;
@@ -180,7 +179,7 @@ async function walkMarkdownFiles(repoRoot: string, directory: string): Promise<s
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if ((entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith(".md")) {
       results.push(relativePath);
     }
   }
@@ -390,6 +389,20 @@ function normalizeRelativePath(repoRoot: string, absolutePath: string): string {
   return path.relative(repoRoot, absolutePath).split(path.sep).join("/");
 }
 
+function resolveIncludePath(repoRoot: string, includePath: string): { absolutePath: string; relativePath: string } {
+  const absolutePath = path.resolve(repoRoot, includePath);
+  const relativePath = path.relative(repoRoot, absolutePath);
+
+  if (path.isAbsolute(relativePath) || relativePath.split(path.sep).some((segment) => segment === "..")) {
+    throw new Error(`include path must stay within the repository root: ${includePath}`);
+  }
+
+  return {
+    absolutePath,
+    relativePath: normalizeRelativePath(repoRoot, absolutePath)
+  };
+}
+
 function deterministicUuid(value: string): string {
   const hex = createHash("sha1").update(value).digest("hex").slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
@@ -408,8 +421,36 @@ async function safeStatKind(targetPath: string): Promise<"file" | "directory" | 
     if (entry.isFile()) {
       return "file";
     }
+    if (entry.isSymbolicLink()) {
+      return targetPath.endsWith(".md") ? "file" : undefined;
+    }
     return undefined;
   } catch {
     return undefined;
   }
+}
+
+async function readMarkdownFileWithinRepo(repoRoot: string, relativePath: string): Promise<string> {
+  const canonicalRepoRoot = await realpath(repoRoot);
+  const targetPath = path.join(repoRoot, relativePath);
+  const canonicalTargetPath = await realpath(targetPath);
+
+  if (!isPathWithinRoot(canonicalRepoRoot, canonicalTargetPath)) {
+    throw new Error(`refusing to read markdown outside the repository root: ${relativePath}`);
+  }
+
+  return readFile(canonicalTargetPath, "utf8");
+}
+
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  if (relative.length === 0) {
+    return true;
+  }
+
+  if (path.isAbsolute(relative)) {
+    return false;
+  }
+
+  return !relative.split(path.sep).some((segment) => segment === "..");
 }

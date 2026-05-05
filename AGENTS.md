@@ -25,7 +25,7 @@ operational state, reviewed memory, and repo-specific overlays.
 6. Build only from explicit task packets with `task_id`, owner, write scope, verification, reviews, security checks, anti-patterns, and rollback notes.
 7. Manager/root coordinates execution; non-trivial, risky, or subsystem-specific implementation belongs to the named specialist owner, while manager/root may only make trivial mechanical edits on the fast path.
 8. Move finished work into handoff and blocking review; when reviewer roles are read-only, manager/root persists their gate outputs under `.devgod/work/reviews/`.
-9. Require reviewer, security, and QA gates plus `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before completion.
+9. Require reviewer, security, and QA gates plus `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before completion. Treat the script as artifact-contract verification only; trusted reviewer authority still comes from runtime checks or other authenticated evidence.
 10. Promote only reviewed, evidence-based memory.
 
 ## Workflow artifacts
@@ -38,6 +38,29 @@ operational state, reviewed memory, and repo-specific overlays.
 - the active task id must match the current brief plus the current plan or task packet
 - review files for `reviewer`, `qa_engineer`, and `security_reviewer` must carry the same task id and include a manager-written source handoff
 - treat older briefs, plans, reviews, or active markers as historical context, not proof of completion for the current ask
+
+## Workflow contract
+
+The workflow checker treats the block below as the canonical repo-local contract for task, review, and gate artifacts.
+
+<!-- devgod-workflow-contract:start -->
+workflow=devgod
+active_file=.devgod/ACTIVE
+brief_file=.devgod/work/briefs/brief-<task-id>.md
+plan_file=.devgod/work/plans/plan-<task-id>.md
+task_file=.devgod/work/tasks/task-<task-id>.md
+review_file=.devgod/work/reviews/review-<task-id>-<role>.md
+brief_template=.devgod/templates/intake-brief.md
+task_template=.devgod/templates/task-packet.md
+review_template=.devgod/templates/review-gate.md
+required_review_roles=reviewer,qa_engineer,security_reviewer
+review_aliases=reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer
+workflow_check=bash scripts/check-devgod-workflow.sh --task-id <task-id>
+workflow_check_scope=artifact_contract_only
+review_artifact_trust=manager_summary_evidence_only
+ci_scope=artifact_contract_regression_fixtures_only
+local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
+<!-- devgod-workflow-contract:end -->
 
 ## Manager discipline
 
@@ -126,7 +149,9 @@ Ask the user before:
 - missing required review blocks completion
 - missing acceptance criteria or verification evidence blocks completion
 - missing workflow-checker proof blocks completion
-- required reviews must have authenticated actor provenance to satisfy a gate
+- the workflow checker validates artifact alignment and markdown-summary consistency only; it does not authenticate reviewers or grant authority by itself
+- markdown review files are manager summaries and evidence only; they do not prove authenticated reviewer identity on their own
+- trusted reviewer authentication and waiver authority must come from runtime checks or another authenticated source outside markdown summaries
 - waived reviews require explicit actor and reason
 - waived reviews require explicit actor, authority, and reason, and unauthorized or legacy-backfilled waivers block completion
 - manager/root must not declare done while a blocking gate fails

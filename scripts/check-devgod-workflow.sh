@@ -33,6 +33,11 @@ fail() {
   exit 1
 }
 
+validate_task_id() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "task_id must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: ${value}"
+}
+
 require_file() {
   local path="$1"
   [[ -f "$path" ]] || fail "missing file: ${path#"$repo_root"/}"
@@ -42,6 +47,26 @@ require_grep() {
   local pattern="$1"
   local path="$2"
   grep -Fq "$pattern" "$path" || fail "missing required text in ${path#"$repo_root"/}: $pattern"
+}
+
+require_heading() {
+  local heading="$1"
+  local path="$2"
+  grep -Fq "$heading" "$path" || fail "missing heading ${heading} in ${path#"$repo_root"/}"
+}
+
+require_allowed_value() {
+  local value="$1"
+  local path="$2"
+  shift 2
+  local allowed
+  for allowed in "$@"; do
+    if [[ "$value" == "$allowed" ]]; then
+      return
+    fi
+  done
+
+  fail "unexpected value in ${path#"$repo_root"/}: ${value}"
 }
 
 extract_section_value() {
@@ -62,6 +87,44 @@ normalize_value() {
   printf '%s' "$1" | tr -d '\r' | sed -e 's/`//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
+extract_marked_block() {
+  local start_marker="$1"
+  local end_marker="$2"
+  local path="$3"
+  awk -v start_marker="$start_marker" -v end_marker="$end_marker" '
+    index($0, start_marker) { in_block=1; next }
+    index($0, end_marker) { exit }
+    in_block { print }
+  ' "$path"
+}
+
+extract_contract_value() {
+  local key="$1"
+  local path="$2"
+  extract_marked_block \
+    '<!-- devgod-workflow-contract:start -->' \
+    '<!-- devgod-workflow-contract:end -->' \
+    "$path" |
+    awk -F= -v key="$key" '
+      {
+        line=$0
+        gsub(/\r/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line == "" || line ~ /^#/) {
+          next
+        }
+
+        current_key=$1
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", current_key)
+        if (current_key == key) {
+          sub(/^[^=]*=/, "", line)
+          print line
+          exit
+        }
+      }
+    '
+}
+
 require_section_equals() {
   local heading="$1"
   local expected="$2"
@@ -70,6 +133,16 @@ require_section_equals() {
   raw="$(extract_section_value "$heading" "$path")"
   [[ -n "$raw" ]] || fail "missing section value ${heading} in ${path#"$repo_root"/}"
   [[ "$(normalize_value "$raw")" == "$expected" ]] || fail "unexpected value for ${heading} in ${path#"$repo_root"/}: expected ${expected}"
+}
+
+require_contract_equals() {
+  local key="$1"
+  local expected="$2"
+  local path="$3"
+  local raw
+  raw="$(extract_contract_value "$key" "$path")"
+  [[ -n "$raw" ]] || fail "missing workflow contract key ${key} in ${path#"$repo_root"/}"
+  [[ "$(normalize_value "$raw")" == "$expected" ]] || fail "unexpected workflow contract value for ${key} in ${path#"$repo_root"/}: expected ${expected}"
 }
 
 extract_review_file() {
@@ -105,12 +178,19 @@ extract_review_file() {
 active_file="$repo_root/.devgod/ACTIVE"
 agents_file="$repo_root/AGENTS.md"
 config_file="$repo_root/.codex/config.toml"
+brief_template="$repo_root/.devgod/templates/intake-brief.md"
+task_template="$repo_root/.devgod/templates/task-packet.md"
+review_template="$repo_root/.devgod/templates/review-gate.md"
 
 require_file "$active_file"
 require_file "$agents_file"
 require_file "$config_file"
+require_file "$brief_template"
+require_file "$task_template"
+require_file "$review_template"
 
 mapfile -t active_lines < "$active_file"
+active_lines=("${active_lines[@]%$'\r'}")
 [[ "${#active_lines[@]}" -eq 3 ]] || fail "unexpected .devgod/ACTIVE content"
 
 [[ "${active_lines[0]}" == task_id=* ]] || fail "missing task_id in .devgod/ACTIVE"
@@ -118,27 +198,68 @@ mapfile -t active_lines < "$active_file"
 [[ "${active_lines[2]}" == "state=active" ]] || fail "state must be active in .devgod/ACTIVE"
 
 task_id="${active_lines[0]#task_id=}"
+task_id="${task_id%$'\r'}"
 [[ -n "$task_id" ]] || fail "task_id must not be empty in .devgod/ACTIVE"
+
+if [[ -n "$requested_task_id" ]]; then
+  validate_task_id "$requested_task_id"
+fi
+validate_task_id "$task_id"
 
 if [[ -n "$requested_task_id" && "$requested_task_id" != "$task_id" ]]; then
   fail "requested task id ${requested_task_id} does not match active task ${task_id}"
 fi
 
-require_grep "route every substantive" "$agents_file"
-require_grep 'devgod-intake' "$agents_file"
-require_grep '.devgod/ACTIVE' "$agents_file"
-require_grep 'current task' "$agents_file"
-require_grep '.devgod/work/briefs/' "$agents_file"
-require_grep '.devgod/work/plans/' "$agents_file"
-require_grep 'check-devgod-workflow.sh --task-id' "$agents_file"
-require_grep 'reviewer`, `qa_engineer`, and `security_reviewer`' "$agents_file"
+require_contract_equals "workflow" "devgod" "$agents_file"
+require_contract_equals "active_file" ".devgod/ACTIVE" "$agents_file"
+require_contract_equals "brief_file" ".devgod/work/briefs/brief-<task-id>.md" "$agents_file"
+require_contract_equals "plan_file" ".devgod/work/plans/plan-<task-id>.md" "$agents_file"
+require_contract_equals "task_file" ".devgod/work/tasks/task-<task-id>.md" "$agents_file"
+require_contract_equals "review_file" ".devgod/work/reviews/review-<task-id>-<role>.md" "$agents_file"
+require_contract_equals "brief_template" ".devgod/templates/intake-brief.md" "$agents_file"
+require_contract_equals "task_template" ".devgod/templates/task-packet.md" "$agents_file"
+require_contract_equals "review_template" ".devgod/templates/review-gate.md" "$agents_file"
+require_contract_equals "required_review_roles" "reviewer,qa_engineer,security_reviewer" "$agents_file"
+require_contract_equals "review_aliases" "reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer" "$agents_file"
+require_contract_equals "workflow_check" "bash scripts/check-devgod-workflow.sh --task-id <task-id>" "$agents_file"
+require_contract_equals "workflow_check_scope" "artifact_contract_only" "$agents_file"
+require_contract_equals "review_artifact_trust" "manager_summary_evidence_only" "$agents_file"
+require_contract_equals "ci_scope" "artifact_contract_regression_fixtures_only" "$agents_file"
+require_contract_equals "local_live_check" "bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]" "$agents_file"
 require_grep 'AGENTS.md' "$config_file"
 require_grep '.agents.md' "$config_file"
 
-review_base="${task_id#task-}"
-brief_file="$repo_root/.devgod/work/briefs/brief-${review_base}.md"
-plan_file="$repo_root/.devgod/work/plans/plan-${review_base}.md"
-task_file="$repo_root/.devgod/work/tasks/task-${review_base}.md"
+require_section_equals "## Task ID" "<task-id>" "$brief_template"
+require_heading "## Success Criteria" "$brief_template"
+require_heading "## Stop Go" "$brief_template"
+require_section_equals "## Stop Go" "go | needs_review | stop" "$brief_template"
+
+require_section_equals "## Task ID" "<task-id>" "$task_template"
+require_section_equals "## Owner role" "<owner-role>" "$task_template"
+require_heading "## Acceptance criteria" "$task_template"
+require_heading "## Verification steps" "$task_template"
+require_heading "## Required reviews" "$task_template"
+require_grep '`reviewer`' "$task_template"
+require_grep '`qa_engineer`' "$task_template"
+require_grep '`security_reviewer`' "$task_template"
+require_heading "## Rollback notes" "$task_template"
+
+require_section_equals "## Task ID" "<task-id>" "$review_template"
+require_section_equals "## Reviewer role" "reviewer | qa_engineer | security_reviewer" "$review_template"
+require_section_equals "## Actor" "<recorded-actor-id>" "$review_template"
+require_section_equals "## Actor role" "reviewer | qa_engineer | security_reviewer | planner | solution_architect" "$review_template"
+require_section_equals "## Provenance status" "summary_only | runtime_verified | legacy_backfill" "$review_template"
+require_section_equals "## Review state" "pending | passed | blocked | waived" "$review_template"
+require_section_equals "## Severity" "low | medium | high | critical" "$review_template"
+require_heading "## Verification evidence" "$review_template"
+require_section_equals "## Waiver authority" "none | manager | security_exception" "$review_template"
+require_section_equals "## Decision" "approved | blocked | waived" "$review_template"
+require_heading "## Source handoff" "$review_template"
+
+artifact_task_id="$task_id"
+brief_file="$repo_root/.devgod/work/briefs/brief-${artifact_task_id}.md"
+plan_file="$repo_root/.devgod/work/plans/plan-${artifact_task_id}.md"
+task_file="$repo_root/.devgod/work/tasks/task-${artifact_task_id}.md"
 
 require_file "$brief_file"
 require_section_equals "## Task ID" "$task_id" "$brief_file"
@@ -157,28 +278,62 @@ for role in "${roles[@]}"; do
   case "$role" in
     reviewer)
       expected_role="reviewer"
-      review_file="$(extract_review_file "$review_base" "reviewer" "reviewer")"
+      review_file="$(extract_review_file "$artifact_task_id" "reviewer" "reviewer")"
       ;;
     qa)
       expected_role="qa_engineer"
-      review_file="$(extract_review_file "$review_base" "qa" "qa_engineer")"
+      review_file="$(extract_review_file "$artifact_task_id" "qa" "qa_engineer")"
       ;;
     security)
       expected_role="security_reviewer"
-      review_file="$(extract_review_file "$review_base" "security" "security_reviewer")"
+      review_file="$(extract_review_file "$artifact_task_id" "security" "security_reviewer")"
       ;;
   esac
 
   require_section_equals "## Task ID" "$task_id" "$review_file"
   require_section_equals "## Reviewer role" "$expected_role" "$review_file"
+  actor="$(normalize_value "$(extract_section_value "## Actor" "$review_file")")"
+  actor_role="$(normalize_value "$(extract_section_value "## Actor role" "$review_file")")"
+  provenance_status="$(normalize_value "$(extract_section_value "## Provenance status" "$review_file")")"
   review_state="$(normalize_value "$(extract_section_value "## Review state" "$review_file")")"
   decision="$(normalize_value "$(extract_section_value "## Decision" "$review_file")")"
   severity="$(normalize_value "$(extract_section_value "## Severity" "$review_file")")"
+  waiver_authority="$(normalize_value "$(extract_section_value "## Waiver authority" "$review_file")")"
   waiver_reason="$(extract_section_value "## Waiver reason" "$review_file")"
 
+  [[ -n "$actor" ]] || fail "missing actor in ${review_file#"$repo_root"/}"
+  [[ -n "$actor_role" ]] || fail "missing actor role in ${review_file#"$repo_root"/}"
+  require_allowed_value "$provenance_status" "$review_file" "summary_only" "runtime_verified" "legacy_backfill"
+  require_allowed_value "$review_state" "$review_file" "passed" "waived"
+  require_allowed_value "$decision" "$review_file" "approved" "waived"
+  require_allowed_value "$severity" "$review_file" "low" "medium" "high" "critical"
+  require_allowed_value "$waiver_authority" "$review_file" "none" "manager" "security_exception"
+
+  if [[ "$expected_role" == "security_reviewer" && "$review_state" == "passed" && "$decision" == "approved" ]]; then
+    case "$severity" in
+      high|critical)
+        fail "passed security review summaries must use low or medium severity, not ${severity} in ${review_file#"$repo_root"/}"
+        ;;
+    esac
+  fi
+
   if [[ "$review_state" == "passed" && "$decision" == "approved" ]]; then
-    :
+    [[ "$actor_role" == "$expected_role" ]] || fail "passed review summary must record actor role ${expected_role} in ${review_file#"$repo_root"/}"
+    [[ "$waiver_authority" == "none" ]] || fail "passed review summary must use waiver authority none in ${review_file#"$repo_root"/}"
+    if [[ "$expected_role" == "security_reviewer" && ( "$severity" == "high" || "$severity" == "critical" ) ]]; then
+      fail "unresolved ${severity} security findings block completion in ${review_file#"$repo_root"/}"
+    fi
   elif [[ "$review_state" == "waived" && "$decision" == "waived" ]]; then
+    case "$expected_role" in
+      reviewer|qa_engineer)
+        [[ "$actor_role" == "planner" || "$actor_role" == "solution_architect" ]] || fail "waived ${expected_role} review summary must record planner or solution_architect actor role in ${review_file#"$repo_root"/}"
+        [[ "$waiver_authority" == "manager" ]] || fail "waived ${expected_role} review summary must use manager waiver authority in ${review_file#"$repo_root"/}"
+        ;;
+      security_reviewer)
+        [[ "$actor_role" == "security_reviewer" ]] || fail "waived security review summary must record security_reviewer actor role in ${review_file#"$repo_root"/}"
+        [[ "$waiver_authority" == "security_exception" ]] || fail "waived security review summary must use security_exception authority in ${review_file#"$repo_root"/}"
+        ;;
+    esac
     [[ -n "$waiver_reason" && "$(normalize_value "$waiver_reason")" != "None." && "$(normalize_value "$waiver_reason")" != "None" ]] || fail "waived review lacks waiver reason in ${review_file#"$repo_root"/}"
   else
     fail "unexpected gate outcome in ${review_file#"$repo_root"/}: state=${review_state} decision=${decision}"
@@ -190,9 +345,8 @@ for role in "${roles[@]}"; do
   [[ -n "$findings" ]] || fail "missing findings in ${review_file#"$repo_root"/}"
   [[ -n "$residual_risk" ]] || fail "missing residual risk in ${review_file#"$repo_root"/}"
   [[ -n "$verification_evidence" ]] || fail "missing verification evidence in ${review_file#"$repo_root"/}"
-  [[ "$severity" == "low" || "$severity" == "medium" ]] || fail "unexpected severity for approved/waived gate in ${review_file#"$repo_root"/}: ${severity}"
   source_handoff="$(extract_section_value "## Source handoff" "$review_file")"
   [[ -n "$source_handoff" ]] || fail "missing source handoff in ${review_file#"$repo_root"/}"
 done
 
-printf 'devgod workflow check passed for %s\n' "$task_id"
+printf 'devgod workflow artifact check passed for %s\n' "$task_id"

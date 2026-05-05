@@ -2,6 +2,24 @@ import TOML from "@iarna/toml";
 
 const AGENTS_BEGIN = "<!-- BEGIN DEVGOD MANAGED -->";
 const AGENTS_END = "<!-- END DEVGOD MANAGED -->";
+const workflowContractBlock = `<!-- devgod-workflow-contract:start -->
+workflow=devgod
+active_file=.devgod/ACTIVE
+brief_file=.devgod/work/briefs/brief-<task-id>.md
+plan_file=.devgod/work/plans/plan-<task-id>.md
+task_file=.devgod/work/tasks/task-<task-id>.md
+review_file=.devgod/work/reviews/review-<task-id>-<role>.md
+brief_template=.devgod/templates/intake-brief.md
+task_template=.devgod/templates/task-packet.md
+review_template=.devgod/templates/review-gate.md
+required_review_roles=reviewer,qa_engineer,security_reviewer
+review_aliases=reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer
+workflow_check=bash scripts/check-devgod-workflow.sh --task-id <task-id>
+workflow_check_scope=artifact_contract_only
+review_artifact_trust=manager_summary_evidence_only
+ci_scope=artifact_contract_regression_fixtures_only
+local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
+<!-- devgod-workflow-contract:end -->`;
 
 const managedAgentsBlock = `${AGENTS_BEGIN}
 ## devgod
@@ -13,6 +31,12 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - use the repo-local devgod agent profiles under \`.codex/agents/devgod-*.toml\`
 - keep one canonical active marker at \`.devgod/ACTIVE\` with \`task_id=<task-id>\`, \`workflow=devgod\`, and \`state=active\`
 - if devgod is not configured yet, run \`npm run devgod:setup:local\`; if that path depends on ignored local bootstrap state, surface the dependency before relying on it
+
+## Workflow contract
+
+The workflow checker treats the block below as the canonical repo-local contract for task, review, and gate artifacts.
+
+${workflowContractBlock}
 
 ## Department Workflow
 
