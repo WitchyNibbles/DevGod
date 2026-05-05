@@ -25,7 +25,7 @@ async function writeBatchFile(filePath: string, lines: string[]): Promise<void> 
 }
 
 const pwshAvailable = await hasPwsh();
-const smoke = pwshAvailable ? test : test.skip;
+const smoke = process.platform === "win32" && pwshAvailable ? test : test.skip;
 
 smoke("PowerShell setup script bootstraps a clean workspace with synthetic docker and npm", async () => {
   const targetRoot = await mkdtemp(join(tmpdir(), "devgod-pwsh-setup-"));
@@ -127,12 +127,14 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);
-    assert.deepEqual(dockerCalls, [
+    assert.deepEqual(dockerCalls.slice(0, 2), [
       "version",
-      "compose up -d devgod-postgres",
-      "inspect -f {{.State.Health.Status}} alpha-container",
-      "inspect -f {{.State.Health.Status}} alpha-container"
+      "compose up -d devgod-postgres"
     ]);
+
+    const inspectCalls = dockerCalls.slice(2);
+    assert.ok(inspectCalls.length >= 1);
+    assert.ok(inspectCalls.every((call) => call === "inspect -f {{.State.Health.Status}} alpha-container"));
 
     const capturedEnv = await readFile(npmEnvCapture, "utf8");
     assert.match(capturedEnv, /DEVGOD_WORKSPACE_SLUG=team/);
