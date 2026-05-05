@@ -51,6 +51,9 @@ test("record_review action rejects caller-asserted role use without trusted reso
       taskId: "task-1",
       title: "Create task graph",
       ownerRole: "planner",
+      completionStandard: "specialist_verified",
+      requiredSpecialistRoles: ["planner"],
+      qualityGates: ["product_acceptance"],
       goal: "Build task graph",
       inputs: ["intake brief"],
       outputs: ["task packets"],
@@ -69,10 +72,14 @@ test("record_review action rejects caller-asserted role use without trusted reso
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/actions.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner-owned task packet and handoff"],
+    qualityGateEvidence: ["product acceptance reviewed in brief"],
     contextRefs: ["brief-1"]
   });
   const handlers = createActionHandlers(service);
@@ -125,6 +132,9 @@ test("record_review action uses trusted resolver output instead of caller-suppli
       taskId: "task-1",
       title: "Create task graph",
       ownerRole: "planner",
+      completionStandard: "specialist_verified",
+      requiredSpecialistRoles: ["planner"],
+      qualityGates: ["product_acceptance"],
       goal: "Build task graph",
       inputs: ["intake brief"],
       outputs: ["task packets"],
@@ -143,10 +153,14 @@ test("record_review action uses trusted resolver output instead of caller-suppli
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/actions.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner-owned task packet and handoff"],
+    qualityGateEvidence: ["product acceptance reviewed in brief"],
     contextRefs: ["brief-1"]
   });
 

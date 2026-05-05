@@ -14,6 +14,12 @@ Original user ask:
 
 ## Goal
 
+## User
+
+## Problem
+
+## Value
+
 ## Audience
 
 ## Constraints
@@ -23,6 +29,8 @@ Original user ask:
 ## Unknowns
 
 ## Success Criteria
+
+## Non-goals
 
 ## Out of scope
 

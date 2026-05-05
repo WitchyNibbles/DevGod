@@ -131,6 +131,7 @@ async function verifySetup() {
          and (
            (table_name = 'artifacts' and column_name in ('metadata'))
            or (table_name = 'memory_entries' and column_name in ('metadata'))
+           or (table_name = 'handoffs' and column_name in ('owner_role', 'completion_standard', 'execution_evidence', 'quality_gate_evidence'))
            or
            (table_name = 'reviews' and column_name in ('actor', 'actor_role', 'waiver_authority', 'identity_assurance'))
            or (table_name = 'approvals' and column_name in ('actor', 'actor_role', 'identity_assurance'))
@@ -140,6 +141,10 @@ async function verifySetup() {
     const requiredColumns = new Set([
       "artifacts.metadata",
       "memory_entries.metadata",
+      "handoffs.owner_role",
+      "handoffs.completion_standard",
+      "handoffs.execution_evidence",
+      "handoffs.quality_gate_evidence",
       "reviews.actor",
       "reviews.actor_role",
       "reviews.waiver_authority",

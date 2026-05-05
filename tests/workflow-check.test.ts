@@ -65,6 +65,10 @@ test("check-devgod-workflow-live accepts CRLF active files", async () => {
         "",
         "`qa_engineer`",
         "",
+        "## Completion standard",
+        "",
+        "`artifact_complete`",
+        "",
         "## Acceptance criteria",
         "",
         "- smoke path passes",
@@ -197,6 +201,10 @@ test("check-devgod-workflow rejects passed security reviews with high severity",
         "## Owner role",
         "",
         "`qa_engineer`",
+        "",
+        "## Completion standard",
+        "",
+        "`artifact_complete`",
         "",
         "## Acceptance criteria",
         "",
@@ -397,6 +405,10 @@ test("check-devgod-workflow rejects passed security reviews with critical severi
         "",
         "`qa_engineer`",
         "",
+        "## Completion standard",
+        "",
+        "`artifact_complete`",
+        "",
         "## Acceptance criteria",
         "",
         "- security severity rule is enforced",
@@ -562,6 +574,162 @@ test("check-devgod-workflow rejects passed security reviews with critical severi
         cwd: repoRoot
       }),
       /passed security review summaries must use low or medium severity, not critical/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow rejects specialist_verified tasks without runtime-verified evidence", async () => {
+  const targetRoot = await mkdtemp(join(tmpdir(), "devgod-specialist-proof-"));
+  const taskId = "DG-SPECIALIST-PROOF";
+
+  try {
+    await writeFile(join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
+
+    await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
+
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "briefs", `brief-${taskId}.md`),
+      `## Task ID\n\n\`${taskId}\`\n`,
+      "utf8"
+    );
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+      [
+        "## Task ID",
+        "",
+        `\`${taskId}\``,
+        "",
+        "## Owner role",
+        "",
+        "`backend_engineer`",
+        "",
+        "## Completion standard",
+        "",
+        "`specialist_verified`",
+        "",
+        "## Required specialist roles",
+        "",
+        "- `backend_engineer`",
+        "- `reviewer`",
+        "- `qa_engineer`",
+        "- `security_reviewer`",
+        "",
+        "## Quality gates",
+        "",
+        "- `product_acceptance`",
+        "- `tdd_required`",
+        "",
+        "## Acceptance criteria",
+        "",
+        "- specialist proof is present",
+        "",
+        "## Verification steps",
+        "",
+        "- bash scripts/check-devgod-workflow.sh --task-id DG-SPECIALIST-PROOF",
+        "",
+        "## Required reviews",
+        "",
+        "- reviewer",
+        "- qa_engineer",
+        "- security_reviewer",
+        "",
+        "## Rollback notes",
+        "",
+        "- delete the fixture"
+      ].join("\n"),
+      "utf8"
+    );
+
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeFile(
+        join(targetRoot, ".devgod", "work", "reviews", `review-${taskId}-${role}.md`),
+        [
+          "# Review Gate",
+          "",
+          "## Task ID",
+          "",
+          `\`${taskId}\``,
+          "",
+          "## Reviewer role",
+          "",
+          `\`${role}\``,
+          "",
+          "## Actor",
+          "",
+          "`synthetic-actor`",
+          "",
+          "## Actor role",
+          "",
+          `\`${role}\``,
+          "",
+          "## Provenance status",
+          "",
+          "`summary_only`",
+          "",
+          "## Review state",
+          "",
+          "`passed`",
+          "",
+          "## Severity",
+          "",
+          "`low`",
+          "",
+          "## Findings",
+          "",
+          "No findings.",
+          "",
+          "## Residual risk",
+          "",
+          "Runtime proof is missing in this negative fixture.",
+          "",
+          "## Verification evidence",
+          "",
+          "- bash scripts/check-devgod-workflow.sh --task-id DG-SPECIALIST-PROOF",
+          "",
+          "## Specialist execution evidence",
+          "",
+          "- manager summary only",
+          "",
+          "## Quality gate evidence",
+          "",
+          "- acceptance claimed without runtime proof",
+          "",
+          "## Waiver authority",
+          "",
+          "`none`",
+          "",
+          "## Waiver reason",
+          "",
+          "None.",
+          "",
+          "## Decision",
+          "",
+          "`approved`",
+          "",
+          "## Source handoff",
+          "",
+          "Manager summary without authenticated runtime proof."
+        ].join("\n"),
+        "utf8"
+      );
+    }
+
+    await writeFile(
+      join(targetRoot, ".devgod", "ACTIVE"),
+      `task_id=${taskId}\nworkflow=devgod\nstate=active\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot, "--task-id", taskId], {
+        cwd: repoRoot
+      }),
+      /requires runtime_verified review provenance/
     );
   } finally {
     await rm(targetRoot, { recursive: true, force: true });

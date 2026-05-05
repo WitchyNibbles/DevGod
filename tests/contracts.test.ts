@@ -31,6 +31,9 @@ test("validateTaskPacket rejects missing operational controls", () => {
     taskId: "task-1",
     title: "Bad task",
     ownerRole: "backend_engineer",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: [],
+    qualityGates: [],
     goal: "ship something",
     inputs: [],
     outputs: [],
@@ -49,6 +52,8 @@ test("validateTaskPacket rejects missing operational controls", () => {
   assert.ok(errors.includes("allowedWriteScope is required"));
   assert.ok(errors.includes("acceptanceCriteria is required"));
   assert.ok(errors.includes("requiredReviews is required"));
+  assert.ok(errors.includes("requiredSpecialistRoles is required"));
+  assert.ok(errors.includes("qualityGates is required"));
 });
 
 test("validateTaskPacket rejects non-devgod roles and missing mandatory review trio", () => {
@@ -56,6 +61,9 @@ test("validateTaskPacket rejects non-devgod roles and missing mandatory review t
     taskId: "task-1",
     title: "Bad task",
     ownerRole: "ceo",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: ["planner"],
+    qualityGates: ["tdd_required"],
     goal: "ship something",
     inputs: ["brief"],
     outputs: ["handoff"],
@@ -75,6 +83,7 @@ test("validateTaskPacket rejects non-devgod roles and missing mandatory review t
   assert.ok(errors.includes("requiredReviews must be limited to: reviewer, security_reviewer, qa_engineer"));
   assert.ok(errors.includes("missing required review gate: reviewer"));
   assert.ok(errors.includes("missing required review gate: security_reviewer"));
+  assert.ok(!errors.includes("requiredSpecialistRoles must include ownerRole"));
 });
 
 test("validateTaskPacket accepts newly shipped specialist roles", () => {
@@ -82,6 +91,9 @@ test("validateTaskPacket accepts newly shipped specialist roles", () => {
     taskId: "task-1",
     title: "TDD task",
     ownerRole: "tdd-guide",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: ["tdd-guide"],
+    qualityGates: ["tdd_required"],
     goal: "prove behavior first",
     inputs: ["brief"],
     outputs: ["tests"],
@@ -103,16 +115,22 @@ test("validateTaskPacket accepts newly shipped specialist roles", () => {
 test("validateHandoff rejects empty evidence fields", () => {
   const errors = validateHandoff({
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "",
     changedFiles: [],
     blockers: [],
     verificationNotes: [""],
+    executionEvidence: [],
+    qualityGateEvidence: [],
     contextRefs: []
   });
 
   assert.ok(errors.includes("handoff summary is required"));
   assert.ok(errors.includes("handoff changedFiles must contain at least one non-empty path"));
   assert.ok(errors.includes("handoff verificationNotes must contain at least one non-empty item"));
+  assert.ok(errors.includes("handoff executionEvidence must contain at least one non-empty item"));
+  assert.ok(errors.includes("handoff qualityGateEvidence must contain at least one non-empty item"));
   assert.ok(errors.includes("handoff contextRefs must contain at least one non-empty item"));
 });
 

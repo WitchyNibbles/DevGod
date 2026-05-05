@@ -31,6 +31,37 @@ function sqlClientWithRows<Row>(
   };
 }
 
+test("sqlClientWithRows supports single-response mode without capture", async () => {
+  const client = sqlClientWithRows([{ id: "row-1" }]);
+  const result = await client.query<{ id: string }>("select 1");
+
+  assert.deepEqual(result.rows, [{ id: "row-1" }]);
+  assert.equal(result.rowCount, 1);
+});
+
+test("sqlClientWithRows reuses the final batch when calls exceed seeded responses", async () => {
+  const capture: QueryCapture[] = [];
+  const client = sqlClientWithRows(
+    [
+      [{ id: "row-1" }],
+      [{ id: "row-2" }]
+    ],
+    capture
+  );
+
+  const first = await client.query<{ id: string }>("select first");
+  const second = await client.query<{ id: string }>("select second");
+  const third = await client.query<{ id: string }>("select third");
+
+  assert.deepEqual(first.rows, [{ id: "row-1" }]);
+  assert.deepEqual(second.rows, [{ id: "row-2" }]);
+  assert.deepEqual(third.rows, [{ id: "row-2" }]);
+  assert.deepEqual(
+    capture.map((query) => query.text),
+    ["select first", "select second", "select third"]
+  );
+});
+
 test("PostgresStore.saveReview persists actor provenance and waiver authority", async () => {
   const capture: QueryCapture[] = [];
   const store = new PostgresStore(sqlClientWithRows([], capture));
@@ -88,6 +119,92 @@ test("PostgresStore.saveApproval persists actor role", async () => {
     "authenticated",
     "approved",
     "All required reviews passed"
+  ]);
+});
+
+test("PostgresStore.saveHandoff persists specialist execution evidence", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.saveHandoff({
+    id: "handoff-1",
+    runId: "run-1",
+    taskId: "task-1",
+    actor: "backend-1",
+    ownerRole: "backend_engineer",
+    completionStandard: "specialist_verified",
+    summary: "Implemented the runtime change",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    executionEvidence: ["backend engineer handoff with owned scope"],
+    qualityGateEvidence: ["product acceptance and TDD evidence captured"],
+    contextRefs: [".devgod/work/tasks/task-1.md"],
+    createdAt: "2026-05-05T00:00:00.000Z"
+  });
+
+  assert.match(capture[0]?.text ?? "", /owner_role/);
+  assert.match(capture[0]?.text ?? "", /execution_evidence/);
+  assert.match(capture[0]?.text ?? "", /quality_gate_evidence/);
+  assert.deepEqual(capture[0]?.values?.slice(3), [
+    "backend-1",
+    "backend_engineer",
+    "specialist_verified",
+    "Implemented the runtime change",
+    ["src/core/service.ts"],
+    [],
+    ["npm test"],
+    ["backend engineer handoff with owned scope"],
+    ["product acceptance and TDD evidence captured"],
+    [".devgod/work/tasks/task-1.md"]
+  ]);
+});
+
+test("PostgresStore.getHandoffs returns specialist execution evidence", async () => {
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [
+        {
+          payload: {
+            id: "handoff-1",
+            runId: "run-1",
+            taskId: "task-1",
+            actor: "backend-1",
+            ownerRole: "backend_engineer",
+            completionStandard: "specialist_verified",
+            summary: "Implemented the runtime change",
+            changedFiles: ["src/core/service.ts"],
+            blockers: [],
+            verificationNotes: ["npm test"],
+            executionEvidence: ["backend engineer handoff with owned scope"],
+            qualityGateEvidence: ["product acceptance and TDD evidence captured"],
+            contextRefs: [".devgod/work/tasks/task-1.md"],
+            createdAt: "2026-05-05T00:00:00.000Z"
+          }
+        }
+      ]
+    ])
+  );
+
+  const handoffs = await store.getHandoffs("run-1", "task-1");
+
+  assert.deepEqual(handoffs, [
+    {
+      id: "handoff-1",
+      runId: "run-1",
+      taskId: "task-1",
+      actor: "backend-1",
+      ownerRole: "backend_engineer",
+      completionStandard: "specialist_verified",
+      summary: "Implemented the runtime change",
+      changedFiles: ["src/core/service.ts"],
+      blockers: [],
+      verificationNotes: ["npm test"],
+      executionEvidence: ["backend engineer handoff with owned scope"],
+      qualityGateEvidence: ["product acceptance and TDD evidence captured"],
+      contextRefs: [".devgod/work/tasks/task-1.md"],
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }
   ]);
 });
 

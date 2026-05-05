@@ -28,6 +28,7 @@ export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
 export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
 export const artifactKinds = ["plan", "markdown_chunk"] as const;
 export const stopGoDecisions = ["go", "needs_review", "stop"] as const;
+export const completionStandards = ["artifact_complete", "specialist_verified"] as const;
 export const retrievalRoles = [
   "planner",
   "product_strategist",
@@ -47,6 +48,17 @@ export const retrievalRoles = [
 ] as const;
 export const requiredGateReviews = ["reviewer", "security_reviewer", "qa_engineer"] as const;
 export const reviewWaiverAuthorities = ["none", "manager", "security_exception"] as const;
+export const qualityGates = [
+  "product_acceptance",
+  "frontend_acceptance",
+  "accessibility_acceptance",
+  "responsive_acceptance",
+  "tdd_required",
+  "e2e_required",
+  "release_readiness_required",
+  "performance_check_required",
+  "setup_replay_required"
+] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -59,9 +71,11 @@ export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
+export type CompletionStandard = (typeof completionStandards)[number];
 export type RetrievalRole = (typeof retrievalRoles)[number];
 export type GateReviewRole = (typeof requiredGateReviews)[number];
 export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
+export type QualityGate = (typeof qualityGates)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -129,6 +143,9 @@ export interface TaskPacketInput {
   taskId: string;
   title: string;
   ownerRole: string;
+  completionStandard: CompletionStandard;
+  requiredSpecialistRoles: RetrievalRole[];
+  qualityGates: QualityGate[];
   goal: string;
   inputs: string[];
   outputs: string[];
@@ -146,10 +163,14 @@ export interface TaskPacketInput {
 
 export interface HandoffInput {
   actor: string;
+  ownerRole: RetrievalRole;
+  completionStandard: CompletionStandard;
   summary: string;
   changedFiles: string[];
   blockers: string[];
   verificationNotes: string[];
+  executionEvidence: string[];
+  qualityGateEvidence: string[];
   contextRefs: string[];
 }
 
@@ -255,10 +276,14 @@ export interface HandoffRecord {
   runId: string;
   taskId: string;
   actor: string;
+  ownerRole: RetrievalRole;
+  completionStandard: CompletionStandard;
   summary: string;
   changedFiles: string[];
   blockers: string[];
   verificationNotes: string[];
+  executionEvidence: string[];
+  qualityGateEvidence: string[];
   contextRefs: string[];
   createdAt: string;
 }

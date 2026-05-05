@@ -56,6 +56,8 @@
     "db:stop": "docker compose down",
     "install:project": "node --experimental-strip-types src/install/cli.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "check:coverage": "node --experimental-strip-types scripts/check-coverage.ts",
+    "check:quality": "bash scripts/check-quality.sh",
     "check:workflow": "bash scripts/check-devgod-workflow.sh",
     "typecheck": "tsc --noEmit",
     "migrate": "node --experimental-strip-types src/admin.ts migrate",

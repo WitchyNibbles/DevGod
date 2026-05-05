@@ -13,7 +13,11 @@ import {
   type ReviewWaiverAuthority,
   type SearchMemoryInput,
   type StopGoDecision,
+  type CompletionStandard,
+  type QualityGate,
+  completionStandards,
   identityAssurances,
+  qualityGates,
   reviewWaiverAuthorities,
   requiredGateReviews,
   retrievalRoles,
@@ -26,6 +30,8 @@ const retrievalRoleSet = new Set<string>(retrievalRoles);
 const requiredGateReviewSet = new Set<string>(requiredGateReviews);
 const reviewWaiverAuthoritySet = new Set<string>(reviewWaiverAuthorities);
 const identityAssuranceSet = new Set<string>(identityAssurances);
+const completionStandardSet = new Set<string>(completionStandards);
+const qualityGateSet = new Set<string>(qualityGates);
 const managerWaiverRoles = new Set<RetrievalRole>(["planner", "solution_architect"]);
 
 export const DEFAULT_RETRIEVAL_ROLE: RetrievalRole = "planner";
@@ -129,6 +135,14 @@ export function isIdentityAssurance(value: string): value is IdentityAssurance {
   return identityAssuranceSet.has(value);
 }
 
+export function isCompletionStandard(value: string): value is CompletionStandard {
+  return completionStandardSet.has(value);
+}
+
+export function isQualityGate(value: string): value is QualityGate {
+  return qualityGateSet.has(value);
+}
+
 export function canActorWaiveReview(input: {
   actorRole: RetrievalRole;
   reviewerRole: GateReviewRole;
@@ -206,6 +220,8 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
   const errors: string[] = [];
   const normalizedOwnerRole = packet.ownerRole.trim();
   const normalizedRequiredReviews = uniqueTrimmedItems(packet.requiredReviews);
+  const normalizedSpecialistRoles = uniqueTrimmedItems(packet.requiredSpecialistRoles);
+  const normalizedQualityGates = uniqueTrimmedItems(packet.qualityGates);
 
   if (packet.taskId.trim().length === 0) {
     errors.push("taskId is required");
@@ -215,6 +231,52 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
     errors.push("ownerRole is required");
   } else if (!isRetrievalRole(normalizedOwnerRole)) {
     errors.push(`ownerRole must be one of: ${retrievalRoles.join(", ")}`);
+  }
+
+  if (!isCompletionStandard(packet.completionStandard)) {
+    errors.push(`completionStandard must be one of: ${completionStandards.join(", ")}`);
+  }
+
+  if (packet.requiredSpecialistRoles.length === 0) {
+    errors.push("requiredSpecialistRoles is required");
+  } else {
+    if (normalizedSpecialistRoles.length !== packet.requiredSpecialistRoles.length) {
+      errors.push("requiredSpecialistRoles must not contain empty or duplicate values");
+    }
+
+    const invalidSpecialistRoles = normalizedSpecialistRoles.filter((role) => !retrievalRoleSet.has(role));
+    if (invalidSpecialistRoles.length > 0) {
+      errors.push(`requiredSpecialistRoles must be limited to: ${retrievalRoles.join(", ")}`);
+    }
+
+    if (normalizedOwnerRole.length > 0 && isRetrievalRole(normalizedOwnerRole)) {
+      if (!normalizedSpecialistRoles.includes(normalizedOwnerRole)) {
+        errors.push("requiredSpecialistRoles must include ownerRole");
+      }
+    }
+  }
+
+  if (packet.qualityGates.length === 0) {
+    errors.push("qualityGates is required");
+  } else {
+    if (normalizedQualityGates.length !== packet.qualityGates.length) {
+      errors.push("qualityGates must not contain empty or duplicate values");
+    }
+
+    const invalidQualityGates = normalizedQualityGates.filter((gate) => !qualityGateSet.has(gate));
+    if (invalidQualityGates.length > 0) {
+      errors.push(`qualityGates must be limited to: ${qualityGates.join(", ")}`);
+    }
+  }
+
+  if (packet.completionStandard === "specialist_verified") {
+    if (normalizedSpecialistRoles.length === 0) {
+      errors.push("specialist_verified tasks require at least one specialist role");
+    }
+
+    if (normalizedQualityGates.length === 0) {
+      errors.push("specialist_verified tasks require at least one quality gate");
+    }
   }
 
   if (packet.goal.trim().length === 0) {
@@ -283,6 +345,14 @@ export function validateHandoff(input: HandoffInput): string[] {
     errors.push("handoff actor is required");
   }
 
+  if (!isRetrievalRole(input.ownerRole)) {
+    errors.push(`handoff ownerRole must be one of: ${retrievalRoles.join(", ")}`);
+  }
+
+  if (!isCompletionStandard(input.completionStandard)) {
+    errors.push(`handoff completionStandard must be one of: ${completionStandards.join(", ")}`);
+  }
+
   if (input.summary.trim().length === 0) {
     errors.push("handoff summary is required");
   }
@@ -296,6 +366,20 @@ export function validateHandoff(input: HandoffInput): string[] {
     input.verificationNotes.length === 0
   ) {
     errors.push("handoff verificationNotes must contain at least one non-empty item");
+  }
+
+  if (
+    uniqueTrimmedItems(input.executionEvidence).length !== input.executionEvidence.length ||
+    input.executionEvidence.length === 0
+  ) {
+    errors.push("handoff executionEvidence must contain at least one non-empty item");
+  }
+
+  if (
+    uniqueTrimmedItems(input.qualityGateEvidence).length !== input.qualityGateEvidence.length ||
+    input.qualityGateEvidence.length === 0
+  ) {
+    errors.push("handoff qualityGateEvidence must contain at least one non-empty item");
   }
 
   if (uniqueTrimmedItems(input.contextRefs).length !== input.contextRefs.length || input.contextRefs.length === 0) {

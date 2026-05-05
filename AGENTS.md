@@ -21,12 +21,13 @@ operational state, reviewed memory, and repo-specific overlays.
 2. Create or update `.devgod/ACTIVE` plus the repo-local work artifacts in `.devgod/work/` before moving past intake.
 3. After at most two shallow local inspection commands, either classify the task as trivial or route bounded evidence gathering; do not let manager/root drift into deep investigation.
 4. Consult `solution_architect` after the evidence pass so boundaries, sequencing, and trust assumptions are explicit before planning.
-5. Use `planner` to synthesize the task graph, owner routing, and explicit task packets from the approved architecture.
-6. Build only from explicit task packets with `task_id`, owner, write scope, verification, reviews, security checks, anti-patterns, and rollback notes.
-7. Manager/root coordinates execution; non-trivial, risky, or subsystem-specific implementation belongs to the named specialist owner, while manager/root may only make trivial mechanical edits on the fast path.
-8. Move finished work into handoff and blocking review; when reviewer roles are read-only, manager/root persists their gate outputs under `.devgod/work/reviews/`.
-9. Require reviewer, security, and QA gates plus `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before completion. Treat the script as artifact-contract verification only; trusted reviewer authority still comes from runtime checks or other authenticated evidence.
-10. Promote only reviewed, evidence-based memory.
+5. For ambiguous, customer-facing, or flow-heavy work, consult `product_strategist` before or alongside architecture so the ask is framed as a customer requirement with explicit user/problem/value context.
+6. Use `planner` to synthesize the task graph, owner routing, and explicit task packets from the approved architecture.
+7. Build only from explicit task packets with `task_id`, owner, completion standard, required specialist roles, quality gates, write scope, verification, reviews, security checks, anti-patterns, and rollback notes.
+8. Manager/root coordinates execution; non-trivial, risky, or subsystem-specific implementation belongs to the named specialist owner, while manager/root may only make trivial mechanical edits on the fast path.
+9. Move finished work into handoff and blocking review; when reviewer roles are read-only, manager/root persists their gate outputs under `.devgod/work/reviews/`.
+10. Require reviewer, security, and QA gates plus `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before completion. Treat the script as artifact-contract verification only; trusted reviewer authority still comes from runtime checks or other authenticated evidence.
+11. Promote only reviewed, evidence-based memory.
 
 ## Workflow artifacts
 
@@ -120,6 +121,9 @@ Do not let a worker start unless the packet includes:
 
 - `task_id`
 - goal and owner role
+- completion standard
+- required specialist roles
+- quality gates
 - inputs and dependencies
 - allowed write scope
 - out-of-scope boundaries
@@ -147,6 +151,8 @@ Ask the user before:
 
 - unresolved `CRITICAL` or `HIGH` security findings block completion
 - missing required review blocks completion
+- missing required specialist execution evidence blocks completion for `specialist_verified` work
+- missing required quality-gate evidence blocks completion for `specialist_verified` work
 - missing acceptance criteria or verification evidence blocks completion
 - missing workflow-checker proof blocks completion
 - the workflow checker validates artifact alignment and markdown-summary consistency only; it does not authenticate reviewers or grant authority by itself
@@ -156,6 +162,7 @@ Ask the user before:
 - waived reviews require explicit actor, authority, and reason, and unauthorized or legacy-backfilled waivers block completion
 - manager/root must not declare done while a blocking gate fails
 - substantive work must keep the current task id aligned across `.devgod/ACTIVE`, the current brief, the current plan or task packet, and the required review gates
+- substantive work that is not on the trivial fast path should normally use `specialist_verified` completion with explicit specialist and quality-gate evidence
 - workers must not edit `AGENTS.md`, `.codex/`, `.agents/`, or `.devgod/memory/` unless the task packet explicitly assigns that scope
 
 ## Caveman format

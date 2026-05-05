@@ -12,6 +12,10 @@ What must be true when this work succeeds?
 
 Who is affected first?
 
+## User segments
+
+Who are the primary users or operators?
+
 ## Main pain
 
 What painful problem does it solve?
@@ -19,6 +23,10 @@ What painful problem does it solve?
 ## Core flows
 
 What are the top 3 to 5 flows?
+
+## Product acceptance checks
+
+What user-visible checks would prove the outcome feels complete and polished on first try?
 
 ## Measurable success criteria
 

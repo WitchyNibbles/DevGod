@@ -181,15 +181,29 @@ export class DevgodCoreService {
       throw new Error(`Invalid handoff: ${validationErrors.join("; ")}`);
     }
 
+    if (handoff.ownerRole !== task.packet.ownerRole) {
+      throw new Error(`Invalid handoff: ownerRole must match task ownerRole ${task.packet.ownerRole}`);
+    }
+
+    if (handoff.completionStandard !== task.packet.completionStandard) {
+      throw new Error(
+        `Invalid handoff: completionStandard must match task completionStandard ${task.packet.completionStandard}`
+      );
+    }
+
     const record = {
       id: randomUUID(),
       runId,
       taskId,
       actor: handoff.actor,
+      ownerRole: handoff.ownerRole,
+      completionStandard: handoff.completionStandard,
       summary: handoff.summary,
       changedFiles: [...handoff.changedFiles],
       blockers: [...handoff.blockers],
       verificationNotes: [...handoff.verificationNotes],
+      executionEvidence: [...handoff.executionEvidence],
+      qualityGateEvidence: [...handoff.qualityGateEvidence],
       contextRefs: [...handoff.contextRefs],
       createdAt: timestamp()
     };

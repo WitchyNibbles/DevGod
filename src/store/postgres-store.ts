@@ -341,10 +341,10 @@ export class PostgresStore implements DevgodStore {
   async saveHandoff(handoff: HandoffRecord): Promise<void> {
     await this.client.query(
       `insert into handoffs (
-         id, workspace_id, project_id, run_id, task_id, actor, summary,
-         changed_files, blockers, verification_notes, context_refs
+         id, workspace_id, project_id, run_id, task_id, actor, owner_role, completion_standard, summary,
+         changed_files, blockers, verification_notes, execution_evidence, quality_gate_evidence, context_refs
        )
-       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8, $9
+       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
        from runs r
        where r.id = $2`,
       [
@@ -352,10 +352,14 @@ export class PostgresStore implements DevgodStore {
         handoff.runId,
         handoff.taskId,
         handoff.actor,
+        handoff.ownerRole,
+        handoff.completionStandard,
         handoff.summary,
         handoff.changedFiles,
         handoff.blockers,
         handoff.verificationNotes,
+        handoff.executionEvidence,
+        handoff.qualityGateEvidence,
         handoff.contextRefs
       ]
     );
@@ -368,10 +372,14 @@ export class PostgresStore implements DevgodStore {
           'runId', run_id,
           'taskId', task_id,
           'actor', actor,
+          'ownerRole', owner_role,
+          'completionStandard', completion_standard,
           'summary', summary,
           'changedFiles', changed_files,
           'blockers', blockers,
           'verificationNotes', verification_notes,
+          'executionEvidence', execution_evidence,
+          'qualityGateEvidence', quality_gate_evidence,
           'contextRefs', context_refs,
           'createdAt', created_at
        ) as payload

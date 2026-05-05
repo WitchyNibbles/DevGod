@@ -87,6 +87,19 @@ extract_section_value() {
   ' "$path"
 }
 
+extract_section_block() {
+  local heading="$1"
+  local path="$2"
+  awk -v heading="$heading" '
+    $0 == heading { in_section=1; next }
+    in_section && /^## / { exit }
+    in_section {
+      gsub(/\r/, "", $0)
+      print
+    }
+  ' "$path"
+}
+
 normalize_value() {
   printf '%s' "$1" | tr -d '\r' | sed -e 's/`//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
@@ -236,6 +249,9 @@ require_section_equals "## Stop Go" "go | needs_review | stop" "$brief_template"
 
 require_section_equals "## Task ID" "<task-id>" "$task_template"
 require_section_equals "## Owner role" "<owner-role>" "$task_template"
+require_section_equals "## Completion standard" "artifact_complete | specialist_verified" "$task_template"
+require_heading "## Required specialist roles" "$task_template"
+require_heading "## Quality gates" "$task_template"
 require_heading "## Acceptance criteria" "$task_template"
 require_heading "## Verification steps" "$task_template"
 require_heading "## Required reviews" "$task_template"
@@ -251,6 +267,8 @@ require_section_equals "## Actor role" "reviewer | qa_engineer | security_review
 require_section_equals "## Provenance status" "summary_only | runtime_verified | legacy_backfill" "$review_template"
 require_section_equals "## Review state" "pending | passed | blocked | waived" "$review_template"
 require_section_equals "## Severity" "low | medium | high | critical" "$review_template"
+require_heading "## Specialist execution evidence" "$review_template"
+require_heading "## Quality gate evidence" "$review_template"
 require_heading "## Verification evidence" "$review_template"
 require_section_equals "## Waiver authority" "none | manager | security_exception" "$review_template"
 require_section_equals "## Decision" "approved | blocked | waived" "$review_template"
@@ -270,6 +288,20 @@ elif [[ -f "$task_file" ]]; then
   require_section_equals "## Task ID" "$task_id" "$task_file"
 else
   fail "missing current plan or task artifact for ${task_id}"
+fi
+
+task_completion_standard="artifact_complete"
+if [[ -f "$task_file" ]]; then
+  require_section_equals "## Task ID" "$task_id" "$task_file"
+  task_completion_standard="$(normalize_value "$(extract_section_value "## Completion standard" "$task_file")")"
+  require_allowed_value "$task_completion_standard" "$task_file" "artifact_complete" "specialist_verified"
+
+  if [[ "$task_completion_standard" == "specialist_verified" ]]; then
+    specialist_roles_block="$(extract_section_block "## Required specialist roles" "$task_file")"
+    quality_gates_block="$(extract_section_block "## Quality gates" "$task_file")"
+    [[ -n "$(normalize_value "$specialist_roles_block")" ]] || fail "missing required specialist roles in ${task_file#"$repo_root"/}"
+    [[ -n "$(normalize_value "$quality_gates_block")" ]] || fail "missing quality gates in ${task_file#"$repo_root"/}"
+  fi
 fi
 
 roles=("reviewer" "qa" "security")
@@ -317,6 +349,10 @@ for role in "${roles[@]}"; do
     esac
   fi
 
+  if [[ "$task_completion_standard" == "specialist_verified" && "$provenance_status" != "runtime_verified" ]]; then
+    fail "specialist_verified work requires runtime_verified review provenance in ${review_file#"$repo_root"/}"
+  fi
+
   if [[ "$review_state" == "passed" && "$decision" == "approved" ]]; then
     [[ "$actor_role" == "$expected_role" ]] || fail "passed review summary must record actor role ${expected_role} in ${review_file#"$repo_root"/}"
     [[ "$waiver_authority" == "none" ]] || fail "passed review summary must use waiver authority none in ${review_file#"$repo_root"/}"
@@ -341,9 +377,15 @@ for role in "${roles[@]}"; do
 
   findings="$(extract_section_value "## Findings" "$review_file")"
   residual_risk="$(extract_section_value "## Residual risk" "$review_file")"
+  specialist_execution_evidence="$(extract_section_value "## Specialist execution evidence" "$review_file")"
+  quality_gate_evidence="$(extract_section_value "## Quality gate evidence" "$review_file")"
   verification_evidence="$(extract_section_value "## Verification evidence" "$review_file")"
   [[ -n "$findings" ]] || fail "missing findings in ${review_file#"$repo_root"/}"
   [[ -n "$residual_risk" ]] || fail "missing residual risk in ${review_file#"$repo_root"/}"
+  if [[ "$task_completion_standard" == "specialist_verified" ]]; then
+    [[ -n "$specialist_execution_evidence" ]] || fail "missing specialist execution evidence in ${review_file#"$repo_root"/}"
+    [[ -n "$quality_gate_evidence" ]] || fail "missing quality gate evidence in ${review_file#"$repo_root"/}"
+  fi
   [[ -n "$verification_evidence" ]] || fail "missing verification evidence in ${review_file#"$repo_root"/}"
   source_handoff="$(extract_section_value "## Source handoff" "$review_file")"
   [[ -n "$source_handoff" ]] || fail "missing source handoff in ${review_file#"$repo_root"/}"

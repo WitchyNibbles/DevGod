@@ -15,6 +15,11 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
+    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    requiredSpecialistRoles:
+      overrides.requiredSpecialistRoles ??
+      [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
+    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -253,10 +258,14 @@ test("recordReview keeps task blocked on high severity finding", async () => {
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/service.ts"],
     blockers: [],
     verificationNotes: ["tests written"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -320,13 +329,77 @@ test("submitHandoff rejects empty verification evidence", async () => {
   await assert.rejects(
     service.submitHandoff(run.id, "task-1", {
       actor: "planner",
+      ownerRole: "planner",
+      completionStandard: "specialist_verified",
       summary: "ready for review",
       changedFiles: [],
       blockers: [],
       verificationNotes: [],
+      executionEvidence: [],
+      qualityGateEvidence: [],
       contextRefs: []
     }),
     /Invalid handoff/
+  );
+});
+
+test("submitHandoff rejects owner roles that do not match the task packet", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ ownerRole: "backend_engineer" })]);
+  await service.claimTask(run.id, "task-1", "backend_engineer");
+
+  await assert.rejects(
+    service.submitHandoff(run.id, "task-1", {
+      actor: "backend_engineer",
+      ownerRole: "frontend_designer",
+      completionStandard: "specialist_verified",
+      summary: "ready for review",
+      changedFiles: ["src/core/service.ts"],
+      blockers: [],
+      verificationNotes: ["npm test"],
+      executionEvidence: ["frontend claim on backend task"],
+      qualityGateEvidence: ["product acceptance checked"],
+      contextRefs: ["brief-1"]
+    }),
+    /ownerRole must match task ownerRole backend_engineer/
+  );
+});
+
+test("submitHandoff rejects completion standards that do not match the task packet", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+
+  await assert.rejects(
+    service.submitHandoff(run.id, "task-1", {
+      actor: "planner",
+      ownerRole: "planner",
+      completionStandard: "artifact_complete",
+      summary: "ready for review",
+      changedFiles: ["src/core/service.ts"],
+      blockers: [],
+      verificationNotes: ["npm test"],
+      executionEvidence: ["planner handoff recorded"],
+      qualityGateEvidence: ["product acceptance checked"],
+      contextRefs: ["brief-1"]
+    }),
+    /completionStandard must match task completionStandard specialist_verified/
   );
 });
 
@@ -344,10 +417,14 @@ test("recordReview keeps task blocked when the latest required review is pending
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -389,10 +466,14 @@ test("recordReview approves only after reviewer, security, and QA all pass", asy
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -434,10 +515,14 @@ test("recordReview rejects spoofed actor roles", async () => {
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/service.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -466,10 +551,14 @@ test("recordReview allows manager waiver for qa gate with provenance", async () 
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -527,10 +616,14 @@ test("recordReview still requires reviewer gate for legacy task packets", async 
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -566,10 +659,14 @@ test("recordReview rejects manager waiver for security gate", async () => {
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
 
@@ -617,10 +714,14 @@ test("recordReview ignores reviews from other runs with the same task key", asyn
   await service.claimTask(firstRun.id, "task-1", "planner");
   await service.submitHandoff(firstRun.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/policy.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
   await service.recordReview(firstRun.id, "task-1", reviewContext("reviewer").actor, {
@@ -645,10 +746,14 @@ test("recordReview ignores reviews from other runs with the same task key", asyn
   await service.claimTask(secondRun.id, "task-1", "planner");
   await service.submitHandoff(secondRun.id, "task-1", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "ready for review",
     changedFiles: ["src/core/service.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-2"]
   });
 
@@ -686,10 +791,14 @@ test("claimTask blocks dependencies with stale approved legacy review state", as
   await service.claimTask(run.id, "plan", "planner");
   await service.submitHandoff(run.id, "plan", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "legacy plan ready for review",
     changedFiles: ["src/core/service.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-legacy-review"]
   });
 
@@ -749,10 +858,14 @@ test("claimTask blocks dependencies with legacy-backfilled review provenance", a
   await service.claimTask(run.id, "plan", "planner");
   await service.submitHandoff(run.id, "plan", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "plan ready for review",
     changedFiles: ["src/core/service.ts"],
     blockers: [],
     verificationNotes: ["npm test"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-auth-assurance"]
   });
   await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
@@ -1553,10 +1666,14 @@ test("resumeRun returns ready tasks with satisfied dependencies", async () => {
   await service.claimTask(run.id, "plan", "planner");
   await service.submitHandoff(run.id, "plan", {
     actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
     summary: "plan ready",
     changedFiles: [".devgod/work/plans/plan.md"],
     blockers: [],
     verificationNotes: ["plan reviewed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
     contextRefs: ["brief-1"]
   });
   await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {

@@ -103,6 +103,44 @@ test("createReviewActionContextResolver rejects unverified principals and unauth
   );
 });
 
+test("createReviewActionContextResolver accepts array bindings and rejects missing principal bindings", async () => {
+  const resolver = createReviewActionContextResolver({
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-reviewer",
+            roles: ["reviewer"]
+          }
+        ]
+      }
+    ],
+    resolveAuthenticatedPrincipal() {
+      return {
+        provider: "github",
+        subject: "bob",
+        verified: true
+      };
+    }
+  });
+
+  await assert.rejects(
+    async () =>
+      resolver({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "alice-reviewer",
+        reviewerRole: "reviewer",
+        reviewState: "passed"
+      }),
+    /No review identity binding for github:bob/
+  );
+});
+
 test("createReviewActionContextResolver derives waiver authority from reviewed bindings", async () => {
   const resolver = createReviewActionContextResolver({
     bindings: {
@@ -260,6 +298,38 @@ test("loadReviewIdentityBindings reads reviewed binding files", async () => {
   }
 });
 
+test("loadReviewIdentityBindings rejects invalid reviewed binding files", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "devgod-review-bindings-invalid-"));
+  const filePath = join(directory, "review-identity-bindings.json");
+
+  try {
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        bindings: [
+          {
+            principal: {
+              provider: "github",
+              subject: "alice"
+            },
+            actors: [
+              {
+                actor: "alice-reviewer",
+                roles: []
+              }
+            ]
+          }
+        ]
+      })}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(() => loadReviewIdentityBindings(filePath), /Invalid review identity bindings/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("validateReviewIdentityFixtures rejects empty names and missing deny expectations", () => {
   const errors = validateReviewIdentityFixtures({
     fixtures: [
@@ -281,6 +351,41 @@ test("validateReviewIdentityFixtures rejects empty names and missing deny expect
 
   assert.match(errors.join(" | "), /name is required/);
   assert.match(errors.join(" | "), /expect\.errorIncludes requires at least one value/);
+});
+
+test("validateReviewIdentityFixtures rejects invalid allow expectations", () => {
+  const errors = validateReviewIdentityFixtures({
+    fixtures: [
+      {
+        name: "bad allow",
+        authContext: {},
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "allow",
+          principal: {
+            provider: " ",
+            subject: "alice",
+            verified: true,
+            groups: ["team-a", "team-a"]
+          },
+          context: {
+            actor: " ",
+            actorRole: "ceo" as never,
+            waiverAuthority: "invalid" as never
+          }
+        }
+      }
+    ]
+  });
+
+  assert.match(errors.join(" | "), /expect\.principal Authenticated principal provider is required/);
+  assert.match(errors.join(" | "), /expect\.context\.actor is required/);
+  assert.match(errors.join(" | "), /invalid expect\.context\.actorRole ceo/);
+  assert.match(errors.join(" | "), /invalid expect\.context\.waiverAuthority invalid/);
 });
 
 test("verifyReviewIdentityAdapter validates allow and deny fixtures", async () => {
@@ -368,6 +473,128 @@ test("verifyReviewIdentityAdapter validates allow and deny fixtures", async () =
   });
 });
 
+test("createReviewPrincipalAdapter normalizes principals and rejects invalid adapter output", async () => {
+  const adapter = createReviewPrincipalAdapter(async () => ({
+    provider: " github ",
+    subject: " alice ",
+    verified: true,
+    displayName: " Alice ",
+    email: " alice@example.com ",
+    groups: ["team-a", "team-b"]
+  }));
+
+  const principal = await adapter({
+    runId: "run-1",
+    taskId: "task-1",
+    actor: "alice-reviewer",
+    reviewerRole: "reviewer",
+    reviewState: "passed",
+    authContext: {}
+  });
+
+  assert.deepEqual(principal, {
+    provider: "github",
+    subject: "alice",
+    verified: true,
+    displayName: "Alice",
+    email: "alice@example.com",
+    groups: ["team-a", "team-b"]
+  });
+
+  const invalidAdapter = createReviewPrincipalAdapter(async () => ({
+    provider: "",
+    subject: "alice",
+    verified: true
+  }));
+
+  await assert.rejects(
+    async () =>
+      invalidAdapter({
+        runId: "run-1",
+        taskId: "task-1",
+        actor: "alice-reviewer",
+        reviewerRole: "reviewer",
+        reviewState: "passed",
+        authContext: {}
+      }),
+    /Authenticated principal provider is required/
+  );
+});
+
+test("verifyReviewIdentityAdapter reports allow and deny mismatches", async () => {
+  const result = await verifyReviewIdentityAdapter({
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-reviewer",
+            roles: ["reviewer"]
+          }
+        ]
+      }
+    ],
+    adapter: async ({ authContext }) => ({
+      provider: authContext.provider,
+      subject: authContext.subject,
+      verified: authContext.verified
+    }),
+    fixtures: [
+      {
+        name: "allow mismatch",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "allow",
+          principal: {
+            provider: "github",
+            subject: "different",
+            verified: true
+          },
+          context: {
+            actor: "alice-reviewer",
+            actorRole: "reviewer",
+            waiverAuthority: "none"
+          }
+        }
+      },
+      {
+        name: "deny mismatch",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "deny",
+          errorIncludes: ["not verified"]
+        }
+      }
+    ]
+  });
+
+  assert.equal(result.passed, 0);
+  assert.equal(result.failed, 2);
+  assert.match(result.failures[0]?.message ?? "", /principal mismatch/);
+  assert.match(result.failures[1]?.message ?? "", /expected deny but resolver allowed/);
+});
+
 test("loadReviewIdentityFixtures reads reviewed fixture files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "devgod-review-fixtures-"));
   const filePath = join(directory, "review-identity-adapter.fixture.json");
@@ -400,6 +627,39 @@ test("loadReviewIdentityFixtures reads reviewed fixture files", async () => {
 
     assert.deepEqual(loaded, fixtures);
     assert.match(raw, /deny unverified principal/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loadReviewIdentityFixtures rejects invalid reviewed fixture files", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "devgod-review-fixtures-invalid-"));
+  const filePath = join(directory, "review-identity-adapter.fixture.json");
+
+  try {
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        fixtures: [
+          {
+            name: "bad fixture",
+            authContext: {},
+            review: {
+              actor: "",
+              reviewerRole: "reviewer",
+              reviewState: "passed"
+            },
+            expect: {
+              outcome: "deny",
+              errorIncludes: []
+            }
+          }
+        ]
+      })}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(() => loadReviewIdentityFixtures(filePath), /Invalid review identity fixtures/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

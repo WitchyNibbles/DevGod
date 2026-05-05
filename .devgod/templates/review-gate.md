@@ -32,6 +32,14 @@ This template records summary state only. The workflow checker validates state, 
 
 `low | medium | high | critical`
 
+## Specialist execution evidence
+
+List the evidence used to trust the claimed specialist ownership for this task.
+
+## Quality gate evidence
+
+List the evidence used to trust the declared quality gates for this task.
+
 ## Findings
 
 ## Residual risk

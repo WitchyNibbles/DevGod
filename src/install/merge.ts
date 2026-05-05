@@ -53,12 +53,13 @@ For this repository, the root Codex thread acts as the engineering manager on fi
 Default department chain:
 
 1. manager intake in the root thread
-2. bounded specialist investigation when evidence is needed
-3. \`solution_architect\` for system design, boundaries, and sequencing
-4. \`planner\` for task slicing, ownership, dependencies, and worker routing
-5. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
-6. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
-7. \`memory_curator\` for durable capture after approved completion
+2. \`product_strategist\` for ambiguous, customer-facing, or flow-heavy asks
+3. bounded specialist investigation when evidence is needed
+4. \`solution_architect\` for system design, boundaries, and sequencing
+5. \`planner\` for task slicing, ownership, dependencies, and worker routing
+6. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
+7. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
+8. \`memory_curator\` for durable capture after approved completion
 
 Additional rules:
 
@@ -67,7 +68,7 @@ Additional rules:
 - any work that needs more than two inspection commands should go through bounded investigation
 - use a bounded investigation packet with: owner role, precise question, read scope, forbidden write scope, evidence required, max output length, stop condition
 - let \`solution_architect\` synthesize investigation evidence before planning when the evidence pass runs first
-- \`planner\` task packets must include owner role, scope, files likely touched, acceptance criteria, verification command, and review gates
+- \`planner\` task packets must include owner role, completion standard, required specialist roles, quality gates, scope, files likely touched, acceptance criteria, verification command, and review gates
 - manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks; specialist owners should handle non-trivial, risky, or subsystem-specific implementation
 - preserve the trivial fast path for single-scope wording or mechanical work that stays within the two-inspection limit
 - use the local \`caveman\` plugin/skill for manager notes, agent handoffs, QA/security gates, and other internal coordination to reduce token cost
@@ -76,6 +77,7 @@ Additional rules:
 - use \`tdd-guide\` for new feature or bugfix slices that should start with failing tests
 - use \`e2e-runner\` for critical user, setup, install, and upgrade flows
 - use \`release-readiness\` before package, migration, installer, or rollout-oriented changes
+- substantive work that is not on the trivial fast path should normally use \`specialist_verified\` completion with explicit specialist and quality-gate evidence
 - require an intake brief for substantive work in \`.devgod/work/briefs/\`
 - require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution
 - require the active task id to match the current brief, plan/task, and review artifacts
