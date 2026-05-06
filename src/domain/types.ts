@@ -59,6 +59,7 @@ export const qualityGates = [
   "performance_check_required",
   "setup_replay_required"
 ] as const;
+export const routingRecommendationKinds = ["owner_dispatch", "review_dispatch", "wait"] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -76,6 +77,7 @@ export type RetrievalRole = (typeof retrievalRoles)[number];
 export type GateReviewRole = (typeof requiredGateReviews)[number];
 export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
 export type QualityGate = (typeof qualityGates)[number];
+export type RoutingRecommendationKind = (typeof routingRecommendationKinds)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -428,4 +430,24 @@ export interface RunStatusSnapshot {
   activeLocks: LockRecord[];
   blockers: string[];
   nextTaskIds: string[];
+}
+
+export interface RoutingRecommendation {
+  taskId: string;
+  taskStatus: TaskStatus;
+  recommendation: RoutingRecommendationKind;
+  authorityLabel: "derived_only";
+  targetRole?: RetrievalRole | undefined;
+  targetReviewRole?: GateReviewRole | undefined;
+  rationale: string[];
+  blockers: string[];
+  allowedWriteScope: string[];
+  retrievalGuidance: string[];
+  approvalCheckpoints: string[];
+}
+
+export interface RoutingRecommendationReport {
+  mode: "advisory_only";
+  runId: string;
+  recommendations: RoutingRecommendation[];
 }

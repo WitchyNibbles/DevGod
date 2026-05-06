@@ -6,6 +6,7 @@ Derived retrieval is a hint layer for `devgod`. It is not authority.
 
 - canonical policy remains `AGENTS.md`, `.devgod/rules/`, and reviewed `.devgod/memory/`
 - derived retrieval may help discover files, prior work, and candidate decisions
+- runtime routing recommendations are advisory only and must not auto-assign a writer or reviewer
 - important claims must be re-anchored in canonical files before planning, review, or implementation decisions
 - no role may treat unreviewed work artifacts as settled policy
 - no role may write durable memory through retrieval alone

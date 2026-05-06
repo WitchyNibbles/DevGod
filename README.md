@@ -326,14 +326,42 @@ Trust-boundary rules:
 
 Installed target repos also get:
 
+- `npm run devgod:status -- --run-id <run-id>`
+- `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>`
 - `.devgod/review-identity-bindings.json`
 - `.devgod/review-identity-adapter.fixture.json`
 - `devgod/review-identity-adapter.ts`
 - `npm run devgod:verify:review-identity`
+- `npm run devgod:record-review`
 
 The installed adapter stub fails closed until you replace it with real server-side principal lookup. The verifier command loads your adapter, reviewed bindings, and reviewed fixtures, then exits nonzero if an allow/deny case is bypassed.
 
+Live review recording uses `record-review`, not the verifier path. It requires a real `DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE`, a reviewed `.devgod/review-identity-bindings.json`, and a JSON input payload such as:
+
+```json
+{
+  "runId": "run-123",
+  "taskId": "task-abc",
+  "actor": "alice-reviewer",
+  "review": {
+    "reviewerRole": "reviewer",
+    "state": "passed",
+    "severity": "low",
+    "findings": []
+  },
+  "authContext": {
+    "provider": "github",
+    "subject": "alice",
+    "verified": true
+  }
+}
+```
+
+The live command rejects the shipped template bindings and copied placeholder bindings. Verification fixtures are for policy replay only; they never satisfy live review authority.
+
 The shipped templates are starting points, not live policy. Review the bindings and fixtures, implement the adapter, and keep all three under normal repo review.
+
+`status` prints a single operator report with explicit authority labels. Runtime rows and active locks are marked `runtime_authoritative`; freshness, blockers, next-task suggestions, and review-identity posture are marked `derived_only`. If the reviewed bindings file is malformed, `status` degrades to a derived warning instead of failing closed.
 
 ## Source Repo Setup
 

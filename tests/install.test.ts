@@ -95,6 +95,7 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
 
   assert.equal(merged.scripts.test, "vitest");
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\.ts migrate/);
+  assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\.ts status/);
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
   assert.match(
     merged.scripts["devgod:verify:migrations:live"],
@@ -104,10 +105,18 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:scaffold-workflow"],
     "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target ."
   );
+  assert.equal(
+    merged.scripts["devgod:seed-happy-path-fixture"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts seed-happy-path-fixture --target ."
+  );
   assert.equal(merged.scripts["devgod:check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
   assert.match(
     merged.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+  );
+  assert.match(
+    merged.scripts["devgod:record-review"],
+    /node_modules\/devgod\/src\/admin\.ts record-review --input \.devgod\/review-action\.json/
   );
   assert.match(
     merged.scripts["devgod:setup:local"],
@@ -220,6 +229,8 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/admin/",
     "src/core/",
     "src/domain/",
+    "src/evals/orchestration-baseline.ts",
+    "src/evals/retrieval-memory-baseline.ts",
     "src/index.ts",
     "src/install/cli.ts",
     "src/install/merge.ts",
@@ -255,6 +266,22 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     assert.ok(!pkg.files.includes(relativePath), `${relativePath} should stay out of the overlay package manifest`);
   }
   assert.ok(pkg.files.every((file) => !file.includes("*")));
+});
+
+test("package dry run includes the orchestration eval entrypoint exported by src/index.ts", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const { stdout } = await execFileAsync("npm", ["pack", "--json", "--dry-run"], {
+    cwd: sourceRoot
+  });
+  const packResult = JSON.parse(stdout) as Array<{
+    files: Array<{
+      path: string;
+    }>;
+  }>;
+
+  const packedFiles = new Set(packResult[0]?.files.map((entry) => entry.path) ?? []);
+  assert.ok(packedFiles.has("src/evals/orchestration-baseline.ts"));
+  assert.ok(packedFiles.has("src/index.ts"));
 });
 
 test("installDevgodIntoProject dry-run reports planned changes without writing", async () => {
@@ -917,8 +944,20 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     await readFile(path.join(targetRoot, "package.json"), "utf8")
   ) as { scripts: Record<string, string> };
   assert.match(
+    targetPackageJson.scripts["devgod:seed-happy-path-fixture"],
+    /node_modules\/devgod\/src\/install\/cli\.ts seed-happy-path-fixture --target \./
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:status"],
+    /node_modules\/devgod\/src\/admin\.ts status/
+  );
+  assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:record-review"],
+    /node_modules\/devgod\/src\/admin\.ts record-review --input \.devgod\/review-action\.json/
   );
 
   await assert.rejects(

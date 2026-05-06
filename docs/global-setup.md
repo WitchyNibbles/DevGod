@@ -28,6 +28,15 @@ Keep local to each consuming repo:
 - repo-specific `AGENTS.md` overlays
 - repo-local `.env.devgod` values and Docker/runtime state
 
+Useful runtime operator commands inside a consuming repo:
+
+- `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for a synthetic install-proof fixture
+- `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
+- `npm run devgod:health` for database reachability
+- `npm run devgod:verify:review-identity` to replay reviewed adapter fixtures
+
+The synthetic fixture command does not write `.devgod/ACTIVE` and does not create authoritative review summaries. Use it only for install-proof checks, never for live workflow completion.
+
 To make Codex configure a repo completely, keep the `devgod-setup` skill, `.env.example`, Docker
 Compose file, and setup scripts together so the agent has one repeatable bootstrap path.
 

@@ -245,12 +245,16 @@ export function mergePackageJson(
   scripts["devgod:health"] = `${runtimeEntry} health`;
   scripts["devgod:bootstrap"] = `${runtimeEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${runtimeEntry} verify-setup`;
+  scripts["devgod:status"] = `${runtimeEntry} status`;
   scripts["devgod:scaffold-workflow"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target .";
+  scripts["devgod:seed-happy-path-fixture"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts seed-happy-path-fixture --target .";
   scripts["devgod:check:happy-path"] = "bash scripts/check-devgod-happy-path.sh";
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:verify:migrations:live"] = `${runtimeEntry} verify-live-migrations`;
   scripts["devgod:verify:review-identity"] = `${runtimeEntry} verify-review-identity`;
+  scripts["devgod:record-review"] = `${runtimeEntry} record-review --input .devgod/review-action.json`;
   scripts["devgod:setup:local"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 

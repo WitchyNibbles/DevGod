@@ -23,6 +23,7 @@ export interface DevgodActionHandlers {
   search_memory(input: SearchMemoryInput): ReturnType<DevgodCoreService["searchMemory"]>;
   get_status(input: { runId: string }): ReturnType<DevgodCoreService["getStatus"]>;
   resume_run(input: { runId: string }): ReturnType<DevgodCoreService["resumeRun"]>;
+  recommend_routing(input: { runId: string }): ReturnType<DevgodCoreService["recommendRouting"]>;
 }
 
 export function createActionHandlers(service: DevgodCoreService): DevgodActionHandlers {
@@ -56,6 +57,9 @@ export function createActionHandlers(service: DevgodCoreService): DevgodActionHa
     },
     resume_run(input) {
       return service.resumeRun(input.runId);
+    },
+    recommend_routing(input) {
+      return service.recommendRouting(input.runId);
     }
   };
 }

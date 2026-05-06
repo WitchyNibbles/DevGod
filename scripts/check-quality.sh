@@ -11,6 +11,9 @@ npm run typecheck
 echo "workflow fixtures"
 npm run verify:workflow
 
+echo "orchestration evals"
+npm run eval:orchestration
+
 echo "audit"
 npm audit --omit=dev
 

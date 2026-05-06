@@ -10,9 +10,11 @@ import {
 } from "../domain/contracts.ts";
 import {
   canRoleAccessSearchResult,
+  collectUnsatisfiedReviewRoles,
   evaluateReviewDecision,
   findBlockingReasonsForTask,
-  findTaskDependencies
+  findTaskDependencies,
+  getRoleRetrievalGuidance
 } from "./policy.ts";
 import { annotateConflictSignals, isProvenancedSearchResult } from "./search-memory-results.ts";
 import type {
@@ -28,6 +30,8 @@ import type {
   PlanInput,
   ReviewInput,
   ReviewRecord,
+  RoutingRecommendation,
+  RoutingRecommendationReport,
   RunRecord,
   RunStatusSnapshot,
   SearchMemoryInput,
@@ -386,6 +390,93 @@ export class DevgodCoreService {
 
   async resumeRun(runId: string): Promise<RunStatusSnapshot> {
     return this.getStatus(runId);
+  }
+
+  async recommendRouting(runId: string): Promise<RoutingRecommendationReport> {
+    const snapshot = await this.getStatus(runId);
+    const blockerMap = new Map<string, string[]>();
+    const recommendations: RoutingRecommendation[] = [];
+
+    for (const task of snapshot.tasks) {
+      const blockers = await this.findTaskBlockers(task, snapshot.tasks, snapshot.activeLocks);
+      blockerMap.set(task.packet.taskId, blockers);
+      const ownerRole = task.packet.ownerRole as TaskPacketInput["requiredSpecialistRoles"][number];
+
+      if (task.status === "ready" && blockers.length === 0) {
+        recommendations.push({
+          taskId: task.packet.taskId,
+          taskStatus: task.status,
+          recommendation: "owner_dispatch",
+          authorityLabel: "derived_only",
+          targetRole: ownerRole,
+          rationale: [
+            "task is ready with dependencies satisfied",
+            `owner role is ${ownerRole}`
+          ],
+          blockers: [],
+          allowedWriteScope: [...task.packet.allowedWriteScope],
+          retrievalGuidance: getRoleRetrievalGuidance(ownerRole),
+          approvalCheckpoints: [
+            "manager must explicitly choose to route this task",
+            `writer must claim ${task.packet.taskId} before edits`,
+            `required reviews before completion: ${task.packet.requiredReviews.join(", ")}`
+          ]
+        });
+        continue;
+      }
+
+      if (task.status === "review_blocked") {
+        const reviews = await this.store.getReviews(runId, task.packet.taskId);
+        const missingReviewRoles = collectUnsatisfiedReviewRoles(task, reviews);
+
+        for (const reviewRole of missingReviewRoles) {
+          recommendations.push({
+            taskId: task.packet.taskId,
+            taskStatus: task.status,
+            recommendation: "review_dispatch",
+            authorityLabel: "derived_only",
+            targetRole: reviewRole,
+            targetReviewRole: reviewRole,
+            rationale: [`review gate ${reviewRole} is still unsatisfied`],
+            blockers: blockers.length > 0 ? [...blockers] : [`missing required review: ${reviewRole}`],
+            allowedWriteScope: [],
+            retrievalGuidance: getRoleRetrievalGuidance(reviewRole),
+            approvalCheckpoints: [
+              "review actor must authenticate through the trusted review identity resolver",
+              "manager must persist or attach authenticated reviewer evidence before completion"
+            ]
+          });
+        }
+        continue;
+      }
+
+      if (task.status === "in_progress" || blockers.length > 0) {
+        recommendations.push({
+          taskId: task.packet.taskId,
+          taskStatus: task.status,
+          recommendation: "wait",
+          authorityLabel: "derived_only",
+          targetRole: ownerRole,
+          rationale:
+            task.status === "in_progress" && task.claimedBy
+              ? [`task is already claimed by ${task.claimedBy}`]
+              : ["task is not yet ready for routing"],
+          blockers: [...blockers],
+          allowedWriteScope: [...task.packet.allowedWriteScope],
+          retrievalGuidance: getRoleRetrievalGuidance(ownerRole),
+          approvalCheckpoints: [
+            "do not route an overlapping writer while the task remains claimed or blocked",
+            "clear blockers before assigning the next specialist"
+          ]
+        });
+      }
+    }
+
+    return {
+      mode: "advisory_only",
+      runId: snapshot.run.id,
+      recommendations
+    };
   }
 
   private async requireRun(runId: string): Promise<RunRecord> {

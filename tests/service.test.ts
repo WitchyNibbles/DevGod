@@ -285,6 +285,42 @@ test("recordReview keeps task blocked on high severity finding", async () => {
   assert.ok(result.blockers.includes("required review not passed: security_reviewer is blocked"));
 });
 
+test("recordReview rejects contradictory passed security reviews", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["tests written"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+
+  await assert.rejects(
+    service.recordReview(run.id, "task-1", reviewContext("security_reviewer").actor, {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "critical",
+      findings: ["still exploitable"]
+    }),
+    /passed reviews must not carry findings; security_reviewer passed reviews must use low or medium severity, not critical/
+  );
+});
+
 test("recordReview rejects approval attempts before a handoff exists", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -1697,4 +1733,81 @@ test("resumeRun returns ready tasks with satisfied dependencies", async () => {
 
   status = await service.resumeRun(run.id);
   assert.ok(status.nextTaskIds.includes("build"));
+});
+
+test("recommendRouting returns advisory owner, review, and wait recommendations without auto-dispatch", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "plan" }),
+    taskPacket({
+      taskId: "build",
+      dependencies: ["plan"],
+      allowedWriteScope: ["src/store"],
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"]
+    })
+  ]);
+
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const report = await service.recommendRouting(run.id);
+  const waitRecommendation = report.recommendations.find((entry) => entry.taskId === "build");
+  const reviewRecommendation = report.recommendations.find(
+    (entry) => entry.taskId === "plan" && entry.targetReviewRole === "security_reviewer"
+  );
+
+  assert.equal(report.mode, "advisory_only");
+  assert.equal(waitRecommendation?.recommendation, "wait");
+  assert.deepEqual(waitRecommendation?.blockers, ["dependency plan is review_blocked"]);
+  assert.equal(reviewRecommendation?.recommendation, "review_dispatch");
+  assert.deepEqual(reviewRecommendation?.approvalCheckpoints, [
+    "review actor must authenticate through the trusted review identity resolver",
+    "manager must persist or attach authenticated reviewer evidence before completion"
+  ]);
+
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const readyReport = await service.recommendRouting(run.id);
+  const ownerRecommendation = readyReport.recommendations.find((entry) => entry.taskId === "build");
+
+  assert.equal(ownerRecommendation?.recommendation, "owner_dispatch");
+  assert.equal(ownerRecommendation?.targetRole, "backend_engineer");
+  assert.deepEqual(ownerRecommendation?.allowedWriteScope, ["src/store"]);
 });

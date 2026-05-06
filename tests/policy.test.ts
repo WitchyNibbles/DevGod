@@ -5,9 +5,11 @@ import {
   buildMemorySearchResult,
   canRoleAccessRetrievalMetadata,
   canRoleAccessSearchResult,
+  collectUnsatisfiedReviewRoles,
   compareMemorySearchResults,
   evaluateReviewDecision,
   findBlockingReasonsForTask,
+  getRoleRetrievalGuidance,
   hasOverlappingWriteScope,
   scoreMemoryResult
 } from "../src/core/policy.ts";
@@ -206,6 +208,31 @@ test("evaluateReviewDecision reports the remaining review gate failure modes", (
     ]).blockers,
     ["required review waiver unauthorized: security_reviewer"]
   );
+});
+
+test("routing policy helpers expose bounded review gaps and role retrieval guidance", () => {
+  const task = createTask();
+  const pendingReviews = [
+    createReview(),
+    createReview({
+      id: "review-2",
+      reviewerRole: "security_reviewer",
+      state: "blocked",
+      actor: "security-1",
+      actorRole: "security_reviewer"
+    })
+  ];
+
+  assert.deepEqual(collectUnsatisfiedReviewRoles(task, pendingReviews), [
+    "security_reviewer",
+    "qa_engineer"
+  ]);
+  assert.deepEqual(getRoleRetrievalGuidance("backend_engineer"), [
+    "approved memory",
+    "repo rules",
+    "runbooks",
+    "reviewed retrieval notes"
+  ]);
 });
 
 test("memory and artifact search builders preserve precedence and access policy", () => {

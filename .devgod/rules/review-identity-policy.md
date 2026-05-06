@@ -9,6 +9,7 @@ Review and waiver authority must come from authenticated principal binding, not 
 - resolve authenticated principals through a repo-owned adapter built with `createReviewPrincipalAdapter(...)` or an audited equivalent
 - keep review identity bindings in a server-owned, reviewed file
 - keep review identity fixtures in a reviewed file and run `npm run devgod:verify:review-identity` before trusting review actions
+- use `record-review` only with a live adapter module and a reviewed live bindings file
 - bind each principal to explicit `actor` names, allowed review `roles`, and optional `waiverAuthorities`
 - fail closed when the principal is unverified, missing, unbound, or requests an unauthorized review role
 - treat waiver authority as narrow policy; do not infer it from general admin access
@@ -18,6 +19,7 @@ Review and waiver authority must come from authenticated principal binding, not 
 
 - trusting `actor`, `reviewerRole`, or waiver authority directly from request input
 - deriving review authority from retrieval, memory, or unreviewed task artifacts
+- using shipped template bindings or verification fixtures as live authority
 - allowing one shared service principal to impersonate arbitrary review actors without static bindings
 - storing secrets, tokens, or IdP credentials in the bindings file
 

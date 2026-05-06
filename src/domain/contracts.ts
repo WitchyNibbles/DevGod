@@ -18,6 +18,8 @@ import {
   completionStandards,
   identityAssurances,
   qualityGates,
+  reviewSeverities,
+  reviewStates,
   reviewWaiverAuthorities,
   requiredGateReviews,
   retrievalRoles,
@@ -29,6 +31,8 @@ import { isTrustedReviewActionContext } from "../core/review-context.ts";
 const maxQueryEmbeddingDimensions = 1536;
 const retrievalRoleSet = new Set<string>(retrievalRoles);
 const requiredGateReviewSet = new Set<string>(requiredGateReviews);
+const reviewSeveritySet = new Set<string>(reviewSeverities);
+const reviewStateSet = new Set<string>(reviewStates);
 const reviewWaiverAuthoritySet = new Set<string>(reviewWaiverAuthorities);
 const identityAssuranceSet = new Set<string>(identityAssurances);
 const completionStandardSet = new Set<string>(completionStandards);
@@ -126,6 +130,14 @@ export function isRetrievalRole(value: string): value is RetrievalRole {
 
 export function isGateReviewRole(value: string): value is GateReviewRole {
   return requiredGateReviewSet.has(value);
+}
+
+export function isReviewSeverity(value: string): value is ReviewInput["severity"] {
+  return reviewSeveritySet.has(value);
+}
+
+export function isReviewState(value: string): value is ReviewInput["state"] {
+  return reviewStateSet.has(value);
 }
 
 export function isReviewWaiverAuthority(value: string): value is ReviewWaiverAuthority {
@@ -412,12 +424,34 @@ export function validateReviewAction(context: TrustedReviewActionContext, review
     errors.push(`reviewerRole must be one of: ${requiredGateReviews.join(", ")}`);
   }
 
+  if (!isReviewState(review.state)) {
+    errors.push(`review state must be one of: ${reviewStates.join(", ")}`);
+  }
+
+  if (!isReviewSeverity(review.severity)) {
+    errors.push(`review severity must be one of: ${reviewSeverities.join(", ")}`);
+  }
+
   if (!isReviewWaiverAuthority(waiverAuthority)) {
     errors.push(`waiverAuthority must be one of: ${reviewWaiverAuthorities.join(", ")}`);
   }
 
+  if (!Array.isArray(review.findings)) {
+    errors.push("review findings must be an array");
+  }
+
   if (review.findings.some((finding) => finding.trim().length === 0)) {
     errors.push("review findings must not contain empty items");
+  }
+
+  if (review.state === "passed" && review.findings.length > 0) {
+    errors.push("passed reviews must not carry findings");
+  }
+
+  if (review.reviewerRole === "security_reviewer" && review.state === "passed") {
+    if (review.severity === "high" || review.severity === "critical") {
+      errors.push(`security_reviewer passed reviews must use low or medium severity, not ${review.severity}`);
+    }
   }
 
   if (review.state === "waived") {
@@ -469,11 +503,26 @@ export function canReviewRecordSatisfyGate(review: ReviewRecord): boolean {
     return false;
   }
 
+  if (!isReviewState(review.state) || !isReviewSeverity(review.severity)) {
+    return false;
+  }
+
   if (!isReviewWaiverAuthority(review.waiverAuthority)) {
     return false;
   }
 
   if (review.state === "passed") {
+    if (review.findings.length > 0) {
+      return false;
+    }
+
+    if (
+      review.reviewerRole === "security_reviewer" &&
+      (review.severity === "high" || review.severity === "critical")
+    ) {
+      return false;
+    }
+
     return review.actorRole === review.reviewerRole && review.waiverAuthority === "none";
   }
 

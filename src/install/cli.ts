@@ -78,7 +78,19 @@ interface ParsedScaffoldCommand {
   forceActive: boolean;
 }
 
-type ParsedCliArgs = ParsedInstallCommand | ParsedVerifyCommand | ParsedScaffoldCommand;
+interface ParsedHappyPathFixtureCommand {
+  command: "seed-happy-path-fixture";
+  targetArg: string;
+  taskId: string;
+  force: boolean;
+  forceActive: boolean;
+}
+
+type ParsedCliArgs =
+  | ParsedInstallCommand
+  | ParsedVerifyCommand
+  | ParsedScaffoldCommand
+  | ParsedHappyPathFixtureCommand;
 
 const installManifestRelativePath = ".devgod/install-manifest.json";
 const installManifestVersion = 1;
@@ -98,7 +110,8 @@ function usage(): never {
       "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]"
+      "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]"
   );
 }
 
@@ -121,20 +134,20 @@ function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[
   }
 
   if (mode === "dry-run") {
-    return [
-      "Review the planned file changes.",
-      "Rerun in apply mode to write changes.",
-      "After apply, run npm install in the target project.",
-      "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
-      "Implement devgod/review-identity-adapter.ts before trusting review actions."
-    ];
+      return [
+        "Review the planned file changes.",
+        "Rerun in apply mode to write changes.",
+        "After apply, run npm install in the target project.",
+        "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
+        "Implement devgod/review-identity-adapter.ts before trusting review actions or running npm run devgod:record-review."
+      ];
   }
 
   return [
     "cd into the target project",
     "npm install",
     "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
-    "Implement devgod/review-identity-adapter.ts and run npm run devgod:verify:review-identity."
+    "Implement devgod/review-identity-adapter.ts, run npm run devgod:verify:review-identity, then use npm run devgod:record-review for live review actions."
   ];
 }
 
@@ -649,11 +662,11 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   };
 }
 
-function parseTaskId(args: string[]): string {
+function parseTaskId(args: string[], command: "scaffold-workflow" | "seed-happy-path-fixture"): string {
   const taskIdIndex = args.indexOf("--task-id");
 
   if (taskIdIndex === -1) {
-    throw new Error("scaffold-workflow requires --task-id <task-id>.");
+    throw new Error(`${command} requires --task-id <task-id>.`);
   }
 
   const taskId = args[taskIdIndex + 1];
@@ -668,9 +681,12 @@ function parseTaskId(args: string[]): string {
   return taskId;
 }
 
-function parseScaffoldCommand(args: string[]): ParsedScaffoldCommand {
+function parseWorkflowMutationCommand(
+  command: "scaffold-workflow" | "seed-happy-path-fixture",
+  args: string[]
+): ParsedScaffoldCommand | ParsedHappyPathFixtureCommand {
   if (args.includes("--apply") || args.includes("--dry-run")) {
-    throw new Error("scaffold-workflow does not support --apply or --dry-run.");
+    throw new Error(`${command} does not support --apply or --dry-run.`);
   }
 
   const resolveScaffoldTarget = (): string => {
@@ -703,9 +719,9 @@ function parseScaffoldCommand(args: string[]): ParsedScaffoldCommand {
   };
 
   return {
-    command: "scaffold-workflow",
+    command,
     targetArg: resolveScaffoldTarget(),
-    taskId: parseTaskId(args),
+    taskId: parseTaskId(args, command),
     force: args.includes("--force"),
     forceActive: args.includes("--force-active")
   };
@@ -731,7 +747,11 @@ function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   }
 
   if (command === "scaffold-workflow") {
-    return parseScaffoldCommand(rawArgs.slice(1));
+    return parseWorkflowMutationCommand("scaffold-workflow", rawArgs.slice(1));
+  }
+
+  if (command === "seed-happy-path-fixture") {
+    return parseWorkflowMutationCommand("seed-happy-path-fixture", rawArgs.slice(1));
   }
 
   if (rawArgs.includes("--apply")) {
@@ -1215,6 +1235,32 @@ function printWorkflowScaffoldSummary(targetRoot: string, summary: WorkflowScaff
   }
 }
 
+function printHappyPathFixtureSummary(targetRoot: string, summary: WorkflowScaffoldSummary): void {
+  console.log(`devgod seed-happy-path-fixture for ${targetRoot}`);
+  console.log(`task_id: ${summary.taskId}`);
+  console.log(`created: ${summary.created.length}`);
+  console.log(`updated: ${summary.updated.length}`);
+
+  if (summary.created.length > 0) {
+    console.log("Created:");
+    for (const filePath of summary.created) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  if (summary.updated.length > 0) {
+    console.log("Updated:");
+    for (const filePath of summary.updated) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  console.log("Next steps:");
+  for (const [index, step] of summary.nextSteps.entries()) {
+    console.log(`${index + 1}. ${step}`);
+  }
+}
+
 function replaceTemplateTaskId(templateContent: string, taskId: string): string {
   return templateContent.replaceAll("<task-id>", taskId);
 }
@@ -1279,7 +1325,155 @@ function buildReviewFromTemplate(
     );
 }
 
-async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+function buildHappyPathFixtureBrief(taskId: string): string {
+  return [
+    "## Task ID",
+    "",
+    `\`${taskId}\``,
+    "",
+    "## Fixture posture",
+    "",
+    "Synthetic install-proof only. Do not reuse these artifacts as live workflow evidence."
+  ].join("\n");
+}
+
+function buildHappyPathFixtureTask(taskId: string): string {
+  return [
+    "## Task ID",
+    "",
+    `\`${taskId}\``,
+    "",
+    "## Owner role",
+    "",
+    "`backend_engineer`",
+    "",
+    "## Completion standard",
+    "",
+    "`specialist_verified`",
+    "",
+    "## Required specialist roles",
+    "",
+    "- `backend_engineer`",
+    "- `reviewer`",
+    "- `qa_engineer`",
+    "- `security_reviewer`",
+    "",
+    "## Quality gates",
+    "",
+    "- `workflow_happy_path_required`",
+    "- `artifact_contract_required`",
+    "- `advisory_retrieval_required`",
+    "",
+    "## Acceptance criteria",
+    "",
+    "- composed happy-path command passes",
+    "- fixture remains synthetic and non-authoritative",
+    "",
+    "## Verification steps",
+    "",
+    "- bash scripts/check-devgod-happy-path.sh",
+    "",
+    "## Required reviews",
+    "",
+    "- reviewer",
+    "- qa_engineer",
+    "- security_reviewer",
+    "",
+    "## Rollback notes",
+    "",
+    "- delete the synthetic fixture artifacts"
+  ].join("\n");
+}
+
+function buildHappyPathFixtureReview(
+  taskId: string,
+  reviewerRole: "reviewer" | "qa_engineer" | "security_reviewer"
+): string {
+  return [
+    "# Review Gate",
+    "",
+    "## Task ID",
+    "",
+    `\`${taskId}\``,
+    "",
+    "## Reviewer role",
+    "",
+    `\`${reviewerRole}\``,
+    "",
+    "## Actor",
+    "",
+    "`synthetic-install-fixture`",
+    "",
+    "## Actor role",
+    "",
+    `\`${reviewerRole}\``,
+    "",
+    "## Provenance status",
+    "",
+    "`summary_only`",
+    "",
+    "## Review state",
+    "",
+    "`blocked`",
+    "",
+    "## Severity",
+    "",
+    "`low`",
+    "",
+    "## Findings",
+    "",
+    "- Synthetic install fixture only; replace with authenticated runtime review evidence before live work.",
+    "",
+    "## Residual risk",
+    "",
+    "Residual risk remains fully open because this fixture is not authenticated reviewer evidence.",
+    "",
+    "## Verification evidence",
+    "",
+    `- bash scripts/check-devgod-happy-path.sh --task-id ${taskId}`,
+    "- fixture review is intentionally non-authoritative",
+    "",
+    "## Specialist execution evidence",
+    "",
+    "- specialist handoff references reviewed files",
+    "",
+    "## Quality gate evidence",
+    "",
+    "- happy-path composition references synthetic fixture checks and retrieval smoke",
+    "",
+    "## Waiver authority",
+    "",
+    "`none`",
+    "",
+    "## Waiver reason",
+    "",
+    "None.",
+    "",
+    "## Decision",
+    "",
+    "`blocked`",
+    "",
+    "## Source handoff",
+    "",
+    "Synthetic fixture summary. No authenticated reviewer source exists for this install proof."
+  ].join("\n");
+}
+
+async function prepareWorkflowArtifactPaths(
+  options: WorkflowScaffoldOptions,
+  pathMode: "live-workflow" | "synthetic-fixture"
+): Promise<{
+  targetRoot: string;
+  activeRelativePath: string;
+  briefRelativePath: string;
+  taskRelativePath: string;
+  reviewRelativePaths: {
+    reviewer: string;
+    qa_engineer: string;
+    security_reviewer: string;
+  };
+  resolvedArtifactPaths: Map<string, string>;
+}> {
   const targetRoot = path.resolve(options.targetRoot);
   const activeRelativePath = ".devgod/ACTIVE";
   const briefRelativePath = `.devgod/work/briefs/brief-${options.taskId}.md`;
@@ -1290,33 +1484,35 @@ async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Prom
     security_reviewer: `.devgod/work/reviews/review-${options.taskId}-security_reviewer.md`
   } as const;
 
-  const activeInspection = await inspectManagedTarget(targetRoot, activeRelativePath);
-  if (activeInspection.invalidReason) {
-    throw new Error(`refusing to scaffold ${activeRelativePath}: ${activeInspection.invalidReason}`);
-  }
+  if (pathMode === "live-workflow") {
+    const activeInspection = await inspectManagedTarget(targetRoot, activeRelativePath);
+    if (activeInspection.invalidReason) {
+      throw new Error(`refusing to scaffold ${activeRelativePath}: ${activeInspection.invalidReason}`);
+    }
 
-  if (activeInspection.content) {
-    const activeTaskId = activeInspection.content
-      .split("\n")
-      .map((line) => line.replace("\r", ""))
-      .find((line) => line.startsWith("task_id="))
-      ?.slice("task_id=".length);
+    if (activeInspection.content) {
+      const activeTaskId = activeInspection.content
+        .split("\n")
+        .map((line) => line.replace("\r", ""))
+        .find((line) => line.startsWith("task_id="))
+        ?.slice("task_id=".length);
 
-    if (activeTaskId && activeTaskId !== options.taskId && !options.forceActive) {
-      throw new Error(
-        `refusing to replace active task ${activeTaskId} without --force-active`
-      );
+      if (activeTaskId && activeTaskId !== options.taskId && !options.forceActive) {
+        throw new Error(`refusing to replace active task ${activeTaskId} without --force-active`);
+      }
     }
   }
 
   const artifactPaths = [
-    activeRelativePath,
     briefRelativePath,
     taskRelativePath,
     reviewRelativePaths.reviewer,
     reviewRelativePaths.qa_engineer,
     reviewRelativePaths.security_reviewer
   ];
+  if (pathMode === "live-workflow") {
+    artifactPaths.unshift(activeRelativePath);
+  }
   const existingArtifacts: string[] = [];
   const resolvedArtifactPaths = new Map<string, string>();
 
@@ -1336,6 +1532,57 @@ async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Prom
       `refusing to overwrite existing workflow artifacts without --force: ${existingArtifacts.join(", ")}`
     );
   }
+
+  return {
+    targetRoot,
+    activeRelativePath,
+    briefRelativePath,
+    taskRelativePath,
+    reviewRelativePaths,
+    resolvedArtifactPaths
+  };
+}
+
+function assertHappyPathFixtureTaskId(taskId: string): void {
+  if (!taskId.startsWith("fixture-")) {
+    throw new Error("seed-happy-path-fixture requires a task id starting with fixture-");
+  }
+}
+
+async function writeWorkflowArtifactSet(
+  targetRoot: string,
+  writes: Array<{ absolutePath: string; content: string }>
+): Promise<Pick<WorkflowScaffoldSummary, "created" | "updated">> {
+  const created: string[] = [];
+  const updated: string[] = [];
+
+  for (const write of writes) {
+    await ensureDirectory(write.absolutePath);
+    const existed = await fileExists(write.absolutePath);
+    await writeFile(write.absolutePath, write.content, "utf8");
+    const relativePath = path.relative(targetRoot, write.absolutePath);
+    if (existed) {
+      updated.push(relativePath);
+    } else {
+      created.push(relativePath);
+    }
+  }
+
+  return {
+    created,
+    updated
+  };
+}
+
+async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+  const {
+    targetRoot,
+    activeRelativePath,
+    briefRelativePath,
+    taskRelativePath,
+    reviewRelativePaths,
+    resolvedArtifactPaths
+  } = await prepareWorkflowArtifactPaths(options, "live-workflow");
 
   const briefTemplate = await readFile(
     path.join(options.sourceRoot, ".devgod", "templates", "intake-brief.md"),
@@ -1383,20 +1630,7 @@ async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Prom
     }
   ];
 
-  const created: string[] = [];
-  const updated: string[] = [];
-
-  for (const write of writes) {
-    await ensureDirectory(write.absolutePath);
-    const existed = await fileExists(write.absolutePath);
-    await writeFile(write.absolutePath, write.content, "utf8");
-    const relativePath = path.relative(targetRoot, write.absolutePath);
-    if (existed) {
-      updated.push(relativePath);
-    } else {
-      created.push(relativePath);
-    }
-  }
+  const { created, updated } = await writeWorkflowArtifactSet(targetRoot, writes);
 
   return {
     taskId: options.taskId,
@@ -1407,6 +1641,62 @@ async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Prom
       "Run specialists and replace pending review skeletons with real gate output.",
       `Run bash scripts/check-devgod-workflow.sh --task-id ${options.taskId} after required reviews pass.`,
       `Use npm run devgod:check:happy-path -- --task-id ${options.taskId} only after the workflow is review-complete.`
+    ]
+  };
+}
+
+async function seedHappyPathFixtureArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+  assertHappyPathFixtureTaskId(options.taskId);
+  if (options.forceActive) {
+    throw new Error("seed-happy-path-fixture does not support --force-active because fixtures never become active");
+  }
+  const {
+    targetRoot,
+    briefRelativePath,
+    taskRelativePath,
+    reviewRelativePaths,
+    resolvedArtifactPaths
+  } = await prepareWorkflowArtifactPaths(options, "synthetic-fixture");
+
+  const writes: Array<{ absolutePath: string; content: string }> = [
+    {
+      absolutePath: resolvedArtifactPaths.get(briefRelativePath) ?? path.join(targetRoot, briefRelativePath),
+      content: `${buildHappyPathFixtureBrief(options.taskId).trimEnd()}\n`
+    },
+    {
+      absolutePath: resolvedArtifactPaths.get(taskRelativePath) ?? path.join(targetRoot, taskRelativePath),
+      content: `${buildHappyPathFixtureTask(options.taskId).trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.reviewer) ??
+        path.join(targetRoot, reviewRelativePaths.reviewer),
+      content: `${buildHappyPathFixtureReview(options.taskId, "reviewer").trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.qa_engineer) ??
+        path.join(targetRoot, reviewRelativePaths.qa_engineer),
+      content: `${buildHappyPathFixtureReview(options.taskId, "qa_engineer").trimEnd()}\n`
+    },
+    {
+      absolutePath:
+        resolvedArtifactPaths.get(reviewRelativePaths.security_reviewer) ??
+        path.join(targetRoot, reviewRelativePaths.security_reviewer),
+      content: `${buildHappyPathFixtureReview(options.taskId, "security_reviewer").trimEnd()}\n`
+    }
+  ];
+
+  const { created, updated } = await writeWorkflowArtifactSet(targetRoot, writes);
+
+  return {
+    taskId: options.taskId,
+    created,
+    updated,
+    nextSteps: [
+      `Run bash scripts/check-devgod-happy-path.sh --task-id ${options.taskId}.`,
+      "Treat this fixture as synthetic install proof only; replace it with real workflow artifacts before live work.",
+      "Do not point .devgod/ACTIVE at this fixture task id and do not treat the review markdown as gate authority."
     ]
   };
 }
@@ -1426,6 +1716,18 @@ async function main() {
       forceActive: parsedArgs.forceActive
     });
     printWorkflowScaffoldSummary(targetRoot, summary);
+    return;
+  }
+
+  if (parsedArgs.command === "seed-happy-path-fixture") {
+    const summary = await seedHappyPathFixtureArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId: parsedArgs.taskId,
+      force: parsedArgs.force,
+      forceActive: parsedArgs.forceActive
+    });
+    printHappyPathFixtureSummary(targetRoot, summary);
     return;
   }
 

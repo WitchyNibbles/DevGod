@@ -23,7 +23,7 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
 
   await writeFile(
     join(targetRoot, ".devgod", "work", "briefs", `brief-${taskId}.md`),
-    `## Task ID\n\n\`${taskId}\`\n`,
+    `## Task ID\n\n\`${taskId}\`\n\n## Fixture posture\n\nSynthetic install-proof only. Do not reuse these artifacts as live workflow evidence.\n`,
     "utf8"
   );
 
@@ -58,6 +58,7 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
       "## Acceptance criteria",
       "",
       "- composed happy-path command passes",
+      "- fixture remains synthetic and non-authoritative",
       "",
       "## Verification steps",
       "",
@@ -71,7 +72,7 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
       "",
       "## Rollback notes",
       "",
-      "- delete the fixture"
+      "- delete the synthetic fixture artifacts"
     ].join("\n"),
     "utf8"
   );
@@ -92,7 +93,7 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
         "",
         "## Actor",
         "",
-        "`synthetic-actor`",
+        "`synthetic-install-fixture`",
         "",
         "## Actor role",
         "",
@@ -100,11 +101,11 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
         "",
         "## Provenance status",
         "",
-        "`runtime_verified`",
+        "`summary_only`",
         "",
         "## Review state",
         "",
-        "`passed`",
+        "`blocked`",
         "",
         "## Severity",
         "",
@@ -112,16 +113,16 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
         "",
         "## Findings",
         "",
-        "No findings.",
+        "- Synthetic install fixture only; replace with authenticated runtime review evidence before live work.",
         "",
         "## Residual risk",
         "",
-        "Residual risk depends on the referenced authenticated runtime review artifact.",
+        "Residual risk remains fully open because this fixture is not authenticated reviewer evidence.",
         "",
         "## Verification evidence",
         "",
-        "- Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
         `- bash scripts/check-devgod-happy-path.sh --task-id ${taskId}`,
+        "- fixture review is intentionally non-authoritative",
         "",
         "## Specialist execution evidence",
         "",
@@ -129,7 +130,7 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
         "",
         "## Quality gate evidence",
         "",
-        "- happy-path composition references workflow and retrieval smoke",
+        "- happy-path composition references synthetic fixture checks and retrieval smoke",
         "",
         "## Waiver authority",
         "",
@@ -141,29 +142,21 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
         "",
         "## Decision",
         "",
-        "`approved`",
+        "`blocked`",
         "",
         "## Source handoff",
         "",
-        "Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
-        "",
-        "Manager summary of reviewer output."
+        "Synthetic fixture summary. No authenticated reviewer source exists for this install proof."
       ].join("\n"),
       "utf8"
     );
   }
 
-  await writeFile(
-    join(targetRoot, ".devgod", "ACTIVE"),
-    `task_id=${taskId}\nworkflow=devgod\nstate=active\n`,
-    "utf8"
-  );
-
   return targetRoot;
 }
 
-test("check-devgod-happy-path passes a runtime-verified fixture and reports advisory retrieval status", async () => {
-  const taskId = "DG-HAPPY-PATH-PASS";
+test("check-devgod-happy-path passes a synthetic fixture and reports advisory retrieval status", async () => {
+  const taskId = "fixture-happy-path-pass";
   const targetRoot = await createHappyPathFixture(taskId);
 
   try {
@@ -173,8 +166,7 @@ test("check-devgod-happy-path passes a runtime-verified fixture and reports advi
       { cwd: repoRoot }
     );
 
-    assert.match(stdout, /workflow live check/);
-    assert.match(stdout, /devgod workflow artifact check passed/);
+    assert.match(stdout, /synthetic fixture check/);
     assert.match(stdout, /retrieval advisory smoke \(derived, non-authoritative\)/);
     assert.match(stdout, /derived retrieval baseline skipped: eval surface unavailable/);
     assert.match(stdout, /devgod happy-path checks passed/);
@@ -183,8 +175,76 @@ test("check-devgod-happy-path passes a runtime-verified fixture and reports advi
   }
 });
 
+test("installed consumer fixture can seed and pass the happy-path flow without manual edits", async () => {
+  const taskId = "fixture-happy-path-consumer";
+  const targetRoot = await mkdtemp(join(tmpdir(), "devgod-consumer-happy-path-"));
+
+  try {
+    await writeFile(join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
+
+    const { stdout: seedStdout } = await execFileAsync(
+      "node",
+      [
+        "--experimental-strip-types",
+        "src/install/cli.ts",
+        "seed-happy-path-fixture",
+        "--target",
+        targetRoot,
+        "--task-id",
+        taskId
+      ],
+      { cwd: repoRoot }
+    );
+
+    assert.match(seedStdout, /devgod seed-happy-path-fixture/);
+    assert.match(seedStdout, new RegExp(`task_id: ${taskId}`));
+
+    const { stdout } = await execFileAsync(
+      "bash",
+      ["scripts/check-devgod-happy-path.sh", "--task-id", taskId],
+      { cwd: targetRoot }
+    );
+
+    assert.match(stdout, /synthetic fixture check/);
+    assert.match(stdout, /retrieval advisory smoke \(derived, non-authoritative\)/);
+    assert.match(stdout, /derived retrieval baseline skipped: eval surface unavailable/);
+    assert.match(stdout, /devgod happy-path checks passed/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("seed-happy-path-fixture rejects non-fixture task ids", async () => {
+  const targetRoot = await mkdtemp(join(tmpdir(), "devgod-consumer-happy-path-reject-"));
+
+  try {
+    await writeFile(join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
+
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        [
+          "--experimental-strip-types",
+          "src/install/cli.ts",
+          "seed-happy-path-fixture",
+          "--target",
+          targetRoot,
+          "--task-id",
+          "not-a-fixture"
+        ],
+        { cwd: repoRoot }
+      ),
+      /task id starting with fixture-/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-happy-path fails when a required review gate is missing", async () => {
-  const taskId = "DG-HAPPY-PATH-MISSING-REVIEW";
+  const taskId = "fixture-happy-path-missing-review";
   const targetRoot = await createHappyPathFixture(taskId);
 
   try {
@@ -194,10 +254,14 @@ test("check-devgod-happy-path fails when a required review gate is missing", asy
     );
 
     await assert.rejects(
-      execFileAsync("bash", ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot], {
-        cwd: repoRoot
-      }),
-      /missing review file for qa_engineer/
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+        {
+          cwd: repoRoot
+        }
+      ),
+      /missing required fixture file: \.devgod\/work\/reviews\/review-.*-qa_engineer\.md/
     );
   } finally {
     await rm(targetRoot, { recursive: true, force: true });

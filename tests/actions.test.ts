@@ -51,6 +51,10 @@ test("createActionHandlers forwards every action to the matching service method"
     resumeRun(runId: string) {
       calls.push({ method: "resumeRun", args: [runId] });
       return Promise.resolve("resume");
+    },
+    recommendRouting(runId: string) {
+      calls.push({ method: "recommendRouting", args: [runId] });
+      return Promise.resolve("routing");
     }
   } as unknown as DevgodCoreService;
 
@@ -93,6 +97,7 @@ test("createActionHandlers forwards every action to the matching service method"
   assert.equal(await handlers.search_memory({ query: "note" } as never), "search");
   assert.equal(await handlers.get_status({ runId: "run-1" }), "status");
   assert.equal(await handlers.resume_run({ runId: "run-1" }), "resume");
+  assert.equal(await handlers.recommend_routing({ runId: "run-1" }), "routing");
 
   assert.deepEqual(calls, [
     { method: "intakeRequest", args: [{ request: "x" }] },
@@ -104,7 +109,8 @@ test("createActionHandlers forwards every action to the matching service method"
     { method: "promoteMemory", args: ["run-1", { title: "note" }] },
     { method: "searchMemory", args: [{ query: "note" }] },
     { method: "getStatus", args: ["run-1"] },
-    { method: "resumeRun", args: ["run-1"] }
+    { method: "resumeRun", args: ["run-1"] },
+    { method: "recommendRouting", args: ["run-1"] }
   ]);
 });
 

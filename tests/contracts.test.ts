@@ -22,6 +22,7 @@ import {
   validateHandoff,
   validateTaskPacket
 } from "../src/domain/contracts.ts";
+import { createReviewActionContextResolver } from "../src/core/review-context.ts";
 
 test("normalizeIntakeRequest returns required intake fields", () => {
   const summary = normalizeIntakeRequest({
@@ -298,6 +299,93 @@ test("canReviewRecordSatisfyGate rejects malformed authenticated passed rows", (
       severity: "low",
       findings: [],
       waiverAuthority: "manager",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+});
+
+test("validateReviewAction rejects contradictory passed security reviews", async () => {
+  const resolver = createReviewActionContextResolver({
+    bindings: {
+      bindings: [
+        {
+          principal: {
+            provider: "github",
+            subject: "security-reviewer-1"
+          },
+          actors: [
+            {
+              actor: "security-reviewer-1",
+              roles: ["security_reviewer"]
+            }
+          ]
+        }
+      ]
+    },
+    async resolveAuthenticatedPrincipal() {
+      return {
+        provider: "github",
+        subject: "security-reviewer-1",
+        verified: true
+      };
+    }
+  });
+  const trustedContext = await resolver({
+      runId: "run-1",
+      taskId: "task-1",
+      actor: "security-reviewer-1",
+      reviewerRole: "security_reviewer",
+      reviewState: "passed"
+    });
+  const errors = validateReviewAction(
+    trustedContext,
+    {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "critical",
+      findings: ["still broken"]
+    }
+  );
+
+  assert.ok(errors.includes("passed reviews must not carry findings"));
+  assert.ok(
+    errors.includes("security_reviewer passed reviews must use low or medium severity, not critical")
+  );
+});
+
+test("canReviewRecordSatisfyGate rejects passed security reviews with high severity or findings", () => {
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-3b",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "security_reviewer",
+      actor: "security-reviewer-1",
+      actorRole: "security_reviewer",
+      identityAssurance: "authenticated",
+      state: "passed",
+      severity: "high",
+      findings: [],
+      waiverAuthority: "none",
+      createdAt: "2026-05-05T00:00:00.000Z"
+    }),
+    false
+  );
+
+  assert.equal(
+    canReviewRecordSatisfyGate({
+      id: "review-3c",
+      runId: "run-1",
+      taskId: "task-1",
+      reviewerRole: "reviewer",
+      actor: "reviewer-1",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      state: "passed",
+      severity: "low",
+      findings: ["unexpected finding"],
+      waiverAuthority: "none",
       createdAt: "2026-05-05T00:00:00.000Z"
     }),
     false
