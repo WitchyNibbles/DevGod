@@ -196,3 +196,25 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("executeStatusCommandFromArgs rejects missing run ids and invalid stale-after-days flags", async () => {
+  await assert.rejects(
+    executeStatusCommandFromArgs([], {
+      env: process.env,
+      async getStatusSnapshot() {
+        assert.fail("status should not resolve a snapshot without --run-id");
+      }
+    }),
+    /status requires --run-id/
+  );
+
+  await assert.rejects(
+    executeStatusCommandFromArgs(["--run-id", "run-123", "--stale-after-days", "nope"], {
+      env: process.env,
+      async getStatusSnapshot() {
+        assert.fail("status should not resolve a snapshot for invalid stale-after-days");
+      }
+    }),
+    /Invalid --stale-after-days value: nope/
+  );
+});

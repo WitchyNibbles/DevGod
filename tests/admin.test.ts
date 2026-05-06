@@ -476,3 +476,95 @@ test("executeRecordReviewCommandFromArgs rejects placeholder bindings copied int
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("executeRecordReviewCommandFromArgs rejects missing input and invalid review payload shapes", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-record-review-invalid-"));
+
+  try {
+    await mkdir(path.join(directory, ".devgod"), { recursive: true });
+
+    await assert.rejects(
+      executeRecordReviewCommandFromArgs([], {
+        cwd: directory,
+        env: process.env,
+        async recordReview() {
+          assert.fail("recordReview should not run without --input");
+        }
+      }),
+      /record-review requires --input/
+    );
+
+    await writeFile(
+      path.join(directory, ".devgod/review-action.json"),
+      `${JSON.stringify(
+        {
+          runId: "run-123",
+          taskId: "task-123",
+          actor: "alice-reviewer",
+          review: {
+            reviewerRole: "not-a-role",
+            state: "not-a-state",
+            severity: "not-a-severity",
+            findings: "not-an-array"
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeRecordReviewCommandFromArgs(["--input", ".devgod/review-action.json"], {
+        cwd: directory,
+        env: process.env,
+        async recordReview() {
+          assert.fail("recordReview should not run for invalid review payloads");
+        }
+      }),
+      /review\.reviewerRole to be a required gate role/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeRecordReviewCommandFromArgs rejects missing live bindings before attempting review recording", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-record-review-missing-bindings-"));
+
+  try {
+    await mkdir(path.join(directory, ".devgod"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod/review-action.json"),
+      `${JSON.stringify(
+        {
+          runId: "run-123",
+          taskId: "task-123",
+          actor: "alice-reviewer",
+          review: {
+            reviewerRole: "reviewer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeRecordReviewCommandFromArgs(["--input", ".devgod/review-action.json"], {
+        cwd: directory,
+        env: process.env,
+        async recordReview() {
+          assert.fail("recordReview should not run when live bindings are missing");
+        }
+      }),
+      /DEVGOD_REVIEW_IDENTITY_BINDINGS or \.devgod\/review-identity-bindings\.json is required/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
