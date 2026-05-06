@@ -36,6 +36,24 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   };
 }
 
+function gitNexusObservation(
+  overrides: Partial<import("../src/admin/gitnexus.ts").GitNexusStatusObservation> = {}
+): import("../src/admin/gitnexus.ts").GitNexusStatusObservation {
+  return {
+    authorityLabel: "derived_only",
+    state: "unconfigured",
+    configured: false,
+    configuredScopes: [],
+    configPaths: [],
+    repoIndexed: false,
+    indexRoot: "/repo/.gitnexus",
+    metaPath: "/repo/.gitnexus/meta.json",
+    recommendedCommand: "npx gitnexus analyze --skip-agents-md",
+    notes: ["gitnexus MCP config was not detected in project or user Codex config"],
+    ...overrides
+  };
+}
+
 function deriveActorRole(actor: string): ReviewActionContext["actorRole"] {
   if (actor === "reviewer-actor") {
     return "reviewer";
@@ -135,6 +153,18 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
         liveTrustReady: false,
         notes: ["adapter module not configured"]
       }),
+      inspectGitNexus: async () =>
+        gitNexusObservation({
+          state: "stale",
+          configured: true,
+          configuredScopes: ["project"],
+          configPaths: ["/repo/.codex/config.toml"],
+          repoIndexed: true,
+          indexedAt: "2026-05-01T00:00:00.000Z",
+          indexedCommit: "abc123",
+          headCommit: "def456",
+          notes: ["gitnexus index is behind the current git HEAD"]
+        }),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -152,7 +182,9 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
 
   assert.equal(result.format, "json");
   assert.match(result.report.alerts.join(" "), /stalled task: plan/);
+  assert.match(result.report.alerts.join(" "), /gitnexus advisory index is stale/);
   assert.match(result.report.nextActions.join(" "), /recover reset-task:plan/);
+  assert.match(result.report.nextActions.join(" "), /npx gitnexus analyze --skip-agents-md/);
 });
 
 test("executeRecoverCommandFromArgs applies safe recovery to requeue stalled work", async () => {
@@ -253,6 +285,18 @@ test("executeOpsCommandFromArgs resolves latest runs and can return text output"
       liveTrustReady: true,
       notes: []
     }),
+    inspectGitNexus: async () =>
+      gitNexusObservation({
+        state: "ready",
+        configured: true,
+        configuredScopes: ["project"],
+        configPaths: ["/repo/.codex/config.toml"],
+        repoIndexed: true,
+        indexedAt: "2026-05-06T00:00:00.000Z",
+        indexedCommit: "abc123",
+        headCommit: "abc123",
+        notes: ["gitnexus advisory context is ready"]
+      }),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },

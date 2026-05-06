@@ -365,6 +365,15 @@ The shipped templates are starting points, not live policy. Review the bindings 
 
 `status` prints a single operator report with explicit authority labels. Runtime rows and active locks are marked `runtime_authoritative`; freshness, blockers, next-task suggestions, and review-identity posture are marked `derived_only`. If the reviewed bindings file is malformed, `status` degrades to a derived warning instead of failing closed. `ops` builds on top of that with routing, recovery, alerts, and next actions in one text-first operator dashboard. `recover` inspects stale tasks, stale review queues, stale approvals, and orphan locks; `--apply-safe` only performs fail-closed state repairs such as lock release, stale-task reset, and stale-approval reblocking.
 
+GitNexus can be layered on top as optional repo intelligence. `status` and `ops` now surface GitNexus readiness and freshness as derived advisory state only; they do not give GitNexus any workflow, review, or completion authority. If you use GitNexus with a `devgod` repo, prefer `npx gitnexus analyze --skip-agents-md` so the index refresh does not rewrite managed `AGENTS.md` content.
+
+Optional GitNexus setup for Codex:
+
+```bash
+codex mcp add gitnexus -- npx -y gitnexus@latest mcp
+npx gitnexus analyze --skip-agents-md
+```
+
 `devgod` also ships a publishable benchmark/report path:
 
 - `npm run eval:orchestration` for runtime baseline cases

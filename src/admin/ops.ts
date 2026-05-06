@@ -26,6 +26,14 @@ export function buildOperatorDashboardReport(input: {
     alerts.push(`review identity not live-ready: ${input.status.reviewIdentity.notes.join("; ")}`);
   }
 
+  if (input.status.gitNexus.state === "stale") {
+    alerts.push("gitnexus advisory index is stale");
+  }
+
+  if (input.status.gitNexus.state === "invalid_metadata") {
+    alerts.push("gitnexus advisory metadata is invalid");
+  }
+
   for (const issue of input.recovery.issues) {
     if (issue.kind === "stalled_task") {
       alerts.push(`stalled task: ${issue.taskId}`);
@@ -53,6 +61,13 @@ export function buildOperatorDashboardReport(input: {
 
   for (const action of input.recovery.actions.filter((entry) => entry.safeToApply)) {
     nextActions.push(`recover ${action.id}`);
+  }
+
+  if (
+    (input.status.gitNexus.state === "stale" || input.status.gitNexus.state === "missing_index") &&
+    input.status.gitNexus.recommendedCommand
+  ) {
+    nextActions.push(input.status.gitNexus.recommendedCommand);
   }
 
   return {
@@ -85,6 +100,13 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   lines.push(`recovery-issues: ${report.recovery.summary.totalIssues}`);
   lines.push(`safe-recovery-actions: ${report.recovery.summary.safeActions}`);
   lines.push(`next-ready: ${report.status.orchestration.nextTaskIds.join(", ") || "none"}`);
+  lines.push(`gitnexus: ${report.status.gitNexus.state}`);
+  if (report.status.gitNexus.configuredScopes.length > 0) {
+    lines.push(`gitnexus-config: ${report.status.gitNexus.configuredScopes.join(", ")}`);
+  }
+  if (report.status.gitNexus.indexedAt) {
+    lines.push(`gitnexus-indexed-at: ${report.status.gitNexus.indexedAt}`);
+  }
 
   if (report.alerts.length > 0) {
     lines.push("alerts:");

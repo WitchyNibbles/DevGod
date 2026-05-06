@@ -41,6 +41,13 @@ The synthetic fixture command does not write `.devgod/ACTIVE` and does not creat
 
 For review identity, consuming repos can keep multiple named backends in one reviewed adapter module via `reviewIdentityAdapters` and select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`. `devgod:status` and `devgod:ops` surface that selection state so operators can detect ambiguous multi-backend configs before trusting live reviews.
 
+Optional GitNexus setup:
+
+- add the MCP server explicitly: `codex mcp add gitnexus -- npx -y gitnexus@latest mcp`
+- index the repo with `npx gitnexus analyze --skip-agents-md`
+- treat GitNexus as advisory evidence only; `devgod:status` and `devgod:ops` surface its readiness and freshness without granting it workflow authority
+- avoid letting GitNexus rewrite managed control-layer files by default
+
 To make Codex configure a repo completely, keep the `devgod-setup` skill, `.env.example`, Docker
 Compose file, and setup scripts together so the agent has one repeatable bootstrap path.
 

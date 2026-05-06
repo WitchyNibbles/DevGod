@@ -77,6 +77,7 @@ Additional rules:
 - use \`tdd-guide\` for new feature or bugfix slices that should start with failing tests
 - use \`e2e-runner\` for critical user, setup, install, and upgrade flows
 - use \`release-readiness\` before package, migration, installer, or rollout-oriented changes
+- if GitNexus is intentionally configured, treat it as optional advisory repo intelligence only and keep workflow authority in \`devgod\`
 - substantive work that is not on the trivial fast path should normally use \`specialist_verified\` completion with explicit specialist and quality-gate evidence
 - require an intake brief for substantive work in \`.devgod/work/briefs/\`
 - require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution

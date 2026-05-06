@@ -180,6 +180,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-memory/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",
@@ -873,7 +874,9 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
+    ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-memory/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",
@@ -881,8 +884,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-release-readiness/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
     ".agents/skills/devgod-setup/SKILL.md",
-    ".agents/skills/devgod-tdd/SKILL.md",
-    ".agents/skills/devgod-e2e/SKILL.md"
+    ".agents/skills/devgod-tdd/SKILL.md"
   ];
 
   for (const relativePath of installedSkills) {
@@ -1275,6 +1277,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-memory/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",

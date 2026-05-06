@@ -6,6 +6,7 @@ import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-ru
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
+import { inspectGitNexusStatus, type GitNexusStatusObservation } from "./admin/gitnexus.ts";
 import { buildOperatorStatusReport, type ReviewIdentityStatusObservation } from "./admin/status.ts";
 import { isGateReviewRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import {
@@ -489,6 +490,7 @@ interface ExecuteStatusCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
   inspectReviewIdentity?: (() => Promise<ReviewIdentityStatusObservation>) | undefined;
+  inspectGitNexus?: (() => Promise<GitNexusStatusObservation>) | undefined;
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
 }
@@ -918,11 +920,17 @@ export async function executeStatusCommandFromArgs(
         cwd: options.cwd,
         env: options.env
       });
+  const gitNexus = options.inspectGitNexus
+    ? await options.inspectGitNexus()
+    : await inspectGitNexusStatus({
+        cwd: options.cwd
+      });
   const snapshot = await options.getStatusSnapshot(runId);
 
   return buildOperatorStatusReport({
     snapshot,
     reviewIdentity,
+    gitNexus,
     staleAfterDays
   });
 }

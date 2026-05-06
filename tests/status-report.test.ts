@@ -35,6 +35,24 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   };
 }
 
+function gitNexusObservation(
+  overrides: Partial<import("../src/admin/gitnexus.ts").GitNexusStatusObservation> = {}
+): import("../src/admin/gitnexus.ts").GitNexusStatusObservation {
+  return {
+    authorityLabel: "derived_only",
+    state: "unconfigured",
+    configured: false,
+    configuredScopes: [],
+    configPaths: [],
+    repoIndexed: false,
+    indexRoot: "/repo/.gitnexus",
+    metaPath: "/repo/.gitnexus/meta.json",
+    recommendedCommand: "npx gitnexus analyze --skip-agents-md",
+    notes: ["gitnexus MCP config was not detected in project or user Codex config"],
+    ...overrides
+  };
+}
+
 test("buildOperatorStatusReport labels authoritative and derived sections clearly", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({
@@ -69,6 +87,7 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
       liveTrustReady: false,
       notes: ["adapter module not configured"]
     },
+    gitNexus: gitNexusObservation(),
     staleAfterDays: 0,
     now: "2100-01-01T00:00:00.000Z"
   });
@@ -89,6 +108,7 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
   assert.equal(report.orchestration.freshness.status, "stale");
   assert.deepEqual(report.orchestration.nextTaskIds, []);
   assert.equal(report.reviewIdentity.liveTrustReady, false);
+  assert.equal(report.gitNexus.state, "unconfigured");
   assert.deepEqual(report.reviewIdentity.notes, ["adapter module not configured"]);
 });
 
@@ -142,7 +162,15 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
-      }
+      },
+      inspectGitNexus: async () =>
+        gitNexusObservation({
+          state: "missing_index",
+          configured: true,
+          configuredScopes: ["project"],
+          configPaths: [path.join(directory, ".codex/config.toml")],
+          notes: ["gitnexus MCP is configured but this repo has not been indexed yet"]
+        })
     });
 
     assert.equal(report.run.id, run.id);
@@ -152,6 +180,7 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
     assert.deepEqual(report.reviewIdentity.availableBackends, []);
     assert.equal(report.reviewIdentity.bindingsPresent, true);
     assert.equal(report.reviewIdentity.liveTrustReady, false);
+    assert.equal(report.gitNexus.state, "missing_index");
     assert.match(
       report.reviewIdentity.notes.join(" "),
       /still contains shipped placeholder values/
@@ -189,10 +218,12 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
-      }
+      },
+      inspectGitNexus: async () => gitNexusObservation()
     });
 
     assert.equal(report.reviewIdentity.liveTrustReady, false);
+    assert.equal(report.gitNexus.state, "unconfigured");
     assert.match(report.reviewIdentity.notes.join(" "), /bindings file is invalid and cannot be trusted/);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -257,7 +288,19 @@ test("executeStatusCommandFromArgs reports multi-backend review adapters and req
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
-      }
+      },
+      inspectGitNexus: async () =>
+        gitNexusObservation({
+          state: "ready",
+          configured: true,
+          configuredScopes: ["user"],
+          configPaths: [path.join(directory, ".codex/config.toml")],
+          repoIndexed: true,
+          indexedAt: "2026-05-06T00:00:00.000Z",
+          indexedCommit: "abc123",
+          headCommit: "abc123",
+          notes: ["gitnexus advisory context is ready"]
+        })
     });
 
     assert.deepEqual(report.reviewIdentity.availableBackends, ["one", "two"]);

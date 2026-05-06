@@ -1,6 +1,7 @@
 import type { FreshnessGateDecision } from "../runtime/freshness-gate.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 import type { RunStatusSnapshot, TaskStatus } from "../domain/types.ts";
+import type { GitNexusStatusObservation } from "./gitnexus.ts";
 
 type StatusAuthorityLabel = "runtime_authoritative" | "derived_only";
 
@@ -42,6 +43,7 @@ export interface OperatorStatusReport {
     freshness: FreshnessGateDecision;
   };
   reviewIdentity: ReviewIdentityStatusObservation;
+  gitNexus: GitNexusStatusObservation;
 }
 
 function emptyTaskBuckets(): Record<TaskStatus, string[]> {
@@ -69,6 +71,7 @@ function countTaskBuckets(byStatus: Record<TaskStatus, string[]>): Record<TaskSt
 export function buildOperatorStatusReport(input: {
   snapshot: RunStatusSnapshot;
   reviewIdentity: ReviewIdentityStatusObservation;
+  gitNexus: GitNexusStatusObservation;
   now?: string | undefined;
   staleAfterDays?: number | undefined;
 }): OperatorStatusReport {
@@ -109,6 +112,7 @@ export function buildOperatorStatusReport(input: {
       nextTaskIds: [...input.snapshot.nextTaskIds],
       freshness
     },
-    reviewIdentity: input.reviewIdentity
+    reviewIdentity: input.reviewIdentity,
+    gitNexus: input.gitNexus
   };
 }

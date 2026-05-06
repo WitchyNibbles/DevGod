@@ -172,6 +172,7 @@ function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
         "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
+        "Optional: if you use GitNexus, configure MCP explicitly and refresh with npx gitnexus analyze --skip-agents-md.",
         "Implement devgod/review-identity-adapter.ts before trusting review actions or running npm run devgod:record-review."
       ];
   }
@@ -180,6 +181,7 @@ function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[
     "cd into the target project",
     "npm install",
     "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
+    "Optional: if you use GitNexus, configure MCP explicitly and refresh with npx gitnexus analyze --skip-agents-md.",
     "Implement devgod/review-identity-adapter.ts, run npm run devgod:verify:review-identity, then use npm run devgod:record-review for live review actions."
   ];
 }
