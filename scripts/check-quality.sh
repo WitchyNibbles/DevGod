@@ -14,6 +14,9 @@ npm run verify:workflow
 echo "orchestration evals"
 npm run eval:orchestration
 
+echo "orchestration benchmark"
+npm run benchmark:orchestration >/dev/null
+
 echo "audit"
 npm audit --omit=dev
 

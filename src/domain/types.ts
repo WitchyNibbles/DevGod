@@ -60,6 +60,18 @@ export const qualityGates = [
   "setup_replay_required"
 ] as const;
 export const routingRecommendationKinds = ["owner_dispatch", "review_dispatch", "wait"] as const;
+export const recoveryIssueKinds = [
+  "stalled_task",
+  "stale_review_block",
+  "stale_approval",
+  "orphan_lock"
+] as const;
+export const recoveryActionKinds = [
+  "reset_task_to_ready",
+  "release_orphan_lock",
+  "reblock_stale_approval",
+  "request_missing_reviews"
+] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -78,6 +90,8 @@ export type GateReviewRole = (typeof requiredGateReviews)[number];
 export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
 export type QualityGate = (typeof qualityGates)[number];
 export type RoutingRecommendationKind = (typeof routingRecommendationKinds)[number];
+export type RecoveryIssueKind = (typeof recoveryIssueKinds)[number];
+export type RecoveryActionKind = (typeof recoveryActionKinds)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -450,4 +464,47 @@ export interface RoutingRecommendationReport {
   mode: "advisory_only";
   runId: string;
   recommendations: RoutingRecommendation[];
+}
+
+export interface RecoveryIssue {
+  id: string;
+  authorityLabel: "derived_only";
+  kind: RecoveryIssueKind;
+  taskId?: string | undefined;
+  lockTaskId?: string | undefined;
+  ageHours?: number | undefined;
+  details: string[];
+  suggestedActionIds: string[];
+}
+
+export interface RecoveryAction {
+  id: string;
+  authorityLabel: "derived_only";
+  kind: RecoveryActionKind;
+  taskId?: string | undefined;
+  safeToApply: boolean;
+  rationale: string[];
+}
+
+export interface RecoveryInspectionReport {
+  mode: "advisory_only";
+  runId: string;
+  staleAfterHours: number;
+  issues: RecoveryIssue[];
+  actions: RecoveryAction[];
+  summary: {
+    totalIssues: number;
+    safeActions: number;
+    blockedTasks: string[];
+    staleTaskIds: string[];
+    orphanLockTaskIds: string[];
+  };
+}
+
+export interface RecoveryApplyResult {
+  mode: "applied";
+  runId: string;
+  appliedActionIds: string[];
+  skippedActionIds: string[];
+  snapshot: RunStatusSnapshot;
 }

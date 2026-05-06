@@ -62,6 +62,7 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
       authorityLabel: "derived_only",
       adapterConfigured: false,
       adapterExists: false,
+      availableBackends: [],
       bindingsPresent: true,
       bindingsPath: "/repo/.devgod/review-identity-bindings.json",
       bindingsUseShippedTemplate: false,
@@ -148,6 +149,7 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
     assert.equal(report.run.authorityLabel, "runtime_authoritative");
     assert.equal(report.reviewIdentity.authorityLabel, "derived_only");
     assert.equal(report.reviewIdentity.adapterConfigured, true);
+    assert.deepEqual(report.reviewIdentity.availableBackends, []);
     assert.equal(report.reviewIdentity.bindingsPresent, true);
     assert.equal(report.reviewIdentity.liveTrustReady, false);
     assert.match(
@@ -197,6 +199,76 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
   }
 });
 
+test("executeStatusCommandFromArgs reports multi-backend review adapters and requires selection", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-command-multi-backend-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+
+  try {
+    await mkdir(path.join(directory, ".devgod"), { recursive: true });
+    await writeFile(
+      path.join(directory, "review-identity-adapter.ts"),
+      `export const reviewIdentityAdapters = {
+  one: async () => ({ provider: "test", subject: "one", verified: true }),
+  two: async () => ({ provider: "test", subject: "two", verified: true })
+};
+`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod/review-identity-bindings.json"),
+      JSON.stringify(
+        {
+          bindings: [
+            {
+              principal: {
+                provider: "github",
+                subject: "alice"
+              },
+              actors: [
+                {
+                  actor: "alice-reviewer",
+                  roles: ["reviewer"]
+                }
+              ]
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE: "./review-identity-adapter.ts",
+        DEVGOD_REVIEW_IDENTITY_BINDINGS: ".devgod/review-identity-bindings.json"
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      }
+    });
+
+    assert.deepEqual(report.reviewIdentity.availableBackends, ["one", "two"]);
+    assert.equal(report.reviewIdentity.selectedBackend, undefined);
+    assert.equal(report.reviewIdentity.liveTrustReady, false);
+    assert.match(report.reviewIdentity.notes.join(" "), /multiple review backends are available but none is selected/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeStatusCommandFromArgs rejects missing run ids and invalid stale-after-days flags", async () => {
   await assert.rejects(
     executeStatusCommandFromArgs([], {
@@ -205,7 +277,7 @@ test("executeStatusCommandFromArgs rejects missing run ids and invalid stale-aft
         assert.fail("status should not resolve a snapshot without --run-id");
       }
     }),
-    /status requires --run-id/
+    /status-like commands require --run-id/
   );
 
   await assert.rejects(

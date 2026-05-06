@@ -10,9 +10,18 @@ export {
   validateReviewIdentityBindings
 } from "./core/review-context.ts";
 export { runOrchestrationBaseline } from "./evals/orchestration-baseline.ts";
+export {
+  renderOrchestrationBenchmarkMarkdown,
+  runOrchestrationBenchmark
+} from "./evals/orchestration-benchmark.ts";
 export { runRetrievalMemoryBaseline } from "./evals/retrieval-memory-baseline.ts";
 export { buildEmbeddingText, runEmbeddingJobs } from "./runtime/embedding-runner.ts";
 export { assessFreshness, runWithFreshnessGate } from "./runtime/freshness-gate.ts";
+export {
+  composeReviewIdentityAdapters,
+  createHeaderReviewIdentityAdapter,
+  createStaticReviewIdentityAdapter
+} from "./runtime/review-identity-adapters.ts";
 export { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 export { MemoryStore } from "./store/memory-store.ts";
 export { PostgresStore } from "./store/postgres-store.ts";

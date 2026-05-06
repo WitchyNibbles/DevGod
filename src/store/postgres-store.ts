@@ -146,6 +146,31 @@ export class PostgresStore implements DevgodStore {
     return result.rows[0]?.payload;
   }
 
+  async findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined> {
+    const result = await this.client.query<JsonRow<RunRecord>>(
+      `select jsonb_build_object(
+          'id', r.id,
+          'workspaceId', r.workspace_id,
+          'projectId', r.project_id,
+          'actor', r.actor,
+          'title', r.title,
+          'request', r.request_text,
+          'summary', r.intake_summary,
+          'status', r.status,
+          'createdAt', r.created_at,
+          'updatedAt', r.updated_at
+       ) as payload
+       from runs r
+       join projects p on p.id = r.project_id
+       join workspaces w on w.id = p.workspace_id
+       where w.slug = $1 and p.slug = $2
+       order by r.updated_at desc
+       limit 1`,
+      [params.workspaceSlug, params.projectSlug]
+    );
+    return result.rows[0]?.payload;
+  }
+
   async updateRun(run: RunRecord): Promise<void> {
     await this.client.query(
       `update runs

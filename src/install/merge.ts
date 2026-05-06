@@ -246,6 +246,8 @@ export function mergePackageJson(
   scripts["devgod:bootstrap"] = `${runtimeEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${runtimeEntry} verify-setup`;
   scripts["devgod:status"] = `${runtimeEntry} status`;
+  scripts["devgod:ops"] = `${runtimeEntry} ops --format text`;
+  scripts["devgod:recover"] = `${runtimeEntry} recover`;
   scripts["devgod:scaffold-workflow"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target .";
   scripts["devgod:seed-happy-path-fixture"] =

@@ -327,6 +327,8 @@ Trust-boundary rules:
 Installed target repos also get:
 
 - `npm run devgod:status -- --run-id <run-id>`
+- `npm run devgod:ops -- --run-id <run-id>` or `npm run devgod:ops -- --run-id latest --format text`
+- `npm run devgod:recover -- --run-id <run-id>` for advisory recovery inspection
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>`
 - `.devgod/review-identity-bindings.json`
 - `.devgod/review-identity-adapter.fixture.json`
@@ -334,7 +336,7 @@ Installed target repos also get:
 - `npm run devgod:verify:review-identity`
 - `npm run devgod:record-review`
 
-The installed adapter stub fails closed until you replace it with real server-side principal lookup. The verifier command loads your adapter, reviewed bindings, and reviewed fixtures, then exits nonzero if an allow/deny case is bypassed.
+The installed adapter stub fails closed until you replace it with real server-side principal lookup. It now supports multiple named backends through `reviewIdentityAdapters` plus `DEVGOD_REVIEW_IDENTITY_BACKEND`, so consuming repos can keep one reviewed adapter module while selecting different authenticated principal sources in different environments. The verifier command loads your adapter, reviewed bindings, and reviewed fixtures, then exits nonzero if an allow/deny case is bypassed.
 
 Live review recording uses `record-review`, not the verifier path. It requires a real `DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE`, a reviewed `.devgod/review-identity-bindings.json`, and a JSON input payload such as:
 
@@ -361,7 +363,13 @@ The live command rejects the shipped template bindings and copied placeholder bi
 
 The shipped templates are starting points, not live policy. Review the bindings and fixtures, implement the adapter, and keep all three under normal repo review.
 
-`status` prints a single operator report with explicit authority labels. Runtime rows and active locks are marked `runtime_authoritative`; freshness, blockers, next-task suggestions, and review-identity posture are marked `derived_only`. If the reviewed bindings file is malformed, `status` degrades to a derived warning instead of failing closed.
+`status` prints a single operator report with explicit authority labels. Runtime rows and active locks are marked `runtime_authoritative`; freshness, blockers, next-task suggestions, and review-identity posture are marked `derived_only`. If the reviewed bindings file is malformed, `status` degrades to a derived warning instead of failing closed. `ops` builds on top of that with routing, recovery, alerts, and next actions in one text-first operator dashboard. `recover` inspects stale tasks, stale review queues, stale approvals, and orphan locks; `--apply-safe` only performs fail-closed state repairs such as lock release, stale-task reset, and stale-approval reblocking.
+
+`devgod` also ships a publishable benchmark/report path:
+
+- `npm run eval:orchestration` for runtime baseline cases
+- `npm run benchmark:orchestration` for the scored comparison report
+- [docs/benchmarks/orchestration-benchmark.md](/home/eimi/projects/devgod/docs/benchmarks/orchestration-benchmark.md) for the checked-in markdown snapshot
 
 ## Source Repo Setup
 

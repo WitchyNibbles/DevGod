@@ -32,10 +32,14 @@ Useful runtime operator commands inside a consuming repo:
 
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for a synthetic install-proof fixture
 - `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
+- `npm run devgod:ops -- --run-id latest --format text` for the operator dashboard
+- `npm run devgod:recover -- --run-id <run-id>` for advisory recovery inspection or `--apply-safe` to repair safe cases
 - `npm run devgod:health` for database reachability
 - `npm run devgod:verify:review-identity` to replay reviewed adapter fixtures
 
 The synthetic fixture command does not write `.devgod/ACTIVE` and does not create authoritative review summaries. Use it only for install-proof checks, never for live workflow completion.
+
+For review identity, consuming repos can keep multiple named backends in one reviewed adapter module via `reviewIdentityAdapters` and select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`. `devgod:status` and `devgod:ops` surface that selection state so operators can detect ambiguous multi-backend configs before trusting live reviews.
 
 To make Codex configure a repo completely, keep the `devgod-setup` skill, `.env.example`, Docker
 Compose file, and setup scripts together so the agent has one repeatable bootstrap path.

@@ -9,6 +9,8 @@ export interface ReviewIdentityStatusObservation {
   adapterConfigured: boolean;
   adapterExists: boolean;
   adapterModulePath?: string | undefined;
+  selectedBackend?: string | undefined;
+  availableBackends: string[];
   bindingsPresent: boolean;
   bindingsPath: string;
   bindingsUseShippedTemplate: boolean;

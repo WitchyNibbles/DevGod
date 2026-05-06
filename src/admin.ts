@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
+import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
 import { buildOperatorStatusReport, type ReviewIdentityStatusObservation } from "./admin/status.ts";
 import { isGateReviewRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import {
@@ -18,12 +19,27 @@ import {
 } from "./core/review-context.ts";
 import { DevgodCoreService } from "./core/service.ts";
 import type { ResolveReviewActionContext } from "./core/review-context.ts";
-import type { ReviewInput, ReviewRecord, RunStatusSnapshot, TaskStatus } from "./domain/types.ts";
+import type {
+  RecoveryApplyResult,
+  RecoveryInspectionReport,
+  ReviewInput,
+  ReviewRecord,
+  RoutingRecommendationReport,
+  RunStatusSnapshot,
+  TaskStatus
+} from "./domain/types.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 type EnvShape = NodeJS.ProcessEnv;
+
+interface LoadedReviewIdentityAdapter {
+  adapter: ReviewPrincipalAdapter<unknown>;
+  modulePath?: string | undefined;
+  selectedBackend?: string | undefined;
+  availableBackends: string[];
+}
 
 async function migrate() {
   const migrationsDir = path.resolve(__dirname, "sql/migrations");
@@ -215,62 +231,6 @@ async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
   return await factory();
 }
 
-async function createReviewIdentityAdapter(options: {
-  cwd?: string | undefined;
-  env?: EnvShape | undefined;
-} = {}): Promise<ReviewPrincipalAdapter<unknown>> {
-  const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
-  const adapterModulePath = env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
-  if (!adapterModulePath) {
-    return createReviewIdentityFixtureAdapter();
-  }
-
-  const resolvedPath = path.isAbsolute(adapterModulePath)
-    ? adapterModulePath
-    : path.resolve(cwd, adapterModulePath);
-  const adapterModule = await import(pathToFileURL(resolvedPath).href);
-  const factory = adapterModule.createReviewIdentityAdapter;
-
-  if (typeof factory === "function") {
-    const created = await factory();
-    if (typeof created !== "function") {
-      throw new Error("createReviewIdentityAdapter() must return a function");
-    }
-    return created as ReviewPrincipalAdapter<unknown>;
-  }
-
-  if (typeof adapterModule.default === "function") {
-    return adapterModule.default as ReviewPrincipalAdapter<unknown>;
-  }
-
-  throw new Error("review identity adapter module must export default(adapter) or createReviewIdentityAdapter()");
-}
-
-async function createLiveReviewIdentityAdapter(options: {
-  cwd?: string | undefined;
-  env?: EnvShape | undefined;
-} = {}): Promise<{
-  adapter: ReviewPrincipalAdapter<unknown>;
-  modulePath: string;
-}> {
-  const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
-  const adapterModulePath = env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
-  if (!adapterModulePath) {
-    throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for record-review");
-  }
-
-  const modulePath = path.isAbsolute(adapterModulePath)
-    ? adapterModulePath
-    : path.resolve(cwd, adapterModulePath);
-
-  return {
-    adapter: await createReviewIdentityAdapter({ cwd, env }),
-    modulePath
-  };
-}
-
 function createReviewIdentityFixtureAdapter(): ReviewPrincipalAdapter<unknown> {
   return async ({ authContext }) => {
     const candidate =
@@ -284,6 +244,121 @@ function createReviewIdentityFixtureAdapter(): ReviewPrincipalAdapter<unknown> {
       verified: candidate.verified === true
     };
   };
+}
+
+async function loadConfiguredReviewIdentityAdapter(options: {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  requireLiveAdapter?: boolean | undefined;
+} = {}): Promise<LoadedReviewIdentityAdapter> {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const adapterModulePath = env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
+  if (!adapterModulePath) {
+    if (options.requireLiveAdapter) {
+      throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for live review actions");
+    }
+
+    return {
+      adapter: createReviewIdentityFixtureAdapter(),
+      availableBackends: []
+    };
+  }
+
+  const resolvedPath = path.isAbsolute(adapterModulePath)
+    ? adapterModulePath
+    : path.resolve(cwd, adapterModulePath);
+  const adapterModule = await import(pathToFileURL(resolvedPath).href);
+  const availableBackends =
+    adapterModule.reviewIdentityAdapters &&
+    typeof adapterModule.reviewIdentityAdapters === "object" &&
+    !Array.isArray(adapterModule.reviewIdentityAdapters)
+      ? Object.keys(adapterModule.reviewIdentityAdapters as Record<string, unknown>).sort((left, right) =>
+          left.localeCompare(right)
+        )
+      : [];
+  const selectedBackend = env.DEVGOD_REVIEW_IDENTITY_BACKEND?.trim() || undefined;
+
+  if (selectedBackend) {
+    const candidate = (adapterModule.reviewIdentityAdapters as Record<string, unknown> | undefined)?.[selectedBackend];
+    if (typeof candidate !== "function") {
+      throw new Error(`review identity backend not found: ${selectedBackend}`);
+    }
+
+    return {
+      adapter: candidate as ReviewPrincipalAdapter<unknown>,
+      modulePath: resolvedPath,
+      selectedBackend,
+      availableBackends
+    };
+  }
+
+  if (availableBackends.length === 1) {
+    const onlyBackend = availableBackends[0] as string;
+    const candidate = (adapterModule.reviewIdentityAdapters as Record<string, unknown>)[onlyBackend];
+    if (typeof candidate === "function") {
+      return {
+        adapter: candidate as ReviewPrincipalAdapter<unknown>,
+        modulePath: resolvedPath,
+        selectedBackend: onlyBackend,
+        availableBackends
+      };
+    }
+  }
+
+  const factory = adapterModule.createReviewIdentityAdapter;
+
+  if (typeof factory === "function") {
+    const created = await factory();
+    if (typeof created !== "function") {
+      throw new Error("createReviewIdentityAdapter() must return a function");
+    }
+    return {
+      adapter: created as ReviewPrincipalAdapter<unknown>,
+      modulePath: resolvedPath,
+      selectedBackend,
+      availableBackends
+    };
+  }
+
+  if (typeof adapterModule.default === "function") {
+    return {
+      adapter: adapterModule.default as ReviewPrincipalAdapter<unknown>,
+      modulePath: resolvedPath,
+      selectedBackend,
+      availableBackends
+    };
+  }
+
+  throw new Error(
+    "review identity adapter module must export default(adapter), createReviewIdentityAdapter(), or reviewIdentityAdapters"
+  );
+}
+
+async function inspectReviewIdentityAdapterBackends(modulePath: string): Promise<string[]> {
+  const adapterModule = await import(pathToFileURL(modulePath).href);
+  if (
+    !adapterModule.reviewIdentityAdapters ||
+    typeof adapterModule.reviewIdentityAdapters !== "object" ||
+    Array.isArray(adapterModule.reviewIdentityAdapters)
+  ) {
+    return [];
+  }
+
+  return Object.keys(adapterModule.reviewIdentityAdapters as Record<string, unknown>).sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+async function createLiveReviewIdentityAdapter(options: {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+} = {}): Promise<LoadedReviewIdentityAdapter> {
+  return loadConfiguredReviewIdentityAdapter({
+    cwd: options.cwd,
+    env: options.env,
+    requireLiveAdapter: true
+  });
 }
 
 async function resolveReviewIdentityFilePath(options: {
@@ -340,13 +415,13 @@ async function verifyReviewIdentityCommand() {
   const [bindings, fixtures, adapter] = await Promise.all([
     loadReviewIdentityBindings(bindingsPath),
     loadReviewIdentityFixtures(fixturesPath),
-    createReviewIdentityAdapter()
+    loadConfiguredReviewIdentityAdapter()
   ]);
 
   const result = await verifyReviewIdentityAdapter({
     bindings,
     fixtures,
-    adapter
+    adapter: adapter.adapter
   });
 
   if (result.failed > 0) {
@@ -372,6 +447,8 @@ interface RecordReviewCommandResult {
   mode: "live";
   bindingsPath: string;
   adapterModulePath: string;
+  selectedBackend?: string | undefined;
+  availableBackends: string[];
   principal: AuthenticatedPrincipal;
   review: ReviewRecord;
   blockers: string[];
@@ -381,6 +458,8 @@ interface RecordReviewCommandResult {
 interface ExecuteRecordReviewCommandOptions {
   adapter: ReviewPrincipalAdapter<unknown>;
   adapterModulePath: string;
+  selectedBackend?: string | undefined;
+  availableBackends?: string[] | undefined;
   bindingsPath: string;
   recordReview: (input: {
     command: RecordReviewCommandInput;
@@ -400,6 +479,8 @@ interface ExecuteRecordReviewCommandFromArgsOptions {
   createLiveAdapter?: (() => Promise<{
     adapter: ReviewPrincipalAdapter<unknown>;
     modulePath: string;
+    selectedBackend?: string | undefined;
+    availableBackends?: string[] | undefined;
   }>) | undefined;
   recordReview: ExecuteRecordReviewCommandOptions["recordReview"];
 }
@@ -408,7 +489,18 @@ interface ExecuteStatusCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
   inspectReviewIdentity?: (() => Promise<ReviewIdentityStatusObservation>) | undefined;
+  findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
+}
+
+interface ExecuteOpsCommandOptions extends ExecuteStatusCommandOptions {
+  getRoutingReport: (runId: string) => Promise<RoutingRecommendationReport>;
+  inspectRecovery: (runId: string, staleAfterHours: number) => Promise<RecoveryInspectionReport>;
+}
+
+interface ExecuteRecoverCommandOptions extends ExecuteStatusCommandOptions {
+  inspectRecovery: (runId: string, staleAfterHours: number) => Promise<RecoveryInspectionReport>;
+  applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
 }
 
 function normalizeRecordReviewCommandInput(raw: string): RecordReviewCommandInput {
@@ -490,6 +582,61 @@ function resolveCommandFlag(args: readonly string[], flag: string): string | und
   }
 
   return value;
+}
+
+function collectCommandFlagValues(args: readonly string[], flag: string): string[] {
+  const values: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== flag) {
+      continue;
+    }
+
+    const value = args[index + 1];
+    if (!value || value.startsWith("-")) {
+      throw new Error(`${flag} requires a value`);
+    }
+    values.push(value);
+    index += 1;
+  }
+
+  return values;
+}
+
+async function resolveRunIdForCommand(
+  args: readonly string[],
+  options: {
+    env?: EnvShape | undefined;
+    findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
+  }
+): Promise<string> {
+  const env = options.env ?? process.env;
+  const runId = resolveCommandFlag(args, "--run-id");
+  if (runId && runId !== "latest") {
+    return runId;
+  }
+
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug || !options.findLatestRun) {
+    throw new Error("status-like commands require --run-id <run-id> or --run-id latest with workspace/project");
+  }
+
+  const latestRun = await options.findLatestRun(workspaceSlug, projectSlug);
+  if (!latestRun) {
+    throw new Error(`No runs found for ${workspaceSlug}/${projectSlug}`);
+  }
+
+  return latestRun.id;
+}
+
+function resolveFormatFlag(args: readonly string[]): "json" | "text" {
+  const format = resolveCommandFlag(args, "--format") ?? "json";
+  if (format !== "json" && format !== "text") {
+    throw new Error(`Invalid --format value: ${format}`);
+  }
+  return format;
 }
 
 async function readRecordReviewCommandInput(
@@ -586,11 +733,32 @@ export async function inspectReviewIdentityStatus(options: {
   const notes: string[] = [];
   let bindingsUsePlaceholderTemplate = false;
   let bindingsInvalid = false;
+  let selectedBackend: string | undefined;
+  let availableBackends: string[] = [];
 
   if (!adapterConfigured) {
     notes.push("adapter module not configured");
   } else if (!adapterExists) {
     notes.push("adapter module path does not exist");
+  } else {
+    try {
+      availableBackends = await inspectReviewIdentityAdapterBackends(adapterModulePath);
+      const loaded = await loadConfiguredReviewIdentityAdapter({
+        cwd,
+        env
+      });
+      selectedBackend = loaded.selectedBackend;
+      availableBackends = loaded.availableBackends;
+      if (availableBackends.length > 1 && !selectedBackend) {
+        notes.push("multiple review backends are available but none is selected");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (availableBackends.length > 1 && !selectedBackend) {
+        notes.push("multiple review backends are available but none is selected");
+      }
+      notes.push(`review identity adapter module is invalid: ${message}`);
+    }
   }
 
   if (bindingsPresent && !bindingsUseShippedTemplate) {
@@ -616,6 +784,8 @@ export async function inspectReviewIdentityStatus(options: {
     adapterConfigured,
     adapterExists,
     adapterModulePath,
+    selectedBackend,
+    availableBackends,
     bindingsPresent,
     bindingsPath,
     bindingsUseShippedTemplate,
@@ -625,6 +795,7 @@ export async function inspectReviewIdentityStatus(options: {
       bindingsPresent &&
       !bindingsUseShippedTemplate &&
       !bindingsUsePlaceholderTemplate &&
+      !(availableBackends.length > 1 && !selectedBackend) &&
       !bindingsInvalid,
     notes
   };
@@ -667,6 +838,8 @@ export async function executeRecordReviewCommand(
     mode: "live",
     bindingsPath: options.bindingsPath,
     adapterModulePath: options.adapterModulePath,
+    selectedBackend: options.selectedBackend,
+    availableBackends: [...(options.availableBackends ?? [])],
     principal,
     review: result.review,
     blockers: result.blockers,
@@ -690,10 +863,15 @@ export async function executeRecordReviewCommandFromArgs(
   const liveAdapter = options.createLiveAdapter
     ? await options.createLiveAdapter()
     : await createLiveReviewIdentityAdapter({ cwd, env });
+  if (!liveAdapter.modulePath) {
+    throw new Error("record-review requires a resolved live adapter module path");
+  }
 
   return executeRecordReviewCommand(command, {
     adapter: liveAdapter.adapter,
     adapterModulePath: liveAdapter.modulePath,
+    selectedBackend: liveAdapter.selectedBackend,
+    availableBackends: liveAdapter.availableBackends,
     bindingsPath,
     recordReview: options.recordReview
   });
@@ -723,10 +901,10 @@ export async function executeStatusCommandFromArgs(
   args: readonly string[],
   options: ExecuteStatusCommandOptions
 ) {
-  const runId = resolveCommandFlag(args, "--run-id");
-  if (!runId) {
-    throw new Error("status requires --run-id <run-id>");
-  }
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
 
   const staleAfterDaysValue = resolveCommandFlag(args, "--stale-after-days") ?? "1";
   const staleAfterDays = Number.parseInt(staleAfterDaysValue, 10);
@@ -751,13 +929,129 @@ export async function executeStatusCommandFromArgs(
 
 async function statusCommand(args: readonly string[]) {
   await withClient(async (client) => {
-    const service = new DevgodCoreService(new PostgresStore(client));
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
     const report = await executeStatusCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       }
     });
     console.log(JSON.stringify(report));
+  });
+}
+
+export async function executeOpsCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteOpsCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const staleAfterHoursValue = resolveCommandFlag(args, "--stale-after-hours") ?? "24";
+  const staleAfterHours = Number.parseInt(staleAfterHoursValue, 10);
+  if (!Number.isInteger(staleAfterHours) || staleAfterHours < 0) {
+    throw new Error(`Invalid --stale-after-hours value: ${staleAfterHoursValue}`);
+  }
+
+  const format = resolveFormatFlag(args);
+  const [status, routing, recovery] = await Promise.all([
+    executeStatusCommandFromArgs(["--run-id", runId], options),
+    options.getRoutingReport(runId),
+    options.inspectRecovery(runId, staleAfterHours)
+  ]);
+  const report = buildOperatorDashboardReport({
+    status,
+    routing,
+    recovery
+  });
+
+  return {
+    format,
+    report
+  };
+}
+
+async function opsCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const result = await executeOpsCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      }
+    });
+
+    if (result.format === "text") {
+      process.stdout.write(formatOperatorDashboardReport(result.report));
+      return;
+    }
+
+    console.log(JSON.stringify(result.report));
+  });
+}
+
+export async function executeRecoverCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteRecoverCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const staleAfterHoursValue = resolveCommandFlag(args, "--stale-after-hours") ?? "24";
+  const staleAfterHours = Number.parseInt(staleAfterHoursValue, 10);
+  if (!Number.isInteger(staleAfterHours) || staleAfterHours < 0) {
+    throw new Error(`Invalid --stale-after-hours value: ${staleAfterHoursValue}`);
+  }
+
+  const applyValues = collectCommandFlagValues(args, "--apply");
+  const applySafe = args.includes("--apply-safe");
+  if (applyValues.length > 0 && applySafe) {
+    throw new Error("recover accepts either --apply-safe or one/more --apply <action-id> flags, not both");
+  }
+
+  if (applyValues.length === 0 && !applySafe) {
+    return options.inspectRecovery(runId, staleAfterHours);
+  }
+
+  return options.applyRecovery(runId, applyValues, staleAfterHours);
+}
+
+async function recoverCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const result = await executeRecoverCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      }
+    });
+    console.log(JSON.stringify(result));
   });
 }
 
@@ -863,6 +1157,16 @@ async function main() {
 
   if (command === "status") {
     await statusCommand(args);
+    return;
+  }
+
+  if (command === "ops") {
+    await opsCommand(args);
+    return;
+  }
+
+  if (command === "recover") {
+    await recoverCommand(args);
     return;
   }
 

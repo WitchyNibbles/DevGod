@@ -98,6 +98,17 @@ export class MemoryStore implements DevgodStore {
     return this.runs.get(runId);
   }
 
+  async findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined> {
+    const project = this.projects.get(`${params.workspaceSlug}:${params.projectSlug}`);
+    if (!project) {
+      return undefined;
+    }
+
+    return [...this.runs.values()]
+      .filter((run) => run.projectId === project.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  }
+
   async updateRun(run: RunRecord): Promise<void> {
     this.runs.set(run.id, run);
   }
