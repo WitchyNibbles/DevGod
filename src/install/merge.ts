@@ -275,6 +275,8 @@ export function mergePackageJson(
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
   scripts["devgod:github-dispatch"] = `${devgodEntry} github-dispatch --target .`;
+  scripts["devgod:mcp"] = `${devgodEntry} mcp`;
+  scripts["devgod:ui"] = `${devgodEntry} serve-ui`;
   scripts["devgod:scaffold-workflow"] = `${devgodEntry} scaffold-workflow --target .`;
   scripts["devgod:seed-happy-path-fixture"] = `${devgodEntry} seed-happy-path-fixture --target .`;
   scripts["devgod:check:happy-path"] = "bash scripts/check-devgod-happy-path.sh";

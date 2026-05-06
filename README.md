@@ -333,6 +333,8 @@ Installed target repos also get:
 - `npm run devgod:report -- --run-id <run-id>` for an evidence-first run report
 - `npm run devgod:plan-context -- --query "<topic>"` for planner-facing retrieval summaries
 - `npm run devgod:github-dispatch -- --input .devgod/github-event.json` for GitHub-originated intake
+- `npm run devgod:mcp` for a packaged stdio MCP server exposing devgod runtime tools
+- `npm run devgod:ui` for a local hosted operator UI over the same runtime surfaces
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>`
 - `.devgod/review-identity-bindings.json`
 - `.devgod/review-identity-adapter.fixture.json`
@@ -377,6 +379,13 @@ The operator surface now includes:
 - `plan-context` for retrieval-backed planning context with authority, freshness, and citation labels
 - `github-dispatch` for turning GitHub issue or PR payloads into canonical `.devgod/work` artifacts without granting GitHub workflow authority
 
+The transport surface now also includes:
+
+- `mcp` for a packaged stdio MCP server built on `@modelcontextprotocol/sdk`
+- `serve-ui` for a local hosted operator UI with `/api/status`, `/api/ops`, and `/api/report` endpoints plus a static dashboard
+
+The first MCP slice is intentionally read-only. It exposes runtime status, ops, report, and planning-context tools without widening workflow authority or introducing generic command execution.
+
 GitNexus can be layered on top as optional repo intelligence. `status` and `ops` now surface GitNexus readiness and freshness as derived advisory state only; they do not give GitNexus any workflow, review, or completion authority. If you use GitNexus with a `devgod` repo, prefer `npx gitnexus analyze --skip-agents-md` so the index refresh does not rewrite managed `AGENTS.md` content.
 
 Optional GitNexus setup for installed repos:
@@ -420,6 +429,8 @@ npm run verify:setup
 npm run verify:release-overlay
 npm run verify:workflow
 npm run verify:migrations:live
+npm run mcp
+npm run ui
 npm test
 npm run typecheck
 ```
@@ -519,10 +530,11 @@ docker-compose.yml
 
 ## Current Limits
 
-This is the Phase 5 opt-in overlay. It now includes a packaged `devgod` wrapper, operator evidence reporting, retrieval-backed planning context, and advisory GitHub intake scaffolding. It does not yet include:
+This is the Phase 5 opt-in overlay. It now includes a packaged `devgod` wrapper, operator evidence reporting, retrieval-backed planning context, advisory GitHub intake scaffolding, a packaged stdio MCP server, and a minimal hosted operator UI. It does not yet include:
 
-- a packaged MCP transport around the shared-core actions
 - production deployment manifests for the shared service
+- a remote or authenticated Streamable HTTP MCP deployment surface
+- a multi-user hosted operator product with auth, persistence, and richer UX flows
 - extra coordinator roles such as `scrum_master` or `test_director`
 
 Repo markdown retrieval is now available through the admin surface:

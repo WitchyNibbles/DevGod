@@ -131,6 +131,14 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:github-dispatch"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts github-dispatch --target ."
   );
+  assert.equal(
+    merged.scripts["devgod:mcp"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts mcp"
+  );
+  assert.equal(
+    merged.scripts["devgod:ui"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts serve-ui"
+  );
   assert.match(
     merged.scripts["devgod:verify:migrations:live"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts verify-live-migrations/
@@ -302,9 +310,11 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/install/merge.ts",
     "src/install/setup-local.ts",
     "src/install/types.ts",
+    "src/mcp/",
     "src/runtime/",
     "src/sql/migrations/",
-    "src/store/"
+    "src/store/",
+    "src/ui/"
   ];
   const excludedOverlayFiles = [
     ".devgod/install-backups/",

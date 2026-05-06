@@ -19,7 +19,9 @@ const adminCommands = new Set([
   "index-repo-markdown",
   "report",
   "plan-context",
-  "github-dispatch"
+  "github-dispatch",
+  "mcp",
+  "serve-ui"
 ]);
 
 const installCommands = new Set([
@@ -34,6 +36,8 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, "../..");
 const adminCliPath = path.join(repoRoot, "src/admin.ts");
 const installCliPath = path.join(repoRoot, "src/install/cli.ts");
+const mcpServerPath = path.join(repoRoot, "src/mcp/server.ts");
+const uiServerPath = path.join(repoRoot, "src/ui/server.ts");
 
 function printUsage(): void {
   process.stdout.write(
@@ -50,6 +54,7 @@ function printUsage(): void {
       "  status | ops | recover | report | plan-context | github-dispatch",
       "  migrate | health | bootstrap-project | verify-setup | verify-live-migrations",
       "  verify-review-identity | record-review | index-repo-markdown | run-embedding-jobs",
+      "  mcp | serve-ui",
       "",
       "Install commands:",
       "  init | upgrade | verify | scaffold-workflow | seed-happy-path-fixture",
@@ -68,19 +73,30 @@ function main(argv: readonly string[]): void {
 
   const scriptPath = installCommands.has(command)
     ? installCliPath
-    : adminCommands.has(command)
-      ? adminCliPath
-      : undefined;
+    : command === "mcp"
+      ? mcpServerPath
+      : command === "serve-ui"
+        ? uiServerPath
+        : adminCommands.has(command)
+          ? adminCliPath
+          : undefined;
 
   if (!scriptPath) {
     throw new Error(`Unknown devgod command: ${command}`);
   }
 
   const nodeArgs: string[] = [];
-  if (scriptPath === adminCliPath && existsSync(path.resolve(process.cwd(), ".env.devgod"))) {
+  if (
+    (scriptPath === adminCliPath || scriptPath === mcpServerPath || scriptPath === uiServerPath) &&
+    existsSync(path.resolve(process.cwd(), ".env.devgod"))
+  ) {
     nodeArgs.push("--env-file=.env.devgod");
   }
-  nodeArgs.push("--experimental-strip-types", scriptPath, command, ...rest);
+  if (scriptPath === mcpServerPath || scriptPath === uiServerPath) {
+    nodeArgs.push("--experimental-strip-types", scriptPath, ...rest);
+  } else {
+    nodeArgs.push("--experimental-strip-types", scriptPath, command, ...rest);
+  }
 
   const result = spawnSync(process.execPath, nodeArgs, {
     stdio: "inherit",

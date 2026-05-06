@@ -22,8 +22,10 @@ export {
   createHeaderReviewIdentityAdapter,
   createStaticReviewIdentityAdapter
 } from "./runtime/review-identity-adapters.ts";
+export { createDevgodMcpServer, startDevgodMcpServer } from "./mcp/server.ts";
 export { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 export { MemoryStore } from "./store/memory-store.ts";
 export { PostgresStore } from "./store/postgres-store.ts";
+export { createHostedUiRequestHandler, startHostedUiServer } from "./ui/server.ts";
 export * from "./domain/contracts.ts";
 export * from "./domain/types.ts";
