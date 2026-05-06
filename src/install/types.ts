@@ -4,6 +4,7 @@ export interface InstallOptions {
   sourceRoot: string;
   targetRoot: string;
   dryRun?: boolean;
+  withGitNexus?: boolean;
 }
 
 export interface InstallSummary {

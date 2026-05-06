@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import {
+  gitNexusCodexConfigFragment,
   mergeAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
@@ -63,6 +64,7 @@ interface ParsedInstallCommand {
   command: "init" | "upgrade";
   dryRun: boolean;
   targetArg: string;
+  withGitNexus?: boolean;
 }
 
 interface ParsedVerifyCommand {
@@ -94,6 +96,7 @@ type ParsedCliArgs =
 
 const installManifestRelativePath = ".devgod/install-manifest.json";
 const installManifestVersion = 1;
+const gitNexusPackageVersion = "1.6.3";
 
 const generatedReviewIdentityAdapter = `import {
   createHeaderReviewIdentityAdapter,
@@ -139,29 +142,37 @@ export default createReviewPrincipalAdapter(async () => {
 
 function usage(): never {
   throw new Error(
-    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) --target <path> | <path>\n" +
+    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-gitnexus] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-gitnexus] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-gitnexus] --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
       "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]"
   );
 }
 
-function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[] {
+function buildNextSteps(
+  command: "init" | "upgrade",
+  mode: InstallMode,
+  withGitNexus: boolean
+): string[] {
   if (command === "upgrade") {
     if (mode === "dry-run") {
       return [
         "Review the planned upgrade changes, conflicts, and orphans.",
         "Resolve any conflicts before applying the upgrade.",
         "Rerun in apply mode to write the planned managed-file updates.",
-        "Run verify after the upgrade to confirm the managed surface is clean."
+        withGitNexus
+          ? "After apply, run npm install and npm run devgod:gitnexus:analyze to refresh the advisory index."
+          : "Run verify after the upgrade to confirm the managed surface is clean."
       ];
     }
 
     return [
       "Review any backups under .devgod/install-backups/ if you changed managed files locally.",
-      "Run verify to confirm the managed surface is clean.",
+      withGitNexus
+        ? "Run npm install, then npm run devgod:gitnexus:analyze to create or refresh the advisory index."
+        : "Run verify to confirm the managed surface is clean.",
       "Resolve any reported orphans manually if the current package no longer manages them."
     ];
   }
@@ -172,7 +183,9 @@ function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
         "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
-        "Optional: if you use GitNexus, configure MCP explicitly and refresh with npx gitnexus analyze --skip-agents-md.",
+        withGitNexus
+          ? "After npm install, run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
+          : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
         "Implement devgod/review-identity-adapter.ts before trusting review actions or running npm run devgod:record-review."
       ];
   }
@@ -181,7 +194,9 @@ function buildNextSteps(command: "init" | "upgrade", mode: InstallMode): string[
     "cd into the target project",
     "npm install",
     "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
-    "Optional: if you use GitNexus, configure MCP explicitly and refresh with npx gitnexus analyze --skip-agents-md.",
+    withGitNexus
+      ? "Run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
+      : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
     "Implement devgod/review-identity-adapter.ts, run npm run devgod:verify:review-identity, then use npm run devgod:record-review for live review actions."
   ];
 }
@@ -575,7 +590,12 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   return manifest;
 }
 
-async function buildInstallPlan(sourceRoot: string): Promise<InstallPlanEntry[]> {
+async function buildInstallPlan(
+  sourceRoot: string,
+  options: {
+    withGitNexus?: boolean;
+  } = {}
+): Promise<InstallPlanEntry[]> {
   const plan: InstallPlanEntry[] = [];
   const copiedFiles = await buildManifest(sourceRoot);
 
@@ -589,6 +609,9 @@ async function buildInstallPlan(sourceRoot: string): Promise<InstallPlanEntry[]>
   }
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
+  const codexConfigSource = options.withGitNexus
+    ? mergeCodexConfig(sourceConfig, gitNexusCodexConfigFragment())
+    : sourceConfig;
   const setupScriptSh = await readFile(path.join(sourceRoot, "scripts/setup-devgod.sh"), "utf8");
   const setupScriptPs1 = await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8");
 
@@ -597,7 +620,8 @@ async function buildInstallPlan(sourceRoot: string): Promise<InstallPlanEntry[]>
       target: ".codex/config.toml",
       mode: "managed",
       strategy: "merge",
-      resolveDesiredContent: async (_targetRoot, currentContent) => mergeCodexConfig(currentContent, sourceConfig)
+      resolveDesiredContent: async (_targetRoot, currentContent) =>
+        mergeCodexConfig(currentContent, codexConfigSource)
     },
     {
       target: "AGENTS.md",
@@ -611,14 +635,24 @@ async function buildInstallPlan(sourceRoot: string): Promise<InstallPlanEntry[]>
       strategy: "merge",
       resolveDesiredContent: async (targetRoot, currentContent) => {
         const dependencyPath = path.relative(targetRoot, sourceRoot);
-        return mergePackageJson(currentContent, dependencyPath);
+        return mergePackageJson(
+          currentContent,
+          dependencyPath,
+          options.withGitNexus
+            ? {
+                withGitNexus: true,
+                gitNexusPackageVersion
+              }
+            : {}
+        );
       }
     },
     {
       target: ".gitignore",
       mode: "managed",
       strategy: "merge",
-      resolveDesiredContent: async (_targetRoot, currentContent) => mergeGitignore(currentContent)
+      resolveDesiredContent: async (_targetRoot, currentContent) =>
+        mergeGitignore(currentContent, options.withGitNexus ? { withGitNexus: true } : {})
     },
     {
       target: "scripts/devgod-setup.sh",
@@ -641,6 +675,37 @@ async function buildInstallPlan(sourceRoot: string): Promise<InstallPlanEntry[]>
   );
 
   return plan;
+}
+
+async function detectInstalledGitNexus(targetRoot: string): Promise<boolean> {
+  const codexConfig = await readFileIfExists(path.join(targetRoot, ".codex/config.toml"));
+  if (codexConfig?.includes("[mcp_servers.gitnexus]")) {
+    return true;
+  }
+
+  const packageJsonContent = await readFileIfExists(path.join(targetRoot, "package.json"));
+  if (!packageJsonContent) {
+    return false;
+  }
+
+  try {
+    const packageJson = JSON.parse(packageJsonContent) as {
+      devDependencies?: Record<string, unknown>;
+      scripts?: Record<string, unknown>;
+    };
+
+    if (typeof packageJson.devDependencies?.gitnexus === "string") {
+      return true;
+    }
+
+    if (typeof packageJson.scripts?.["devgod:gitnexus:analyze"] === "string") {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 async function backupExistingFile(
@@ -693,7 +758,8 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   return {
     command,
     dryRun: hasDryRun,
-    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply"]))
+    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply", "--with-gitnexus"])),
+    ...(args.includes("--with-gitnexus") ? { withGitNexus: true } : {})
   };
 }
 
@@ -771,8 +837,12 @@ function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
 
   if (command === "verify") {
     const commandArgs = rawArgs.slice(1);
-    if (commandArgs.includes("--apply") || commandArgs.includes("--dry-run")) {
-      throw new Error("verify does not support --apply or --dry-run.");
+    if (
+      commandArgs.includes("--apply") ||
+      commandArgs.includes("--dry-run") ||
+      commandArgs.includes("--with-gitnexus")
+    ) {
+      throw new Error("verify does not support --apply, --dry-run, or --with-gitnexus.");
     }
 
     return {
@@ -802,7 +872,8 @@ function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   return {
     command: "init",
     dryRun: true,
-    targetArg: resolveCliTarget(rawArgs)
+    targetArg: resolveCliTarget(rawArgs, new Set(["--dry-run", "--with-gitnexus"])),
+    ...(rawArgs.includes("--with-gitnexus") ? { withGitNexus: true } : {})
   };
 }
 
@@ -1015,12 +1086,17 @@ async function loadInstallManifestOrBackfill(
 async function buildManagedUpgradePlan(
   sourceRoot: string,
   targetRoot: string,
-  manifest: InstallManifest
+  manifest: InstallManifest,
+  options: {
+    withGitNexus?: boolean;
+  } = {}
 ): Promise<{
   orphans: string[];
   plannedWrites: PlannedWrite[];
 }> {
-  const planEntries = (await buildInstallPlan(sourceRoot)).filter((entry) => entry.mode === "managed");
+  const planEntries = (await buildInstallPlan(sourceRoot, options)).filter(
+    (entry) => entry.mode === "managed"
+  );
   const manifestRecords = new Map(manifest.files.map((record) => [record.target, record] as const));
   const plannedTargets = new Set(planEntries.map((entry) => entry.target));
 
@@ -1059,14 +1135,15 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
+  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("init", mode));
+  const summary = createInstallSummary(mode, buildNextSteps("init", mode, withGitNexus));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const plannedWrites: PlannedWrite[] = [];
 
-  for (const entry of await buildInstallPlan(sourceRoot)) {
+  for (const entry of await buildInstallPlan(sourceRoot, { withGitNexus })) {
     const plannedWrite = resolveInstallAction(await resolvePlanEntry(entry, targetRoot));
     plannedWrites.push(plannedWrite);
     if (plannedWrite.action === "conflict") {
@@ -1089,13 +1166,16 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
+  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode));
+  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, withGitNexus));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const { existingManifest, manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
-  const { orphans, plannedWrites } = await buildManagedUpgradePlan(sourceRoot, targetRoot, manifest);
+  const { orphans, plannedWrites } = await buildManagedUpgradePlan(sourceRoot, targetRoot, manifest, {
+    withGitNexus
+  });
 
   summary.orphans.push(...orphans);
   for (const plannedWrite of plannedWrites) {
@@ -1124,11 +1204,14 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
 export async function verifyDevgodInstall(options: InstallOptions): Promise<VerifySummary> {
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetRoot = path.resolve(options.targetRoot);
+  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const { manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
-  const planEntries = (await buildInstallPlan(sourceRoot)).filter((entry) => entry.mode === "managed");
+  const planEntries = (await buildInstallPlan(sourceRoot, { withGitNexus })).filter(
+    (entry) => entry.mode === "managed"
+  );
   const plannedTargets = new Set(planEntries.map((entry) => entry.target));
 
   const missing: string[] = [];

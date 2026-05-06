@@ -7,7 +7,13 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { mergeAgentsMd, mergeCodexConfig, mergeGitignore, mergePackageJson } from "../src/install/merge.ts";
+import {
+  gitNexusCodexConfigFragment,
+  mergeAgentsMd,
+  mergeCodexConfig,
+  mergeGitignore,
+  mergePackageJson
+} from "../src/install/merge.ts";
 import {
   installDevgodIntoProject,
   upgradeDevgodInProject,
@@ -77,6 +83,20 @@ test("mergeCodexConfig preserves existing comments when no semantic change is ne
   assert.equal(merged, existing);
 });
 
+test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing project config", () => {
+  const merged = mergeCodexConfig(
+    'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
+    gitNexusCodexConfigFragment()
+  );
+
+  assert.match(merged, /\[mcp_servers\.gitnexus\]/);
+  assert.match(merged, /command = "npx"/);
+  assert.match(merged, /"--no-install"/);
+  assert.match(merged, /"gitnexus"/);
+  assert.match(merged, /"mcp"/);
+  assert.match(merged, /\[mcp_servers\.playwright\]/);
+});
+
 test("mergePackageJson adds devgod dependency and scripts without removing existing scripts", () => {
   const merged = JSON.parse(
     mergePackageJson(
@@ -125,11 +145,42 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
 
+test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
+  const merged = JSON.parse(
+    mergePackageJson(
+      JSON.stringify({
+        name: "target-project",
+        private: true
+      }),
+      "../devgod",
+      {
+        withGitNexus: true,
+        gitNexusPackageVersion: "1.6.3"
+      }
+    )
+  ) as {
+    scripts: Record<string, string>;
+    devDependencies: Record<string, string>;
+  };
+
+  assert.equal(merged.devDependencies.gitnexus, "1.6.3");
+  assert.equal(merged.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
+  assert.equal(merged.scripts["devgod:gitnexus:status"], "gitnexus status");
+});
+
 test("mergeGitignore adds devgod env ignores once", () => {
   const first = mergeGitignore("node_modules/\n");
   const second = mergeGitignore(first);
 
   assert.match(first, /\.env\.devgod/);
+  assert.equal(first, second);
+});
+
+test("mergeGitignore adds GitNexus storage ignore only when requested", () => {
+  const first = mergeGitignore("node_modules/\n", { withGitNexus: true });
+  const second = mergeGitignore(first, { withGitNexus: true });
+
+  assert.match(first, /\.gitnexus\//);
   assert.equal(first, second);
 });
 
@@ -440,6 +491,38 @@ test("installDevgodIntoProject first apply backs up divergent managed content", 
   }
 });
 
+test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP config, and safe next steps", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-gitnexus-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    const summary = await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot,
+      withGitNexus: true
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex/config.toml"), "utf8");
+    const gitignore = await readFile(path.join(targetRoot, ".gitignore"), "utf8");
+
+    assert.equal(packageJson.devDependencies.gitnexus, "1.6.3");
+    assert.equal(packageJson.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
+    assert.equal(packageJson.scripts["devgod:gitnexus:status"], "gitnexus status");
+    assert.match(codexConfig, /\[mcp_servers\.gitnexus\]/);
+    assert.match(codexConfig, /"--no-install"/);
+    assert.match(gitignore, /\.gitnexus\//);
+    assert.match(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("install CLI init --apply is explicit, replay-safe, and does not run docker", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-apply-"));
@@ -508,6 +591,50 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
     assert.match(secondRun.stdout, /backups created: 0/);
     assert.match(secondRun.stdout, /writes performed: no/);
     await assert.rejects(readFile(dockerSentinel, "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall auto-detects the GitNexus install option", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-gitnexus-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot, withGitNexus: true });
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, true);
+    assert.deepEqual(summary.missing, []);
+    assert.deepEqual(summary.modified, []);
+    assert.deepEqual(summary.orphans, []);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject preserves the GitNexus install option without repeating the flag", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-gitnexus-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot, withGitNexus: true });
+
+    const replay = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(replay.conflicts.length, 0);
+    assert.equal(replay.created.length, 0);
+    assert.equal(replay.updated.length, 0);
+    assert.equal(replay.writesPerformed, false);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }

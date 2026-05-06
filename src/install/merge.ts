@@ -88,6 +88,11 @@ Additional rules:
 
 ${AGENTS_END}`;
 
+interface GitNexusInstallSettings {
+  withGitNexus?: boolean;
+  gitNexusPackageVersion?: string;
+}
+
 function sortObjectKeys<T>(value: T): T {
   if (Array.isArray(value) || value === null || typeof value !== "object") {
     return value;
@@ -184,8 +189,22 @@ export function mergeCodexConfig(
   return `${TOML.stringify(normalizedMerged as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
 }
 
-export function mergeGitignore(existingContent: string | undefined): string {
+export function gitNexusCodexConfigFragment(): string {
+  return (
+    '[mcp_servers.gitnexus]\n' +
+    'command = "npx"\n' +
+    'args = ["--no-install", "gitnexus", "mcp"]\n'
+  );
+}
+
+export function mergeGitignore(
+  existingContent: string | undefined,
+  options: GitNexusInstallSettings = {}
+): string {
   const requiredLines = [".env.devgod", ".env.devgod.*"];
+  if (options.withGitNexus) {
+    requiredLines.push(".gitnexus/");
+  }
   const existingLines = new Set(
     (existingContent ?? "")
       .split(/\r?\n/)
@@ -219,7 +238,8 @@ function prefixedFileDependency(relativePath: string): string {
 
 export function mergePackageJson(
   existingContent: string | undefined,
-  dependencyPathFromTarget: string
+  dependencyPathFromTarget: string,
+  options: GitNexusInstallSettings = {}
 ): string {
   const packageJson = existingContent && existingContent.trim().length > 0
     ? (JSON.parse(existingContent) as Record<string, unknown>)
@@ -262,6 +282,12 @@ export function mergePackageJson(
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);
+
+  if (options.withGitNexus) {
+    scripts["devgod:gitnexus:analyze"] = "gitnexus analyze --skip-agents-md";
+    scripts["devgod:gitnexus:status"] = "gitnexus status";
+    devDependencies.gitnexus = options.gitNexusPackageVersion ?? "1.6.3";
+  }
 
   packageJson.scripts = sortObjectKeys(scripts);
   packageJson.devDependencies = sortObjectKeys(devDependencies);

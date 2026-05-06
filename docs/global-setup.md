@@ -43,10 +43,11 @@ For review identity, consuming repos can keep multiple named backends in one rev
 
 Optional GitNexus setup:
 
-- add the MCP server explicitly: `codex mcp add gitnexus -- npx -y gitnexus@latest mcp`
-- index the repo with `npx gitnexus analyze --skip-agents-md`
+- install `devgod` with `init --apply --with-gitnexus` or rerun `upgrade --apply --with-gitnexus` for an existing repo
+- run `npm install`, then `npm run devgod:gitnexus:analyze`
+- the installer writes a project-local GitNexus MCP entry that uses `npx --no-install gitnexus mcp`
 - treat GitNexus as advisory evidence only; `devgod:status` and `devgod:ops` surface its readiness and freshness without granting it workflow authority
-- avoid letting GitNexus rewrite managed control-layer files by default
+- avoid letting GitNexus rewrite managed control-layer files by default; the shipped analyze script uses `--skip-agents-md`
 
 To make Codex configure a repo completely, keep the `devgod-setup` skill, `.env.example`, Docker
 Compose file, and setup scripts together so the agent has one repeatable bootstrap path.

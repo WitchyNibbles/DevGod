@@ -367,12 +367,16 @@ The shipped templates are starting points, not live policy. Review the bindings 
 
 GitNexus can be layered on top as optional repo intelligence. `status` and `ops` now surface GitNexus readiness and freshness as derived advisory state only; they do not give GitNexus any workflow, review, or completion authority. If you use GitNexus with a `devgod` repo, prefer `npx gitnexus analyze --skip-agents-md` so the index refresh does not rewrite managed `AGENTS.md` content.
 
-Optional GitNexus setup for Codex:
+Optional GitNexus setup for installed repos:
 
 ```bash
-codex mcp add gitnexus -- npx -y gitnexus@latest mcp
-npx gitnexus analyze --skip-agents-md
+node --experimental-strip-types src/install/cli.ts init --apply --with-gitnexus --target /path/to/repo
+cd /path/to/repo
+npm install
+npm run devgod:gitnexus:analyze
 ```
+
+The opt-in installer path adds a project-local GitNexus package pin, a `.codex/config.toml` MCP block that runs `npx --no-install gitnexus mcp`, `.gitnexus/` ignore rules, and helper scripts without granting GitNexus any review or workflow authority.
 
 `devgod` also ships a publishable benchmark/report path:
 
