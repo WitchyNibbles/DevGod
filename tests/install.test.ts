@@ -55,6 +55,8 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
+  assert.match(first, /implicitly invoked on every prompt/i);
+  assert.match(first, /default workflow controller even when other tools are available/i);
   assert.equal(first, second);
 });
 
@@ -114,29 +116,41 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   };
 
   assert.equal(merged.scripts.test, "vitest");
-  assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\.ts migrate/);
-  assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\.ts status/);
+  assert.equal(
+    merged.scripts.devgod,
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts"
+  );
+  assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\/devgod\.ts migrate/);
+  assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
+  assert.equal(
+    merged.scripts["devgod:report"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts report --format markdown"
+  );
+  assert.equal(
+    merged.scripts["devgod:github-dispatch"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts github-dispatch --target ."
+  );
   assert.match(
     merged.scripts["devgod:verify:migrations:live"],
-    /node_modules\/devgod\/src\/admin\.ts verify-live-migrations/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-live-migrations/
   );
   assert.equal(
     merged.scripts["devgod:scaffold-workflow"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target ."
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts scaffold-workflow --target ."
   );
   assert.equal(
     merged.scripts["devgod:seed-happy-path-fixture"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts seed-happy-path-fixture --target ."
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-happy-path-fixture --target ."
   );
   assert.equal(merged.scripts["devgod:check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
   assert.match(
     merged.scripts["devgod:verify:review-identity"],
-    /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
   );
   assert.match(
     merged.scripts["devgod:record-review"],
-    /node_modules\/devgod\/src\/admin\.ts record-review --input \.devgod\/review-action\.json/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
   );
   assert.match(
     merged.scripts["devgod:setup:local"],
@@ -1074,19 +1088,20 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   ) as { scripts: Record<string, string> };
   assert.match(
     targetPackageJson.scripts["devgod:seed-happy-path-fixture"],
-    /node_modules\/devgod\/src\/install\/cli\.ts seed-happy-path-fixture --target \./
+    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-happy-path-fixture --target \./
   );
+  assert.match(targetPackageJson.scripts.devgod, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
   assert.match(
     targetPackageJson.scripts["devgod:status"],
-    /node_modules\/devgod\/src\/admin\.ts status/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts status/
   );
   assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],
-    /node_modules\/devgod\/src\/admin\.ts verify-review-identity/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
   );
   assert.match(
     targetPackageJson.scripts["devgod:record-review"],
-    /node_modules\/devgod\/src\/admin\.ts record-review --input \.devgod\/review-action\.json/
+    /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
   );
 
   await assert.rejects(

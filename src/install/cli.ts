@@ -1692,7 +1692,7 @@ async function writeWorkflowArtifactSet(
   };
 }
 
-async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+export async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
   const {
     targetRoot,
     activeRelativePath,

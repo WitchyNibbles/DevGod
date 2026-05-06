@@ -1,0 +1,29 @@
+name: devgod-github-dispatch
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, edited]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Persist GitHub event payload
+        run: cp "$GITHUB_EVENT_PATH" .devgod/github-event.json
+      - name: Scaffold canonical devgod workflow artifacts
+        run: npm run devgod:github-dispatch -- --input .devgod/github-event.json --force-active
+      - name: Show next steps
+        run: cat .devgod/ACTIVE

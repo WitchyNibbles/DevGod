@@ -326,9 +326,13 @@ Trust-boundary rules:
 
 Installed target repos also get:
 
+- `npm run devgod -- status` as the single default runtime entrypoint
 - `npm run devgod:status -- --run-id <run-id>`
 - `npm run devgod:ops -- --run-id <run-id>` or `npm run devgod:ops -- --run-id latest --format text`
 - `npm run devgod:recover -- --run-id <run-id>` for advisory recovery inspection
+- `npm run devgod:report -- --run-id <run-id>` for an evidence-first run report
+- `npm run devgod:plan-context -- --query "<topic>"` for planner-facing retrieval summaries
+- `npm run devgod:github-dispatch -- --input .devgod/github-event.json` for GitHub-originated intake
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>`
 - `.devgod/review-identity-bindings.json`
 - `.devgod/review-identity-adapter.fixture.json`
@@ -364,6 +368,14 @@ The live command rejects the shipped template bindings and copied placeholder bi
 The shipped templates are starting points, not live policy. Review the bindings and fixtures, implement the adapter, and keep all three under normal repo review.
 
 `status` prints a single operator report with explicit authority labels. Runtime rows and active locks are marked `runtime_authoritative`; freshness, blockers, next-task suggestions, and review-identity posture are marked `derived_only`. If the reviewed bindings file is malformed, `status` degrades to a derived warning instead of failing closed. `ops` builds on top of that with routing, recovery, alerts, and next actions in one text-first operator dashboard. `recover` inspects stale tasks, stale review queues, stale approvals, and orphan locks; `--apply-safe` only performs fail-closed state repairs such as lock release, stale-task reset, and stale-approval reblocking.
+
+`devgod` is now the packaged default command surface for installed repos. Use `npm run devgod -- <command>` when you want one stable entrypoint that routes between runtime and install flows. The wrapper loads `.env.devgod` automatically for runtime commands when the file is present, keeps the devgod workflow implicit by default, and only yields control when the user explicitly chooses another tool or mode.
+
+The operator surface now includes:
+
+- `report` for a timeline-oriented evidence bundle across run status, routing, recovery, handoffs, reviews, and approvals
+- `plan-context` for retrieval-backed planning context with authority, freshness, and citation labels
+- `github-dispatch` for turning GitHub issue or PR payloads into canonical `.devgod/work` artifacts without granting GitHub workflow authority
 
 GitNexus can be layered on top as optional repo intelligence. `status` and `ops` now surface GitNexus readiness and freshness as derived advisory state only; they do not give GitNexus any workflow, review, or completion authority. If you use GitNexus with a `devgod` repo, prefer `npx gitnexus analyze --skip-agents-md` so the index refresh does not rewrite managed `AGENTS.md` content.
 
@@ -507,12 +519,11 @@ docker-compose.yml
 
 ## Current Limits
 
-This is the Phase 5 opt-in overlay. It does not yet include:
+This is the Phase 5 opt-in overlay. It now includes a packaged `devgod` wrapper, operator evidence reporting, retrieval-backed planning context, and advisory GitHub intake scaffolding. It does not yet include:
 
 - a packaged MCP transport around the shared-core actions
 - production deployment manifests for the shared service
 - extra coordinator roles such as `scrum_master` or `test_director`
-- a `devgod:codex` command wrapper
 
 Repo markdown retrieval is now available through the admin surface:
 
@@ -520,6 +531,11 @@ Repo markdown retrieval is now available through the admin surface:
 - `DEVGOD_REPO_MARKDOWN_INCLUDE=README.md,docs,.devgod` controls the allowlist
 - `DEVGOD_EMBEDDING_MODEL` queues embedding jobs for indexed markdown chunks
 - `node --experimental-strip-types src/admin.ts run-embedding-jobs [limit]` writes vectors for queued chunks
+
+GitHub intake templates now ship in `.devgod/templates/`:
+
+- `github-dispatch-event.example.json` for local dry runs
+- `github-dispatch-workflow.yml` as a starter GitHub Actions workflow that persists the event payload and hands it to `devgod:github-dispatch`
 
 ## Design Rules
 

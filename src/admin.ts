@@ -5,10 +5,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
+import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
+import { buildPlanningContextReport, formatPlanningContextReportMarkdown } from "./admin/planning-context.ts";
+import { dispatchGithubWorkItem } from "./admin/github-dispatch.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
 import { inspectGitNexusStatus, type GitNexusStatusObservation } from "./admin/gitnexus.ts";
 import { buildOperatorStatusReport, type ReviewIdentityStatusObservation } from "./admin/status.ts";
-import { isGateReviewRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
+import { isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import {
   createReviewActionContextResolver,
   createReviewPrincipalAdapter,
@@ -26,6 +29,8 @@ import type {
   ReviewInput,
   ReviewRecord,
   RoutingRecommendationReport,
+  RetrievalRole,
+  SearchMemoryResult,
   RunStatusSnapshot,
   TaskStatus
 } from "./domain/types.ts";
@@ -505,6 +510,35 @@ interface ExecuteRecoverCommandOptions extends ExecuteStatusCommandOptions {
   applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
 }
 
+interface ExecuteReportCommandOptions extends ExecuteOpsCommandOptions {
+  getHandoffs: (runId: string, taskId: string) => Promise<readonly {
+    createdAt: string;
+    actor: string;
+    ownerRole: RetrievalRole;
+    completionStandard: string;
+  }[]>;
+  getReviews: (runId: string, taskId: string) => Promise<readonly ReviewRecord[]>;
+  getApprovals: (runId: string, taskId: string) => Promise<readonly {
+    createdAt: string;
+    actor: string;
+    actorRole: RetrievalRole;
+    identityAssurance: "authenticated" | "legacy_backfill";
+    decision: string;
+  }[]>;
+}
+
+interface ExecutePlanContextCommandOptions {
+  env?: EnvShape | undefined;
+  searchMemory: (input: {
+    workspaceSlug: string;
+    projectSlug: string;
+    query: string;
+    limit: number;
+    includeGlobal: boolean;
+    requesterRole: RetrievalRole;
+  }) => Promise<readonly SearchMemoryResult[]>;
+}
+
 function normalizeRecordReviewCommandInput(raw: string): RecordReviewCommandInput {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   const runId = typeof parsed.runId === "string" ? parsed.runId.trim() : "";
@@ -636,6 +670,14 @@ async function resolveRunIdForCommand(
 function resolveFormatFlag(args: readonly string[]): "json" | "text" {
   const format = resolveCommandFlag(args, "--format") ?? "json";
   if (format !== "json" && format !== "text") {
+    throw new Error(`Invalid --format value: ${format}`);
+  }
+  return format;
+}
+
+function resolveMarkdownFormatFlag(args: readonly string[]): "json" | "markdown" {
+  const format = resolveCommandFlag(args, "--format") ?? "json";
+  if (format !== "json" && format !== "markdown") {
     throw new Error(`Invalid --format value: ${format}`);
   }
   return format;
@@ -1063,6 +1105,187 @@ async function recoverCommand(args: readonly string[]) {
   });
 }
 
+export async function executeReportCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteReportCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const format = resolveMarkdownFormatFlag(args);
+  const staleAfterHoursValue = resolveCommandFlag(args, "--stale-after-hours") ?? "24";
+  const staleAfterHours = Number.parseInt(staleAfterHoursValue, 10);
+  if (!Number.isInteger(staleAfterHours) || staleAfterHours < 0) {
+    throw new Error(`Invalid --stale-after-hours value: ${staleAfterHoursValue}`);
+  }
+
+  const [status, routing, recovery] = await Promise.all([
+    executeStatusCommandFromArgs(["--run-id", runId], options),
+    options.getRoutingReport(runId),
+    options.inspectRecovery(runId, staleAfterHours)
+  ]);
+  const snapshot = await options.getStatusSnapshot(runId);
+
+  const handoffsByTask = Object.fromEntries(
+    await Promise.all(
+      snapshot.tasks.map(async (task) => [task.packet.taskId, await options.getHandoffs(runId, task.packet.taskId)])
+    )
+  );
+  const reviewsByTask = Object.fromEntries(
+    await Promise.all(
+      snapshot.tasks.map(async (task) => [task.packet.taskId, await options.getReviews(runId, task.packet.taskId)])
+    )
+  );
+  const approvalsByTask = Object.fromEntries(
+    await Promise.all(
+      snapshot.tasks.map(async (task) => [task.packet.taskId, await options.getApprovals(runId, task.packet.taskId)])
+    )
+  );
+
+  return {
+    format,
+    report: buildRunEvidenceReport({
+      snapshot,
+      status,
+      routing,
+      recovery,
+      handoffsByTask,
+      reviewsByTask,
+      approvalsByTask
+    })
+  };
+}
+
+async function reportCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const result = await executeReportCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    if (result.format === "markdown") {
+      process.stdout.write(formatRunEvidenceReportMarkdown(result.report));
+      return;
+    }
+
+    console.log(JSON.stringify(result.report));
+  });
+}
+
+export async function executePlanContextCommandFromArgs(
+  args: readonly string[],
+  options: ExecutePlanContextCommandOptions
+) {
+  const env = options.env ?? process.env;
+  const query = resolveCommandFlag(args, "--query");
+  if (!query) {
+    throw new Error("plan-context requires --query <text>");
+  }
+
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("plan-context requires workspace/project via flags or environment");
+  }
+
+  const roleCandidate = resolveCommandFlag(args, "--role") ?? "planner";
+  if (!isRetrievalRole(roleCandidate)) {
+    throw new Error(`Invalid --role value: ${roleCandidate}`);
+  }
+
+  const limitValue = resolveCommandFlag(args, "--limit") ?? "5";
+  const limit = Number.parseInt(limitValue, 10);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`Invalid --limit value: ${limitValue}`);
+  }
+
+  const format = resolveMarkdownFormatFlag(args);
+  const includeGlobal = !args.includes("--project-only");
+  const results = await options.searchMemory({
+    workspaceSlug,
+    projectSlug,
+    query,
+    limit,
+    includeGlobal,
+    requesterRole: roleCandidate
+  });
+
+  return {
+    format,
+    report: buildPlanningContextReport({
+      query,
+      requesterRole: roleCandidate,
+      results
+    })
+  };
+}
+
+async function planContextCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const service = new DevgodCoreService(new PostgresStore(client));
+    const result = await executePlanContextCommandFromArgs(args, {
+      env: process.env,
+      searchMemory(input) {
+        return service.searchMemory(input);
+      }
+    });
+
+    if (result.format === "markdown") {
+      process.stdout.write(formatPlanningContextReportMarkdown(result.report));
+      return;
+    }
+
+    console.log(JSON.stringify(result.report));
+  });
+}
+
+export async function executeGithubDispatchCommandFromArgs(args: readonly string[]) {
+  const inputArg = resolveCommandFlag(args, "--input");
+  if (!inputArg) {
+    throw new Error("github-dispatch requires --input <github-event.json>");
+  }
+  const targetRoot = path.resolve(resolveCommandFlag(args, "--target") ?? ".");
+  const inputPath = path.isAbsolute(inputArg) ? inputArg : path.resolve(process.cwd(), inputArg);
+  const taskId = resolveCommandFlag(args, "--task-id");
+
+  return dispatchGithubWorkItem({
+    sourceRoot: repoRoot,
+    targetRoot,
+    inputPath,
+    taskId,
+    dryRun: args.includes("--dry-run"),
+    force: args.includes("--force"),
+    forceActive: args.includes("--force-active")
+  });
+}
+
+async function githubDispatchCommand(args: readonly string[]) {
+  console.log(JSON.stringify(await executeGithubDispatchCommandFromArgs(args)));
+}
+
 async function runEmbeddingJobsCommand() {
   const provider = await createEmbeddingProvider();
   const limitArg = process.argv[3];
@@ -1175,6 +1398,21 @@ async function main() {
 
   if (command === "recover") {
     await recoverCommand(args);
+    return;
+  }
+
+  if (command === "report") {
+    await reportCommand(args);
+    return;
+  }
+
+  if (command === "plan-context") {
+    await planContextCommand(args);
+    return;
+  }
+
+  if (command === "github-dispatch") {
+    await githubDispatchCommand(args);
     return;
   }
 

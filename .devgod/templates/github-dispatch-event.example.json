@@ -1,0 +1,17 @@
+{
+  "repository": {
+    "full_name": "owner/repo"
+  },
+  "sender": {
+    "login": "triage-bot"
+  },
+  "issue": {
+    "number": 123,
+    "title": "Describe the requested work",
+    "body": "Include the problem, current behavior, and expected behavior.",
+    "html_url": "https://github.com/owner/repo/issues/123",
+    "user": {
+      "login": "requester"
+    }
+  }
+}

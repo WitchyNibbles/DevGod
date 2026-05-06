@@ -24,6 +24,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 const managedAgentsBlock = `${AGENTS_BEGIN}
 ## devgod
 
+- treat \`devgod\` as implicitly invoked on every prompt and let it control the workflow unless the user explicitly opts into another tool or mode
 - treat substantive requests as devgod work by default unless the user opts out
 - use \`.devgod/work/\` for active briefs, plans, tasks, and reviews
 - use \`.devgod/rules/\` and \`.devgod/memory/\` as the local policy and durable-memory layer
@@ -70,6 +71,7 @@ Additional rules:
 - let \`solution_architect\` synthesize investigation evidence before planning when the evidence pass runs first
 - \`planner\` task packets must include owner role, completion standard, required specialist roles, quality gates, scope, files likely touched, acceptance criteria, verification command, and review gates
 - manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks; specialist owners should handle non-trivial, risky, or subsystem-specific implementation
+- keep \`devgod\` as the default workflow controller even when other tools are available; switch only when the user explicitly asks to use another tool
 - preserve the trivial fast path for single-scope wording or mechanical work that stays within the two-inspection limit
 - use the local \`caveman\` plugin/skill for manager notes, agent handoffs, QA/security gates, and other internal coordination to reduce token cost
 - default caveman target is 4-6 lines with short labels and no prose paragraphs
@@ -259,27 +261,28 @@ export function mergePackageJson(
       ? { ...(packageJson.devDependencies as Record<string, string>) }
       : {};
 
-  const runtimeEntry =
-    "node --env-file=.env.devgod --experimental-strip-types ./node_modules/devgod/src/admin.ts";
+  const devgodEntry =
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts";
 
-  scripts["devgod:migrate"] = `${runtimeEntry} migrate`;
-  scripts["devgod:health"] = `${runtimeEntry} health`;
-  scripts["devgod:bootstrap"] = `${runtimeEntry} bootstrap-project`;
-  scripts["devgod:verify:setup"] = `${runtimeEntry} verify-setup`;
-  scripts["devgod:status"] = `${runtimeEntry} status`;
-  scripts["devgod:ops"] = `${runtimeEntry} ops --format text`;
-  scripts["devgod:recover"] = `${runtimeEntry} recover`;
-  scripts["devgod:scaffold-workflow"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts scaffold-workflow --target .";
-  scripts["devgod:seed-happy-path-fixture"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/cli.ts seed-happy-path-fixture --target .";
+  scripts["devgod"] = devgodEntry;
+  scripts["devgod:migrate"] = `${devgodEntry} migrate`;
+  scripts["devgod:health"] = `${devgodEntry} health`;
+  scripts["devgod:bootstrap"] = `${devgodEntry} bootstrap-project`;
+  scripts["devgod:verify:setup"] = `${devgodEntry} verify-setup`;
+  scripts["devgod:status"] = `${devgodEntry} status`;
+  scripts["devgod:ops"] = `${devgodEntry} ops --format text`;
+  scripts["devgod:recover"] = `${devgodEntry} recover`;
+  scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
+  scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
+  scripts["devgod:github-dispatch"] = `${devgodEntry} github-dispatch --target .`;
+  scripts["devgod:scaffold-workflow"] = `${devgodEntry} scaffold-workflow --target .`;
+  scripts["devgod:seed-happy-path-fixture"] = `${devgodEntry} seed-happy-path-fixture --target .`;
   scripts["devgod:check:happy-path"] = "bash scripts/check-devgod-happy-path.sh";
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
-  scripts["devgod:verify:migrations:live"] = `${runtimeEntry} verify-live-migrations`;
-  scripts["devgod:verify:review-identity"] = `${runtimeEntry} verify-review-identity`;
-  scripts["devgod:record-review"] = `${runtimeEntry} record-review --input .devgod/review-action.json`;
-  scripts["devgod:setup:local"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
+  scripts["devgod:verify:migrations:live"] = `${devgodEntry} verify-live-migrations`;
+  scripts["devgod:verify:review-identity"] = `${devgodEntry} verify-review-identity`;
+  scripts["devgod:record-review"] = `${devgodEntry} record-review --input .devgod/review-action.json`;
+  scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);
 

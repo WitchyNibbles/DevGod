@@ -78,6 +78,7 @@
     "src/store/"
   ],
   "scripts": {
+    "devgod": "node --experimental-strip-types src/admin/devgod.ts",
     "db:start": "docker compose up -d devgod-postgres",
     "db:stop": "docker compose down",
     "install:project": "node --experimental-strip-types src/install/cli.ts",
