@@ -1,27 +1,17 @@
 ---
 name: devgod-qa-verification
-description: Use when devgod needs verification planning or a QA gate with happy-path, edge-path, failure-path, regression, and retrieval-specific checks.
+description: QA gates and verification matrices.
 ---
 
 # Devgod QA Verification
 
-Use this skill when a task needs a verification plan or a blocking QA gate.
+Use when a task needs a verification plan or blocking QA gate.
 
-## Goal
-
-Make completion claims falsifiable.
-
-## Workflow
+Goal: make completion claims falsifiable.
 
 1. Restate the acceptance criteria.
-2. Build a lean verification matrix covering:
-   - happy path
-   - edge path
-   - failure path
-   - regression path
-3. If retrieval or memory behavior changed, add checks for:
-   - provenance
-   - freshness
+2. Build a lean matrix for happy, edge, failure, and regression paths.
+3. If retrieval or memory changed, add provenance, freshness, and authority checks.
    - contradiction handling
    - redaction or exposure boundaries
 4. Prefer replayable commands and precise repro steps.

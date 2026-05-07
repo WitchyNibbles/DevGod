@@ -63,12 +63,13 @@ test("mergeAgentsMd appends and is idempotent", () => {
 test("mergeCodexConfig preserves existing values and adds missing devgod defaults", () => {
   const merged = mergeCodexConfig(
     `model = "custom-model"\n\n[features]\npersonality = false\n`,
-    `model = "gpt-5.4"\nproject_doc_fallback_filenames = ["AGENTS.md", ".agents.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\n\n[agents]\nmax_threads = 8\n`
+    `model = "gpt-5.4"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\n\n[agents]\nmax_threads = 8\n`
   );
 
   assert.match(merged, /model = "custom-model"/);
   assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"AGENTS\.md"/);
   assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"\.agents\.md"/);
+  assert.match(merged, /project_doc_fallback_filenames = \[\s*"\.agents\.md", "AGENTS\.md"\s*\]/);
   assert.match(merged, /multi_agent = true/);
   assert.match(merged, /enable_request_compression = true/);
   assert.match(merged, /max_threads = 8/);

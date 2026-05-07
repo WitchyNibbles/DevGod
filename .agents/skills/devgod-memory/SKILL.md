@@ -1,24 +1,20 @@
 ---
 name: devgod-memory
-description: Use when a devgod task finishes and Codex should capture durable project memory in repo-local files instead of relying on platform memory features.
+description: Promote durable repo-local project memory.
 ---
 
 # Devgod Memory
 
-This skill creates practical, reviewable memory.
+Goal: capture stable knowledge in `.devgod/memory/`.
 
-## Goal
-
-Capture stable knowledge in `.devgod/memory/` so future threads start smarter.
-
-## Files
+Files:
 
 - `.devgod/memory/project-profile.md`
 - `.devgod/memory/decision-log.md`
 - `.devgod/memory/patterns.md`
 - `.devgod/memory/lessons-learned.md`
 
-## Update rules
+Rules:
 
 - keep only high-signal facts
 - prefer editing existing sections over adding noise

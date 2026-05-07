@@ -1,27 +1,17 @@
 ---
 name: devgod-release-readiness
-description: Use when devgod needs a shipment gate for package changes, installer changes, migrations, setup flows, or rollout-sensitive updates.
+description: Shipment gate for package and installer changes.
 ---
 
 # Devgod Release Readiness
 
-Use this skill before calling package or control-layer work ready to ship.
+Use before calling package or control-layer work ready to ship.
 
-## Goal
+Goal: block releases that are green on paper but unsafe to ship.
 
-Block releases that are green on paper but unsafe to ship.
-
-## Workflow
-
-1. Restate the shipment surface: package files, installer behavior, migrations, setup commands, and rollback path.
-2. Verify the minimum release checklist:
-   - tests
-   - typecheck
-   - package contents
-   - migration safety
-   - setup or upgrade notes
-   - rollback notes
-3. Check that no live `.devgod/work/` state or reviewed memory content is accidentally shipped.
+1. Restate the shipment surface.
+2. Verify tests, typecheck, package contents, migration safety, setup notes, and rollback notes.
+3. Ensure no live `.devgod/work/` state or reviewed memory content is shipped.
 4. Call out breaking changes, env changes, and operator steps explicitly.
 5. Block completion if evidence is missing.
 

@@ -1,27 +1,21 @@
 ---
 name: devgod-execution
-description: Use when the user wants devgod to move from planning into implementation with specialist agents, review loops, and token-efficient coordination.
+description: Move planned devgod work into implementation.
 ---
 
 # Devgod Execution
 
-Use this skill after planning is good enough to build from explicit task packets.
+Use after planning is good enough to build from explicit task packets.
 
-## Goal
+Goal: ship the smallest clean increment without bypassing gates.
 
-Ship the smallest clean, secure, working increment without bypassing gates.
-
-## Workflow
-
-1. Restate the current milestone, active task packet, completion standard, specialist roles, and done criteria.
-2. Confirm the active task packet came from an architect-approved plan and a planner-owned decomposition handoff.
-3. Enforce allowed write scope before implementation.
-4. Enforce the task packet's completion standard, required specialist roles, and quality gates before implementation begins.
-5. Spawn only the agents needed for the active slice.
-6. Manager/root coordinates execution. Non-trivial, risky, or subsystem-specific implementation goes to the specialist owner named in the task packet.
-7. Manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks that do not need specialist ownership.
-8. Move completed work into handoff for blocking `reviewer`, `qa_engineer`, and `security_reviewer` review.
-9. The handoff must capture owner role, completion standard, specialist execution evidence, and quality gate evidence.
+1. Restate milestone, active packet, completion standard, and roles.
+2. Confirm the packet came from architect + planner handoff.
+3. Enforce write scope, completion standard, required roles, and quality gates.
+4. Spawn only the agents needed for the active slice.
+5. Manager coordinates; non-trivial work stays with the named specialist owner.
+6. Move completed work into `reviewer`, `qa_engineer`, and `security_reviewer` handoff.
+7. Capture owner role, completion standard, specialist evidence, and quality-gate evidence.
 10. The manager persists the review gate files under `.devgod/work/reviews/` when the reviewer roles are read-only.
 11. Run `bash scripts/check-devgod-workflow.sh --task-id <task-id>` before claiming the substantive slice is complete.
 12. Promote only reviewed durable memory.

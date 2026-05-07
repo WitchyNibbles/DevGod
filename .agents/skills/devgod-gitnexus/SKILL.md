@@ -1,27 +1,23 @@
 ---
 name: devgod-gitnexus
-description: Use when a devgod specialist should gather repo intelligence from GitNexus without granting it workflow authority.
+description: Advisory GitNexus repo intelligence.
 ---
 
 # Devgod GitNexus
 
-Use this skill only when GitNexus is available and the task benefits from deeper code intelligence.
+Use only when GitNexus is available and deeper code intelligence will help.
 
-## Goal
+Goal: improve repo evidence without giving GitNexus workflow authority.
 
-Get better repo evidence from GitNexus while keeping `devgod` in charge of workflow, trust, and completion.
-
-## Best-fit cases
+Best fits:
 
 - unfamiliar code exploration
-- blast-radius analysis before edits
+- blast-radius analysis
 - refactor scoping
 - process tracing for debugging or review
-- multi-repo dependency checks when GitNexus groups are already configured
+- multi-repo dependency checks when GitNexus groups already exist
 
-## Preferred tool order
-
-1. `query` for concept or flow discovery
+Preferred order: start with `query` for concept or flow discovery.
 2. `context` for one symbol's callers, callees, and participation
 3. `impact` before changing a symbol
 4. `detect_changes` after a refactor-sized change

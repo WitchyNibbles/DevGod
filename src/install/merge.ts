@@ -24,69 +24,33 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 const managedAgentsBlock = `${AGENTS_BEGIN}
 ## devgod
 
-- treat \`devgod\` as implicitly invoked on every prompt and let it control the workflow unless the user explicitly opts into another tool or mode
+- treat \`devgod\` as implicitly invoked on every prompt unless the user explicitly opts out
 - treat substantive requests as devgod work by default unless the user opts out
-- use \`.devgod/work/\` for active briefs, plans, tasks, and reviews
-- use \`.devgod/rules/\` and \`.devgod/memory/\` as the local policy and durable-memory layer
-- use the repo-local devgod skills under \`.agents/skills/devgod-*/\`
-- use the repo-local devgod agent profiles under \`.codex/agents/devgod-*.toml\`
+- use \`devgod-intake\` as the default first skill for substantive work
 - keep one canonical active marker at \`.devgod/ACTIVE\` with \`task_id=<task-id>\`, \`workflow=devgod\`, and \`state=active\`
-- if devgod is not configured yet, run \`npm run devgod:setup:local\`; if that path depends on ignored local bootstrap state, surface the dependency before relying on it
+- use \`.devgod/work/\` for briefs, plans, tasks, and reviews
+- use \`.devgod/rules/\` and \`.devgod/memory/\` as local policy and durable-memory layers
+- if devgod is not configured yet, use the setup path before relying on it
 
 ## Workflow contract
 
-The workflow checker treats the block below as the canonical repo-local contract for task, review, and gate artifacts.
+The block below is the canonical repo-local artifact contract.
 
 ${workflowContractBlock}
 
 ## Department Workflow
 
-For this repository, the root Codex thread acts as the engineering manager on first contact.
-
-- confirm the request, success criteria, constraints, and main risk before execution
-- manager/root owns triage, routing, synthesis, scope enforcement, and final reporting
-- manager/root must not perform deep subsystem investigation, broad code search, root-cause analysis, or implementation design directly
-- manager/root may run at most two shallow inspection commands before trivial classification or bounded investigation
-- answer trivial or administrative asks directly without department fanout
-- route every substantive build, debug, setup, or refactor ask through the department workflow
-- use \`devgod-intake\` as the default first skill for substantive work
-
-Default department chain:
-
-1. manager intake in the root thread
-2. \`product_strategist\` for ambiguous, customer-facing, or flow-heavy asks
-3. bounded specialist investigation when evidence is needed
-4. \`solution_architect\` for system design, boundaries, and sequencing
-5. \`planner\` for task slicing, ownership, dependencies, and worker routing
-6. implementation specialists (\`backend_engineer\`, \`frontend_designer\`, \`infra_engineer\`) for scoped delivery
-7. blocking \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates before the manager reports completion
-8. \`memory_curator\` for durable capture after approved completion
-
-Additional rules:
-
-- prefer repo-local custom agents under \`.codex/agents/devgod-*.toml\` when available
-- create or update \`.devgod/ACTIVE\` and the matching intake brief before moving past intake
-- any work that needs more than two inspection commands should go through bounded investigation
-- use a bounded investigation packet with: owner role, precise question, read scope, forbidden write scope, evidence required, max output length, stop condition
-- let \`solution_architect\` synthesize investigation evidence before planning when the evidence pass runs first
-- \`planner\` task packets must include owner role, completion standard, required specialist roles, quality gates, scope, files likely touched, acceptance criteria, verification command, and review gates
-- manager/root may apply only small mechanical edits for trivial, single-scope, low-risk tasks; specialist owners should handle non-trivial, risky, or subsystem-specific implementation
-- keep \`devgod\` as the default workflow controller even when other tools are available; switch only when the user explicitly asks to use another tool
-- preserve the trivial fast path for single-scope wording or mechanical work that stays within the two-inspection limit
-- use the local \`caveman\` plugin/skill for manager notes, agent handoffs, QA/security gates, and other internal coordination to reduce token cost
-- default caveman target is 4-6 lines with short labels and no prose paragraphs
-- keep direct user replies in standard concise English unless the user asks for caveman format
-- use \`tdd-guide\` for new feature or bugfix slices that should start with failing tests
-- use \`e2e-runner\` for critical user, setup, install, and upgrade flows
-- use \`release-readiness\` before package, migration, installer, or rollout-oriented changes
-- if GitNexus is intentionally configured, treat it as optional advisory repo intelligence only and keep workflow authority in \`devgod\`
-- substantive work that is not on the trivial fast path should normally use \`specialist_verified\` completion with explicit specialist and quality-gate evidence
-- require an intake brief for substantive work in \`.devgod/work/briefs/\`
-- require a task packet or plan artifact in \`.devgod/work/plans/\` or \`.devgod/work/tasks/\` before worker execution
-- require the active task id to match the current brief, plan/task, and review artifacts
-- the manager is the default writer for \`.devgod/work/reviews/\`; read-only reviewer roles still need persisted gate files
-- run \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\` before reporting substantive work complete
-- do not claim substantive work is done without reviewer/QA/security gate output in \`.devgod/work/reviews/\`
+- root Codex thread acts as engineering manager on first contact
+- manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
+- create or update \`.devgod/ACTIVE\` and the matching brief before moving past intake
+- keep \`devgod\` as the default workflow controller even when other tools are available
+- route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
+- use \`tdd-guide\`, \`e2e-runner\`, and \`release-readiness\` when the slice needs those gates
+- preserve the trivial fast path for single-scope low-risk work
+- unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
+- markdown review files are evidence summaries, not reviewer authority
+- reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
+- substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\`
 
 ${AGENTS_END}`;
 
@@ -174,8 +138,8 @@ export function mergeCodexConfig(
   const merged = mergeTomlTable(target, source);
 
   const mergedFallbacks = new Set(
-    ensureStringArray(target.project_doc_fallback_filenames, []).concat(
-      ensureStringArray(source.project_doc_fallback_filenames, [])
+    ensureStringArray(source.project_doc_fallback_filenames, []).concat(
+      ensureStringArray(target.project_doc_fallback_filenames, [])
     )
   );
   if (mergedFallbacks.size > 0) {

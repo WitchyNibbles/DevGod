@@ -1,27 +1,18 @@
 ---
 name: devgod-review
-description: Use when devgod needs a correctness and regression review that is separate from security review and focused on actionable findings.
+description: Correctness and regression review.
 ---
 
 # Devgod Review
 
-Use this skill for reviewer-style passes after changes exist.
+Use for reviewer-style passes after changes exist.
 
-## Goal
+Goal: find behavior bugs, regression risk, and missing verification.
 
-Find behavior bugs, regression risk, and missing verification before completion.
-
-## Workflow
-
-1. Read the task goal and claimed acceptance criteria.
-2. Inspect the changed files and identify behavior changes.
-3. Look for:
-   - correctness bugs
-   - regression risk
-   - missing tests
-   - unsafe assumptions
-   - drift from the task packet or plan
-4. Separate:
+1. Read the goal and claimed acceptance criteria.
+2. Inspect changed files and identify behavior changes.
+3. Look for correctness bugs, regression risk, missing tests, unsafe assumptions, and drift from the task packet or plan.
+4. Separate findings by severity and call out residual risk.
    - blocking findings
    - non-blocking risk
    - residual gaps

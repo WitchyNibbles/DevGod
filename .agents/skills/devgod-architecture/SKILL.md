@@ -1,26 +1,19 @@
 ---
 name: devgod-architecture
-description: Use when devgod needs architecture guidance with clear boundaries, trust assumptions, migration risk, and reversible versus expensive decisions.
+description: Architecture boundaries and sequencing for devgod.
 ---
 
 # Devgod Architecture
 
-Use this skill for architecture decisions that will shape planning or worker routing.
+Use for architecture decisions that shape planning or worker routing.
 
-## Goal
+Goal: a thin-slice design that fits repo reality.
 
-Produce a thin-slice architecture that fits current repo reality.
-
-## Workflow
-
-1. Identify the canonical source-of-truth layers involved.
-2. Map the proposed change into components and data flow.
-3. Call out trust boundaries, failure modes, and migration risk.
-4. Label each meaningful decision:
-   - reversible
-   - expensive
-5. Prefer the simplest architecture that preserves policy, review, and rollback.
-6. End with the smallest safe first slice.
+1. Identify source-of-truth layers.
+2. Map components and data flow.
+3. Call out trust boundaries and migration risk.
+4. Mark decisions as reversible or expensive.
+5. End with the smallest safe first slice.
 
 ## Rules
 

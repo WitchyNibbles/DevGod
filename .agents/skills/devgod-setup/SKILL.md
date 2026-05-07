@@ -1,26 +1,22 @@
 ---
 name: devgod-setup
-description: Use when Codex needs to create and configure the local/shared pieces required for devgod to function in a repo.
+description: Configure local and shared devgod prerequisites.
 ---
 
 # Devgod Setup
 
-Use this skill when `devgod` is present but not fully configured, or when a new repo needs the complete local + shared-core setup.
+Use when `devgod` is present but not fully configured.
 
-## Goal
+Goal: leave the repo in a state where Codex can actually use `devgod`.
 
-Leave the repo in a state where Codex can actually use `devgod`, not just read about it.
-
-## What "working" means
+Working means:
 
 - repo-local control files exist
 - Postgres with `pgvector` is reachable
 - migrations are applied
-- the workspace/project is registered
+- workspace/project is registered
 - health checks pass
-- Codex has a clear next prompt for using `devgod`
-
-## Workflow
+- Codex has a clear next prompt
 
 1. Verify the repo contains the `devgod` runtime and local-control files.
 2. Ensure `.env.devgod` exists. If missing, create it from `.env.devgod.example`.
