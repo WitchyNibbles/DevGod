@@ -118,30 +118,78 @@ if (-not $env:DEVGOD_DOCKER_CONTAINER_NAME) {
     $env:DEVGOD_DOCKER_CONTAINER_NAME = "devgod-postgres-$($env:DEVGOD_PROJECT_SLUG)"
 }
 
-docker compose up -d devgod-postgres
+if (-not $env:DEVGOD_QDRANT_CONTAINER_NAME) {
+    $env:DEVGOD_QDRANT_CONTAINER_NAME = "devgod-qdrant-$($env:DEVGOD_PROJECT_SLUG)"
+}
 
-Write-Host "waiting for devgod-postgres to become healthy"
-$healthy = $false
-for ($i = 0; $i -lt 60; $i++) {
-    $status = ""
-    try {
-        $status = docker inspect -f "{{.State.Health.Status}}" $env:DEVGOD_DOCKER_CONTAINER_NAME 2>$null
-    } catch {
+if (-not $env:DEVGOD_QDRANT_URL) {
+    $env:DEVGOD_QDRANT_URL = "http://127.0.0.1:$($env:DEVGOD_QDRANT_PORT)"
+    if (-not $env:DEVGOD_QDRANT_PORT) {
+        $env:DEVGOD_QDRANT_URL = "http://127.0.0.1:6333"
+    }
+}
+
+if (-not $env:DEVGOD_POSTGRES_PASSWORD -or $env:DEVGOD_POSTGRES_PASSWORD -eq "devgod") {
+    throw "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues"
+}
+
+function Wait-DevgodContainerHealth {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    Write-Host "waiting for $Label to become healthy"
+    for ($i = 0; $i -lt 60; $i++) {
         $status = ""
+        try {
+            $status = docker inspect -f "{{.State.Health.Status}}" $ContainerName 2>$null
+        } catch {
+            $status = ""
+        }
+
+        if ($status -eq "healthy") {
+            return
+        }
+
+        Start-Sleep -Seconds 2
     }
 
-    if ($status -eq "healthy") {
-        $healthy = $true
-        break
+    docker logs $ContainerName --tail 100
+    throw "$Label did not become healthy"
+}
+
+function Wait-DevgodQdrantHttp {
+    param([Parameter(Mandatory = $true)][string]$Url)
+
+    Write-Host "waiting for devgod-qdrant to answer $Url"
+    for ($i = 0; $i -lt 60; $i++) {
+        try {
+            $base = [System.Uri]::new($Url)
+            $builder = [System.UriBuilder]::new($base)
+            if (-not $builder.Path.EndsWith("/")) {
+                $builder.Path = "$($builder.Path)/"
+            }
+            $endpoint = [System.Uri]::new($builder.Uri, "collections")
+            $response = Invoke-WebRequest -Uri $endpoint -Method Get -MaximumRedirection 0 -TimeoutSec 2
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+                return
+            }
+        } catch {
+        }
+
+        Start-Sleep -Seconds 2
     }
 
-    Start-Sleep -Seconds 2
+    docker logs $env:DEVGOD_QDRANT_CONTAINER_NAME --tail 100
+    throw "devgod-qdrant did not answer health checks at $Url"
 }
 
-if (-not $healthy) {
-    docker logs $env:DEVGOD_DOCKER_CONTAINER_NAME --tail 100
-    throw "devgod-postgres did not become healthy"
-}
+docker compose up -d devgod-postgres devgod-qdrant
+
+Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_DOCKER_CONTAINER_NAME -Label "devgod-postgres"
+Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_QDRANT_CONTAINER_NAME -Label "devgod-qdrant"
+Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
 
 if (-not (Test-Path -LiteralPath "node_modules")) {
     npm install
@@ -156,3 +204,4 @@ Write-Host "devgod local setup complete"
 Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"
+Write-Host "qdrant: configured"

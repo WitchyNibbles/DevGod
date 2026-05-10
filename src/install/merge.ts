@@ -231,6 +231,7 @@ export function mergePackageJson(
   scripts["devgod"] = devgodEntry;
   scripts["devgod:migrate"] = `${devgodEntry} migrate`;
   scripts["devgod:health"] = `${devgodEntry} health`;
+  scripts["devgod:doctor"] = `${devgodEntry} doctor`;
   scripts["devgod:bootstrap"] = `${devgodEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${devgodEntry} verify-setup`;
   scripts["devgod:status"] = `${devgodEntry} status`;

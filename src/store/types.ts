@@ -7,6 +7,8 @@ import type {
   PlanArtifact,
   ProjectRecord,
   ReviewRecord,
+  RuntimeMigrationJournalRecord,
+  RuntimeProjectRegistrationRecord,
   RetrievalRole,
   RunRecord,
   SearchMemoryResult,
@@ -66,6 +68,14 @@ export interface DevgodStore {
     projectName?: string | undefined;
     repoPath?: string | undefined;
   }): Promise<{ workspace: WorkspaceRecord; project: ProjectRecord }>;
+  getProjectContext(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }): Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  saveProjectRuntimeRegistration(registration: RuntimeProjectRegistrationRecord): Promise<void>;
+  getProjectRuntimeRegistration(projectId: string): Promise<RuntimeProjectRegistrationRecord | undefined>;
+  saveRuntimeMigrationJournal(journal: RuntimeMigrationJournalRecord): Promise<void>;
+  listRuntimeMigrationJournals(projectId: string): Promise<RuntimeMigrationJournalRecord[]>;
   createRun(run: RunRecord): Promise<void>;
   getRun(runId: string): Promise<RunRecord | undefined>;
   findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined>;

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export interface McpRuntimeSurface {
   status(args: readonly string[]): Promise<unknown>;
+  runtimeHealth(args: readonly string[]): Promise<unknown>;
   ops(args: readonly string[]): Promise<unknown>;
   report(args: readonly string[]): Promise<unknown>;
   planContext(args: readonly string[]): Promise<unknown>;
@@ -74,6 +75,20 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         pushOptionalNumberFlag(args, "--stale-after-days", input.staleAfterDays);
         const report = await runtime.status(args);
         return buildTextResult("Returned the devgod status report.", report);
+      }
+    },
+    {
+      name: "devgod_runtime_health",
+      description:
+        "Check runtime registration, data-root, qdrant, and review-identity health for a devgod run.",
+      inputSchema: {
+        runId: z.string().trim().optional(),
+        workspaceSlug: z.string().trim().optional(),
+        projectSlug: z.string().trim().optional()
+      },
+      async invoke(input) {
+        const report = await runtime.runtimeHealth(buildRunSelectorArgs(input));
+        return buildTextResult("Returned the devgod runtime health report.", report);
       }
     },
     {

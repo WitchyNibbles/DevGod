@@ -10,6 +10,7 @@ import {
   mergeGitignore,
   mergePackageJson
 } from "./merge.ts";
+import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
   InstallMode,
   InstallOptions,
@@ -231,6 +232,72 @@ async function readFileIfExists(filePath: string): Promise<string | undefined> {
   return readFile(filePath, "utf8");
 }
 
+function isSafeDevgodEnvKey(candidate: string): boolean {
+  return /^DEVGOD_[A-Z0-9_]+$/.test(candidate);
+}
+
+function parseDevgodEnvContent(content: string): NodeJS.ProcessEnv {
+  const parsed: NodeJS.ProcessEnv = {};
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    if (!rawLine.trim() || rawLine.trimStart().startsWith("#")) {
+      continue;
+    }
+
+    const match = rawLine.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
+    if (!match) {
+      continue;
+    }
+
+    const key = match[1] ?? "";
+    if (!isSafeDevgodEnvKey(key)) {
+      continue;
+    }
+
+    const rawValue = (match[2] ?? "").trim();
+    if (rawValue.startsWith('"')) {
+      const quotedMatch = rawValue.match(/^"((?:\\.|[^"])*)"(?:\s+#.*)?$/);
+      if (quotedMatch) {
+        parsed[key] = quotedMatch[1]
+          ?.replace(/\\\\/g, "\\")
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, "\n")
+          .replace(/\\r/g, "\r")
+          .replace(/\\t/g, "\t")
+          .replace(/\\\$/g, "$");
+        continue;
+      }
+    }
+
+    if (rawValue.startsWith("'")) {
+      const quotedMatch = rawValue.match(/^'([^']*)'(?:\s+#.*)?$/);
+      if (quotedMatch) {
+        parsed[key] = quotedMatch[1] ?? "";
+        continue;
+      }
+    }
+
+    parsed[key] = rawValue.replace(/\s+#.*$/, "").trimEnd();
+  }
+
+  return parsed;
+}
+
+async function loadTargetRuntimeEnv(targetRoot: string): Promise<NodeJS.ProcessEnv> {
+  const targetEnv = { ...process.env };
+
+  for (const relativePath of [".env.devgod.example", ".env.devgod"]) {
+    const content = await readFileIfExists(path.join(targetRoot, relativePath));
+    if (!content) {
+      continue;
+    }
+
+    Object.assign(targetEnv, parseDevgodEnvContent(content));
+  }
+
+  return targetEnv;
+}
+
 function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
@@ -375,8 +442,111 @@ function createInstallSummary(mode: InstallMode, nextSteps: string[]): InstallSu
     plannedBackups: [],
     conflicts: [],
     orphans: [],
+    runtimeRegistration: undefined,
+    runtimeBackupManifest: undefined,
+    runtimeMigrationReport: undefined,
     nextSteps
   };
+}
+
+async function writeJsonArtifact(
+  targetRoot: string,
+  relativePath: string,
+  payload: unknown,
+  summary: InstallSummary
+): Promise<void> {
+  const inspection = await inspectManagedTarget(targetRoot, relativePath);
+  if (inspection.invalidReason) {
+    throw new Error(`Runtime artifact at ${relativePath} is not an in-root regular file.`);
+  }
+
+  const absolutePath = inspection.absolutePath;
+  const nextContent = `${JSON.stringify(payload, null, 2)}\n`;
+  const existingContent = inspection.content;
+
+  if (existingContent === nextContent) {
+    return;
+  }
+
+  await ensureDirectory(absolutePath);
+  await writeFile(absolutePath, nextContent, "utf8");
+  if (existingContent === undefined) {
+    summary.created.push(relativePath);
+  } else {
+    summary.updated.push(relativePath);
+  }
+  summary.writesPerformed = true;
+}
+
+async function writeRuntimeMigrationArtifacts(params: {
+  targetRoot: string;
+  manifest: InstallManifest;
+  summary: InstallSummary;
+  orphans: readonly string[];
+  conflicts: readonly string[];
+}): Promise<void> {
+  const projectSlug = path.basename(params.targetRoot);
+  const runtimeEnv = await loadTargetRuntimeEnv(params.targetRoot);
+  const runtimeConfig = resolveRuntimeEnvironmentConfig(runtimeEnv, {
+    projectSlug,
+    cwd: params.targetRoot
+  });
+
+  const registrationPath = ".devgod/runtime/registration-intent.json";
+  const backupManifestPath = ".devgod/runtime/backup-manifest.json";
+  const migrationReportPath = ".devgod/runtime/migration-report.json";
+  params.summary.runtimeRegistration = registrationPath;
+  params.summary.runtimeBackupManifest = backupManifestPath;
+  params.summary.runtimeMigrationReport = migrationReportPath;
+
+  await writeJsonArtifact(
+    params.targetRoot,
+    registrationPath,
+    {
+      repoPath: params.targetRoot,
+      projectSlug,
+      runtimeProfile: runtimeConfig.runtimeProfile,
+      dataRoot: runtimeConfig.dataRoot,
+      qdrantUrl: runtimeConfig.qdrantUrl,
+      qdrantCollection: runtimeConfig.qdrantCollection,
+      installManifestPath: runtimeConfig.installManifestPath
+    },
+    params.summary
+  );
+
+  await writeJsonArtifact(
+    params.targetRoot,
+    backupManifestPath,
+    {
+      version: params.manifest.version,
+      files: params.manifest.files
+    },
+    params.summary
+  );
+
+  await writeJsonArtifact(
+    params.targetRoot,
+    migrationReportPath,
+    {
+      status: "planned",
+      project: {
+        repoPath: params.targetRoot,
+        projectSlug
+      },
+      registrationIntentPath: registrationPath,
+      backupManifestPath,
+      orphans: [...params.orphans],
+      conflicts: [...params.conflicts],
+      cleanupRecommendation:
+        params.orphans.length > 0
+          ? "review orphaned managed files before deleting legacy artifacts"
+          : "legacy compatibility window still active; archive legacy managed files after doctor and verify pass",
+      verification: {
+        commands: ["npm run devgod:doctor", "npm run devgod:verify:setup"]
+      }
+    },
+    params.summary
+  );
 }
 
 function normalizeManifestRecord(record: InstallManifestRecord): InstallManifestRecord {
@@ -1196,6 +1366,13 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
     if (await writeInstallManifest(targetRoot, plannedWrites, existingManifest ?? manifest)) {
       summary.writesPerformed = true;
     }
+    await writeRuntimeMigrationArtifacts({
+      targetRoot,
+      manifest: existingManifest ?? manifest,
+      summary,
+      orphans,
+      conflicts: summary.conflicts
+    });
   }
 
   return summary;

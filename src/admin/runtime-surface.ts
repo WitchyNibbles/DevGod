@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  executeDoctorCommandFromArgs,
   executeOpsCommandFromArgs,
   executePlanContextCommandFromArgs,
   executeReportCommandFromArgs,
@@ -55,6 +56,27 @@ export async function getStatusSurface(args: readonly string[], options: Runtime
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
+      }
+    })
+  );
+}
+
+export async function getRuntimeHealthSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env, cwd }) =>
+    executeDoctorCommandFromArgs(args, {
+      cwd,
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
       }
     })
   );

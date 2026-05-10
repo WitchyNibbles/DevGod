@@ -5,6 +5,8 @@ import type {
   MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
+  RuntimeMigrationJournalRecord,
+  RuntimeProjectRegistrationRecord,
   RunRecord,
   TaskRecord
 } from "../src/domain/types.ts";
@@ -175,6 +177,50 @@ function createMarkdownArtifactRecord(): MarkdownArtifactRecord {
   };
 }
 
+function createRuntimeProjectRegistrationRecord(): RuntimeProjectRegistrationRecord {
+  return {
+    projectId: "project:team:devgod",
+    workspaceId: "workspace:team",
+    repoPath: "/repo/devgod",
+    runtimeProfile: "local-docker",
+    dataRoot: "/home/eimi/.local/share/devgod",
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: ".devgod/install-manifest.json",
+    manifest: {
+      version: 1,
+      files: ["AGENTS.md", ".codex/config.toml"]
+    },
+    provenance: {
+      authority: "runtime_authoritative",
+      source: "install-upgrade",
+      version: "0.1.0"
+    },
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z"
+  };
+}
+
+function createRuntimeMigrationJournalRecord(): RuntimeMigrationJournalRecord {
+  return {
+    id: "journal-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    phase: "legacy-upgrade",
+    status: "completed",
+    backupManifestPath: ".devgod/install-backups/runtime-backup.json",
+    verificationReportPath: ".devgod/runtime/verification-report.json",
+    rollbackState: "legacy-safe",
+    details: {
+      registeredProject: true,
+      cleanupRecommendation: "archive legacy managed files"
+    },
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z"
+  };
+}
+
 test("sqlClientWithRows supports single-response mode without capture", async () => {
   const client = sqlClientWithRows([{ id: "row-1" }]);
   const result = await client.query<{ id: string }>("select 1");
@@ -232,6 +278,76 @@ test("PostgresStore.ensureProjectContext upserts workspace and project metadata"
     "Devgod",
     "/repo/devgod"
   ]);
+});
+
+test("PostgresStore.saveProjectRuntimeRegistration persists canonical repo registration and manifest provenance", async () => {
+  const capture: QueryCapture[] = [];
+  const registration = createRuntimeProjectRegistrationRecord();
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: registration }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveProjectRuntimeRegistration(registration);
+  const loaded = await store.getProjectRuntimeRegistration(registration.projectId);
+
+  assert.deepEqual(loaded, registration);
+  assert.match(capture[0]?.text ?? "", /insert into runtime_project_registrations/);
+  assert.match(capture[0]?.text ?? "", /on conflict \(project_id\) do update/);
+  assert.deepEqual(capture[0]?.values, [
+    registration.projectId,
+    registration.workspaceId,
+    registration.repoPath,
+    registration.runtimeProfile,
+    registration.dataRoot,
+    registration.qdrantUrl,
+    registration.qdrantCollection,
+    registration.installManifestPath,
+    JSON.stringify(registration.manifest),
+    JSON.stringify(registration.provenance)
+  ]);
+  assert.match(capture[1]?.text ?? "", /from runtime_project_registrations/);
+  assert.deepEqual(capture[1]?.values, [registration.projectId]);
+});
+
+test("PostgresStore.saveRuntimeMigrationJournal records backup manifest, verification report, and rollback state", async () => {
+  const capture: QueryCapture[] = [];
+  const journal = createRuntimeMigrationJournalRecord();
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: journal }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveRuntimeMigrationJournal(journal);
+  const loaded = await store.listRuntimeMigrationJournals(journal.projectId);
+
+  assert.deepEqual(loaded, [journal]);
+  assert.match(capture[0]?.text ?? "", /insert into runtime_migration_journals/);
+  assert.match(capture[0]?.text ?? "", /on conflict \(id\) do update/);
+  assert.deepEqual(capture[0]?.values, [
+    journal.id,
+    journal.workspaceId,
+    journal.projectId,
+    journal.runId,
+    journal.phase,
+    journal.status,
+    journal.backupManifestPath,
+    journal.verificationReportPath,
+    journal.rollbackState,
+    JSON.stringify(journal.details)
+  ]);
+  assert.match(capture[1]?.text ?? "", /from runtime_migration_journals/);
+  assert.deepEqual(capture[1]?.values, [journal.projectId]);
 });
 
 test("PostgresStore.createRun, getRun, and updateRun persist run summaries", async () => {

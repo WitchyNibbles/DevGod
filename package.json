@@ -81,7 +81,7 @@
   ],
   "scripts": {
     "devgod": "node --experimental-strip-types src/admin/devgod.ts",
-    "db:start": "docker compose up -d devgod-postgres",
+    "db:start": "docker compose up -d devgod-postgres devgod-qdrant",
     "db:stop": "docker compose down",
     "install:project": "node --experimental-strip-types src/install/cli.ts",
     "scaffold:workflow": "node --experimental-strip-types src/install/cli.ts scaffold-workflow --target .",
@@ -96,6 +96,7 @@
     "typecheck": "tsc --noEmit",
     "migrate": "node --experimental-strip-types src/admin.ts migrate",
     "health": "node --experimental-strip-types src/admin.ts health",
+    "doctor": "node --experimental-strip-types src/admin.ts doctor",
     "bootstrap": "node --experimental-strip-types src/admin.ts bootstrap-project",
     "verify:setup": "node --experimental-strip-types src/admin.ts verify-setup",
     "status": "node --experimental-strip-types src/admin.ts status",

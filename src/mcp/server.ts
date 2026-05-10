@@ -1,12 +1,19 @@
 import process from "node:process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { getOpsSurface, getPlanContextSurface, getReportSurface, getStatusSurface } from "../admin/runtime-surface.ts";
+import {
+  getOpsSurface,
+  getPlanContextSurface,
+  getReportSurface,
+  getRuntimeHealthSurface,
+  getStatusSurface
+} from "../admin/runtime-surface.ts";
 import { createMcpToolDefinitions, type McpRuntimeSurface } from "./tools.ts";
 
 export function createDevgodMcpServer(
   runtime: McpRuntimeSurface = {
     status: getStatusSurface,
+    runtimeHealth: getRuntimeHealthSurface,
     ops: getOpsSurface,
     report: getReportSurface,
     planContext: getPlanContextSurface

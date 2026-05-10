@@ -1,8 +1,15 @@
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { installDevgodIntoProject, upgradeDevgodInProject, verifyDevgodInstall } from "./install/cli.ts";
 import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
+import {
+  resolveQdrantCollectionsUrl,
+  resolveRuntimeEnvironmentConfig,
+  validateRuntimeQdrantUrl
+} from "./runtime/config.ts";
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
@@ -26,14 +33,18 @@ import type { ResolveReviewActionContext } from "./core/review-context.ts";
 import type {
   RecoveryApplyResult,
   RecoveryInspectionReport,
+  ProjectRecord,
   ReviewInput,
   ReviewRecord,
+  RuntimeMigrationJournalRecord,
+  RuntimeProjectRegistrationRecord,
   RoutingRecommendationReport,
   RetrievalRole,
   SearchMemoryResult,
   RunStatusSnapshot,
   TaskStatus
 } from "./domain/types.ts";
+import type { WorkspaceRecord } from "./domain/types.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,20 +86,53 @@ async function bootstrapProject() {
   const workspaceName = process.env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
   const projectSlug = process.env.DEVGOD_PROJECT_SLUG;
   const projectName = process.env.DEVGOD_PROJECT_NAME;
-  const repoPath = process.env.DEVGOD_PROJECT_REPO_PATH;
+  const repoPath = path.resolve(process.env.DEVGOD_PROJECT_REPO_PATH ?? process.cwd());
 
   if (!projectSlug) {
     throw new Error("DEVGOD_PROJECT_SLUG is required");
   }
 
+  const runtimeConfig = resolveRuntimeEnvironmentConfig(process.env, {
+    projectSlug,
+    cwd: repoPath
+  });
+  await mkdir(runtimeConfig.dataRoot, { recursive: true });
+
   await withClient(async (client) => {
     const store = new PostgresStore(client);
-    await store.ensureProjectContext({
+    const { workspace, project } = await store.ensureProjectContext({
       workspaceSlug,
       workspaceName,
       projectSlug,
       projectName,
       repoPath
+    });
+    await store.saveProjectRuntimeRegistration({
+      projectId: project.id,
+      workspaceId: workspace.id,
+      repoPath,
+      runtimeProfile: runtimeConfig.runtimeProfile,
+      dataRoot: runtimeConfig.dataRoot,
+      qdrantUrl: runtimeConfig.qdrantUrl,
+      qdrantCollection: runtimeConfig.qdrantCollection,
+      installManifestPath: runtimeConfig.installManifestPath,
+      manifest: {
+        installManifestPath: runtimeConfig.installManifestPath
+      },
+      provenance: {
+        authority: "runtime_authoritative",
+        source: "bootstrap-project",
+        version: "0.1.0"
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    await syncRuntimeMigrationJournal({
+      store,
+      workspace,
+      project,
+      repoPath,
+      status: "registered"
     });
   });
 
@@ -104,6 +148,7 @@ async function verifySetup() {
   }
 
   await withClient(async (client) => {
+    const store = new PostgresStore(client);
     const extensionResult = await client.query<{ extversion: string }>(
       `select extversion from pg_extension where extname = 'vector'`
     );
@@ -128,7 +173,9 @@ async function verifySetup() {
            'reviews',
            'locks',
            'memory_entries',
-           'embedding_jobs'
+           'embedding_jobs',
+           'runtime_project_registrations',
+           'runtime_migration_journals'
          )`
     );
 
@@ -144,7 +191,9 @@ async function verifySetup() {
       "reviews",
       "locks",
       "memory_entries",
-      "embedding_jobs"
+      "embedding_jobs",
+      "runtime_project_registrations",
+      "runtime_migration_journals"
     ]);
 
     for (const row of tablesResult.rows) {
@@ -193,8 +242,8 @@ async function verifySetup() {
       throw new Error(`Missing required columns: ${[...requiredColumns].join(", ")}`);
     }
 
-    const projectResult = await client.query<{ slug: string }>(
-      `select p.slug
+    const projectResult = await client.query<{ id: string; slug: string }>(
+      `select p.id, p.slug
        from projects p
        join workspaces w on w.id = p.workspace_id
        where w.slug = $1 and p.slug = $2`,
@@ -204,6 +253,69 @@ async function verifySetup() {
     if (projectResult.rows.length === 0) {
       throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
     }
+
+    const projectId = projectResult.rows[0]?.id;
+    const registrationResult = await client.query<{
+      data_root: string;
+      runtime_profile: string;
+      qdrant_url: string | null;
+      qdrant_collection: string;
+    }>(
+      `select data_root, runtime_profile, qdrant_url, qdrant_collection
+       from runtime_project_registrations
+       where project_id = $1`,
+      [projectId]
+    );
+
+    if (registrationResult.rows.length === 0) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} is not runtime-registered`);
+    }
+
+    const projectContext = await store.getProjectContext({
+      workspaceSlug,
+      projectSlug
+    });
+    if (!projectContext) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
+    }
+
+    const registration = registrationResult.rows[0]!;
+    await access(registration.data_root);
+
+    if (registration.qdrant_url) {
+      const qdrantHealth = await inspectQdrantHealthWithRetry(
+        {
+          projectId,
+          workspaceId: projectContext.workspace.id,
+          repoPath: path.resolve(process.env.DEVGOD_PROJECT_REPO_PATH ?? process.cwd()),
+          runtimeProfile: registration.runtime_profile,
+          dataRoot: registration.data_root,
+          qdrantUrl: registration.qdrant_url,
+          qdrantCollection: registration.qdrant_collection,
+          installManifestPath: undefined,
+          manifest: {},
+          provenance: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          attempts: 20,
+          delayMs: 1_000
+        }
+      );
+
+      if (!qdrantHealth.ok) {
+        throw new Error(`Qdrant health check failed: ${qdrantHealth.summary}`);
+      }
+    }
+
+    await syncRuntimeMigrationJournal({
+      store,
+      workspace: projectContext.workspace,
+      project: projectContext.project,
+      repoPath: path.resolve(process.env.DEVGOD_PROJECT_REPO_PATH ?? process.cwd()),
+      status: "verified"
+    });
   });
 
   console.log("setup verified");
@@ -215,6 +327,45 @@ async function verifyLiveMigrations() {
   await health();
   await bootstrapProject();
   await verifySetup();
+
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "devgod-live-migrations-"));
+
+  try {
+    await writeFile(path.join(fixtureRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+    await installDevgodIntoProject({
+      sourceRoot: repoRoot,
+      targetRoot: fixtureRoot
+    });
+
+    const driftTarget = path.join(fixtureRoot, "scripts", "check-devgod-workflow.sh");
+    const driftedContent = `${await readFile(driftTarget, "utf8")}# local drift\n`;
+    await writeFile(driftTarget, driftedContent, "utf8");
+    await rm(path.join(fixtureRoot, ".devgod", "install-manifest.json"));
+
+    const upgradeSummary = await upgradeDevgodInProject({
+      sourceRoot: repoRoot,
+      targetRoot: fixtureRoot
+    });
+    if (!upgradeSummary.runtimeMigrationReport || !upgradeSummary.runtimeBackupManifest) {
+      throw new Error("upgrade did not emit the expected runtime migration artifacts");
+    }
+    if (upgradeSummary.backups.length === 0) {
+      throw new Error("upgrade did not capture a managed-file backup for rollback proof");
+    }
+
+    const verifySummary = await verifyDevgodInstall({
+      sourceRoot: repoRoot,
+      targetRoot: fixtureRoot
+    });
+    if (!verifySummary.ok) {
+      throw new Error(
+        `upgraded fixture did not verify cleanly (missing=${verifySummary.missing.length}, modified=${verifySummary.modified.length}, orphans=${verifySummary.orphans.length})`
+      );
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+
   console.log("live migrations verified");
 }
 
@@ -498,6 +649,21 @@ interface ExecuteStatusCommandOptions {
   inspectGitNexus?: (() => Promise<GitNexusStatusObservation>) | undefined;
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
+}
+
+interface ExecuteDoctorCommandOptions extends ExecuteStatusCommandOptions {
+  findProjectContext?: ((
+    workspaceSlug: string,
+    projectSlug: string
+  ) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>) | undefined;
+  getProjectRuntimeRegistration: (
+    projectId: string
+  ) => Promise<RuntimeProjectRegistrationRecord | undefined>;
+  inspectQdrant?: ((
+    registration: RuntimeProjectRegistrationRecord
+  ) => Promise<{ ok: boolean; summary: string }>) | undefined;
+  pathExists?: ((candidatePath: string) => Promise<boolean>) | undefined;
+  inspectGitNexus?: (() => Promise<GitNexusStatusObservation>) | undefined;
 }
 
 interface ExecuteOpsCommandOptions extends ExecuteStatusCommandOptions {
@@ -977,6 +1143,341 @@ export async function executeStatusCommandFromArgs(
   });
 }
 
+async function runtimePathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveProjectSelector(
+  args: readonly string[],
+  env: EnvShape
+): { workspaceSlug: string; projectSlug: string } {
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("doctor requires workspace/project context when no explicit run id is provided");
+  }
+
+  return { workspaceSlug, projectSlug };
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function readJsonFileIfExists<T>(filePath: string): Promise<T | undefined> {
+  try {
+    const content = await readFile(filePath, "utf8");
+    return JSON.parse(content) as T;
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function syncRuntimeMigrationJournal(options: {
+  store: PostgresStore;
+  workspace: WorkspaceRecord;
+  project: ProjectRecord;
+  repoPath: string;
+  status: string;
+  runId?: string | undefined;
+}): Promise<RuntimeMigrationJournalRecord | undefined> {
+  const runtimeDir = path.join(options.repoPath, ".devgod", "runtime");
+  const migrationReportPath = path.join(runtimeDir, "migration-report.json");
+  const registrationIntentPath = path.join(runtimeDir, "registration-intent.json");
+  const backupManifestPath = path.join(runtimeDir, "backup-manifest.json");
+  const migrationReport = await readJsonFileIfExists<{
+    status?: string;
+    cleanupRecommendation?: string;
+    conflicts?: string[];
+    orphans?: string[];
+  }>(migrationReportPath);
+
+  if (!migrationReport) {
+    return undefined;
+  }
+
+  const registrationIntent = await readJsonFileIfExists<Record<string, unknown>>(registrationIntentPath);
+  const backupManifest = await readJsonFileIfExists<Record<string, unknown>>(backupManifestPath);
+  const timestamp = new Date().toISOString();
+  const journal: RuntimeMigrationJournalRecord = {
+    id: `runtime-migration:${options.project.id}:external-runtime-refactor`,
+    workspaceId: options.workspace.id,
+    projectId: options.project.id,
+    runId: options.runId,
+    phase: "external-runtime-refactor",
+    status: options.status,
+    backupManifestPath,
+    verificationReportPath: migrationReportPath,
+    rollbackState: backupManifest ? "backup_manifest_recorded" : "not_available",
+    details: {
+      reportedStatus: migrationReport.status ?? "planned",
+      cleanupRecommendation: migrationReport.cleanupRecommendation ?? null,
+      conflicts: migrationReport.conflicts ?? [],
+      orphans: migrationReport.orphans ?? [],
+      registrationIntentPath,
+      registrationIntent,
+      backupManifest
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  await options.store.saveRuntimeMigrationJournal(journal);
+  return journal;
+}
+
+async function inspectQdrantHealth(
+  registration: RuntimeProjectRegistrationRecord
+): Promise<{ ok: boolean; summary: string }> {
+  if (!registration.qdrantUrl) {
+    return {
+      ok: false,
+      summary: "qdrant URL is not configured in runtime registration"
+    };
+  }
+
+  try {
+    const qdrantUrl = validateRuntimeQdrantUrl(registration.qdrantUrl, registration.runtimeProfile);
+    const response = await fetch(resolveQdrantCollectionsUrl(qdrantUrl), {
+      redirect: "error",
+      signal: AbortSignal.timeout(3_000)
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        summary: `qdrant returned ${response.status} ${response.statusText}`
+      };
+    }
+
+    return {
+      ok: true,
+      summary: "qdrant reachable"
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      summary: `qdrant unreachable: ${message}`
+    };
+  }
+}
+
+async function inspectQdrantHealthWithRetry(
+  registration: RuntimeProjectRegistrationRecord,
+  options: {
+    attempts: number;
+    delayMs: number;
+  }
+): Promise<{ ok: boolean; summary: string }> {
+  let latestResult = await inspectQdrantHealth(registration);
+
+  for (let attempt = 1; attempt < options.attempts && !latestResult.ok; attempt += 1) {
+    await sleep(options.delayMs);
+    latestResult = await inspectQdrantHealth(registration);
+  }
+
+  return latestResult;
+}
+
+export async function executeDoctorCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteDoctorCommandOptions
+) {
+  const env = options.env ?? process.env;
+  const explicitRunId = resolveCommandFlag(args, "--run-id");
+  const projectSelector =
+    explicitRunId && explicitRunId !== "latest"
+      ? {
+          workspaceSlug: resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "unknown",
+          projectSlug: resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG ?? "unknown"
+        }
+      : resolveProjectSelector(args, env);
+  const latestRun =
+    explicitRunId === "latest" || !explicitRunId
+      ? await options.findLatestRun?.(projectSelector.workspaceSlug, projectSelector.projectSlug)
+      : undefined;
+  const resolvedRunId =
+    explicitRunId && explicitRunId !== "latest" ? explicitRunId : latestRun?.id;
+  const snapshot = resolvedRunId ? await options.getStatusSnapshot(resolvedRunId) : undefined;
+  const projectContext =
+    projectSelector.workspaceSlug !== "unknown" && projectSelector.projectSlug !== "unknown"
+      ? await options.findProjectContext?.(projectSelector.workspaceSlug, projectSelector.projectSlug)
+      : undefined;
+
+  if (!snapshot && !projectContext) {
+    throw new Error(`Project ${projectSelector.workspaceSlug}/${projectSelector.projectSlug} is not bootstrapped`);
+  }
+
+  const projectId = snapshot?.run.projectId ?? projectContext?.project.id;
+  const workspaceId = snapshot?.run.workspaceId ?? projectContext?.workspace.id;
+  if (!projectId || !workspaceId) {
+    throw new Error("doctor could not resolve project context");
+  }
+
+  const registration = await options.getProjectRuntimeRegistration(projectId);
+  const reviewIdentity = options.inspectReviewIdentity
+    ? await options.inspectReviewIdentity()
+    : await inspectReviewIdentityStatus({
+        cwd: options.cwd,
+        env
+      });
+  const currentRepoPath = path.resolve(options.cwd ?? process.cwd());
+  const canAccessPath = options.pathExists ?? runtimePathExists;
+
+  const registrationCheck = registration
+    ? {
+        authorityLabel: "runtime_authoritative" as const,
+        ok: true,
+        summary: "runtime registration present"
+      }
+    : {
+        authorityLabel: "runtime_authoritative" as const,
+        ok: false,
+        summary: "project is bootstrapped but not runtime-registered"
+      };
+
+  const repoPathCheck = registration
+    ? path.resolve(registration.repoPath) === currentRepoPath
+      ? {
+          authorityLabel: "runtime_authoritative" as const,
+          ok: true,
+          summary: "repo path matches runtime registration"
+        }
+      : {
+          authorityLabel: "runtime_authoritative" as const,
+          ok: false,
+          summary: `repo path mismatch: registered ${registration.repoPath}, current ${currentRepoPath}`
+        }
+    : {
+        authorityLabel: "runtime_authoritative" as const,
+        ok: false,
+        summary: "repo path could not be checked without runtime registration"
+      };
+
+  const dataRootCheck = registration
+    ? (await canAccessPath(registration.dataRoot))
+      ? {
+          authorityLabel: "runtime_authoritative" as const,
+          ok: true,
+          summary: "runtime data root is accessible"
+        }
+      : {
+          authorityLabel: "runtime_authoritative" as const,
+          ok: false,
+          summary: `runtime data root is missing or inaccessible: ${registration.dataRoot}`
+        }
+    : {
+        authorityLabel: "runtime_authoritative" as const,
+        ok: false,
+        summary: "runtime data root could not be checked without runtime registration"
+      };
+
+  const qdrantStatus =
+    registration ? await (options.inspectQdrant ?? inspectQdrantHealth)(registration) : {
+      ok: false,
+      summary: "qdrant URL is not configured in runtime registration"
+    };
+
+  const qdrantCheck = {
+    authorityLabel: "runtime_authoritative" as const,
+    ok: qdrantStatus.ok,
+    summary: qdrantStatus.summary
+  };
+
+  const reviewIdentityCheck = {
+    authorityLabel: "derived_only" as const,
+    ok: reviewIdentity.liveTrustReady,
+    summary: reviewIdentity.liveTrustReady
+      ? "review identity bindings are live-trust ready"
+      : reviewIdentity.notes[0] ?? "review identity is not live-trust ready"
+  };
+
+  const checks = {
+    registration: registrationCheck,
+    repoPath: repoPathCheck,
+    dataRoot: dataRootCheck,
+    qdrant: qdrantCheck,
+    reviewIdentity: reviewIdentityCheck
+  };
+
+  const blockers = [
+    registrationCheck,
+    repoPathCheck,
+    dataRootCheck,
+    qdrantCheck
+  ]
+    .filter((check) => !check.ok)
+    .map((check) => check.summary);
+  const advisories = reviewIdentityCheck.ok ? [] : [reviewIdentityCheck.summary];
+
+  return {
+    ok: blockers.length === 0,
+    run: snapshot
+      ? {
+          authorityLabel: "runtime_authoritative" as const,
+          id: snapshot.run.id,
+          workspaceId: snapshot.run.workspaceId,
+          projectId: snapshot.run.projectId
+        }
+      : undefined,
+    project: {
+      authorityLabel: "runtime_authoritative" as const,
+      workspaceSlug: projectSelector.workspaceSlug,
+      projectSlug: projectSelector.projectSlug,
+      workspaceId,
+      projectId
+    },
+    runtime: {
+      authorityLabel: "runtime_authoritative" as const,
+      runtimeProfile: registration?.runtimeProfile,
+      dataRoot: registration?.dataRoot,
+      qdrantUrl: registration?.qdrantUrl,
+      qdrantCollection: registration?.qdrantCollection
+    },
+    checks,
+    blockers,
+    advisories
+  };
+}
+
+async function doctorCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const report = await executeDoctorCommandFromArgs(args, {
+      cwd: process.cwd(),
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      }
+    });
+    console.log(JSON.stringify(report));
+  });
+}
+
 async function statusCommand(args: readonly string[]) {
   await withClient(async (client) => {
     const store = new PostgresStore(client);
@@ -1388,6 +1889,11 @@ async function main() {
 
   if (command === "status") {
     await statusCommand(args);
+    return;
+  }
+
+  if (command === "doctor") {
+    await doctorCommand(args);
     return;
   }
 

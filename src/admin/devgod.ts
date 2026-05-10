@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const adminCommands = new Set([
   "migrate",
   "health",
+  "doctor",
   "bootstrap-project",
   "verify-setup",
   "verify-live-migrations",
@@ -52,7 +53,7 @@ function printUsage(): void {
       "",
       "Runtime commands:",
       "  status | ops | recover | report | plan-context | github-dispatch",
-      "  migrate | health | bootstrap-project | verify-setup | verify-live-migrations",
+      "  migrate | health | doctor | bootstrap-project | verify-setup | verify-live-migrations",
       "  verify-review-identity | record-review | index-repo-markdown | run-embedding-jobs",
       "  mcp | serve-ui",
       "",

@@ -159,21 +159,66 @@ if [[ -z "${DEVGOD_DOCKER_CONTAINER_NAME:-}" ]]; then
   export DEVGOD_DOCKER_CONTAINER_NAME="devgod-postgres-${DEVGOD_PROJECT_SLUG}"
 fi
 
-docker compose up -d devgod-postgres
+if [[ -z "${DEVGOD_QDRANT_CONTAINER_NAME:-}" ]]; then
+  export DEVGOD_QDRANT_CONTAINER_NAME="devgod-qdrant-${DEVGOD_PROJECT_SLUG}"
+fi
 
-echo "waiting for devgod-postgres to become healthy"
-for _ in {1..60}; do
-  if [[ "$(docker inspect -f '{{.State.Health.Status}}' "${DEVGOD_DOCKER_CONTAINER_NAME}" 2>/dev/null || true)" == "healthy" ]]; then
-    break
-  fi
-  sleep 2
-done
+if [[ -z "${DEVGOD_QDRANT_URL:-}" ]]; then
+  export DEVGOD_QDRANT_URL="http://127.0.0.1:${DEVGOD_QDRANT_PORT:-6333}"
+fi
 
-if [[ "$(docker inspect -f '{{.State.Health.Status}}' "${DEVGOD_DOCKER_CONTAINER_NAME}" 2>/dev/null || true)" != "healthy" ]]; then
-  echo "devgod-postgres did not become healthy" >&2
-  docker logs "${DEVGOD_DOCKER_CONTAINER_NAME}" --tail 100 >&2 || true
+if [[ -z "${DEVGOD_POSTGRES_PASSWORD:-}" || "${DEVGOD_POSTGRES_PASSWORD}" == "devgod" ]]; then
+  echo "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues" >&2
   exit 1
 fi
+
+wait_for_container_health() {
+  local container_name="$1"
+  local label="$2"
+
+  echo "waiting for ${label} to become healthy"
+  for _ in {1..60}; do
+    if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$container_name" 2>/dev/null || true)" == "healthy" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "${label} did not become healthy" >&2
+  docker logs "$container_name" --tail 100 >&2 || true
+  exit 1
+}
+
+wait_for_qdrant_http() {
+  local qdrant_url="$1"
+
+  echo "waiting for devgod-qdrant to answer ${qdrant_url}"
+  for _ in {1..60}; do
+    if node -e '
+      const base = new URL(process.argv[1]);
+      if (!base.pathname.endsWith("/")) {
+        base.pathname = `${base.pathname}/`;
+      }
+      const endpoint = new URL("collections", base);
+      fetch(endpoint, { redirect: "error", signal: AbortSignal.timeout(2000) })
+        .then((response) => process.exit(response.ok ? 0 : 1))
+        .catch(() => process.exit(1));
+    ' "$qdrant_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "devgod-qdrant did not answer health checks at ${qdrant_url}" >&2
+  docker logs "${DEVGOD_QDRANT_CONTAINER_NAME}" --tail 100 >&2 || true
+  exit 1
+}
+
+docker compose up -d devgod-postgres devgod-qdrant
+
+wait_for_container_health "${DEVGOD_DOCKER_CONTAINER_NAME}" "devgod-postgres"
+wait_for_container_health "${DEVGOD_QDRANT_CONTAINER_NAME}" "devgod-qdrant"
+wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
 
 if [[ ! -d node_modules ]]; then
   npm install
@@ -188,3 +233,4 @@ echo "devgod local setup complete"
 echo "workspace: ${DEVGOD_WORKSPACE_SLUG}"
 echo "project: ${DEVGOD_PROJECT_SLUG}"
 echo "database: configured"
+echo "qdrant: configured"

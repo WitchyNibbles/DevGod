@@ -17,6 +17,9 @@ export interface InstallSummary {
   plannedBackups: string[];
   conflicts: string[];
   orphans: string[];
+  runtimeRegistration?: string | undefined;
+  runtimeBackupManifest?: string | undefined;
+  runtimeMigrationReport?: string | undefined;
   nextSteps: string[];
 }
 

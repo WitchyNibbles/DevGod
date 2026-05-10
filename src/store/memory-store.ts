@@ -15,6 +15,8 @@ import type {
   ProjectRecord,
   RetrievalRole,
   ReviewRecord,
+  RuntimeMigrationJournalRecord,
+  RuntimeProjectRegistrationRecord,
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
@@ -52,6 +54,8 @@ export class MemoryStore implements DevgodStore {
   private readonly approvals = new Map<string, ApprovalRecord>();
   private readonly memoryEntries = new Map<string, MemoryEntryRecord>();
   private readonly markdownArtifacts = new Map<string, MarkdownArtifactRecord>();
+  private readonly runtimeProjectRegistrations = new Map<string, RuntimeProjectRegistrationRecord>();
+  private readonly runtimeMigrationJournals = new Map<string, RuntimeMigrationJournalRecord>();
   private readonly embeddingJobs = new Map<string, EmbeddingJobRecord>();
   private readonly artifactEmbeddings = new Map<string, EmbeddingVectorRecord>();
   private readonly memoryEntryEmbeddings = new Map<string, EmbeddingVectorRecord>();
@@ -88,6 +92,37 @@ export class MemoryStore implements DevgodStore {
     this.projects.set(projectKey, project);
 
     return { workspace, project };
+  }
+
+  async getProjectContext(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }): Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined> {
+    const workspace = this.workspaces.get(params.workspaceSlug);
+    const project = this.projects.get(`${params.workspaceSlug}:${params.projectSlug}`);
+    if (!workspace || !project) {
+      return undefined;
+    }
+
+    return { workspace, project };
+  }
+
+  async saveProjectRuntimeRegistration(registration: RuntimeProjectRegistrationRecord): Promise<void> {
+    this.runtimeProjectRegistrations.set(registration.projectId, registration);
+  }
+
+  async getProjectRuntimeRegistration(projectId: string): Promise<RuntimeProjectRegistrationRecord | undefined> {
+    return this.runtimeProjectRegistrations.get(projectId);
+  }
+
+  async saveRuntimeMigrationJournal(journal: RuntimeMigrationJournalRecord): Promise<void> {
+    this.runtimeMigrationJournals.set(journal.id, journal);
+  }
+
+  async listRuntimeMigrationJournals(projectId: string): Promise<RuntimeMigrationJournalRecord[]> {
+    return [...this.runtimeMigrationJournals.values()]
+      .filter((journal) => journal.projectId === projectId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   async createRun(run: RunRecord): Promise<void> {

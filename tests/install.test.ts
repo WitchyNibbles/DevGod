@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -25,6 +26,33 @@ const execFileAsync = promisify(execFile);
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   await chmod(filePath, 0o755);
+}
+
+async function startHealthServer(): Promise<{ close: () => Promise<void>; url: string }> {
+  const server = createServer((request, response) => {
+    if (request.url === "/collections") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("health server did not bind to an IPv4 port");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      )
+  };
 }
 
 const driftFixtureTarget = "scripts/check-devgod-workflow.sh";
@@ -122,6 +150,7 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts"
   );
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\/devgod\.ts migrate/);
+  assert.match(merged.scripts["devgod:doctor"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor/);
   assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
   assert.equal(
@@ -657,9 +686,13 @@ test("upgradeDevgodInProject preserves the GitNexus install option without repea
     });
 
     assert.equal(replay.conflicts.length, 0);
-    assert.equal(replay.created.length, 0);
+    assert.deepEqual(replay.created.sort(), [
+      ".devgod/runtime/backup-manifest.json",
+      ".devgod/runtime/migration-report.json",
+      ".devgod/runtime/registration-intent.json"
+    ]);
     assert.equal(replay.updated.length, 0);
-    assert.equal(replay.writesPerformed, false);
+    assert.equal(replay.writesPerformed, true);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -867,7 +900,11 @@ test("upgradeDevgodInProject legacy installs backfill the manifest and count man
     });
 
     assert.equal(summary.mode, "apply");
-    assert.equal(summary.created.length, 0);
+    assert.deepEqual(summary.created.sort(), [
+      ".devgod/runtime/backup-manifest.json",
+      ".devgod/runtime/migration-report.json",
+      ".devgod/runtime/registration-intent.json"
+    ]);
     assert.equal(summary.updated.length, 0);
     assert.equal(summary.backups.length, 0);
     assert.equal(summary.writesPerformed, true);
@@ -878,6 +915,126 @@ test("upgradeDevgodInProject legacy installs backfill the manifest and count man
     assert.ok(manifest.files.some((entry) => entry.target === driftFixtureTarget));
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject writes runtime migration artifacts for legacy installs", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-runtime-artifacts-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.mode, "apply");
+    assert.equal(summary.runtimeRegistration, ".devgod/runtime/registration-intent.json");
+    assert.equal(summary.runtimeBackupManifest, ".devgod/runtime/backup-manifest.json");
+    assert.equal(summary.runtimeMigrationReport, ".devgod/runtime/migration-report.json");
+
+    const registration = JSON.parse(
+      await readFile(path.join(targetRoot, summary.runtimeRegistration ?? ""), "utf8")
+    ) as {
+      repoPath: string;
+      runtimeProfile: string;
+      qdrantCollection: string;
+    };
+    assert.equal(registration.repoPath, targetRoot);
+    assert.equal(registration.runtimeProfile, "local-docker");
+    assert.equal(registration.qdrantCollection, "devgod-memory");
+
+    const backupManifest = JSON.parse(
+      await readFile(path.join(targetRoot, summary.runtimeBackupManifest ?? ""), "utf8")
+    ) as {
+      files: Array<{ target: string }>;
+    };
+    assert.ok(backupManifest.files.some((entry) => entry.target === "AGENTS.md"));
+
+    const migrationReport = JSON.parse(
+      await readFile(path.join(targetRoot, summary.runtimeMigrationReport ?? ""), "utf8")
+    ) as {
+      status: string;
+      verification: {
+        commands: string[];
+      };
+    };
+    assert.equal(migrationReport.status, "planned");
+    assert.deepEqual(migrationReport.verification.commands, [
+      "npm run devgod:doctor",
+      "npm run devgod:verify:setup"
+    ]);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject derives runtime migration artifacts from target repo env", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-runtime-env-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(
+      path.join(targetRoot, ".env.devgod"),
+      [
+        "DEVGOD_RUNTIME_DATA_ROOT=./runtime-state",
+        "DEVGOD_QDRANT_URL=http://127.0.0.1:7444",
+        "DEVGOD_QDRANT_COLLECTION=custom-memory",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
+
+    const summary = await upgradeDevgodInProject({
+      sourceRoot,
+      targetRoot
+    });
+    const registration = JSON.parse(
+      await readFile(path.join(targetRoot, summary.runtimeRegistration ?? ""), "utf8")
+    ) as {
+      dataRoot: string;
+      qdrantUrl: string;
+      qdrantCollection: string;
+    };
+
+    assert.equal(registration.dataRoot, path.join(targetRoot, "runtime-state"));
+    assert.equal(registration.qdrantUrl, "http://127.0.0.1:7444/");
+    assert.equal(registration.qdrantCollection, "custom-memory");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeDevgodInProject refuses to follow runtime artifact symlinks outside the target root", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-runtime-symlink-"));
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-runtime-symlink-outside-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await rm(path.join(targetRoot, ".devgod"), { recursive: true, force: true });
+    await mkdir(path.join(targetRoot, ".devgod"), { recursive: true });
+    await symlink(path.join(outsideRoot, "runtime"), path.join(targetRoot, ".devgod", "runtime"));
+    await rm(path.join(targetRoot, ".devgod", "install-manifest.json"), { force: true });
+
+    await assert.rejects(
+      upgradeDevgodInProject({
+        sourceRoot,
+        targetRoot
+      }),
+      /Runtime artifact at \.devgod\/runtime\/registration-intent\.json is not an in-root regular file/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
   }
 });
 
@@ -1129,6 +1286,7 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
   const binDir = path.join(targetRoot, "bin");
   const captureFile = path.join(targetRoot, "captured-env.txt");
   const sentinel = path.join(targetRoot, "env-executed");
+  const healthServer = await startHealthServer();
 
   try {
     await mkdir(binDir, { recursive: true });
@@ -1210,6 +1368,7 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        DEVGOD_QDRANT_URL: healthServer.url,
         NODE_OPTIONS: "baseline-node-options",
         BASH_ENV: "baseline-bash-env",
         LD_PRELOAD: "baseline-ld-preload",
@@ -1231,6 +1390,7 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
     assert.match(captured, /DEVGOD_POSTGRES_PASSWORD=pa"ss # literal/);
     await assert.rejects(readFile(sentinel, "utf8"));
   } finally {
+    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -1243,13 +1403,18 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
   const dockerComposeSentinel = path.join(targetRoot, "docker-compose-called");
   const npmLog = path.join(targetRoot, "npm-log.txt");
   const npmEnvCapture = path.join(targetRoot, "npm-env.txt");
+  const healthServer = await startHealthServer();
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
+      "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
+      `DEVGOD_QDRANT_URL=${healthServer.url}`
+    );
     await writeFile(
       path.join(targetRoot, ".env.example"),
-      await readFile(path.join(sourceRoot, ".env.example"), "utf8"),
+      installedExampleEnv,
       "utf8"
     );
 
@@ -1303,6 +1468,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "DEVGOD_PROJECT_NAME=${DEVGOD_PROJECT_NAME:-}",
         "DEVGOD_PROJECT_REPO_PATH=${DEVGOD_PROJECT_REPO_PATH:-}",
         "DEVGOD_DOCKER_CONTAINER_NAME=${DEVGOD_DOCKER_CONTAINER_NAME:-}",
+        "DEVGOD_QDRANT_URL=${DEVGOD_QDRANT_URL:-}",
         "EOF",
         "fi",
         "case \"${1:-}\" in",
@@ -1327,6 +1493,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        DEVGOD_QDRANT_URL: healthServer.url,
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_DOCKER_COMPOSE_SENTINEL: dockerComposeSentinel,
         DEVGOD_NPM_LOG_FILE: npmLog,
@@ -1345,9 +1512,9 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(dockerCalls, [
       "version",
-      "compose up -d devgod-postgres",
+      "compose up -d devgod-postgres devgod-qdrant",
       "inspect -f {{.State.Health.Status}} devgod-postgres",
-      "inspect -f {{.State.Health.Status}} devgod-postgres"
+      "inspect -f {{.State.Health.Status}} devgod-qdrant"
     ]);
 
     const npmEnv = await readFile(npmEnvCapture, "utf8");
@@ -1356,10 +1523,12 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     assert.match(npmEnv, /DEVGOD_PROJECT_NAME=devgod/);
     assert.match(npmEnv, new RegExp(`DEVGOD_PROJECT_REPO_PATH=${targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.match(npmEnv, /DEVGOD_DOCKER_CONTAINER_NAME=devgod-postgres/);
+    assert.match(npmEnv, new RegExp(`DEVGOD_QDRANT_URL=${healthServer.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 
     const copiedEnv = await readFile(path.join(targetRoot, ".env"), "utf8");
     assert.match(copiedEnv, /DEVGOD_PROJECT_REPO_PATH=\/absolute\/path\/to\/repo/);
   } finally {
+    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });

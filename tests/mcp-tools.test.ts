@@ -9,6 +9,10 @@ test("createMcpToolDefinitions wires status, ops, report, and plan-context tools
       calls.push({ tool: "status", args });
       return { kind: "status" };
     },
+    async runtimeHealth(args) {
+      calls.push({ tool: "runtimeHealth", args });
+      return { kind: "runtimeHealth" };
+    },
     async ops(args) {
       calls.push({ tool: "ops", args });
       return { kind: "ops" };
@@ -25,13 +29,14 @@ test("createMcpToolDefinitions wires status, ops, report, and plan-context tools
 
   assert.deepEqual(
     tools.map((tool) => tool.name),
-    ["devgod_status", "devgod_ops", "devgod_report", "devgod_plan_context"]
+    ["devgod_status", "devgod_runtime_health", "devgod_ops", "devgod_report", "devgod_plan_context"]
   );
 
   await tools[0]?.invoke({ runId: "run-1", staleAfterDays: 2 });
-  await tools[1]?.invoke({ workspaceSlug: "team", projectSlug: "devgod", staleAfterHours: 24 });
-  await tools[2]?.invoke({ runId: "latest" });
-  await tools[3]?.invoke({
+  await tools[1]?.invoke({ workspaceSlug: "team", projectSlug: "devgod" });
+  await tools[2]?.invoke({ workspaceSlug: "team", projectSlug: "devgod", staleAfterHours: 24 });
+  await tools[3]?.invoke({ runId: "latest" });
+  await tools[4]?.invoke({
     query: "incident playbook",
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -44,6 +49,10 @@ test("createMcpToolDefinitions wires status, ops, report, and plan-context tools
     {
       tool: "status",
       args: ["--run-id", "run-1", "--stale-after-days", "2"]
+    },
+    {
+      tool: "runtimeHealth",
+      args: ["--run-id", "latest", "--workspace-slug", "team", "--project-slug", "devgod"]
     },
     {
       tool: "ops",

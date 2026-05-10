@@ -4,9 +4,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildOperatorStatusReport } from "../src/admin/status.ts";
-import { executeStatusCommandFromArgs } from "../src/admin.ts";
+import { executeDoctorCommandFromArgs, executeStatusCommandFromArgs } from "../src/admin.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
-import type { TaskPacketInput } from "../src/domain/types.ts";
+import type { RuntimeProjectRegistrationRecord, TaskPacketInput } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
@@ -50,6 +50,23 @@ function gitNexusObservation(
     recommendedCommand: "npx gitnexus analyze --skip-agents-md",
     notes: ["gitnexus MCP config was not detected in project or user Codex config"],
     ...overrides
+  };
+}
+
+function runtimeRegistration(overrides: Partial<RuntimeProjectRegistrationRecord> = {}): RuntimeProjectRegistrationRecord {
+  return {
+    projectId: overrides.projectId ?? "project:team:devgod",
+    workspaceId: overrides.workspaceId ?? "workspace:team",
+    repoPath: overrides.repoPath ?? "/repo/devgod",
+    runtimeProfile: overrides.runtimeProfile ?? "local-docker",
+    dataRoot: overrides.dataRoot ?? "/home/eimi/.local/share/devgod/devgod",
+    qdrantUrl: overrides.qdrantUrl ?? "http://127.0.0.1:6333",
+    qdrantCollection: overrides.qdrantCollection ?? "devgod-memory",
+    installManifestPath: overrides.installManifestPath ?? ".devgod/install-manifest.json",
+    manifest: overrides.manifest ?? { version: 1 },
+    provenance: overrides.provenance ?? { authority: "runtime_authoritative" },
+    createdAt: overrides.createdAt ?? "2026-05-10T00:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-05-10T00:00:00.000Z"
   };
 }
 
@@ -332,4 +349,179 @@ test("executeStatusCommandFromArgs rejects missing run ids and invalid stale-aft
     }),
     /Invalid --stale-after-days value: nope/
   );
+});
+
+test("executeDoctorCommandFromArgs fails when a bootstrapped project has no runtime registration", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+
+  const report = await executeDoctorCommandFromArgs(["--run-id", run.id], {
+    cwd: "/repo/devgod",
+    env: process.env,
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getProjectRuntimeRegistration(projectId) {
+      return store.getProjectRuntimeRegistration(projectId);
+    },
+    inspectGitNexus: async () => gitNexusObservation(),
+    inspectReviewIdentity: async () => ({
+      authorityLabel: "derived_only",
+      adapterConfigured: false,
+      adapterExists: false,
+      availableBackends: [],
+      bindingsPresent: false,
+      bindingsPath: "/repo/devgod/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: false,
+      notes: ["review identity bindings file missing"]
+    })
+  });
+
+  assert.equal(report.ok, false);
+  assert.equal(report.checks.registration.ok, false);
+  assert.equal(report.checks.repoPath.ok, false);
+  assert.equal(report.checks.reviewIdentity.ok, false);
+  assert.deepEqual(report.advisories, ["review identity bindings file missing"]);
+  assert.match(report.checks.registration.summary, /not runtime-registered/);
+});
+
+test("executeDoctorCommandFromArgs works without a run id when a project is bootstrapped", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-zero-run-"));
+  const store = new MemoryStore();
+
+  try {
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+
+    const report = await executeDoctorCommandFromArgs([], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      async getStatusSnapshot() {
+        assert.fail("doctor should not require a run snapshot for bootstrapped projects");
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: false,
+        adapterExists: false,
+        availableBackends: [],
+        bindingsPresent: false,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: false,
+        notes: ["review identity bindings file missing"]
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      })
+    });
+
+    assert.equal(report.ok, true);
+    assert.equal(report.run, undefined);
+    assert.equal(report.project.workspaceSlug, "team");
+    assert.equal(report.project.projectSlug, "devgod");
+    assert.equal(report.checks.reviewIdentity.ok, false);
+    assert.deepEqual(report.blockers, []);
+    assert.deepEqual(report.advisories, ["review identity bindings file missing"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review bindings as separate findings", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-command-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+
+  try {
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: run.projectId,
+        workspaceId: run.workspaceId,
+        repoPath: "/other/repo",
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+
+    const report = await executeDoctorCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectGitNexus: async () => gitNexusObservation(),
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: false,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: false,
+        notes: ["review identity bindings file missing"]
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      })
+    });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.checks.registration.ok, true);
+    assert.equal(report.checks.dataRoot.ok, true);
+    assert.equal(report.checks.qdrant.ok, true);
+    assert.equal(report.checks.repoPath.ok, false);
+    assert.equal(report.checks.reviewIdentity.ok, false);
+    assert.deepEqual(report.advisories, ["review identity bindings file missing"]);
+    assert.match(report.checks.repoPath.summary, /repo path mismatch/);
+    assert.match(report.checks.reviewIdentity.summary, /bindings file missing/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

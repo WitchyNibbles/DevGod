@@ -8,6 +8,8 @@ import type {
   ProjectRecord,
   RetrievalRole,
   ReviewRecord,
+  RuntimeMigrationJournalRecord,
+  RuntimeProjectRegistrationRecord,
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
@@ -106,6 +108,167 @@ export class PostgresStore implements DevgodStore {
     );
 
     return { workspace, project };
+  }
+
+  async getProjectContext(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }): Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined> {
+    const result = await this.client.query<JsonRow<{ workspace: WorkspaceRecord; project: ProjectRecord }>>(
+      `select jsonb_build_object(
+          'workspace', jsonb_build_object(
+            'id', w.id,
+            'slug', w.slug,
+            'name', w.name,
+            'createdAt', w.created_at
+          ),
+          'project', jsonb_build_object(
+            'id', p.id,
+            'workspaceId', p.workspace_id,
+            'slug', p.slug,
+            'name', p.name,
+            'repoPath', p.repo_path,
+            'createdAt', p.created_at
+          )
+       ) as payload
+       from projects p
+       join workspaces w on w.id = p.workspace_id
+       where w.slug = $1 and p.slug = $2`,
+      [params.workspaceSlug, params.projectSlug]
+    );
+
+    return result.rows[0]?.payload;
+  }
+
+  async saveProjectRuntimeRegistration(registration: RuntimeProjectRegistrationRecord): Promise<void> {
+    await this.client.query(
+      `insert into runtime_project_registrations (
+         project_id,
+         workspace_id,
+         repo_path,
+         runtime_profile,
+         data_root,
+         qdrant_url,
+         qdrant_collection,
+         install_manifest_path,
+         manifest,
+         provenance
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+       on conflict (project_id) do update
+       set workspace_id = excluded.workspace_id,
+           repo_path = excluded.repo_path,
+           runtime_profile = excluded.runtime_profile,
+           data_root = excluded.data_root,
+           qdrant_url = excluded.qdrant_url,
+           qdrant_collection = excluded.qdrant_collection,
+           install_manifest_path = excluded.install_manifest_path,
+           manifest = excluded.manifest,
+           provenance = excluded.provenance,
+           updated_at = now()`,
+      [
+        registration.projectId,
+        registration.workspaceId,
+        registration.repoPath,
+        registration.runtimeProfile,
+        registration.dataRoot,
+        registration.qdrantUrl ?? null,
+        registration.qdrantCollection,
+        registration.installManifestPath ?? null,
+        JSON.stringify(registration.manifest),
+        JSON.stringify(registration.provenance)
+      ]
+    );
+  }
+
+  async getProjectRuntimeRegistration(
+    projectId: string
+  ): Promise<RuntimeProjectRegistrationRecord | undefined> {
+    const result = await this.client.query<JsonRow<RuntimeProjectRegistrationRecord>>(
+      `select jsonb_build_object(
+          'projectId', project_id,
+          'workspaceId', workspace_id,
+          'repoPath', repo_path,
+          'runtimeProfile', runtime_profile,
+          'dataRoot', data_root,
+          'qdrantUrl', qdrant_url,
+          'qdrantCollection', qdrant_collection,
+          'installManifestPath', install_manifest_path,
+          'manifest', manifest,
+          'provenance', provenance,
+          'createdAt', created_at,
+          'updatedAt', updated_at
+       ) as payload
+       from runtime_project_registrations
+       where project_id = $1`,
+      [projectId]
+    );
+    return result.rows[0]?.payload;
+  }
+
+  async saveRuntimeMigrationJournal(journal: RuntimeMigrationJournalRecord): Promise<void> {
+    await this.client.query(
+      `insert into runtime_migration_journals (
+         id,
+         workspace_id,
+         project_id,
+         run_id,
+         phase,
+         status,
+         backup_manifest_path,
+         verification_report_path,
+         rollback_state,
+         details
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       on conflict (id) do update
+       set workspace_id = excluded.workspace_id,
+           project_id = excluded.project_id,
+           run_id = excluded.run_id,
+           phase = excluded.phase,
+           status = excluded.status,
+           backup_manifest_path = excluded.backup_manifest_path,
+           verification_report_path = excluded.verification_report_path,
+           rollback_state = excluded.rollback_state,
+           details = excluded.details,
+           updated_at = now()`,
+      [
+        journal.id,
+        journal.workspaceId,
+        journal.projectId,
+        journal.runId ?? null,
+        journal.phase,
+        journal.status,
+        journal.backupManifestPath,
+        journal.verificationReportPath,
+        journal.rollbackState,
+        JSON.stringify(journal.details)
+      ]
+    );
+  }
+
+  async listRuntimeMigrationJournals(projectId: string): Promise<RuntimeMigrationJournalRecord[]> {
+    const result = await this.client.query<JsonRow<RuntimeMigrationJournalRecord>>(
+      `select jsonb_build_object(
+          'id', id,
+          'workspaceId', workspace_id,
+          'projectId', project_id,
+          'runId', run_id,
+          'phase', phase,
+          'status', status,
+          'backupManifestPath', backup_manifest_path,
+          'verificationReportPath', verification_report_path,
+          'rollbackState', rollback_state,
+          'details', details,
+          'createdAt', created_at,
+          'updatedAt', updated_at
+       ) as payload
+       from runtime_migration_journals
+       where project_id = $1
+       order by created_at asc`,
+      [projectId]
+    );
+    return result.rows.map((row) => row.payload);
   }
 
   async createRun(run: RunRecord): Promise<void> {

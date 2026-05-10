@@ -30,6 +30,9 @@ Keep local to each consuming repo:
 
 Useful runtime operator commands inside a consuming repo:
 
+- `npm run devgod:setup:local` for the loopback-only local Postgres and Qdrant bootstrap wrapper
+- `npm run devgod:doctor` for runtime registration, data-root, and Qdrant health even before the repo has any run history
+- `npm run devgod:verify:setup` for the blocking runtime setup proof after bootstrap
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for a synthetic install-proof fixture
 - `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
 - `npm run devgod:ops -- --run-id latest --format text` for the operator dashboard
@@ -39,7 +42,7 @@ Useful runtime operator commands inside a consuming repo:
 
 The synthetic fixture command does not write `.devgod/ACTIVE` and does not create authoritative review summaries. Use it only for install-proof checks, never for live workflow completion.
 
-For review identity, consuming repos can keep multiple named backends in one reviewed adapter module via `reviewIdentityAdapters` and select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`. `devgod:status` and `devgod:ops` surface that selection state so operators can detect ambiguous multi-backend configs before trusting live reviews.
+For review identity, consuming repos can keep multiple named backends in one reviewed adapter module via `reviewIdentityAdapters` and select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`. `devgod:doctor`, `devgod:status`, and `devgod:ops` surface that selection state so operators can detect ambiguous multi-backend configs before trusting live reviews.
 
 Optional GitNexus setup:
 

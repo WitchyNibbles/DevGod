@@ -248,6 +248,36 @@ export interface ProjectRecord {
   createdAt: string;
 }
 
+export interface RuntimeProjectRegistrationRecord {
+  projectId: string;
+  workspaceId: string;
+  repoPath: string;
+  runtimeProfile: string;
+  dataRoot: string;
+  qdrantUrl?: string | undefined;
+  qdrantCollection: string;
+  installManifestPath?: string | undefined;
+  manifest: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuntimeMigrationJournalRecord {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  runId?: string | undefined;
+  phase: string;
+  status: string;
+  backupManifestPath: string;
+  verificationReportPath: string;
+  rollbackState: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RunRecord {
   id: string;
   workspaceId: string;

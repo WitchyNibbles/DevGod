@@ -6,9 +6,9 @@ services:
     environment:
       POSTGRES_DB: ${DEVGOD_POSTGRES_DB:-devgod}
       POSTGRES_USER: ${DEVGOD_POSTGRES_USER:-devgod}
-      POSTGRES_PASSWORD: ${DEVGOD_POSTGRES_PASSWORD:-devgod}
+      POSTGRES_PASSWORD: ${DEVGOD_POSTGRES_PASSWORD:-devgod-local-password}
     ports:
-      - "${DEVGOD_POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${DEVGOD_POSTGRES_PORT:-5432}:5432"
     volumes:
       - devgod-postgres-data:/var/lib/postgresql
     healthcheck:
@@ -21,5 +21,24 @@ services:
       timeout: 5s
       retries: 20
 
+  devgod-qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: ${DEVGOD_QDRANT_CONTAINER_NAME:-devgod-qdrant}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DEVGOD_QDRANT_PORT:-6333}:6333"
+    volumes:
+      - devgod-qdrant-data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -lc 'exec 3<>/dev/tcp/127.0.0.1/6333'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   devgod-postgres-data:
+  devgod-qdrant-data:

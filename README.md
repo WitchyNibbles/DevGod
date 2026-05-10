@@ -30,6 +30,7 @@ Supported CLI inventory:
 - `node --experimental-strip-types src/install/cli.ts init --apply --target /absolute/path/to/project`
 - `node --experimental-strip-types src/install/cli.ts init --dry-run --target /absolute/path/to/project`
 - `node --experimental-strip-types src/install/cli.ts --dry-run --target /absolute/path/to/project`
+- `npm run doctor`
 
 Legacy note:
 
@@ -42,7 +43,7 @@ Fast path:
 2. Install `devgod` into the target project.
 3. In the target project, run `npm install`.
 4. If you want the shipped local Docker bootstrap path, run `npm run devgod:setup:local`.
-5. Let `npm run devgod:verify:setup` be the setup/database proof only after you intentionally run the setup/bootstrap path.
+5. Use `npm run devgod:doctor` and `npm run devgod:verify:setup` as the blocking runtime proof after you intentionally run the setup/bootstrap path. `doctor` now works before the repo has any run history; review-identity findings stay advisory until you wire a live adapter.
 
 ## Install Into An Existing Project
 
@@ -69,6 +70,7 @@ Optional local bootstrap path:
 
 ```bash
 npm run devgod:setup:local
+npm run devgod:doctor
 ```
 
 ## Install Into A New Project
@@ -98,6 +100,7 @@ Optional local bootstrap path:
 
 ```bash
 npm run devgod:setup:local
+npm run devgod:doctor
 ```
 
 ## What The Installer Changes
@@ -133,7 +136,7 @@ It will not:
 
 ## Setup After Install
 
-Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped Docker-first setup path.
+Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped Docker-first setup path. That path now provisions the local Postgres and Qdrant runtime services before it runs the repo bootstrap commands.
 
 That command runs `src/install/setup-local.ts`, which dispatches to the generated target-repo setup script, and then does this:
 
@@ -145,14 +148,16 @@ That command runs `src/install/setup-local.ts`, which dispatches to the generate
 6. runs `npm run devgod:migrate`
 7. runs `npm run devgod:bootstrap`
 8. runs `npm run devgod:verify:setup`
+9. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
 
-The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml`. That behavior is separate from the installer itself.
+The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml` with the local Postgres and Qdrant services. That behavior is separate from the installer itself.
 
 If you need a managed database today, use a dedicated non-production database, set the target repo environment explicitly, and run the admin commands manually:
 
 ```bash
 npm run devgod:migrate
 npm run devgod:bootstrap
+npm run devgod:doctor
 npm run devgod:verify:setup
 npm run devgod:verify:migrations:live
 ```
@@ -166,6 +171,7 @@ The target repo uses `.env.devgod`, not this source repo's `.env`.
 Required for the shipped `npm run devgod:setup:local` path:
 
 - `DEVGOD_CORE_DATABASE_URL`
+- `DEVGOD_QDRANT_URL`
 
 Required if you run the admin commands manually:
 
@@ -178,11 +184,17 @@ Usually useful:
 - `DEVGOD_WORKSPACE_NAME`
 - `DEVGOD_PROJECT_NAME`
 - `DEVGOD_PROJECT_REPO_PATH`
+- `DEVGOD_RUNTIME_PROFILE`
+- `DEVGOD_RUNTIME_DATA_ROOT`
 - `DEVGOD_POSTGRES_DB`
 - `DEVGOD_POSTGRES_USER`
 - `DEVGOD_POSTGRES_PASSWORD`
 - `DEVGOD_POSTGRES_PORT`
 - `DEVGOD_DOCKER_CONTAINER_NAME`
+- `DEVGOD_QDRANT_COLLECTION`
+- `DEVGOD_QDRANT_PORT`
+- `DEVGOD_QDRANT_GRPC_PORT`
+- `DEVGOD_QDRANT_CONTAINER_NAME`
 
 Defaults in the shipped target-repo example and setup path:
 
@@ -191,12 +203,16 @@ Defaults in the shipped target-repo example and setup path:
 - `DEVGOD_PROJECT_SLUG` defaults to the target repo directory name
 - `DEVGOD_PROJECT_NAME` defaults to `DEVGOD_PROJECT_SLUG`
 - `DEVGOD_DOCKER_CONTAINER_NAME` defaults to `devgod-postgres-${DEVGOD_PROJECT_SLUG}`
+- `DEVGOD_QDRANT_URL` defaults to `http://127.0.0.1:6333`
+- `DEVGOD_QDRANT_COLLECTION` defaults to `devgod-memory`
+- `DEVGOD_QDRANT_CONTAINER_NAME` defaults to `devgod-qdrant-${DEVGOD_PROJECT_SLUG}`
 
 Credential note:
 
-- the example `devgod` / `devgod` credentials are local Docker defaults only
+- `.env.devgod.example` now defaults to a loopback-only local password and loopback-bound ports for the shipped Docker path
 - for any non-local database, use unique credentials and a dedicated database
-- the default Docker compose path publishes Postgres on the host port; if the machine is shared or the port is reachable from outside your workstation, change the password and exposure before using it
+- the shipped Docker compose path binds Postgres and Qdrant REST to `127.0.0.1` and does not publish Qdrant gRPC by default
+- `DEVGOD_POSTGRES_PASSWORD` must not be left at the legacy `devgod` value when you run the local setup wrapper
 - `.env.devgod` is meant to stay private and ignored by git
 
 ## Operate With Codex
@@ -206,7 +222,8 @@ If a target repo has `devgod` installed but not configured, a Codex agent should
 1. check for `.env.devgod`
 2. run `npm install` if dependencies are missing
 3. run `npm run devgod:setup:local`
-4. use `npm run devgod:verify:setup` as the blocking setup/database proof
+4. use `npm run devgod:doctor` and `npm run devgod:verify:setup` as the blocking runtime proof
+5. treat `devgod:doctor` review-identity warnings as advisory until the repo replaces the shipped adapter stub
 
 Once the repo is configured, the intended operating rhythm is:
 
@@ -473,12 +490,13 @@ The spellbook has three layers:
 2. `Repo-local control layer`
    Each consuming repo keeps its own `AGENTS.md`, `.devgod/rules/`, `.devgod/work/`, `.devgod/memory/`, and repo-local skills.
 3. `Shared backend layer`
-   The shared core stores runs, task graphs, locks, reviews, approvals, and retrieval metadata in Node/Postgres with `pgvector`.
+   The shared core stores runs, task graphs, locks, reviews, approvals, retrieval metadata, and runtime registration state in Node/Postgres with `pgvector`, while the local runtime keeps Qdrant configuration machine-local and replayable.
 
 Source-of-truth split:
 
 - repo markdown: reviewed project policy, durable decisions, patterns, and lessons
-- Postgres: live operational state and audit trail
+- Postgres: live operational state, audit trail, and runtime registration state
+- Qdrant: local vector retrieval collections and runtime-managed collection configuration
 - `pgvector`: semantic retrieval over memory plus indexed repo markdown chunks
 
 This package owns the reusable bootstrap layer:

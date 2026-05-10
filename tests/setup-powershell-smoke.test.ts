@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { delimiter, join } from "node:path";
@@ -24,6 +25,33 @@ async function writeBatchFile(filePath: string, lines: string[]): Promise<void> 
   await writeFile(filePath, `${lines.join("\r\n")}\r\n`, "utf8");
 }
 
+async function startHealthServer(): Promise<{ close: () => Promise<void>; url: string }> {
+  const server = createServer((request, response) => {
+    if (request.url === "/collections") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("health server did not bind to an IPv4 port");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      )
+  };
+}
+
 const pwshAvailable = await hasPwsh();
 const smoke = process.platform === "win32" && pwshAvailable ? test : test.skip;
 
@@ -35,6 +63,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
   const npmLog = join(targetRoot, "npm.log");
   const npmEnvCapture = join(targetRoot, "npm-env.txt");
   const setupScript = join(targetRoot, "scripts", "devgod-setup.ps1");
+  const healthServer = await startHealthServer();
 
   try {
     await mkdir(binDir, { recursive: true });
@@ -48,6 +77,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
         "DEVGOD_PROJECT_NAME='Alpha Project'",
         "DEVGOD_PROJECT_REPO_PATH=/absolute/path/to/repo",
         "DEVGOD_DOCKER_CONTAINER_NAME=alpha-container",
+        "DEVGOD_POSTGRES_PASSWORD=alpha-local-password",
         ""
       ].join("\n"),
       "utf8"
@@ -94,6 +124,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
       "    echo DEVGOD_PROJECT_NAME=%DEVGOD_PROJECT_NAME%",
       "    echo DEVGOD_PROJECT_REPO_PATH=%DEVGOD_PROJECT_REPO_PATH%",
       "    echo DEVGOD_DOCKER_CONTAINER_NAME=%DEVGOD_DOCKER_CONTAINER_NAME%",
+      "    echo DEVGOD_QDRANT_URL=%DEVGOD_QDRANT_URL%",
       "  )",
       ")",
       'if "%~1"=="install" exit /b 0',
@@ -111,6 +142,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
       env: {
         ...process.env,
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        DEVGOD_QDRANT_URL: healthServer.url,
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_DOCKER_COMPOSE_SENTINEL: dockerComposeSentinel,
         DEVGOD_NPM_LOG_FILE: npmLog,
@@ -129,12 +161,14 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);
     assert.deepEqual(dockerCalls.slice(0, 2), [
       "version",
-      "compose up -d devgod-postgres"
+      "compose up -d devgod-postgres devgod-qdrant"
     ]);
 
     const inspectCalls = dockerCalls.slice(2);
-    assert.ok(inspectCalls.length >= 1);
-    assert.ok(inspectCalls.every((call) => call === "inspect -f {{.State.Health.Status}} alpha-container"));
+    assert.deepEqual(inspectCalls, [
+      "inspect -f {{.State.Health.Status}} alpha-container",
+      "inspect -f {{.State.Health.Status}} devgod-qdrant-alpha"
+    ]);
 
     const capturedEnv = await readFile(npmEnvCapture, "utf8");
     const capturedProjectRepoPath =
@@ -149,11 +183,13 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
     assert.match(capturedEnv, /DEVGOD_PROJECT_NAME=Alpha Project/);
     assert.equal(await realpath(capturedProjectRepoPath), await realpath(targetRoot));
     assert.match(capturedEnv, /DEVGOD_DOCKER_CONTAINER_NAME=alpha-container/);
+    assert.match(capturedEnv, /DEVGOD_QDRANT_URL=http:\/\/127\.0\.0\.1:6333/);
 
     const copiedEnv = await readFile(join(targetRoot, ".env"), "utf8");
     const exampleEnv = await readFile(join(targetRoot, ".env.example"), "utf8");
     assert.equal(copiedEnv, exampleEnv);
   } finally {
+    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
