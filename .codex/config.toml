@@ -1,5 +1,4 @@
 model = "gpt-5.4"
-model_provider = "openai"
 model_reasoning_effort = "high"
 model_verbosity = "low"
 approval_policy = "on-request"
