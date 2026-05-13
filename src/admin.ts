@@ -543,9 +543,13 @@ async function resolveReviewIdentityFilePath(options: {
 }): Promise<string> {
   const cwd = options.cwd ?? process.cwd();
   if (options.envVarValue) {
-    return path.isAbsolute(options.envVarValue)
+    const configuredPath = path.isAbsolute(options.envVarValue)
       ? options.envVarValue
       : path.resolve(cwd, options.envVarValue);
+    if (await pathExists(configuredPath)) {
+      return configuredPath;
+    }
+    return path.resolve(repoRoot, options.templateRelativePath);
   }
 
   const livePath = path.resolve(cwd, options.liveRelativePath);
@@ -586,10 +590,25 @@ async function verifyReviewIdentityCommand() {
     throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity");
   }
 
+  const useTemplateFallbackAdapter =
+    isRepoTemplateReviewIdentityPath(bindingsPath) &&
+    isRepoTemplateReviewIdentityPath(fixturesPath) &&
+    (!process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE ||
+      !(await pathExists(resolveAdapterModulePath(process.cwd(), process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE))));
+
   const [bindings, fixtures, adapter] = await Promise.all([
     loadReviewIdentityBindings(bindingsPath),
     loadReviewIdentityFixtures(fixturesPath),
-    loadConfiguredReviewIdentityAdapter()
+    loadConfiguredReviewIdentityAdapter(
+      useTemplateFallbackAdapter
+        ? {
+            env: {
+              ...process.env,
+              DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE: undefined
+            }
+          }
+        : undefined
+    )
   ]);
 
   const result = await verifyReviewIdentityAdapter({
@@ -607,6 +626,14 @@ async function verifyReviewIdentityCommand() {
   }
 
   console.log(JSON.stringify(result));
+}
+
+function resolveAdapterModulePath(cwd: string, modulePath: string | undefined): string | undefined {
+  if (!modulePath) {
+    return undefined;
+  }
+
+  return path.isAbsolute(modulePath) ? modulePath : path.resolve(cwd, modulePath);
 }
 
 interface RecordReviewCommandInput {
