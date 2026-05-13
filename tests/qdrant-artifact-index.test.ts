@@ -5,7 +5,10 @@ import { QdrantArtifactIndex } from "../src/store/qdrant-artifact-index.ts";
 test("QdrantArtifactIndex.queryArtifactMatches parses Qdrant 1.17 points payloads", async () => {
   const requests: Array<{ url: string; method?: string }> = [];
   const index = new QdrantArtifactIndex(async (url, init) => {
-    requests.push({ url: String(url), method: init?.method });
+    requests.push({
+      url: String(url),
+      ...(init?.method ? { method: init.method } : {})
+    });
     return new Response(
       JSON.stringify({
         result: {

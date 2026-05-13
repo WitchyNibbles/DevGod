@@ -48,6 +48,7 @@ test("getPlanContextSurface wires query embedding through the runtime surface", 
         };
       },
       async createPlanContextEmbedQuery(env) {
+        assert.ok(env);
         assert.equal(env.DEVGOD_EMBEDDING_MODEL, "devgod-local-hash-1536");
         return async ({ model, text }) => {
           assert.equal(model, "devgod-local-hash-1536");
