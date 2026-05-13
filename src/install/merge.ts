@@ -53,6 +53,13 @@ ${workflowContractBlock}
 - reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\`
 
+## Autonomy Loop
+
+- for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
+- the manager must not stop after intake, architecture, planning, or one implementation slice unless product-level acceptance is complete, a real blocker requires user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
+- after each completed task, update \`.devgod/work/product-state.md\`, update \`.devgod/work/task-queue.json\`, update \`.devgod/ACTIVE\`, select the next unblocked task, and continue execution
+- a completed phase is not a completed product
+
 ## Git hygiene
 
 - in consuming repos, \`git_operator\` must not stage \`.devgod/\`, \`.agents/\`, \`.codex/\`, or \`AGENTS.md\` unless the task explicitly targets devgod/control-layer installation or maintenance
@@ -246,6 +253,8 @@ export function mergePackageJson(
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
   scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;
+  scripts["devgod:autopilot-status"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts";
   scripts["devgod:github-dispatch"] = `${devgodEntry} github-dispatch --target .`;
   scripts["devgod:mcp"] = `${devgodEntry} mcp`;
   scripts["devgod:ui"] = `${devgodEntry} serve-ui`;

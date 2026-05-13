@@ -1,0 +1,17 @@
+{
+  "project_status": "not_started",
+  "current_task_id": null,
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Example task",
+      "status": "pending",
+      "class": "prototype_slice",
+      "depends_on": [],
+      "acceptance_criteria": [],
+      "verification": [],
+      "evidence": [],
+      "blocker": null
+    }
+  ]
+}

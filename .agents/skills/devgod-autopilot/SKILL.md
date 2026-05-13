@@ -1,0 +1,74 @@
+---
+name: devgod-autopilot
+description: Full-project autonomous delivery loop until the product goal is complete or a real blocker exists.
+---
+
+# Devgod Autopilot
+
+Use for full-project or multi-phase execution when DevGod must keep moving without waiting after each slice.
+
+Goal: continue planning, implementing, verifying, repairing, reviewing, and selecting the next task until the product-level goal is complete or a real blocker exists.
+
+## Required reads
+
+Read, in order:
+
+1. project requirements or brief
+2. `AGENTS.md`
+3. `.devgod/ACTIVE`
+4. `.devgod/work/product-state.md`
+5. `.devgod/work/task-queue.json`
+6. the active task packet and any directly dependent task packets
+
+If `product-state.md` or `task-queue.json` is missing, initialize it from `.devgod/templates/` before continuing and record that initialization in the state update.
+
+## Loop
+
+1. Restate the product goal, global acceptance criteria, current milestone, and stopping criteria.
+2. Determine whether the product-level goal is complete.
+3. If complete, stop and report the evidence.
+4. If incomplete, select the first unblocked task where:
+   - `status` is not `done`
+   - every dependency is `done`
+   - the task is not blocked
+5. Refuse to execute a task packet that lacks:
+   - acceptance criteria
+   - verification commands
+   - rollback notes where the change can require rollback
+   - owner role
+   - expected artifacts
+6. Implement the smallest vertical slice that can produce real evidence.
+7. Run the task verification commands exactly as written.
+8. If verification fails, invoke `devgod-repair-loop`.
+9. Repeat repair until:
+   - verification passes
+   - a real blocker exists
+   - or the bounded repair budget is exhausted
+10. Record review evidence according to task class:
+   - `prototype_slice`: reviewer and QA evidence, plus security evidence when trust boundaries changed
+   - `security_sensitive`: reviewer, QA, and security evidence are mandatory
+   - `release_candidate`: reviewer, QA, security, and release-readiness evidence are mandatory
+   - `docs_only`: reviewer evidence is mandatory; QA and security evidence are required if commands, setup, policy, or behavior changed
+11. Update:
+   - `.devgod/work/product-state.md`
+   - `.devgod/work/task-queue.json`
+   - `.devgod/ACTIVE`
+12. Select the next unblocked task and continue immediately unless a stop condition is met.
+
+## State update rules
+
+- product state must include product-goal progress, current task, next task, blockers, and verification/review evidence
+- task queue must record status transitions, blocker text, and evidence links or commands
+- `.devgod/ACTIVE` must always point at the task currently being executed
+
+## Hard rules
+
+- do not stop after intake, architecture, planning, or one implementation slice
+- a completed phase is not a completed product
+- never mark work done without verification evidence
+- never invent successful test results
+- stop only when:
+  - all product-level acceptance criteria are complete
+  - a real blocker requires user input
+  - verification cannot proceed after documented repair attempts
+  - or the user explicitly requested planning only

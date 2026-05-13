@@ -81,6 +81,10 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /`tdd-guide`/);
   assert.match(first, /`e2e-runner`/);
   assert.match(first, /`release-readiness`/);
+  assert.match(first, /## Autonomy Loop/);
+  assert.match(first, /\.devgod\/work\/product-state\.md/);
+  assert.match(first, /\.devgod\/work\/task-queue\.json/);
+  assert.match(first, /a completed phase is not a completed product/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -157,6 +161,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(
     merged.scripts["devgod:report"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts report --format markdown"
+  );
+  assert.equal(
+    merged.scripts["devgod:autopilot-status"],
+    "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts"
   );
   assert.equal(
     merged.scripts["devgod:github-dispatch"],
@@ -288,6 +296,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
 
   const expectedSkillFiles = [
     ".agents/skills/devgod-architecture/SKILL.md",
+    ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
@@ -298,6 +307,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-qa-verification/SKILL.md",
     ".agents/skills/devgod-release-readiness/SKILL.md",
+    ".agents/skills/devgod-repair-loop/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
     ".agents/skills/devgod-setup/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md"
@@ -345,6 +355,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/admin.ts",
     "src/admin/",
     "src/core/",
+    "src/devgod/",
     "src/domain/",
     "src/evals/orchestration-baseline.ts",
     "src/evals/retrieval-memory-baseline.ts",
@@ -379,6 +390,10 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   assert.equal(
     pkg.scripts["scaffold:workflow"],
     "node --experimental-strip-types src/install/cli.ts scaffold-workflow --target ."
+  );
+  assert.equal(
+    pkg.scripts["devgod:autopilot-status"],
+    "node --experimental-strip-types src/devgod/autopilot-status.ts"
   );
   assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
   for (const relativePath of overlayPortableAssets) {
@@ -1200,6 +1215,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
 
   const installedSkills = [
     ".agents/skills/devgod-architecture/SKILL.md",
+    ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
@@ -1210,6 +1226,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-qa-verification/SKILL.md",
     ".agents/skills/devgod-release-readiness/SKILL.md",
+    ".agents/skills/devgod-repair-loop/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
     ".agents/skills/devgod-setup/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md"
@@ -1219,6 +1236,18 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     const content = await readFile(path.join(targetRoot, relativePath), "utf8");
     assert.match(content, /^---/m, `${relativePath} should install a skill file`);
   }
+
+  const productStateTemplate = await readFile(
+    path.join(targetRoot, ".devgod", "templates", "product-state.md"),
+    "utf8"
+  );
+  assert.match(productStateTemplate, /# Product State/);
+
+  const taskQueueTemplate = await readFile(
+    path.join(targetRoot, ".devgod", "templates", "task-queue.json"),
+    "utf8"
+  );
+  assert.match(taskQueueTemplate, /"project_status": "not_started"/);
 
   const installedWorkflowChecker = await readFile(
     path.join(targetRoot, "scripts/check-devgod-workflow.sh"),
@@ -1286,6 +1315,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:autopilot-status"],
+    /node_modules\/devgod\/src\/devgod\/autopilot-status\.ts/
   );
   assert.equal(
     targetPackageJson.scripts["devgod:verify:git-guard"],
@@ -2007,6 +2040,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
 
   const expectedSkillFiles = [
     ".agents/skills/devgod-architecture/SKILL.md",
+    ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
@@ -2017,6 +2051,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-qa-verification/SKILL.md",
     ".agents/skills/devgod-release-readiness/SKILL.md",
+    ".agents/skills/devgod-repair-loop/SKILL.md",
     ".agents/skills/devgod-review/SKILL.md",
     ".agents/skills/devgod-setup/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md"
@@ -2051,6 +2086,8 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".githooks/commit-msg",
     ".githooks/pre-commit",
     ".devgod/rules/role-retrieval-policy.md",
+    ".devgod/templates/product-state.md",
+    ".devgod/templates/task-queue.json",
     ".devgod/templates/review-identity-bindings.json",
     ".devgod/templates/review-identity-adapter.fixture.json",
     "scripts/check-devgod-commit-msg.sh",
@@ -2061,6 +2098,8 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     "scripts/verify-devgod-workflow-check.sh",
     "scripts/verify-release-overlay.sh",
     "src/admin.ts",
+    "src/devgod/autopilot-status.ts",
+    "src/devgod/task-queue.ts",
     "src/index.ts",
     "src/install/cli.ts",
     "src/install/git-guard.ts",

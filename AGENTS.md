@@ -46,6 +46,27 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - manager/root may do only trivial mechanical edits outside explicit specialist ownership
 - substantive work completes only after `reviewer`, `qa_engineer`, and `security_reviewer` gates plus the workflow check
 
+## Autonomy loop
+
+For full-project or multi-phase requests, DevGod must operate as a continuing delivery loop.
+
+The manager must not stop after intake, architecture, planning, or one implementation slice unless:
+
+- the product-level acceptance criteria are complete
+- a real blocker requires user input
+- verification cannot proceed after documented repair attempts
+- or the user explicitly requested planning only
+
+After each completed task, the manager must:
+
+1. update `.devgod/work/product-state.md`
+2. update `.devgod/work/task-queue.json`
+3. update `.devgod/ACTIVE`
+4. select the next unblocked task
+5. continue execution
+
+A completed phase is not a completed product.
+
 ## Default role chain
 
 - planning and routing: `planner`, `product_strategist`, `solution_architect`
