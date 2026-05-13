@@ -6,7 +6,13 @@ import {
   summarizeTaskQueue
 } from "../src/devgod/task-queue.ts";
 
-function buildQueue(overrides: Partial<ReturnType<typeof parseTaskQueueContent>> = {}) {
+type QueueFixture = {
+  project_status: string;
+  current_task_id: string | null;
+  tasks: Array<Record<string, unknown>>;
+};
+
+function buildQueue(overrides: Partial<QueueFixture> = {}): QueueFixture {
   return {
     project_status: "in_progress",
     current_task_id: null,
