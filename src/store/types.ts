@@ -79,6 +79,13 @@ export interface DevgodStore {
   createRun(run: RunRecord): Promise<void>;
   getRun(runId: string): Promise<RunRecord | undefined>;
   findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined>;
+  findRunsByProjectActivity(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+    dateFrom?: string | undefined;
+    dateTo?: string | undefined;
+    timezone: string;
+  }): Promise<RunRecord[]>;
   updateRun(run: RunRecord): Promise<void>;
   savePlan(plan: PlanArtifact): Promise<void>;
   getPlan(runId: string): Promise<PlanArtifact | undefined>;

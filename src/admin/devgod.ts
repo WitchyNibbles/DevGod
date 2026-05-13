@@ -20,6 +20,8 @@ const adminCommands = new Set([
   "index-repo-markdown",
   "report",
   "plan-context",
+  "export-docs",
+  "/export-docs",
   "github-dispatch",
   "mcp",
   "serve-ui"
@@ -52,7 +54,7 @@ function printUsage(): void {
       "  devgod <install-command> [args]",
       "",
       "Runtime commands:",
-      "  status | ops | recover | report | plan-context | github-dispatch",
+      "  status | ops | recover | report | plan-context | export-docs | github-dispatch",
       "  migrate | health | doctor | bootstrap-project | verify-setup | verify-live-migrations",
       "  verify-review-identity | record-review | index-repo-markdown | run-embedding-jobs",
       "  mcp | serve-ui",

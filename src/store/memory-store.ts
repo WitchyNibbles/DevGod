@@ -32,6 +32,30 @@ import type {
   QueueEmbeddingJobInput
 } from "./types.ts";
 
+function zonedIsoDate(value: string, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(value));
+}
+
+function isoDateWithinRange(
+  isoDate: string,
+  range: { dateFrom?: string | undefined; dateTo?: string | undefined }
+): boolean {
+  if (range.dateFrom && isoDate < range.dateFrom) {
+    return false;
+  }
+
+  if (range.dateTo && isoDate > range.dateTo) {
+    return false;
+  }
+
+  return true;
+}
+
 interface EmbeddingVectorRecord {
   embedding: readonly number[];
   embeddingModel: string;
@@ -142,6 +166,53 @@ export class MemoryStore implements DevgodStore {
     return [...this.runs.values()]
       .filter((run) => run.projectId === project.id)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  }
+
+  async findRunsByProjectActivity(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+    dateFrom?: string | undefined;
+    dateTo?: string | undefined;
+    timezone: string;
+  }): Promise<RunRecord[]> {
+    const project = this.projects.get(`${params.workspaceSlug}:${params.projectSlug}`);
+    if (!project) {
+      return [];
+    }
+
+    return [...this.runs.values()]
+      .filter((run) => run.projectId === project.id)
+      .filter((run) => {
+        const taskIds = [...this.tasks.values()]
+          .filter((task) => task.runId === run.id)
+          .map((task) => task.packet.taskId);
+        const plan = this.plans.get(run.id);
+
+        const activityTimestamps = [
+          run.createdAt,
+          run.updatedAt,
+          ...(plan ? [plan.createdAt] : []),
+          ...(awaitableTaskDates(run.id, this.tasks)),
+          ...(awaitableCreatedDates(run.id, taskIds, this.handoffs)),
+          ...(awaitableCreatedDates(run.id, taskIds, this.reviews)),
+          ...(awaitableCreatedDates(run.id, taskIds, this.approvals))
+        ];
+
+        return activityTimestamps.some((timestamp) =>
+          isoDateWithinRange(zonedIsoDate(timestamp, params.timezone), {
+            dateFrom: params.dateFrom,
+            dateTo: params.dateTo
+          })
+        );
+      })
+      .sort((left, right) => {
+        const leftDate = zonedIsoDate(left.updatedAt, params.timezone);
+        const rightDate = zonedIsoDate(right.updatedAt, params.timezone);
+        if (leftDate === rightDate) {
+          return left.createdAt.localeCompare(right.createdAt);
+        }
+        return leftDate.localeCompare(rightDate);
+      });
   }
 
   async updateRun(run: RunRecord): Promise<void> {
@@ -502,6 +573,26 @@ export class MemoryStore implements DevgodStore {
 
     return cosineSimilarity(queryEmbedding, embeddingRecord.embedding) * 6;
   }
+}
+
+function awaitableTaskDates(
+  runId: string,
+  tasks: ReadonlyMap<string, TaskRecord>
+): string[] {
+  return [...tasks.values()]
+    .filter((task) => task.runId === runId)
+    .flatMap((task) => [task.createdAt, task.updatedAt]);
+}
+
+function awaitableCreatedDates<RecordShape extends { runId: string; taskId: string; createdAt: string }>(
+  runId: string,
+  taskIds: readonly string[],
+  records: ReadonlyMap<string, RecordShape>
+): string[] {
+  const taskIdSet = new Set(taskIds);
+  return [...records.values()]
+    .filter((record) => record.runId === runId && taskIdSet.has(record.taskId))
+    .map((record) => record.createdAt);
 }
 
 function cosineSimilarity(left: readonly number[], right: readonly number[]): number {

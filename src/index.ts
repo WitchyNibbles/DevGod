@@ -1,5 +1,11 @@
 export { createActionHandlers } from "./core/actions.ts";
 export { DevgodCoreService } from "./core/service.ts";
+export { parseExportDocsRequest } from "./docs-export/parser.ts";
+export { resolveObsidianConfig, validateObsidianConfig } from "./docs-export/obsidian-config.ts";
+export { DocsSummarizer } from "./docs-export/summarizer.ts";
+export { ObsidianMarkdownRenderer } from "./docs-export/renderer.ts";
+export { ObsidianVaultWriter, sanitizeMarkdownFilename } from "./docs-export/obsidian-writer.ts";
+export { RuntimeWorklogProvider } from "./docs-export/worklog-provider.ts";
 export {
   createReviewPrincipalAdapter,
   createReviewActionContextResolver,

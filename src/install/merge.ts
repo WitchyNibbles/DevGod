@@ -245,6 +245,7 @@ export function mergePackageJson(
   scripts["devgod:recover"] = `${devgodEntry} recover`;
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
+  scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;
   scripts["devgod:github-dispatch"] = `${devgodEntry} github-dispatch --target .`;
   scripts["devgod:mcp"] = `${devgodEntry} mcp`;
   scripts["devgod:ui"] = `${devgodEntry} serve-ui`;

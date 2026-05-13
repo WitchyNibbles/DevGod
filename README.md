@@ -202,6 +202,16 @@ Usually useful:
 - `DEVGOD_QDRANT_GRPC_PORT`
 - `DEVGOD_QDRANT_CONTAINER_NAME`
 
+Optional for Obsidian exports:
+
+- `DEVGOD_OBSIDIAN_ENABLED`
+- `DEVGOD_OBSIDIAN_VAULT_PATH`
+- `DEVGOD_OBSIDIAN_DEFAULT_PROJECT`
+- `DEVGOD_OBSIDIAN_DAILY_FOLDER`
+- `DEVGOD_OBSIDIAN_DOCS_FOLDER`
+- `DEVGOD_OBSIDIAN_ADR_FOLDER`
+- `DEVGOD_OBSIDIAN_TIMEZONE`
+
 Defaults in the shipped target-repo example and setup path:
 
 - `DEVGOD_WORKSPACE_SLUG` defaults to `default` in `.env.devgod.example`
@@ -400,7 +410,37 @@ The operator surface now includes:
 
 - `report` for a timeline-oriented evidence bundle across run status, routing, recovery, handoffs, reviews, and approvals
 - `plan-context` for retrieval-backed planning context with authority, freshness, and citation labels
+- `export-docs` for turning date-scoped runtime work history into structured Markdown notes inside a configured Obsidian vault
 - `github-dispatch` for turning GitHub issue or PR payloads into canonical `.devgod/work` artifacts without granting GitHub workflow authority
+
+Obsidian export example:
+
+```bash
+npm run devgod -- export-docs give me a listed summary of all things we worked on the 10th of this month
+```
+
+Obsidian export config example:
+
+```dotenv
+DEVGOD_OBSIDIAN_ENABLED=true
+DEVGOD_OBSIDIAN_VAULT_PATH=/absolute/path/to/Obsidian
+DEVGOD_OBSIDIAN_DEFAULT_PROJECT=devgod
+DEVGOD_OBSIDIAN_DAILY_FOLDER=Devgod/Daily
+DEVGOD_OBSIDIAN_DOCS_FOLDER=Devgod/Docs
+DEVGOD_OBSIDIAN_ADR_FOLDER=Devgod/ADR
+DEVGOD_OBSIDIAN_TIMEZONE=Europe/Madrid
+```
+
+Generated note patterns:
+
+- `Devgod/Daily/2026-05-10.md`
+- `Devgod/Docs/obsidian-export-feature.md`
+- `Devgod/ADR/2026-05-10-devgod-decision-log.md`
+
+Known limitations:
+
+- v1 summaries are deterministic and derived from runtime runs, plans, tasks, handoffs, reviews, and approvals; they do not call an LLM
+- the natural-language parser is intentionally narrow and currently covers explicit ISO dates plus phrases such as `today`, `yesterday`, `this week`, `this month`, and `the 10th of this month`
 
 The transport surface now also includes:
 

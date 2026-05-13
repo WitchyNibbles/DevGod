@@ -368,6 +368,82 @@ export class PostgresStore implements DevgodStore {
     return result.rows[0]?.payload;
   }
 
+  async findRunsByProjectActivity(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+    dateFrom?: string | undefined;
+    dateTo?: string | undefined;
+    timezone: string;
+  }): Promise<RunRecord[]> {
+    const result = await this.client.query<JsonRow<RunRecord>>(
+      `select jsonb_build_object(
+          'id', r.id,
+          'workspaceId', r.workspace_id,
+          'projectId', r.project_id,
+          'actor', r.actor,
+          'title', r.title,
+          'request', r.request_text,
+          'summary', r.intake_summary,
+          'status', r.status,
+          'createdAt', r.created_at,
+          'updatedAt', r.updated_at
+       ) as payload
+       from runs r
+       join projects p on p.id = r.project_id
+       join workspaces w on w.id = p.workspace_id
+       where w.slug = $1
+         and p.slug = $2
+         and (
+           ($3::date is null and $4::date is null)
+           or ((r.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           or ((r.updated_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           or exists (
+             select 1
+             from artifacts a
+             where a.run_id = r.id
+               and a.kind = 'plan'
+               and ((a.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           )
+           or exists (
+             select 1
+             from tasks t
+             where t.run_id = r.id
+               and (
+                 ((t.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+                 or ((t.updated_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+               )
+           )
+           or exists (
+             select 1
+             from handoffs h
+             where h.run_id = r.id
+               and ((h.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           )
+           or exists (
+             select 1
+             from reviews rv
+             where rv.run_id = r.id
+               and ((rv.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           )
+           or exists (
+             select 1
+             from approvals ap
+             where ap.run_id = r.id
+               and ((ap.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           )
+         )
+       order by ((r.updated_at at time zone $5)::date) asc, r.created_at asc`,
+      [
+        params.workspaceSlug,
+        params.projectSlug,
+        params.dateFrom ?? null,
+        params.dateTo ?? null,
+        params.timezone
+      ]
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
   async updateRun(run: RunRecord): Promise<void> {
     await this.client.query(
       `update runs

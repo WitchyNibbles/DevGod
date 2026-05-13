@@ -19,6 +19,13 @@ import { dispatchGithubWorkItem } from "./admin/github-dispatch.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
 import { inspectGitNexusStatus, type GitNexusStatusObservation } from "./admin/gitnexus.ts";
 import { buildOperatorStatusReport, type ReviewIdentityStatusObservation } from "./admin/status.ts";
+import { parseExportDocsRequest } from "./docs-export/parser.ts";
+import { resolveObsidianConfig, validateObsidianConfig } from "./docs-export/obsidian-config.ts";
+import { DocsSummarizer } from "./docs-export/summarizer.ts";
+import { ObsidianMarkdownRenderer } from "./docs-export/renderer.ts";
+import { ObsidianVaultWriter } from "./docs-export/obsidian-writer.ts";
+import { buildObsidianTargetPath } from "./docs-export/targets.ts";
+import { RuntimeWorklogProvider, type WorklogProvider } from "./docs-export/worklog-provider.ts";
 import { isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import {
   createReviewActionContextResolver,
@@ -46,6 +53,7 @@ import type {
   TaskStatus
 } from "./domain/types.ts";
 import type { WorkspaceRecord } from "./domain/types.ts";
+import type { ExportDocsCommandResult } from "./docs-export/models.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 import { QdrantArtifactIndex, type ArtifactVectorIndex } from "./store/qdrant-artifact-index.ts";
 
@@ -714,6 +722,18 @@ interface ExecutePlanContextCommandOptions {
   embedQuery?: ((input: { model: string; text: string }) => Promise<readonly number[]>) | undefined;
 }
 
+interface ExecuteExportDocsCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  now?: Date | undefined;
+  resolveObsidianConfig?: typeof resolveObsidianConfig | undefined;
+  validateObsidianConfig?: typeof validateObsidianConfig | undefined;
+  createWorklogProvider: (input: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => WorklogProvider;
+}
+
 export interface ExecuteIndexRepoMarkdownCommandOptions {
   env?: EnvShape | undefined;
   argv?: readonly string[] | undefined;
@@ -853,6 +873,32 @@ function collectCommandFlagValues(args: readonly string[], flag: string): string
   }
 
   return values;
+}
+
+function collectCommandFreeText(
+  args: readonly string[],
+  options: {
+    valueFlags?: readonly string[] | undefined;
+    booleanFlags?: readonly string[] | undefined;
+  } = {}
+): string {
+  const valueFlags = new Set(options.valueFlags ?? []);
+  const booleanFlags = new Set(options.booleanFlags ?? []);
+  const tokens: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index]!;
+    if (valueFlags.has(value)) {
+      index += 1;
+      continue;
+    }
+    if (booleanFlags.has(value)) {
+      continue;
+    }
+    tokens.push(value);
+  }
+
+  return tokens.join(" ").trim();
 }
 
 async function resolveRunIdForCommand(
@@ -1708,6 +1754,68 @@ export async function executeReportCommandFromArgs(
   };
 }
 
+export async function executeExportDocsCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteExportDocsCommandOptions
+): Promise<ExportDocsCommandResult> {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("export-docs requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags");
+  }
+
+  const resolveObsidianConfigImpl = options.resolveObsidianConfig ?? resolveObsidianConfig;
+  const validateObsidianConfigImpl = options.validateObsidianConfig ?? validateObsidianConfig;
+  const config = resolveObsidianConfigImpl(env, {
+    cwd,
+    projectSlug
+  });
+  await validateObsidianConfigImpl(config);
+
+  const rawQuery = collectCommandFreeText(args, {
+    valueFlags: ["--workspace-slug", "--project-slug"],
+    booleanFlags: ["--overwrite"]
+  });
+  const request = parseExportDocsRequest(rawQuery, config, {
+    now: options.now
+  });
+  const provider = options.createWorklogProvider({
+    workspaceSlug,
+    projectSlug
+  });
+  const entries = await provider.getEntries(request);
+
+  if (entries.length === 0) {
+    const dateLabel =
+      request.dateFrom && request.dateTo && request.dateFrom === request.dateTo
+        ? request.dateFrom
+        : request.dateFrom && request.dateTo
+          ? `${request.dateFrom} to ${request.dateTo}`
+          : "the requested range";
+    return {
+      request,
+      message: `No matching worklog entries found for ${dateLabel}. No note was created.`,
+      matchedEntries: 0
+    };
+  }
+
+  const summary = new DocsSummarizer().summarize(entries, request);
+  const markdown = new ObsidianMarkdownRenderer().render(summary, request);
+  const writer = new ObsidianVaultWriter(config.vaultPath!);
+  const targetPath = await writer.writeNote(markdown, buildObsidianTargetPath(request, summary), args.includes("--overwrite"));
+
+  return {
+    request,
+    summary,
+    targetPath,
+    message: `Exported Obsidian note:\n${targetPath}`,
+    matchedEntries: entries.length
+  };
+}
+
 async function reportCommand(args: readonly string[]) {
   await withClient(async (client) => {
     const store = new PostgresStore(client);
@@ -1823,6 +1931,23 @@ async function planContextCommand(args: readonly string[]) {
     }
 
     console.log(JSON.stringify(result.report));
+  });
+}
+
+async function exportDocsCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const result = await executeExportDocsCommandFromArgs(args, {
+      cwd: process.cwd(),
+      env: process.env,
+      createWorklogProvider({ workspaceSlug, projectSlug }) {
+        return new RuntimeWorklogProvider(createRuntimeStore(client), {
+          workspaceSlug,
+          projectSlug
+        });
+      }
+    });
+
+    process.stdout.write(`${result.message}\n`);
   });
 }
 
@@ -1986,6 +2111,11 @@ async function main() {
 
   if (command === "plan-context") {
     await planContextCommand(args);
+    return;
+  }
+
+  if (command === "export-docs" || command === "/export-docs") {
+    await exportDocsCommand(args);
     return;
   }
 

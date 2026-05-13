@@ -39,6 +39,7 @@ Useful runtime operator commands inside a consuming repo:
 - `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
 - `npm run devgod:ops -- --run-id latest --format text` for the operator dashboard
 - `npm run devgod:recover -- --run-id <run-id>` for advisory recovery inspection or `--apply-safe` to repair safe cases
+- `npm run devgod:export-docs -- summarize what we worked on today` for an Obsidian work note when `DEVGOD_OBSIDIAN_*` is configured
 - `npm run devgod:health` for database reachability
 - `npm run devgod:verify:review-identity` to replay reviewed adapter fixtures
 
