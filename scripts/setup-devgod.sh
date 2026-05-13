@@ -11,16 +11,6 @@ if [[ ! -f .env && -f .env.example ]]; then
   echo "created .env from .env.example"
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required for local setup unless you provide a managed Postgres backend" >&2
-  exit 1
-fi
-
-if ! docker version >/dev/null 2>&1; then
-  echo "docker is installed but not usable from this environment; enable Docker Desktop WSL integration or provide a managed Postgres backend" >&2
-  exit 1
-fi
-
 is_safe_env_key() {
   [[ "$1" =~ ^DEVGOD_[A-Z0-9_]+$ ]]
 }
@@ -121,6 +111,10 @@ load_env_file() {
         continue
       fi
 
+      if [[ -n "${!key+x}" ]]; then
+        continue
+      fi
+
       value="$(trim_leading_whitespace "$raw_value")"
 
       if [[ "${value:0:1}" == '"' ]]; then
@@ -141,6 +135,129 @@ load_env_file() {
   done < "$env_file"
 }
 
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+normalize_runtime_mode() {
+  local candidate="${1:-auto}"
+  case "${candidate,,}" in
+    ""|auto)
+      printf 'auto\n'
+      ;;
+    docker|native|managed)
+      printf '%s\n' "${candidate,,}"
+      ;;
+    *)
+      fail "invalid DEVGOD_RUNTIME_MODE: ${candidate}"
+      ;;
+  esac
+}
+
+derive_runtime_mode_from_profile() {
+  local candidate="${1:-}"
+  case "${candidate,,}" in
+    local-docker)
+      printf 'docker\n'
+      ;;
+    local-native)
+      printf 'native\n'
+      ;;
+    managed)
+      printf 'managed\n'
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
+runtime_profile_for_mode() {
+  case "$1" in
+    docker)
+      printf 'local-docker\n'
+      ;;
+    native)
+      printf 'local-native\n'
+      ;;
+    managed)
+      printf 'managed\n'
+      ;;
+    *)
+      fail "unsupported runtime mode: $1"
+      ;;
+  esac
+}
+
+docker_runtime_available() {
+  command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1
+}
+
+resolve_runtime_mode() {
+  local requested_mode="$1"
+  if [[ "$requested_mode" != "auto" ]]; then
+    printf '%s\n' "$requested_mode"
+    return
+  fi
+
+  local profile_mode
+  profile_mode="$(derive_runtime_mode_from_profile "${DEVGOD_RUNTIME_PROFILE:-}")"
+  if [[ "$profile_mode" == "managed" || "$profile_mode" == "native" ]]; then
+    printf '%s\n' "$profile_mode"
+    return
+  fi
+
+  if docker_runtime_available; then
+    printf 'docker\n'
+    return
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    printf 'native\n'
+    return
+  fi
+
+  fail "docker runtime is unavailable and native fallback is only supported on Linux; set DEVGOD_RUNTIME_MODE=managed or install Docker"
+}
+
+run_privileged() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+
+  command -v sudo >/dev/null 2>&1 || fail "sudo is required for native runtime setup"
+  sudo --non-interactive "$@"
+}
+
+run_as_postgres() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -u postgres "$@"
+    return
+  fi
+
+  command -v runuser >/dev/null 2>&1 || fail "sudo or runuser is required for PostgreSQL administration"
+  runuser -u postgres -- "$@"
+}
+
+systemd_available() {
+  command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1
+}
+
+apt_available() {
+  command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1
+}
+
+apt_search_first_package() {
+  local pattern="$1"
+  apt-cache search "$pattern" 2>/dev/null | awk 'NF > 0 { print $1; exit }'
+}
+
+sql_escape_literal() {
+  printf '%s' "$1" | sed "s/'/''/g"
+}
+
 load_env_file ./.env
 
 if [[ -z "${DEVGOD_PROJECT_REPO_PATH:-}" || "${DEVGOD_PROJECT_REPO_PATH}" == "/absolute/path/to/repo" ]]; then
@@ -155,6 +272,14 @@ if [[ -z "${DEVGOD_PROJECT_NAME:-}" ]]; then
   export DEVGOD_PROJECT_NAME="${DEVGOD_PROJECT_SLUG}"
 fi
 
+if [[ -z "${DEVGOD_WORKSPACE_SLUG:-}" ]]; then
+  export DEVGOD_WORKSPACE_SLUG="default"
+fi
+
+if [[ -z "${DEVGOD_WORKSPACE_NAME:-}" ]]; then
+  export DEVGOD_WORKSPACE_NAME="Default Workspace"
+fi
+
 if [[ -z "${DEVGOD_DOCKER_CONTAINER_NAME:-}" ]]; then
   export DEVGOD_DOCKER_CONTAINER_NAME="devgod-postgres-${DEVGOD_PROJECT_SLUG}"
 fi
@@ -163,13 +288,32 @@ if [[ -z "${DEVGOD_QDRANT_CONTAINER_NAME:-}" ]]; then
   export DEVGOD_QDRANT_CONTAINER_NAME="devgod-qdrant-${DEVGOD_PROJECT_SLUG}"
 fi
 
+if [[ -z "${DEVGOD_RUNTIME_DATA_ROOT:-}" ]]; then
+  export DEVGOD_RUNTIME_DATA_ROOT="$HOME/.local/share/devgod/${DEVGOD_PROJECT_SLUG}"
+fi
+
+if [[ -z "${DEVGOD_QDRANT_PORT:-}" ]]; then
+  export DEVGOD_QDRANT_PORT="6333"
+fi
+
+if [[ -z "${DEVGOD_QDRANT_GRPC_PORT:-}" ]]; then
+  export DEVGOD_QDRANT_GRPC_PORT="6334"
+fi
+
 if [[ -z "${DEVGOD_QDRANT_URL:-}" ]]; then
-  export DEVGOD_QDRANT_URL="http://127.0.0.1:${DEVGOD_QDRANT_PORT:-6333}"
+  export DEVGOD_QDRANT_URL="http://127.0.0.1:${DEVGOD_QDRANT_PORT}"
+fi
+
+if [[ -z "${DEVGOD_POSTGRES_PORT:-}" ]]; then
+  export DEVGOD_POSTGRES_PORT="5432"
 fi
 
 if [[ -z "${DEVGOD_POSTGRES_PASSWORD:-}" || "${DEVGOD_POSTGRES_PASSWORD}" == "devgod" ]]; then
-  echo "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues" >&2
-  exit 1
+  fail "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues"
+fi
+
+if [[ -z "${DEVGOD_CORE_DATABASE_URL:-}" ]]; then
+  export DEVGOD_CORE_DATABASE_URL="postgres://${DEVGOD_POSTGRES_USER:-devgod}:${DEVGOD_POSTGRES_PASSWORD}@127.0.0.1:${DEVGOD_POSTGRES_PORT}/${DEVGOD_POSTGRES_DB:-devgod}"
 fi
 
 wait_for_container_health() {
@@ -210,15 +354,195 @@ wait_for_qdrant_http() {
   done
 
   echo "devgod-qdrant did not answer health checks at ${qdrant_url}" >&2
-  docker logs "${DEVGOD_QDRANT_CONTAINER_NAME}" --tail 100 >&2 || true
   exit 1
 }
 
-docker compose up -d devgod-postgres devgod-qdrant
+wait_for_postgres_native() {
+  echo "waiting for PostgreSQL to accept local connections"
+  for _ in {1..60}; do
+    if run_as_postgres pg_isready -q >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
 
-wait_for_container_health "${DEVGOD_DOCKER_CONTAINER_NAME}" "devgod-postgres"
-wait_for_container_health "${DEVGOD_QDRANT_CONTAINER_NAME}" "devgod-qdrant"
-wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
+  fail "postgresql did not become ready"
+}
+
+ensure_native_linux_support() {
+  [[ "$(uname -s)" == "Linux" ]] || fail "native runtime mode is only supported on Linux and WSL"
+  systemd_available || fail "native runtime mode requires systemd; on WSL enable systemd or use DEVGOD_RUNTIME_MODE=managed"
+  [[ "${DEVGOD_POSTGRES_PORT}" == "5432" ]] || fail "native runtime mode currently supports DEVGOD_POSTGRES_PORT=5432 only"
+}
+
+ensure_native_postgres_tools() {
+  if command -v psql >/dev/null 2>&1 && command -v pg_isready >/dev/null 2>&1; then
+    return
+  fi
+
+  apt_available || fail "native runtime mode requires PostgreSQL client tools or apt-get support"
+  run_privileged apt-get update
+  run_privileged apt-get install -y postgresql postgresql-contrib postgresql-client
+}
+
+ensure_native_qdrant_binary() {
+  if [[ -n "${DEVGOD_NATIVE_QDRANT_EXECUTABLE:-}" && -x "${DEVGOD_NATIVE_QDRANT_EXECUTABLE}" ]]; then
+    printf '%s\n' "${DEVGOD_NATIVE_QDRANT_EXECUTABLE}"
+    return
+  fi
+
+  if command -v qdrant >/dev/null 2>&1; then
+    command -v qdrant
+    return
+  fi
+
+  apt_available || fail "native runtime mode requires a qdrant binary on PATH or an apt package named qdrant"
+  local qdrant_package
+  qdrant_package="$(apt_search_first_package '^qdrant$')"
+  [[ -n "$qdrant_package" ]] || fail "native runtime mode could not find a qdrant package; install Qdrant locally or use managed mode"
+  run_privileged apt-get update
+  run_privileged apt-get install -y "$qdrant_package"
+  command -v qdrant >/dev/null 2>&1 || fail "qdrant package installed but qdrant binary is still unavailable"
+  command -v qdrant
+}
+
+ensure_native_pgvector_available() {
+  local available
+  available="$(run_as_postgres psql -Atqc "select 1 from pg_available_extensions where name = 'vector'" postgres 2>/dev/null || true)"
+  if [[ "$available" == "1" ]]; then
+    return
+  fi
+
+  apt_available || fail "native runtime mode requires pgvector to be installed for PostgreSQL"
+  local package_name
+  package_name="$(apt_search_first_package 'pgvector')"
+  [[ -n "$package_name" ]] || fail "native runtime mode could not find a pgvector package; install pgvector locally before rerunning setup"
+  run_privileged apt-get update
+  run_privileged apt-get install -y "$package_name"
+}
+
+ensure_native_postgres_database() {
+  local escaped_user escaped_db escaped_password role_exists db_exists
+  escaped_user="$(sql_escape_literal "${DEVGOD_POSTGRES_USER:-devgod}")"
+  escaped_db="$(sql_escape_literal "${DEVGOD_POSTGRES_DB:-devgod}")"
+  escaped_password="$(sql_escape_literal "${DEVGOD_POSTGRES_PASSWORD}")"
+
+  role_exists="$(run_as_postgres psql -Atqc "select 1 from pg_roles where rolname = '${escaped_user}'" postgres 2>/dev/null || true)"
+  if [[ "$role_exists" != "1" ]]; then
+    run_as_postgres psql -v ON_ERROR_STOP=1 -c "create role \"${DEVGOD_POSTGRES_USER:-devgod}\" with login password '${escaped_password}'" postgres
+  else
+    run_as_postgres psql -v ON_ERROR_STOP=1 -c "alter role \"${DEVGOD_POSTGRES_USER:-devgod}\" with login password '${escaped_password}'" postgres
+  fi
+
+  db_exists="$(run_as_postgres psql -Atqc "select 1 from pg_database where datname = '${escaped_db}'" postgres 2>/dev/null || true)"
+  if [[ "$db_exists" != "1" ]]; then
+    run_as_postgres psql -v ON_ERROR_STOP=1 -c "create database \"${DEVGOD_POSTGRES_DB:-devgod}\" owner \"${DEVGOD_POSTGRES_USER:-devgod}\"" postgres
+  fi
+
+  run_as_postgres psql -v ON_ERROR_STOP=1 -d "${DEVGOD_POSTGRES_DB:-devgod}" -c "create extension if not exists vector"
+}
+
+install_qdrant_systemd_unit() {
+  local qdrant_executable="$1"
+  local service_name="${DEVGOD_NATIVE_QDRANT_SERVICE_NAME:-devgod-qdrant-${DEVGOD_PROJECT_SLUG}}"
+  local unit_dir="${DEVGOD_NATIVE_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  local config_root="${DEVGOD_NATIVE_QDRANT_CONFIG_ROOT:-${DEVGOD_RUNTIME_DATA_ROOT}/qdrant}"
+  local storage_dir="${DEVGOD_NATIVE_QDRANT_STORAGE_DIR:-${config_root}/storage}"
+  local snapshots_dir="${DEVGOD_NATIVE_QDRANT_SNAPSHOTS_DIR:-${config_root}/snapshots}"
+  local temp_dir="${DEVGOD_NATIVE_QDRANT_TEMP_DIR:-${config_root}/tmp}"
+  local config_path="${config_root}/config.yaml"
+  local unit_path="${unit_dir}/${service_name}.service"
+  local service_user="${DEVGOD_NATIVE_QDRANT_SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
+  local tmp_unit
+
+  mkdir -p "$config_root" "$storage_dir" "$snapshots_dir" "$temp_dir"
+  run_privileged mkdir -p "$unit_dir"
+
+  cat > "$config_path" <<EOF
+log_level: INFO
+storage:
+  storage_path: ${storage_dir}
+  snapshots_path: ${snapshots_dir}
+  temp_path: ${temp_dir}
+service:
+  host: 127.0.0.1
+  http_port: ${DEVGOD_QDRANT_PORT}
+  grpc_port: ${DEVGOD_QDRANT_GRPC_PORT}
+EOF
+
+  tmp_unit="$(mktemp)"
+  cat > "$tmp_unit" <<EOF
+[Unit]
+Description=Devgod Qdrant (${DEVGOD_PROJECT_SLUG})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${service_user}
+ExecStart=${qdrant_executable} --config-path ${config_path}
+WorkingDirectory=${config_root}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  run_privileged install -m 0644 "$tmp_unit" "$unit_path"
+  rm -f "$tmp_unit"
+  printf '%s\n' "$service_name"
+}
+
+setup_docker_runtime() {
+  docker_runtime_available || fail "docker runtime mode selected but Docker is not available; use DEVGOD_RUNTIME_MODE=native or managed instead"
+  docker compose up -d devgod-postgres devgod-qdrant
+
+  wait_for_container_health "${DEVGOD_DOCKER_CONTAINER_NAME}" "devgod-postgres"
+  wait_for_container_health "${DEVGOD_QDRANT_CONTAINER_NAME}" "devgod-qdrant"
+  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
+}
+
+setup_native_runtime() {
+  ensure_native_linux_support
+  ensure_native_postgres_tools
+
+  run_privileged systemctl enable --now postgresql
+  wait_for_postgres_native
+  ensure_native_pgvector_available
+  ensure_native_postgres_database
+
+  local qdrant_executable qdrant_service_name
+  qdrant_executable="$(ensure_native_qdrant_binary)"
+  qdrant_service_name="$(install_qdrant_systemd_unit "$qdrant_executable")"
+  run_privileged systemctl daemon-reload
+  run_privileged systemctl enable --now "$qdrant_service_name"
+  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
+}
+
+setup_managed_runtime() {
+  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
+}
+
+requested_runtime_mode="$(normalize_runtime_mode "${DEVGOD_RUNTIME_MODE:-auto}")"
+runtime_mode="$(resolve_runtime_mode "$requested_runtime_mode")"
+export DEVGOD_RUNTIME_MODE="$runtime_mode"
+export DEVGOD_RUNTIME_PROFILE="$(runtime_profile_for_mode "$runtime_mode")"
+
+case "$runtime_mode" in
+  docker)
+    setup_docker_runtime
+    ;;
+  native)
+    setup_native_runtime
+    ;;
+  managed)
+    setup_managed_runtime
+    ;;
+  *)
+    fail "unsupported runtime mode: $runtime_mode"
+    ;;
+esac
 
 if [[ ! -d node_modules ]]; then
   npm install
@@ -234,7 +558,8 @@ npm run verify:setup
 
 echo ""
 echo "devgod local setup complete"
-echo "workspace: ${DEVGOD_WORKSPACE_SLUG}"
-echo "project: ${DEVGOD_PROJECT_SLUG}"
+echo "runtime mode: ${DEVGOD_RUNTIME_MODE}"
+echo "workspace: ${DEVGOD_WORKSPACE_SLUG:-default}"
+echo "project: ${DEVGOD_PROJECT_SLUG:-unknown}"
 echo "database: configured"
 echo "qdrant: configured"

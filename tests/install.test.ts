@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -1540,6 +1540,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(dockerCalls, [
       "version",
+      "version",
       "compose up -d devgod-postgres devgod-qdrant",
       "inspect -f {{.State.Health.Status}} devgod-postgres",
       "inspect -f {{.State.Health.Status}} devgod-qdrant"
@@ -1555,6 +1556,266 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
 
     const copiedEnv = await readFile(path.join(targetRoot, ".env"), "utf8");
     assert.match(copiedEnv, /DEVGOD_PROJECT_REPO_PATH=\/absolute\/path\/to\/repo/);
+  } finally {
+    await healthServer.close();
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installed setup script falls back to native Linux services when docker is unavailable", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-setup-native-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const binDir = path.join(targetRoot, "bin");
+  const dockerLog = path.join(targetRoot, "docker-log.txt");
+  const systemctlLog = path.join(targetRoot, "systemctl-log.txt");
+  const sudoLog = path.join(targetRoot, "sudo-log.txt");
+  const psqlLog = path.join(targetRoot, "psql-log.txt");
+  const npmLog = path.join(targetRoot, "npm-log.txt");
+  const unitDir = path.join(targetRoot, "systemd");
+  const healthServer = await startHealthServer();
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await mkdir(unitDir, { recursive: true });
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    await writeExecutable(
+      path.join(binDir, "docker"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_DOCKER_LOG_FILE:?missing docker log}"',
+        'if [[ "${1:-}" == "version" ]]; then',
+        "  exit 1",
+        "fi",
+        "exit 1"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "systemctl"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_SYSTEMCTL_LOG_FILE:?missing systemctl log}"',
+        'case "${1:-}" in',
+        "  is-system-running)",
+        '    printf "%s\\n" "running"',
+        "    exit 0",
+        "    ;;",
+        "  daemon-reload|enable|start|enable\\ --now)",
+        "    exit 0",
+        "    ;;",
+        "  is-active)",
+        "    exit 0",
+        "    ;;",
+        "esac",
+        "exit 0"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "sudo"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_SUDO_LOG_FILE:?missing sudo log}"',
+        'if [[ "${1:-}" == "-u" ]]; then',
+        "  shift 2",
+        "fi",
+        'if [[ "${1:-}" == "--non-interactive" ]]; then',
+        "  shift",
+        "fi",
+        'exec "$@"'
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "qdrant"),
+      "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
+    );
+
+    await writeExecutable(
+      path.join(binDir, "pg_isready"),
+      "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
+    );
+
+    await writeExecutable(
+      path.join(binDir, "psql"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_PSQL_LOG_FILE:?missing psql log}"',
+        'if printf "%s" "$*" | grep -Fq "pg_available_extensions"; then',
+        '  printf "%s\\n" "1"',
+        "fi",
+        "exit 0"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "npm"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_NPM_LOG_FILE:?missing npm log}"',
+        'case "${1:-}" in',
+        "  install)",
+        "    exit 0",
+        "    ;;",
+        "  run)",
+        '    case "${2:-}" in',
+        "      migrate|bootstrap|verify:setup)",
+        "        exit 0",
+        "        ;;",
+        "    esac",
+        "    ;;",
+        "esac",
+        'printf "unexpected npm call: %s\\n" "$*" >&2',
+        "exit 1"
+      ].join("\n")
+    );
+
+    await execFileAsync("bash", [path.join(targetRoot, "scripts", "devgod-setup.sh")], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        HOME: targetRoot,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        DEVGOD_POSTGRES_PASSWORD: "fixture-local-password",
+        DEVGOD_DOCKER_LOG_FILE: dockerLog,
+        DEVGOD_SYSTEMCTL_LOG_FILE: systemctlLog,
+        DEVGOD_SUDO_LOG_FILE: sudoLog,
+        DEVGOD_PSQL_LOG_FILE: psqlLog,
+        DEVGOD_NPM_LOG_FILE: npmLog,
+        DEVGOD_NATIVE_SYSTEMD_UNIT_DIR: unitDir,
+        DEVGOD_QDRANT_URL: healthServer.url
+      }
+    });
+
+    const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
+    assert.deepEqual(dockerCalls, ["version"]);
+
+    const systemctlCalls = (await readFile(systemctlLog, "utf8")).trim().split(/\n+/);
+    assert.match(systemctlCalls.join("\n"), /is-system-running/);
+    assert.match(systemctlCalls.join("\n"), /enable --now postgresql/);
+    assert.match(systemctlCalls.join("\n"), /daemon-reload/);
+    assert.match(systemctlCalls.join("\n"), /enable --now devgod-qdrant-devgod/);
+
+    const sudoCalls = await readFile(sudoLog, "utf8");
+    assert.match(sudoCalls, /-u postgres psql/);
+
+    const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
+    assert.deepEqual(npmCalls, [
+      "install",
+      "run migrate",
+      "run bootstrap",
+      "run verify:setup"
+    ]);
+
+    const unitFiles = await readdir(unitDir);
+    const qdrantUnitFile = unitFiles.find((entry) => entry.startsWith("devgod-qdrant-") && entry.endsWith(".service"));
+    assert.ok(qdrantUnitFile, "expected a qdrant systemd unit file");
+    const qdrantUnit = await readFile(path.join(unitDir, qdrantUnitFile), "utf8");
+    assert.match(qdrantUnit, /ExecStart=.*qdrant/);
+    const runtimeProjects = await readdir(path.join(targetRoot, ".local", "share", "devgod"));
+    assert.ok(runtimeProjects.length > 0, "expected a native runtime data root");
+    const qdrantConfig = await readFile(
+      path.join(targetRoot, ".local", "share", "devgod", runtimeProjects[0]!, "qdrant", "config.yaml"),
+      "utf8"
+    );
+    assert.match(qdrantConfig, /http_port: \d+/);
+  } finally {
+    await healthServer.close();
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installed setup script honors managed runtime mode without taking service ownership", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-setup-managed-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const binDir = path.join(targetRoot, "bin");
+  const dockerLog = path.join(targetRoot, "docker-log.txt");
+  const systemctlLog = path.join(targetRoot, "systemctl-log.txt");
+  const npmLog = path.join(targetRoot, "npm-log.txt");
+  const healthServer = await startHealthServer();
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
+      "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
+      `DEVGOD_QDRANT_URL=${healthServer.url}`
+    );
+    await writeFile(path.join(targetRoot, ".env.example"), installedExampleEnv, "utf8");
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    await writeExecutable(
+      path.join(binDir, "docker"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_DOCKER_LOG_FILE:?missing docker log}"',
+        "exit 99"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "systemctl"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_SYSTEMCTL_LOG_FILE:?missing systemctl log}"',
+        "exit 99"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "npm"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_NPM_LOG_FILE:?missing npm log}"',
+        'case "${1:-}" in',
+        "  install)",
+        "    exit 0",
+        "    ;;",
+        "  run)",
+        '    case "${2:-}" in',
+        "      migrate|bootstrap|verify:setup)",
+        "        exit 0",
+        "        ;;",
+        "    esac",
+        "    ;;",
+        "esac",
+        'printf "unexpected npm call: %s\\n" "$*" >&2',
+        "exit 1"
+      ].join("\n")
+    );
+
+    await execFileAsync("bash", [path.join(targetRoot, "scripts", "devgod-setup.sh")], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        DEVGOD_RUNTIME_MODE: "managed",
+        DEVGOD_DOCKER_LOG_FILE: dockerLog,
+        DEVGOD_SYSTEMCTL_LOG_FILE: systemctlLog,
+        DEVGOD_NPM_LOG_FILE: npmLog,
+        DEVGOD_QDRANT_URL: healthServer.url
+      }
+    });
+
+    await assert.rejects(readFile(dockerLog, "utf8"));
+    await assert.rejects(readFile(systemctlLog, "utf8"));
+    const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
+    assert.deepEqual(npmCalls, [
+      "install",
+      "run migrate",
+      "run bootstrap",
+      "run verify:setup"
+    ]);
   } finally {
     await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });

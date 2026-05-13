@@ -21,7 +21,7 @@ Host prerequisites:
 - Node.js `>=22`
 - `npm`
 - Bash for `scripts/install-devgod.sh`, or PowerShell for `scripts/install-devgod.ps1`
-- Docker only if you later choose the shipped local setup path
+- Docker only if you later choose Docker as the shipped local runtime mode
 - a clone of this repo in a stable local path, or an unpacked package copy with the same installer assets
 
 Supported CLI inventory:
@@ -42,7 +42,7 @@ Fast path:
 1. Clone this repo somewhere permanent.
 2. Install `devgod` into the target project.
 3. In the target project, run `npm install`.
-4. If you want the shipped local Docker bootstrap path, run `npm run devgod:setup:local`.
+4. If you want the shipped local runtime bootstrap path, run `npm run devgod:setup:local`.
 5. Use `npm run devgod:doctor` and `npm run devgod:verify:setup` as the blocking runtime proof after you intentionally run the setup/bootstrap path. `doctor` now works before the repo has any run history; review-identity findings stay advisory until you wire a live adapter.
 
 ## Install Into An Existing Project
@@ -129,7 +129,7 @@ It will:
 
 It will not:
 
-- claim that package install also means host setup, Docker bootstrap, or review-trust wiring is complete
+- claim that package install also means host setup, runtime bootstrap, or review-trust wiring is complete
 - run `npm install`, Docker, migrations, or bootstrap for you
 - copy live `.devgod/work/` history from this source repo into the target repo
 - copy reviewed durable memory content into the target repo
@@ -137,14 +137,18 @@ It will not:
 
 ## Setup After Install
 
-Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped Docker-first setup path. That path now provisions the local Postgres and Qdrant runtime services before it runs the repo bootstrap commands.
+Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped runtime-owned setup path. That path resolves a runtime mode, provisions or validates Postgres and Qdrant accordingly, and only then runs the repo bootstrap commands.
 
 That command runs `src/install/setup-local.ts`, which dispatches to the generated target-repo setup script, and then does this:
 
 1. creates `.env.devgod` from `.env.devgod.example` if needed
-2. checks Docker availability
-3. fills in sane defaults for the target repo path and project identity
-4. starts `docker-compose.devgod.yml`
+2. fills in sane defaults for the target repo path, workspace, project identity, and runtime env
+3. resolves runtime mode from `DEVGOD_RUNTIME_MODE`
+4. owns lifecycle only when appropriate:
+   - `docker` starts `docker-compose.devgod.yml`
+   - `native` starts local Linux services
+   - `managed` validates connectivity only and does not start services
+   - `auto` prefers Docker when available and otherwise falls back to native on Linux/WSL
 5. runs `npm install`
 6. runs `npm run devgod:setup:git-guard` when the repo has an installed `devgod` manifest and git metadata
 7. runs `npm run devgod:migrate`
@@ -152,7 +156,7 @@ That command runs `src/install/setup-local.ts`, which dispatches to the generate
 9. runs `npm run devgod:verify:setup`
 10. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
 
-The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml` with the local Postgres and Qdrant services. That behavior is separate from the installer itself.
+The shipped `npm run devgod:setup:local` path now treats the runtime as mandatory. If Docker is unavailable on Linux/WSL, the setup path falls back to native local services instead of failing immediately. Managed mode remains validation-only.
 
 If you want the repo-local commit guard without the Docker/bootstrap path, run `npm run devgod:setup:git-guard` and then `npm run devgod:verify:git-guard`.
 
@@ -190,6 +194,7 @@ Usually useful:
 - `DEVGOD_WORKSPACE_NAME`
 - `DEVGOD_PROJECT_NAME`
 - `DEVGOD_PROJECT_REPO_PATH`
+- `DEVGOD_RUNTIME_MODE`
 - `DEVGOD_RUNTIME_PROFILE`
 - `DEVGOD_RUNTIME_DATA_ROOT`
 - `DEVGOD_POSTGRES_DB`
@@ -218,6 +223,7 @@ Defaults in the shipped target-repo example and setup path:
 - `DEVGOD_PROJECT_REPO_PATH` defaults to the current target repo path
 - `DEVGOD_PROJECT_SLUG` defaults to the target repo directory name
 - `DEVGOD_PROJECT_NAME` defaults to `DEVGOD_PROJECT_SLUG`
+- `DEVGOD_RUNTIME_MODE` defaults to `auto`
 - `DEVGOD_DOCKER_CONTAINER_NAME` defaults to `devgod-postgres-${DEVGOD_PROJECT_SLUG}`
 - `DEVGOD_QDRANT_URL` defaults to `http://127.0.0.1:6333`
 - `DEVGOD_QDRANT_COLLECTION` defaults to `devgod-memory`
@@ -226,6 +232,7 @@ Defaults in the shipped target-repo example and setup path:
 Credential note:
 
 - `.env.devgod.example` now defaults to a loopback-only local password and loopback-bound ports for the shipped Docker path
+- `native` mode currently targets Linux/WSL with `systemd`; on Windows the shipped PowerShell setup supports `docker` and `managed`
 - for any non-local database, use unique credentials and a dedicated database
 - the shipped Docker compose path binds Postgres and Qdrant REST to `127.0.0.1` and does not publish Qdrant gRPC by default
 - `DEVGOD_POSTGRES_PASSWORD` must not be left at the legacy `devgod` value when you run the local setup wrapper
@@ -251,7 +258,8 @@ Once the repo is configured, the intended operating rhythm is:
 - reviewed durable memory lives under `.devgod/memory/`
 - repo-local skills live under `.agents/skills/devgod-*`
 - reviewer, QA, and security gates block completion for substantive work
-- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` is the workflow-integrity proof before a substantive completion claim
+- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof for the shipped workflow shape
+- `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is the live workflow-integrity proof before a substantive completion claim
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
 

@@ -3,11 +3,58 @@ import os from "node:os";
 import path from "node:path";
 
 export interface RuntimeEnvironmentConfig {
+  runtimeMode: RuntimeMode;
   runtimeProfile: string;
   dataRoot: string;
   qdrantUrl: string;
   qdrantCollection: string;
   installManifestPath: string;
+}
+
+export const runtimeModes = ["docker", "native", "managed"] as const;
+export type RuntimeMode = (typeof runtimeModes)[number];
+
+function normalizeRuntimeMode(candidate: string): RuntimeMode | "auto" {
+  const normalized = candidate.trim().toLowerCase();
+  switch (normalized) {
+    case "":
+    case "auto":
+      return "auto";
+    case "docker":
+    case "native":
+    case "managed":
+      return normalized;
+    default:
+      throw new Error(`invalid runtime mode: ${candidate}`);
+  }
+}
+
+export function runtimeProfileForMode(mode: RuntimeMode): string {
+  switch (mode) {
+    case "docker":
+      return "local-docker";
+    case "native":
+      return "local-native";
+    case "managed":
+      return "managed";
+  }
+}
+
+export function runtimeModeFromProfile(profile: string): RuntimeMode {
+  const normalized = profile.trim().toLowerCase();
+  if (normalized === "managed" || normalized.startsWith("managed")) {
+    return "managed";
+  }
+  if (normalized === "local-native" || normalized.startsWith("local-native")) {
+    return "native";
+  }
+  if (normalized === "local-docker" || normalized.startsWith("local-docker")) {
+    return "docker";
+  }
+  if (normalized.startsWith("local")) {
+    return "docker";
+  }
+  throw new Error(`invalid runtime profile: ${profile}`);
 }
 
 function isLoopbackHostname(hostname: string): boolean {
@@ -78,7 +125,12 @@ export function resolveRuntimeEnvironmentConfig(
     cwd?: string | undefined;
   }
 ): RuntimeEnvironmentConfig {
-  const runtimeProfile = env.DEVGOD_RUNTIME_PROFILE?.trim() || "local-docker";
+  const requestedRuntimeMode = normalizeRuntimeMode(env.DEVGOD_RUNTIME_MODE?.trim() ?? "auto");
+  const runtimeProfile =
+    requestedRuntimeMode === "auto"
+      ? env.DEVGOD_RUNTIME_PROFILE?.trim() || "local-docker"
+      : runtimeProfileForMode(requestedRuntimeMode);
+  const runtimeMode = runtimeModeFromProfile(runtimeProfile);
   const qdrantPort = env.DEVGOD_QDRANT_PORT?.trim() || "6333";
   const dataRoot = env.DEVGOD_RUNTIME_DATA_ROOT?.trim() || defaultRuntimeDataRoot(options.projectSlug);
   const qdrantUrl = validateRuntimeQdrantUrl(
@@ -87,6 +139,7 @@ export function resolveRuntimeEnvironmentConfig(
   );
 
   return {
+    runtimeMode,
     runtimeProfile,
     dataRoot: path.resolve(options.cwd ?? process.cwd(), dataRoot),
     qdrantUrl,

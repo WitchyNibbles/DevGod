@@ -75,6 +75,9 @@ function Import-DevgodEnvFile {
         if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
             $name = $Matches[1]
             if (Test-DevgodSafeEnvKey -Name $name) {
+                if (Test-Path -LiteralPath "Env:$name") {
+                    return
+                }
                 $value = Trim-DevgodLeadingWhitespace $Matches[2]
                 if ($value -match '^"((?:\\.|[^"])*)"(?:\s+#.*)?$') {
                     $value = Unescape-DevgodDoubleQuotedValue $Matches[1]
@@ -92,14 +95,63 @@ function Import-DevgodEnvFile {
 
 Import-DevgodEnvFile -Path ".env"
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "docker is required for local setup unless you provide a managed Postgres backend"
+function Resolve-DevgodRuntimeModeFromProfile {
+    param([string]$Profile)
+
+    switch ($Profile.ToLowerInvariant()) {
+        "local-docker" { return "docker" }
+        "local-native" { return "native" }
+        "managed" { return "managed" }
+        default { return $null }
+    }
 }
 
-try {
-    docker version | Out-Null
-} catch {
-    throw "docker is installed but not usable from this environment; enable Docker Desktop WSL integration or provide a managed Postgres backend"
+function Resolve-DevgodRuntimeProfile {
+    param([Parameter(Mandatory = $true)][string]$Mode)
+
+    switch ($Mode) {
+        "docker" { return "local-docker" }
+        "native" { return "local-native" }
+        "managed" { return "managed" }
+        default { throw "unsupported runtime mode: $Mode" }
+    }
+}
+
+function Test-DevgodDockerAvailable {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    try {
+        docker version | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-DevgodRuntimeMode {
+    $requested = if ($env:DEVGOD_RUNTIME_MODE) { $env:DEVGOD_RUNTIME_MODE.ToLowerInvariant() } else { "auto" }
+    switch ($requested) {
+        "docker" { return "docker" }
+        "native" { return "native" }
+        "managed" { return "managed" }
+        "auto" {
+            if ($env:DEVGOD_RUNTIME_PROFILE) {
+                $derived = Resolve-DevgodRuntimeModeFromProfile -Profile $env:DEVGOD_RUNTIME_PROFILE
+                if ($derived -and $derived -ne "docker") {
+                    return $derived
+                }
+            }
+            if (Test-DevgodDockerAvailable) {
+                return "docker"
+            }
+            throw "docker runtime is unavailable and native fallback is only supported on Linux/WSL; use DEVGOD_RUNTIME_MODE=managed or run the Unix setup path"
+        }
+        default {
+            throw "invalid DEVGOD_RUNTIME_MODE: $requested"
+        }
+    }
 }
 
 if (-not $env:DEVGOD_PROJECT_REPO_PATH -or $env:DEVGOD_PROJECT_REPO_PATH -eq "/absolute/path/to/repo") {
@@ -112,6 +164,14 @@ if (-not $env:DEVGOD_PROJECT_SLUG) {
 
 if (-not $env:DEVGOD_PROJECT_NAME) {
     $env:DEVGOD_PROJECT_NAME = $env:DEVGOD_PROJECT_SLUG
+}
+
+if (-not $env:DEVGOD_WORKSPACE_SLUG) {
+    $env:DEVGOD_WORKSPACE_SLUG = "default"
+}
+
+if (-not $env:DEVGOD_WORKSPACE_NAME) {
+    $env:DEVGOD_WORKSPACE_NAME = "Default Workspace"
 }
 
 if (-not $env:DEVGOD_DOCKER_CONTAINER_NAME) {
@@ -131,6 +191,16 @@ if (-not $env:DEVGOD_QDRANT_URL) {
 
 if (-not $env:DEVGOD_POSTGRES_PASSWORD -or $env:DEVGOD_POSTGRES_PASSWORD -eq "devgod") {
     throw "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues"
+}
+
+if (-not $env:DEVGOD_POSTGRES_PORT) {
+    $env:DEVGOD_POSTGRES_PORT = "5432"
+}
+
+if (-not $env:DEVGOD_CORE_DATABASE_URL) {
+    $postgresUser = if ($env:DEVGOD_POSTGRES_USER) { $env:DEVGOD_POSTGRES_USER } else { "devgod" }
+    $postgresDb = if ($env:DEVGOD_POSTGRES_DB) { $env:DEVGOD_POSTGRES_DB } else { "devgod" }
+    $env:DEVGOD_CORE_DATABASE_URL = "postgres://$postgresUser:$($env:DEVGOD_POSTGRES_PASSWORD)@127.0.0.1:$($env:DEVGOD_POSTGRES_PORT)/$postgresDb"
 }
 
 function Wait-DevgodContainerHealth {
@@ -185,11 +255,29 @@ function Wait-DevgodQdrantHttp {
     throw "devgod-qdrant did not answer health checks at $Url"
 }
 
-docker compose up -d devgod-postgres devgod-qdrant
+$runtimeMode = Resolve-DevgodRuntimeMode
+$env:DEVGOD_RUNTIME_MODE = $runtimeMode
+$env:DEVGOD_RUNTIME_PROFILE = Resolve-DevgodRuntimeProfile -Mode $runtimeMode
 
-Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_DOCKER_CONTAINER_NAME -Label "devgod-postgres"
-Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_QDRANT_CONTAINER_NAME -Label "devgod-qdrant"
-Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
+switch ($runtimeMode) {
+    "docker" {
+        if (-not (Test-DevgodDockerAvailable)) {
+            throw "docker runtime mode selected but Docker is not available; use DEVGOD_RUNTIME_MODE=managed or run the Unix setup path for native fallback"
+        }
+
+        docker compose up -d devgod-postgres devgod-qdrant
+
+        Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_DOCKER_CONTAINER_NAME -Label "devgod-postgres"
+        Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_QDRANT_CONTAINER_NAME -Label "devgod-qdrant"
+        Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
+    }
+    "managed" {
+        Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
+    }
+    "native" {
+        throw "native runtime mode is only supported through the Unix/Linux setup path; use WSL bash setup or managed mode"
+    }
+}
 
 if (-not (Test-Path -LiteralPath "node_modules")) {
     npm install
@@ -209,6 +297,7 @@ npm run verify:setup
 
 Write-Host ""
 Write-Host "devgod local setup complete"
+Write-Host "runtime mode: $runtimeMode"
 Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"

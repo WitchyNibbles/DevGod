@@ -460,6 +460,67 @@ test("executeDoctorCommandFromArgs works without a run id when a project is boot
   }
 });
 
+test("executeDoctorCommandFromArgs reports runtime mode derived from registration profile", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-runtime-mode-"));
+  const store = new MemoryStore();
+
+  try {
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root"),
+        runtimeProfile: "local-native"
+      })
+    );
+
+    const report = await executeDoctorCommandFromArgs([], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      async getStatusSnapshot() {
+        assert.fail("doctor should not require a run snapshot for bootstrapped projects");
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: false,
+        adapterExists: false,
+        availableBackends: [],
+        bindingsPresent: false,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: false,
+        notes: ["review identity bindings file missing"]
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      })
+    });
+
+    assert.equal(report.runtime.runtimeProfile, "local-native");
+    assert.equal(report.runtime.runtimeMode, "native");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review bindings as separate findings", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-command-"));
   const store = new MemoryStore();

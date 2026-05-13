@@ -186,7 +186,7 @@ function buildNextSteps(
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
         "After npm install, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
-        "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
+        "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
         withGitNexus
           ? "After npm install, run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
           : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
@@ -198,7 +198,7 @@ function buildNextSteps(
     "cd into the target project",
     "npm install",
     "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
-    "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
+    "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
     withGitNexus
       ? "Run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
       : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",

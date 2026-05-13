@@ -8,6 +8,7 @@ import { embedQueryText, runEmbeddingJobs, type EmbeddingProvider } from "./runt
 import {
   resolveQdrantCollectionsUrl,
   resolveRuntimeEnvironmentConfig,
+  runtimeModeFromProfile,
   validateRuntimeQdrantUrl
 } from "./runtime/config.ts";
 import { createHashEmbeddingProvider } from "./runtime/hash-embedding-provider.ts";
@@ -1560,6 +1561,7 @@ export async function executeDoctorCommandFromArgs(
     },
     runtime: {
       authorityLabel: "runtime_authoritative" as const,
+      runtimeMode: registration?.runtimeProfile ? runtimeModeFromProfile(registration.runtimeProfile) : undefined,
       runtimeProfile: registration?.runtimeProfile,
       dataRoot: registration?.dataRoot,
       qdrantUrl: registration?.qdrantUrl,
