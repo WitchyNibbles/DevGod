@@ -7,6 +7,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  executeIndexRepoMarkdownCommand,
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs
 } from "../src/admin.ts";
@@ -567,4 +568,59 @@ test("executeRecordReviewCommandFromArgs rejects missing live bindings before at
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("executeIndexRepoMarkdownCommand wires the runtime store into markdown indexing", async () => {
+  const createdClients: unknown[] = [];
+  const createdStores: object[] = [];
+
+  const result = await executeIndexRepoMarkdownCommand({
+    argv: ["node", "src/admin.ts", "index-repo-markdown", "docs"],
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_WORKSPACE_NAME: "Team Workspace",
+      DEVGOD_PROJECT_SLUG: "devgod",
+      DEVGOD_PROJECT_NAME: "Devgod",
+      DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536",
+      DEVGOD_REPO_MARKDOWN_INCLUDE: "README.md,.agents/skills"
+    },
+    async withClient(callback) {
+      const client = { kind: "client" };
+      createdClients.push(client);
+      return callback(client as never);
+    },
+    createStore(client) {
+      const store = {
+        kind: "store",
+        client
+      };
+      createdStores.push(store);
+      return store as never;
+    },
+    async indexRepoMarkdown(input) {
+      assert.equal(input.repoRoot, path.resolve(process.cwd(), "docs"));
+      assert.equal(input.workspaceSlug, "team");
+      assert.equal(input.workspaceName, "Team Workspace");
+      assert.equal(input.projectSlug, "devgod");
+      assert.equal(input.projectName, "Devgod");
+      assert.equal(input.embeddingModel, "devgod-local-hash-1536");
+      assert.deepEqual(input.include, ["README.md", ".agents/skills"]);
+      assert.equal(input.store, createdStores[0]);
+      return {
+        runId: "run-markdown",
+        filesIndexed: 2,
+        chunksStored: 4,
+        jobsQueued: 4
+      };
+    }
+  });
+
+  assert.equal(createdClients.length, 1);
+  assert.equal(createdStores.length, 1);
+  assert.deepEqual(result, {
+    runId: "run-markdown",
+    filesIndexed: 2,
+    chunksStored: 4,
+    jobsQueued: 4
+  });
 });

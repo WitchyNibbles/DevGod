@@ -89,6 +89,94 @@ test("indexRepoMarkdown stores markdown chunks, queues embeddings, and exposes t
   }
 });
 
+test("indexRepoMarkdown default includes capture skill markdown for retrieval", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-skills-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    await mkdir(path.join(repoRoot, ".agents", "skills", "devgod-test"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, ".agents", "skills", "devgod-test", "SKILL.md"),
+      [
+        "# Devgod Test Skill",
+        "",
+        "Use Qdrant-backed retrieval to keep planning context out of repo prompts."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const indexResult = await indexRepoMarkdown({
+      store,
+      repoRoot,
+      workspaceSlug: "team",
+      projectSlug: "devgod"
+    });
+
+    assert.equal(indexResult.filesIndexed, 1);
+
+    const results = await service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "qdrant-backed retrieval"
+    });
+
+    assert.equal(results[0]?.citation.sourcePath, ".agents/skills/devgod-test/SKILL.md");
+    assert.equal(results[0]?.authority.source, "repo_artifact");
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("indexRepoMarkdown preserves distinct chunks when heading slugs repeat within one file", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-duplicate-headings-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    await writeFile(
+      path.join(repoRoot, "README.md"),
+      [
+        "# Runbook",
+        "",
+        "Primary rollback checklist.",
+        "",
+        "## Output Contract",
+        "",
+        "First repeated section keeps the initial guidance.",
+        "",
+        "## Output Contract",
+        "",
+        "Second repeated section must still be retrievable without ID collisions."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const indexResult = await indexRepoMarkdown({
+      store,
+      repoRoot,
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      include: ["README.md"]
+    });
+
+    assert.equal(indexResult.filesIndexed, 1);
+    assert.ok(indexResult.chunksStored >= 3);
+
+    const results = await service.searchMemory({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      query: "ID collisions"
+    });
+
+    assert.equal(results[0]?.citation.sourcePath, "README.md");
+    assert.equal(results[0]?.citation.sourceAnchor, "output-contract");
+    assert.match(results[0]?.content ?? "", /Second repeated section/);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("indexRepoMarkdown replaces stale markdown chunks when files are removed", async () => {
   const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-cleanup-"));
   const store = new MemoryStore();

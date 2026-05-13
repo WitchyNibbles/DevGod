@@ -604,6 +604,111 @@ test("PostgresStore.replaceMarkdownArtifacts rolls back when artifact persistenc
   assert.equal(capture[capture.length - 1]?.text, "rollback");
 });
 
+test("PostgresStore.replaceMarkdownArtifacts does not clear Qdrant when the transaction rolls back", async () => {
+  const capture: QueryCapture[] = [];
+  const qdrantCalls: Array<{ projectId: string; collection: string }> = [];
+  const artifact = createMarkdownArtifactRecord();
+  const client: SqlClient = {
+    async query<Row>(text: string, values?: readonly unknown[]): Promise<SqlQueryResult<Row>> {
+      capture.push({ text, values });
+      if (text.includes("insert into artifacts")) {
+        throw new Error("insert failed");
+      }
+      return {
+        rows: [],
+        rowCount: 0
+      };
+    }
+  };
+  const store = new PostgresStore(client, {
+    artifactVectorIndex: {
+      async upsertArtifactPoint() {
+        assert.fail("replaceMarkdownArtifacts should not upsert vectors");
+      },
+      async deleteProjectArtifacts(input) {
+        qdrantCalls.push({
+          projectId: input.projectId,
+          collection: input.collection
+        });
+      },
+      async queryArtifactMatches() {
+        return [];
+      }
+    }
+  });
+
+  await assert.rejects(
+    store.replaceMarkdownArtifacts({
+      workspaceId: artifact.workspaceId,
+      projectId: artifact.projectId,
+      runId: artifact.runId,
+      artifacts: [artifact]
+    }),
+    /insert failed/
+  );
+
+  assert.deepEqual(qdrantCalls, []);
+  assert.equal(capture[0]?.text, "begin");
+  assert.equal(capture[capture.length - 1]?.text, "rollback");
+});
+
+test("PostgresStore.replaceMarkdownArtifacts clears configured project vectors from Qdrant", async () => {
+  const capture: QueryCapture[] = [];
+  const qdrantCalls: Array<{ projectId: string; collection: string }> = [];
+  const artifact = createMarkdownArtifactRecord();
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [],
+        [],
+        [
+          {
+            runtimeProfile: "local-native",
+            qdrantUrl: "http://127.0.0.1:6333",
+            qdrantCollection: "devgod-memory"
+          }
+        ]
+      ],
+      capture
+    ),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint() {
+          assert.fail("replaceMarkdownArtifacts should not upsert vectors");
+        },
+        async deleteProjectArtifacts(input) {
+          qdrantCalls.push({
+            projectId: input.projectId,
+            collection: input.collection
+          });
+        },
+        async queryArtifactMatches() {
+          return [];
+        }
+      }
+    }
+  );
+
+  await store.replaceMarkdownArtifacts({
+    workspaceId: artifact.workspaceId,
+    projectId: artifact.projectId,
+    runId: artifact.runId,
+    artifacts: [artifact]
+  });
+
+  assert.deepEqual(qdrantCalls, [
+    {
+      projectId: "project:team:devgod",
+      collection: "devgod-memory"
+    }
+  ]);
+  assert.equal(capture[0]?.text, "begin");
+  assert.equal(capture[4]?.text, "commit");
+  assert.match(capture[5]?.text ?? "", /from runtime_project_registrations/);
+});
+
 test("PostgresStore.saveReview persists actor provenance and waiver authority", async () => {
   const capture: QueryCapture[] = [];
   const store = new PostgresStore(sqlClientWithRows([], capture));
@@ -1091,6 +1196,90 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
   assert.deepEqual(capture[5]?.values, ["team", "devgod", "[0.1,0.2]", "text-embedding-3-small", 15]);
 });
 
+test("PostgresStore.searchMemory augments artifact vector retrieval with configured Qdrant matches", async () => {
+  const capture: QueryCapture[] = [];
+  const qdrantQueries: Array<{ projectId: string; collection: string; limit: number }> = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+          {
+            runtimeProfile: "local-native",
+            qdrantUrl: "http://127.0.0.1:6333",
+            qdrantCollection: "devgod-memory"
+          }
+        ],
+        [
+          {
+            id: "artifact-1",
+            runId: "run-1",
+            kind: "markdown_chunk",
+            title: "Qdrant Runbook",
+            content: "Skill context retrieval lives in Qdrant.",
+            sourcePath: ".agents/skills/devgod-test/SKILL.md",
+            sourceAnchor: "devgod-test-skill",
+            metadata: {
+              retrievalRoles: ["planner"],
+              tags: ["repo_markdown", "skills"]
+            },
+            createdAt: "2026-05-11T00:00:00.000Z"
+          }
+        ]
+      ],
+      capture
+    ),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint() {
+          assert.fail("searchMemory should not upsert vectors");
+        },
+        async deleteProjectArtifacts() {
+          assert.fail("searchMemory should not clear vectors");
+        },
+        async queryArtifactMatches(input) {
+          qdrantQueries.push({
+            projectId: input.projectId,
+            collection: input.collection,
+            limit: input.limit
+          });
+          return [{ id: "artifact-1", score: 0.99 }];
+        }
+      }
+    }
+  );
+
+  const [result] = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small",
+    requesterRole: "planner"
+  });
+
+  assert.equal(result?.id, "artifact-1");
+  assert.equal(result?.authority.source, "repo_artifact");
+  assert.equal(result?.citation.sourcePath, ".agents/skills/devgod-test/SKILL.md");
+  assert.deepEqual(qdrantQueries, [
+    {
+      projectId: "project:team:devgod",
+      collection: "devgod-memory",
+      limit: 15
+    }
+  ]);
+  assert.match(capture[6]?.text ?? "", /from runtime_project_registrations/);
+  assert.match(capture[7]?.text ?? "", /from artifacts a/);
+  assert.match(capture[7]?.text ?? "", /a\.id::text = any\(\$2::text\[\]\)/);
+});
+
 test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {
   const store = new PostgresStore(
     sqlClientWithRows([
@@ -1424,16 +1613,17 @@ test("PostgresStore.completeEmbeddingJob writes the vector and marks the job don
     embedding: [0.1, 0.2, 0.3]
   });
 
-  assert.equal(capture.length, 4);
+  assert.equal(capture.length, 5);
   assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
-  assert.match(capture[1]?.text ?? "", /status = 'done'/);
-  assert.match(capture[1]?.text ?? "", /status = 'processing'/);
-  assert.deepEqual(capture[1]?.values, ["job-1", "memory_entries", "memory-1", "text-embedding-3-small"]);
+  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
   assert.match(capture[2]?.text ?? "", /update memory_entries/);
   assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
   assert.deepEqual(capture[2]?.values, ["memory-1", "[0.1,0.2,0.3]", "text-embedding-3-small"]);
-  assert.equal(capture[3]?.text, "commit");
+  assert.match(capture[3]?.text ?? "", /update embedding_jobs/);
+  assert.match(capture[3]?.text ?? "", /status = 'done'/);
+  assert.match(capture[3]?.text ?? "", /status = 'processing'/);
+  assert.deepEqual(capture[3]?.values, ["job-1", "memory_entries", "memory-1", "text-embedding-3-small"]);
+  assert.equal(capture[4]?.text, "commit");
 });
 
 test("PostgresStore.completeEmbeddingJob writes artifact vectors and marks the job done", async () => {
@@ -1471,14 +1661,98 @@ test("PostgresStore.completeEmbeddingJob writes artifact vectors and marks the j
     embedding: [0.4, 0.5]
   });
 
-  assert.equal(capture.length, 4);
+  assert.equal(capture.length, 5);
   assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
-  assert.deepEqual(capture[1]?.values, ["job-artifact", "artifacts", "artifact-1", "text-embedding-3-small"]);
+  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
   assert.match(capture[2]?.text ?? "", /update artifacts/);
   assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
   assert.deepEqual(capture[2]?.values, ["artifact-1", "[0.4,0.5]", "text-embedding-3-small"]);
-  assert.equal(capture[3]?.text, "commit");
+  assert.match(capture[3]?.text ?? "", /update embedding_jobs/);
+  assert.deepEqual(capture[3]?.values, ["job-artifact", "artifacts", "artifact-1", "text-embedding-3-small"]);
+  assert.equal(capture[4]?.text, "commit");
+});
+
+test("PostgresStore.completeEmbeddingJob syncs artifact vectors to the configured Qdrant index", async () => {
+  const capture: QueryCapture[] = [];
+  const qdrantCalls: Array<{ id: string; collection: string; vector: readonly number[] }> = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [
+          {
+            id: "job-artifact",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            sourceTable: "artifacts",
+            sourceId: "artifact-1",
+            embeddingModel: "text-embedding-3-small",
+            status: "processing",
+            errorMessage: null,
+            createdAt: "2026-05-03T00:00:00.000Z",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        ],
+        [{}],
+        [
+          {
+            id: "artifact-1",
+            workspaceId: "workspace:team",
+            projectId: "project:team:devgod",
+            title: "Runbook",
+            content: "Rollback steps",
+            sourcePath: "docs/runbook.md",
+            sourceAnchor: "runbook",
+            retrievalRoles: ["reviewer"],
+            tags: ["repo_markdown"],
+            runtimeProfile: "local-native",
+            qdrantUrl: "http://127.0.0.1:6333",
+            qdrantCollection: "devgod-memory"
+          }
+        ],
+        [{}],
+        []
+      ],
+      capture
+    ),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint(input) {
+          qdrantCalls.push({
+            id: input.point.id,
+            collection: input.collection,
+            vector: input.point.vector
+          });
+        },
+        async deleteProjectArtifacts() {
+          assert.fail("completeEmbeddingJob should not clear the whole collection");
+        },
+        async queryArtifactMatches() {
+          return [];
+        }
+      }
+    }
+  );
+
+  await store.completeEmbeddingJob({
+    jobId: "job-artifact",
+    sourceTable: "artifacts",
+    sourceId: "artifact-1",
+    embeddingModel: "text-embedding-3-small",
+    embedding: [0.4, 0.5]
+  });
+
+  assert.deepEqual(qdrantCalls, [
+    {
+      id: "artifact-1",
+      collection: "devgod-memory",
+      vector: [0.4, 0.5]
+    }
+  ]);
+  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
+  assert.match(capture[2]?.text ?? "", /update artifacts/);
+  assert.match(capture[3]?.text ?? "", /from artifacts a/);
+  assert.match(capture[4]?.text ?? "", /update embedding_jobs/);
 });
 
 test("PostgresStore.failEmbeddingJob records failures without changing the source vector", async () => {

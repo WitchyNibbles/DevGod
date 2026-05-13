@@ -15,6 +15,12 @@ import type {
   TaskRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
+import {
+  buildArtifactSearchResult,
+  canRoleAccessRetrievalMetadata,
+  compareMemorySearchResults
+} from "../core/policy.ts";
+import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
 import { PostgresEmbeddingJobs } from "./postgres-embedding-jobs.ts";
 import { searchMemory } from "./postgres-memory-search.ts";
 import type {
@@ -26,6 +32,7 @@ import type {
   LeaseEmbeddingJobsInput,
   QueueEmbeddingJobInput
 } from "./types.ts";
+import type { ArtifactVectorIndex } from "./qdrant-artifact-index.ts";
 
 export interface SqlQueryResult<Row> {
   rows: Row[];
@@ -41,6 +48,24 @@ export interface SqlClient {
 
 interface JsonRow<T> {
   payload: T;
+}
+
+interface ArtifactHydrationRow {
+  id: string;
+  runId: string;
+  kind: MarkdownArtifactRecord["kind"];
+  title: string;
+  content: string;
+  sourcePath: string | null;
+  sourceAnchor: string | null;
+  metadata: MarkdownArtifactRecord["metadata"] | null;
+  createdAt: string;
+}
+
+interface RuntimeRegistrationLookupRow {
+  runtimeProfile: string | null;
+  qdrantUrl: string | null;
+  qdrantCollection: string | null;
 }
 
 function now(): string {
@@ -62,10 +87,19 @@ async function withTransaction<T>(client: SqlClient, work: () => Promise<T>): Pr
 export class PostgresStore implements DevgodStore {
   private readonly client: SqlClient;
   private readonly embeddingJobs: PostgresEmbeddingJobs;
+  private readonly artifactVectorIndex?: ArtifactVectorIndex | undefined;
 
-  constructor(client: SqlClient) {
+  constructor(
+    client: SqlClient,
+    options: {
+      artifactVectorIndex?: ArtifactVectorIndex | undefined;
+    } = {}
+  ) {
     this.client = client;
-    this.embeddingJobs = new PostgresEmbeddingJobs(client);
+    this.artifactVectorIndex = options.artifactVectorIndex;
+    this.embeddingJobs = new PostgresEmbeddingJobs(client, {
+      artifactVectorIndex: this.artifactVectorIndex
+    });
   }
 
   async ensureProjectContext(params: {
@@ -720,7 +754,7 @@ export class PostgresStore implements DevgodStore {
         `delete from artifacts
          where project_id = $1
            and kind = 'markdown_chunk'`,
-        [input.projectId]
+       [input.projectId]
       );
 
       for (const artifact of input.artifacts) {
@@ -745,6 +779,16 @@ export class PostgresStore implements DevgodStore {
         );
       }
     });
+
+    const registration = this.artifactVectorIndex ? await this.lookupRuntimeRegistration(input.projectId) : undefined;
+    if (this.artifactVectorIndex && registration?.qdrantUrl && registration.qdrantCollection && registration.runtimeProfile) {
+      await this.artifactVectorIndex.deleteProjectArtifacts({
+        baseUrl: registration.qdrantUrl,
+        runtimeProfile: registration.runtimeProfile,
+        collection: registration.qdrantCollection,
+        projectId: input.projectId
+      });
+    }
   }
 
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
@@ -780,7 +824,141 @@ export class PostgresStore implements DevgodStore {
     embeddingModel?: string | undefined;
     requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]> {
-    return searchMemory(this.client, params);
+    const baseResults = await searchMemory(this.client, params);
+
+    if (
+      !this.artifactVectorIndex ||
+      !params.queryEmbedding ||
+      params.queryEmbedding.length === 0
+    ) {
+      return baseResults;
+    }
+
+    const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
+    const requesterRole = params.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
+    const registration = await this.lookupRuntimeRegistration(projectId);
+    if (!registration?.qdrantUrl || !registration.qdrantCollection || !registration.runtimeProfile) {
+      return baseResults;
+    }
+
+    const artifactMatches = await this.artifactVectorIndex.queryArtifactMatches({
+      baseUrl: registration.qdrantUrl,
+      runtimeProfile: registration.runtimeProfile,
+      collection: registration.qdrantCollection,
+      projectId,
+      vector: params.queryEmbedding,
+      limit: Math.min(Math.max(params.limit * 3, 15), 100)
+    });
+
+    if (artifactMatches.length === 0) {
+      return baseResults;
+    }
+
+    const hydratedArtifacts = await this.loadArtifactsByIds(params.projectSlug, artifactMatches.map((match) => match.id));
+    const hydratedById = new Map(hydratedArtifacts.map((artifact) => [artifact.id, artifact]));
+    const qdrantResults = artifactMatches
+      .map((match) => {
+        const artifact = hydratedById.get(match.id);
+        if (!artifact) {
+          return undefined;
+        }
+
+        if (!canRoleAccessRetrievalMetadata(artifact.metadata, requesterRole)) {
+          return undefined;
+        }
+
+        const baseResult = buildArtifactSearchResult(artifact, params.query, params.projectSlug);
+        return {
+          ...baseResult,
+          score: baseResult.score + Math.max(0, match.score) * 6
+        };
+      })
+      .filter((result): result is SearchMemoryResult => Boolean(result));
+
+    if (qdrantResults.length === 0) {
+      return baseResults;
+    }
+
+    const merged = new Map<string, SearchMemoryResult>();
+    for (const result of [...baseResults, ...qdrantResults]) {
+      const existing = merged.get(result.id);
+      if (!existing || result.score > existing.score) {
+        merged.set(result.id, result);
+      }
+    }
+
+    return [...merged.values()].sort(compareMemorySearchResults).slice(0, params.limit);
   }
 
+  private async lookupRuntimeRegistration(projectId: string): Promise<RuntimeRegistrationLookupRow | undefined> {
+    const result = await this.client.query<RuntimeRegistrationLookupRow>(
+      `select
+         runtime_profile as "runtimeProfile",
+         qdrant_url as "qdrantUrl",
+         qdrant_collection as "qdrantCollection"
+       from runtime_project_registrations
+       where project_id = $1`,
+      [projectId]
+    );
+
+    return result.rows[0];
+  }
+
+  private async loadArtifactsByIds(
+    projectSlug: string,
+    artifactIds: readonly string[]
+  ): Promise<
+    Array<
+      Pick<
+        MarkdownArtifactRecord,
+        "id" | "title" | "content" | "sourcePath" | "sourceAnchor" | "createdAt" | "kind" | "metadata" | "runId"
+      >
+    >
+  > {
+    if (artifactIds.length === 0) {
+      return [];
+    }
+
+    const result = await this.client.query<ArtifactHydrationRow>(
+      `select
+         a.id,
+         a.run_id as "runId",
+         a.kind,
+         a.title,
+         coalesce(a.content->>'text', a.content::text) as content,
+         a.metadata->>'sourcePath' as "sourcePath",
+         a.metadata->>'sourceAnchor' as "sourceAnchor",
+         a.metadata as metadata,
+         a.created_at as "createdAt"
+       from artifacts a
+       join projects p on p.id = a.project_id
+       where p.slug = $1
+         and a.id::text = any($2::text[])`,
+      [projectSlug, artifactIds]
+    );
+
+    const byId = new Map(
+      result.rows.map((row) => [
+        row.id,
+        {
+          id: row.id,
+          runId: row.runId,
+          kind: row.kind,
+          title: row.title,
+          content: row.content,
+          sourcePath: row.sourcePath ?? undefined,
+          sourceAnchor: row.sourceAnchor ?? undefined,
+          metadata: row.metadata ?? {},
+          createdAt: row.createdAt
+        }
+      ])
+    );
+
+    return artifactIds.map((artifactId) => byId.get(artifactId)).filter(Boolean) as Array<
+      Pick<
+        MarkdownArtifactRecord,
+        "id" | "title" | "content" | "sourcePath" | "sourceAnchor" | "createdAt" | "kind" | "metadata" | "runId"
+      >
+    >;
+  }
 }

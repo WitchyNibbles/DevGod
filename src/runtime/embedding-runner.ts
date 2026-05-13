@@ -7,6 +7,10 @@ export interface EmbeddingProvider {
     source: EmbeddingSourceRecord;
     text: string;
   }): Promise<readonly number[]>;
+  embedQuery?(input: {
+    model: string;
+    text: string;
+  }): Promise<readonly number[]>;
 }
 
 export interface RunEmbeddingJobsInput {
@@ -26,6 +30,41 @@ export interface RunEmbeddingJobsResult {
 
 export function buildEmbeddingText(source: EmbeddingSourceRecord): string {
   return [source.title.trim(), source.content.trim()].filter((value) => value.length > 0).join("\n\n");
+}
+
+export async function embedQueryText(input: {
+  provider: EmbeddingProvider;
+  model: string;
+  text: string;
+}): Promise<readonly number[]> {
+  if (typeof input.provider.embedQuery === "function") {
+    return input.provider.embedQuery({
+      model: input.model,
+      text: input.text
+    });
+  }
+
+  return input.provider.embed({
+    job: {
+      id: `query:${input.model}`,
+      workspaceId: "workspace:query",
+      projectId: undefined,
+      sourceTable: "memory_entries",
+      sourceId: "query",
+      embeddingModel: input.model,
+      status: "processing",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    },
+    model: input.model,
+    source: {
+      sourceTable: "memory_entries",
+      sourceId: "query",
+      title: "query",
+      content: input.text
+    },
+    text: input.text
+  });
 }
 
 export async function runEmbeddingJobs(input: RunEmbeddingJobsInput): Promise<RunEmbeddingJobsResult> {

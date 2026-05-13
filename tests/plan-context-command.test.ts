@@ -4,6 +4,7 @@ import { DevgodCoreService } from "../src/core/service.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 import { executePlanContextCommandFromArgs } from "../src/admin.ts";
 import { formatPlanningContextReportMarkdown } from "../src/admin/planning-context.ts";
+import type { RetrievalRole } from "../src/domain/types.ts";
 
 test("executePlanContextCommandFromArgs returns ranked planning context and markdown output", async () => {
   const service = new DevgodCoreService(new MemoryStore());
@@ -74,4 +75,48 @@ test("executePlanContextCommandFromArgs honors --project-only when querying memo
   });
 
   assert.equal(includeGlobal, false);
+});
+
+test("executePlanContextCommandFromArgs derives a query embedding when an embedding model is configured", async () => {
+  let capturedInput:
+    | {
+        workspaceSlug: string;
+        projectSlug: string;
+        query: string;
+        limit: number;
+        includeGlobal: boolean;
+        queryEmbedding?: readonly number[] | undefined;
+        embeddingModel?: string | undefined;
+        requesterRole: RetrievalRole;
+      }
+    | undefined;
+
+  await executePlanContextCommandFromArgs(["--query", "qdrant retrieval"], {
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod",
+      DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+    },
+    async searchMemory(input: {
+      workspaceSlug: string;
+      projectSlug: string;
+      query: string;
+      limit: number;
+      includeGlobal: boolean;
+      queryEmbedding?: readonly number[] | undefined;
+      embeddingModel?: string | undefined;
+      requesterRole: RetrievalRole;
+    }) {
+      capturedInput = input;
+      return [];
+    },
+    async embedQuery({ model, text }: { model: string; text: string }) {
+      assert.equal(model, "devgod-local-hash-1536");
+      assert.equal(text, "qdrant retrieval");
+      return [0.25, 0.75];
+    }
+  } as never);
+
+  assert.deepEqual(capturedInput?.queryEmbedding, [0.25, 0.75]);
+  assert.equal(capturedInput?.embeddingModel, "devgod-local-hash-1536");
 });

@@ -15,8 +15,9 @@ export {
   runOrchestrationBenchmark
 } from "./evals/orchestration-benchmark.ts";
 export { runRetrievalMemoryBaseline } from "./evals/retrieval-memory-baseline.ts";
-export { buildEmbeddingText, runEmbeddingJobs } from "./runtime/embedding-runner.ts";
+export { buildEmbeddingText, embedQueryText, runEmbeddingJobs } from "./runtime/embedding-runner.ts";
 export { assessFreshness, runWithFreshnessGate } from "./runtime/freshness-gate.ts";
+export { createHashEmbeddingProvider, hashTextToEmbedding } from "./runtime/hash-embedding-provider.ts";
 export {
   composeReviewIdentityAdapters,
   createHeaderReviewIdentityAdapter,

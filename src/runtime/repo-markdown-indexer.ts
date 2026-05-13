@@ -4,7 +4,7 @@ import path from "node:path";
 import { retrievalRoles, type MarkdownArtifactRecord, type RetrievalRole, type RunRecord } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
 
-const DEFAULT_INCLUDE_PATHS = ["README.md", "docs", ".devgod"] as const;
+const DEFAULT_INCLUDE_PATHS = ["README.md", "AGENTS.md", "docs", ".devgod", ".agents/skills"] as const;
 const DEFAULT_EXCLUDED_SEGMENTS = new Set([".git", "node_modules", "dist", "build", "coverage"]);
 const MARKDOWN_INDEX_RUN_ACTOR = "repo_indexer";
 const MARKDOWN_INDEX_RUN_TITLE = "Repo markdown index";
@@ -196,13 +196,13 @@ function buildArtifactsForFile(input: {
 }) {
   const artifacts: MarkdownArtifactRecord[] = [];
 
-  for (const section of input.sections) {
+  input.sections.forEach((section, sectionIndex) => {
     const chunks = chunkMarkdownSection(section.lines.join("\n").trim());
 
     chunks.forEach((content, chunkIndex) => {
       artifacts.push({
         id: deterministicUuid(
-          `markdown:${input.projectId}:${input.relativePath}:${section.sourceAnchor ?? "root"}:${chunkIndex}`
+          `markdown:${input.projectId}:${input.relativePath}:${section.sourceAnchor ?? "root"}:${sectionIndex}:${chunkIndex}`
         ),
         workspaceId: input.workspaceId,
         projectId: input.projectId,
@@ -216,7 +216,7 @@ function buildArtifactsForFile(input: {
         createdAt: new Date().toISOString()
       });
     });
-  }
+  });
 
   return artifacts;
 }

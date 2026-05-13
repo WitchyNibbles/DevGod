@@ -4,12 +4,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { installDevgodIntoProject, upgradeDevgodInProject, verifyDevgodInstall } from "./install/cli.ts";
-import { runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
+import { embedQueryText, runEmbeddingJobs, type EmbeddingProvider } from "./runtime/embedding-runner.ts";
 import {
   resolveQdrantCollectionsUrl,
   resolveRuntimeEnvironmentConfig,
   validateRuntimeQdrantUrl
 } from "./runtime/config.ts";
+import { createHashEmbeddingProvider } from "./runtime/hash-embedding-provider.ts";
 import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
@@ -46,10 +47,13 @@ import type {
 } from "./domain/types.ts";
 import type { WorkspaceRecord } from "./domain/types.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
+import { QdrantArtifactIndex, type ArtifactVectorIndex } from "./store/qdrant-artifact-index.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 type EnvShape = NodeJS.ProcessEnv;
+type PostgresStoreClient = ConstructorParameters<typeof PostgresStore>[0];
+type IndexRepoMarkdownStore = Parameters<typeof indexRepoMarkdown>[0]["store"];
 
 interface LoadedReviewIdentityAdapter {
   adapter: ReviewPrincipalAdapter<unknown>;
@@ -369,10 +373,12 @@ async function verifyLiveMigrations() {
   console.log("live migrations verified");
 }
 
-async function createEmbeddingProvider(): Promise<EmbeddingProvider> {
-  const providerModulePath = process.env.DEVGOD_EMBEDDING_PROVIDER_MODULE;
+async function createEmbeddingProvider(env: EnvShape = process.env): Promise<EmbeddingProvider> {
+  const providerModulePath = env.DEVGOD_EMBEDDING_PROVIDER_MODULE;
   if (!providerModulePath) {
-    throw new Error("DEVGOD_EMBEDDING_PROVIDER_MODULE is required for run-embedding-jobs");
+    return createHashEmbeddingProvider({
+      model: env.DEVGOD_EMBEDDING_MODEL?.trim() || undefined
+    });
   }
 
   const resolvedPath = path.isAbsolute(providerModulePath)
@@ -701,8 +707,52 @@ interface ExecutePlanContextCommandOptions {
     query: string;
     limit: number;
     includeGlobal: boolean;
+    queryEmbedding?: readonly number[] | undefined;
+    embeddingModel?: string | undefined;
     requesterRole: RetrievalRole;
   }) => Promise<readonly SearchMemoryResult[]>;
+  embedQuery?: ((input: { model: string; text: string }) => Promise<readonly number[]>) | undefined;
+}
+
+export interface ExecuteIndexRepoMarkdownCommandOptions {
+  env?: EnvShape | undefined;
+  argv?: readonly string[] | undefined;
+  withClient?: typeof withClient | undefined;
+  createStore?: ((client: PostgresStoreClient) => IndexRepoMarkdownStore) | undefined;
+  indexRepoMarkdown?: typeof indexRepoMarkdown | undefined;
+}
+
+export interface CreateRuntimeStoreOptions {
+  artifactVectorIndex?: ArtifactVectorIndex | undefined;
+}
+
+export function createRuntimeStore(
+  client: PostgresStoreClient,
+  options: CreateRuntimeStoreOptions = {}
+): PostgresStore {
+  return new PostgresStore(client, {
+    artifactVectorIndex: options.artifactVectorIndex ?? new QdrantArtifactIndex()
+  });
+}
+
+export async function createPlanContextEmbedQuery(
+  env: EnvShape = process.env,
+  options: {
+    provider?: EmbeddingProvider | undefined;
+  } = {}
+): Promise<ExecutePlanContextCommandOptions["embedQuery"]> {
+  const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim();
+  if (!embeddingModel) {
+    return undefined;
+  }
+
+  const provider = options.provider ?? (await createEmbeddingProvider(env));
+  return ({ model, text }) =>
+    embedQueryText({
+      provider,
+      model,
+      text
+    });
 }
 
 function normalizeRecordReviewCommandInput(raw: string): RecordReviewCommandInput {
@@ -1725,12 +1775,22 @@ export async function executePlanContextCommandFromArgs(
 
   const format = resolveMarkdownFormatFlag(args);
   const includeGlobal = !args.includes("--project-only");
+  const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim();
+  const queryEmbedding =
+    embeddingModel && options.embedQuery
+      ? await options.embedQuery({
+          model: embeddingModel,
+          text: query
+        })
+      : undefined;
   const results = await options.searchMemory({
     workspaceSlug,
     projectSlug,
     query,
     limit,
     includeGlobal,
+    queryEmbedding,
+    embeddingModel,
     requesterRole: roleCandidate
   });
 
@@ -1745,13 +1805,16 @@ export async function executePlanContextCommandFromArgs(
 }
 
 async function planContextCommand(args: readonly string[]) {
+  const embedQuery = await createPlanContextEmbedQuery(process.env);
+
   await withClient(async (client) => {
-    const service = new DevgodCoreService(new PostgresStore(client));
+    const service = new DevgodCoreService(createRuntimeStore(client));
     const result = await executePlanContextCommandFromArgs(args, {
       env: process.env,
       searchMemory(input) {
         return service.searchMemory(input);
-      }
+      },
+      embedQuery
     });
 
     if (result.format === "markdown") {
@@ -1799,7 +1862,7 @@ async function runEmbeddingJobsCommand() {
 
   await withClient(async (client) => {
     const result = await runEmbeddingJobs({
-      store: new PostgresStore(client),
+      store: createRuntimeStore(client),
       provider,
       limit
     });
@@ -1807,29 +1870,35 @@ async function runEmbeddingJobsCommand() {
   });
 }
 
-async function indexRepoMarkdownCommand() {
-  const targetRepoRoot = process.argv[3]
-    ? path.resolve(process.cwd(), process.argv[3])
-    : process.env.DEVGOD_REPO_MARKDOWN_ROOT
-      ? path.resolve(process.cwd(), process.env.DEVGOD_REPO_MARKDOWN_ROOT)
+export async function executeIndexRepoMarkdownCommand(options: ExecuteIndexRepoMarkdownCommandOptions = {}) {
+  const env = options.env ?? process.env;
+  const argv = options.argv ?? process.argv;
+  const withClientImpl = options.withClient ?? withClient;
+  const createStoreImpl = options.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
+  const indexRepoMarkdownImpl = options.indexRepoMarkdown ?? indexRepoMarkdown;
+
+  const targetRepoRoot = argv[3]
+    ? path.resolve(process.cwd(), argv[3])
+    : env.DEVGOD_REPO_MARKDOWN_ROOT
+      ? path.resolve(process.cwd(), env.DEVGOD_REPO_MARKDOWN_ROOT)
       : repoRoot;
-  const workspaceSlug = process.env.DEVGOD_WORKSPACE_SLUG ?? "default";
-  const workspaceName = process.env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
-  const projectSlug = process.env.DEVGOD_PROJECT_SLUG;
-  const projectName = process.env.DEVGOD_PROJECT_NAME;
-  const include = (process.env.DEVGOD_REPO_MARKDOWN_INCLUDE ?? "README.md,docs,.devgod")
+  const workspaceSlug = env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const workspaceName = env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
+  const projectSlug = env.DEVGOD_PROJECT_SLUG;
+  const projectName = env.DEVGOD_PROJECT_NAME;
+  const include = (env.DEVGOD_REPO_MARKDOWN_INCLUDE ?? "README.md,AGENTS.md,docs,.devgod,.agents/skills")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const embeddingModel = process.env.DEVGOD_EMBEDDING_MODEL;
+  const embeddingModel = env.DEVGOD_EMBEDDING_MODEL;
 
   if (!projectSlug) {
     throw new Error("DEVGOD_PROJECT_SLUG is required");
   }
 
-  await withClient(async (client) => {
-    const result = await indexRepoMarkdown({
-      store: new PostgresStore(client),
+  return withClientImpl(async (client) =>
+    indexRepoMarkdownImpl({
+      store: createStoreImpl(client),
       repoRoot: targetRepoRoot,
       workspaceSlug,
       workspaceName,
@@ -1837,9 +1906,12 @@ async function indexRepoMarkdownCommand() {
       projectName,
       include,
       embeddingModel
-    });
-    console.log(JSON.stringify(result));
-  });
+    })
+  );
+}
+
+async function indexRepoMarkdownCommand() {
+  console.log(JSON.stringify(await executeIndexRepoMarkdownCommand()));
 }
 
 async function main() {

@@ -558,9 +558,10 @@ This is the Phase 5 opt-in overlay. It now includes a packaged `devgod` wrapper,
 Repo markdown retrieval is now available through the admin surface:
 
 - `node --experimental-strip-types src/admin.ts index-repo-markdown [repo-root]`
-- `DEVGOD_REPO_MARKDOWN_INCLUDE=README.md,docs,.devgod` controls the allowlist
-- `DEVGOD_EMBEDDING_MODEL` queues embedding jobs for indexed markdown chunks
-- `node --experimental-strip-types src/admin.ts run-embedding-jobs [limit]` writes vectors for queued chunks
+- `DEVGOD_REPO_MARKDOWN_INCLUDE=README.md,AGENTS.md,docs,.devgod,.agents/skills` controls the allowlist
+- `DEVGOD_EMBEDDING_MODEL=devgod-local-hash-1536` enables the shipped local deterministic embedding path
+- `node --experimental-strip-types src/admin.ts run-embedding-jobs [limit]` writes vectors for queued chunks and syncs artifact vectors into Qdrant
+- `node --experimental-strip-types src/admin.ts plan-context --query "<topic>"` now derives a query embedding when `DEVGOD_EMBEDDING_MODEL` is configured, then uses Qdrant-backed artifact recall plus canonical Postgres hydration
 
 GitHub intake templates now ship in `.devgod/templates/`:
 
