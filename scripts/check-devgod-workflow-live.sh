@@ -24,6 +24,62 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+resolve_devgod_cli() {
+  local source_cli="$repo_root/src/admin/devgod.ts"
+  if [[ -f "$source_cli" ]]; then
+    printf '%s\n' "$source_cli"
+    return
+  fi
+
+  local installed_cli="$repo_root/node_modules/devgod/src/admin/devgod.ts"
+  if [[ -f "$installed_cli" ]]; then
+    printf '%s\n' "$installed_cli"
+    return
+  fi
+
+  local package_json="$repo_root/package.json"
+  if [[ ! -f "$package_json" ]]; then
+    printf 'missing package.json for devgod CLI resolution: %s\n' "${package_json#"$repo_root"/}" >&2
+    exit 1
+  fi
+
+  local resolved_cli=""
+  resolved_cli="$(
+    node --input-type=module - "$package_json" "$repo_root" <<'EOF'
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
+const packageJsonPath = process.argv[2];
+const repoRoot = process.argv[3];
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+const dependency =
+  packageJson.devDependencies?.devgod ??
+  packageJson.dependencies?.devgod ??
+  packageJson.optionalDependencies?.devgod;
+
+if (typeof dependency !== "string" || !dependency.startsWith("file:")) {
+  process.exit(0);
+}
+
+const rawPath = dependency.slice("file:".length);
+const resolvedRoot = path.resolve(repoRoot, rawPath);
+const cliPath = path.join(resolvedRoot, "src", "admin", "devgod.ts");
+
+if (existsSync(cliPath)) {
+  process.stdout.write(`${cliPath}\n`);
+}
+EOF
+  )"
+
+  if [[ -n "$resolved_cli" && -f "$resolved_cli" ]]; then
+    printf '%s\n' "$resolved_cli"
+    return
+  fi
+
+  printf 'unable to resolve devgod CLI for runtime workflow proof from %s\n' "$repo_root" >&2
+  exit 1
+}
+
 if [[ -z "$requested_task_id" ]]; then
   active_file="$repo_root/.devgod/ACTIVE"
   [[ -f "$active_file" ]] || {
@@ -39,4 +95,7 @@ if [[ -z "$requested_task_id" ]]; then
   }
 fi
 
-bash "$repo_root/scripts/check-devgod-workflow.sh" --repo-root "$repo_root" --task-id "$requested_task_id"
+devgod_cli="$(resolve_devgod_cli)"
+node --experimental-strip-types "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest
+
+bash "$repo_root/scripts/check-devgod-workflow.sh" --live --external-review-authority --repo-root "$repo_root" --task-id "$requested_task_id"

@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 requested_task_id=""
+live_mode=0
+external_review_authority=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,6 +18,14 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
       requested_task_id="$2"
       shift 2
+      ;;
+    --live)
+      live_mode=1
+      shift
+      ;;
+    --external-review-authority)
+      external_review_authority=1
+      shift
       ;;
     *)
       if [[ "$1" == -* ]]; then
@@ -73,6 +83,14 @@ require_allowed_value() {
   fail "unexpected value in ${path#"$repo_root"/}: ${value}"
 }
 
+require_nonempty_section_block() {
+  local heading="$1"
+  local path="$2"
+  local block
+  block="$(extract_section_block "$heading" "$path")"
+  [[ -n "$(normalize_value "$block")" ]] || fail "missing section content ${heading} in ${path#"$repo_root"/}"
+}
+
 require_runtime_proof_reference() {
   local block="$1"
   local path="$2"
@@ -81,6 +99,37 @@ require_runtime_proof_reference() {
   printf '%s\n' "$block" |
     grep -Eq '^[[:space:]-]*Runtime proof:[[:space:]]*[^[:space:]<].*$' ||
     fail "specialist_verified runtime_verified summaries must cite Runtime proof in ${heading} of ${path#"$repo_root"/}"
+}
+
+load_supported_quality_gates() {
+  local rules_path="$repo_root/.devgod/rules/task-quality-matrix.md"
+  [[ -f "$rules_path" ]] || fail "missing quality gate rules: ${rules_path#"$repo_root"/}"
+  awk '
+    /^### `/ {
+      line=$0
+      gsub(/^### `/, "", line)
+      gsub(/`$/, "", line)
+      print line
+    }
+  ' "$rules_path"
+}
+
+extract_list_items() {
+  local heading="$1"
+  local path="$2"
+  extract_section_block "$heading" "$path" |
+    awk '
+      {
+        line=$0
+        gsub(/\r/, "", line)
+        gsub(/`/, "", line)
+        sub(/^[[:space:]-]+/, "", line)
+        sub(/[[:space:]]+$/, "", line)
+        if (line != "" && line !~ /^### /) {
+          print line
+        }
+      }
+    '
 }
 
 extract_section_value() {
@@ -314,6 +363,73 @@ if [[ -f "$task_file" ]]; then
   fi
 fi
 
+if [[ "$live_mode" -eq 1 ]]; then
+  [[ -f "$task_file" ]] || fail "live workflow requires current task artifact for ${task_id}"
+
+  for heading in \
+    "## Owner role" \
+    "## Completion standard" \
+    "## Required specialist roles" \
+    "## Quality gates" \
+    "## Goal" \
+    "## Inputs" \
+    "## Dependencies" \
+    "## Outputs" \
+    "## Allowed write scope" \
+    "## Out of scope" \
+    "## Assumptions" \
+    "## Acceptance criteria" \
+    "## Verification steps" \
+    "## Required reviews" \
+    "## Security checks" \
+    "## Retrieval guidance" \
+    "## Anti-patterns to avoid" \
+    "## Rollback notes" \
+    "## Handoff format"; do
+    require_heading "$heading" "$task_file"
+  done
+
+  require_heading "### Approved assumptions" "$task_file"
+  require_heading "### Blocked assumptions" "$task_file"
+
+  for heading in \
+    "## Required specialist roles" \
+    "## Quality gates" \
+    "## Goal" \
+    "## Inputs" \
+    "## Dependencies" \
+    "## Outputs" \
+    "## Allowed write scope" \
+    "## Out of scope" \
+    "## Acceptance criteria" \
+    "## Verification steps" \
+    "## Required reviews" \
+    "## Security checks" \
+    "## Retrieval guidance" \
+    "## Anti-patterns to avoid" \
+    "## Rollback notes" \
+    "## Handoff format"; do
+    require_nonempty_section_block "$heading" "$task_file"
+  done
+
+  required_reviews_block="$(extract_section_block "## Required reviews" "$task_file")"
+  printf '%s\n' "$required_reviews_block" | grep -Fq 'reviewer' || fail "missing reviewer required review in ${task_file#"$repo_root"/}"
+  printf '%s\n' "$required_reviews_block" | grep -Fq 'qa_engineer' || fail "missing qa_engineer required review in ${task_file#"$repo_root"/}"
+  printf '%s\n' "$required_reviews_block" | grep -Fq 'security_reviewer' || fail "missing security_reviewer required review in ${task_file#"$repo_root"/}"
+
+  mapfile -t supported_quality_gates < <(load_supported_quality_gates)
+  declare -A supported_quality_gate_map=()
+  for gate in "${supported_quality_gates[@]}"; do
+    supported_quality_gate_map["$gate"]=1
+  done
+
+  mapfile -t live_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
+  [[ "${#live_quality_gates[@]}" -gt 0 ]] || fail "missing live quality gates in ${task_file#"$repo_root"/}"
+  for gate in "${live_quality_gates[@]}"; do
+    [[ -n "${supported_quality_gate_map[$gate]:-}" ]] || fail "unsupported quality gate in ${task_file#"$repo_root"/}: $gate"
+  done
+fi
+
 roles=("reviewer" "qa" "security")
 
 for role in "${roles[@]}"; do
@@ -346,10 +462,19 @@ for role in "${roles[@]}"; do
   [[ -n "$actor" ]] || fail "missing actor in ${review_file#"$repo_root"/}"
   [[ -n "$actor_role" ]] || fail "missing actor role in ${review_file#"$repo_root"/}"
   require_allowed_value "$provenance_status" "$review_file" "summary_only" "runtime_verified" "legacy_backfill"
-  require_allowed_value "$review_state" "$review_file" "passed" "waived"
-  require_allowed_value "$decision" "$review_file" "approved" "waived"
+  if [[ "$external_review_authority" -eq 1 ]]; then
+    require_allowed_value "$review_state" "$review_file" "pending" "passed" "blocked" "waived"
+    require_allowed_value "$decision" "$review_file" "approved" "blocked" "waived"
+  else
+    require_allowed_value "$review_state" "$review_file" "passed" "waived"
+    require_allowed_value "$decision" "$review_file" "approved" "waived"
+  fi
   require_allowed_value "$severity" "$review_file" "low" "medium" "high" "critical"
   require_allowed_value "$waiver_authority" "$review_file" "none" "manager" "security_exception"
+
+  if [[ "$live_mode" -eq 1 && "$external_review_authority" -eq 0 && "$provenance_status" != "runtime_verified" ]]; then
+    fail "live workflow requires runtime_verified provenance for satisfying review ${expected_role} in ${review_file#"$repo_root"/}"
+  fi
 
   if [[ "$expected_role" == "security_reviewer" && "$review_state" == "passed" && "$decision" == "approved" ]]; then
     case "$severity" in
@@ -359,11 +484,13 @@ for role in "${roles[@]}"; do
     esac
   fi
 
-  if [[ "$task_completion_standard" == "specialist_verified" && "$provenance_status" != "runtime_verified" ]]; then
+  if [[ "$task_completion_standard" == "specialist_verified" && "$external_review_authority" -eq 0 && "$provenance_status" != "runtime_verified" ]]; then
     fail "specialist_verified work requires runtime_verified review provenance in ${review_file#"$repo_root"/}"
   fi
 
-  if [[ "$review_state" == "passed" && "$decision" == "approved" ]]; then
+  if [[ "$external_review_authority" -eq 1 ]]; then
+    :
+  elif [[ "$review_state" == "passed" && "$decision" == "approved" ]]; then
     [[ "$actor_role" == "$expected_role" ]] || fail "passed review summary must record actor role ${expected_role} in ${review_file#"$repo_root"/}"
     [[ "$waiver_authority" == "none" ]] || fail "passed review summary must use waiver authority none in ${review_file#"$repo_root"/}"
     if [[ "$expected_role" == "security_reviewer" && ( "$severity" == "high" || "$severity" == "critical" ) ]]; then
@@ -401,6 +528,10 @@ for role in "${roles[@]}"; do
   source_handoff="$(extract_section_value "## Source handoff" "$review_file")"
   source_handoff_block="$(extract_section_block "## Source handoff" "$review_file")"
   [[ -n "$source_handoff" ]] || fail "missing source handoff in ${review_file#"$repo_root"/}"
+  if [[ "$live_mode" -eq 1 && "$external_review_authority" -eq 0 ]]; then
+    require_runtime_proof_reference "$verification_evidence_block" "$review_file" "## Verification evidence"
+    require_runtime_proof_reference "$source_handoff_block" "$review_file" "## Source handoff"
+  fi
   if [[ "$task_completion_standard" == "specialist_verified" && "$provenance_status" == "runtime_verified" ]]; then
     require_runtime_proof_reference "$verification_evidence_block" "$review_file" "## Verification evidence"
     require_runtime_proof_reference "$source_handoff_block" "$review_file" "## Source handoff"

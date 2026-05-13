@@ -106,7 +106,8 @@ Ask the user before:
 
 - unresolved `CRITICAL` or `HIGH` security findings block completion
 - missing required review, specialist evidence, quality-gate evidence, acceptance criteria, or verification evidence blocks completion
-- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` is required before reporting substantive work complete
+- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof
+- `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is required before reporting active substantive work complete
 - markdown review files are evidence summaries, not reviewer authority
 - trusted reviewer identity and waivers must come from runtime or another authenticated source
 - current task id must align across `.devgod/ACTIVE`, brief, plan/task, and review artifacts

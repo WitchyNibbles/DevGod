@@ -1565,10 +1565,36 @@ test("workflow live wrapper forwards the active task id to the workflow checker"
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-workflow-live-smoke-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const checkArgsLog = path.join(targetRoot, "workflow-check-args.txt");
+  const proofArgsLog = path.join(targetRoot, "workflow-proof-args.txt");
+  const stubRoot = await mkdtemp(path.join(tmpdir(), "devgod-workflow-proof-install-stub-"));
 
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await mkdir(path.join(stubRoot, "src", "admin"), { recursive: true });
+    await writeFile(
+      path.join(stubRoot, "package.json"),
+      JSON.stringify({ name: "devgod", private: true, type: "module" }, null, 2) + "\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(stubRoot, "src", "admin", "devgod.ts"),
+      [
+        'import { writeFileSync } from "node:fs";',
+        'writeFileSync(process.env.DEVGOD_WORKFLOW_PROOF_ARGS_LOG, process.argv.slice(2).join(" "), "utf8");',
+        'process.stdout.write(JSON.stringify({ authorityLabel: "runtime_authoritative", taskStatus: "approved" }) + "\\n");'
+      ].join("\n"),
+      "utf8"
+    );
+    const packageJsonPath = path.join(targetRoot, "package.json");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      devDependencies?: Record<string, string>;
+    };
+    packageJson.devDependencies = {
+      ...(packageJson.devDependencies ?? {}),
+      devgod: `file:${stubRoot}`
+    };
+    await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n", "utf8");
 
     await writeExecutable(
       path.join(targetRoot, "scripts", "check-devgod-workflow.sh"),
@@ -1589,14 +1615,22 @@ test("workflow live wrapper forwards the active task id to the workflow checker"
       cwd: targetRoot,
       env: {
         ...process.env,
-        DEVGOD_WORKFLOW_CHECK_ARGS_LOG: checkArgsLog
+        DEVGOD_WORKFLOW_CHECK_ARGS_LOG: checkArgsLog,
+        DEVGOD_WORKFLOW_PROOF_ARGS_LOG: proofArgsLog
       }
     });
+
+    const proofArgs = await readFile(proofArgsLog, "utf8");
+    assert.match(proofArgs, /workflow-proof/);
+    assert.match(proofArgs, /--task-id DG-004-smoke/);
+    assert.match(proofArgs, /--run-id latest/);
 
     const checkArgs = await readFile(checkArgsLog, "utf8");
     assert.match(checkArgs, /--repo-root \S+devgod-workflow-live-smoke-\S+/);
     assert.match(checkArgs, /--task-id DG-004-smoke/);
+    assert.match(checkArgs, /--external-review-authority/);
   } finally {
+    await rm(stubRoot, { recursive: true, force: true });
     await rm(targetRoot, { recursive: true, force: true });
   }
 });

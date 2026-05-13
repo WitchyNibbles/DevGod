@@ -9,9 +9,39 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   executeIndexRepoMarkdownCommand,
   executeRecordReviewCommand,
-  executeRecordReviewCommandFromArgs
+  executeRecordReviewCommandFromArgs,
+  executeWorkflowProofCommandFromArgs
 } from "../src/admin.ts";
-import type { TrustedReviewActionContext } from "../src/domain/types.ts";
+import { createReviewActionContextResolver } from "../src/core/review-context.ts";
+import { DevgodCoreService } from "../src/core/service.ts";
+import type { TaskPacketInput, TrustedReviewActionContext } from "../src/domain/types.ts";
+import { MemoryStore } from "../src/store/memory-store.ts";
+
+function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  return {
+    taskId: overrides.taskId ?? "task-1",
+    title: overrides.title ?? "Create task graph",
+    ownerRole: overrides.ownerRole ?? "planner",
+    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    requiredSpecialistRoles:
+      overrides.requiredSpecialistRoles ??
+      [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
+    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    goal: overrides.goal ?? "Build task graph",
+    inputs: overrides.inputs ?? ["intake brief"],
+    outputs: overrides.outputs ?? ["task packets"],
+    dependencies: overrides.dependencies ?? [],
+    allowedWriteScope: overrides.allowedWriteScope ?? [".devgod/work/tasks"],
+    outOfScope: overrides.outOfScope ?? ["production deploys"],
+    acceptanceCriteria: overrides.acceptanceCriteria ?? ["task packet exists"],
+    verificationSteps: overrides.verificationSteps ?? ["review generated packet"],
+    requiredReviews: overrides.requiredReviews ?? ["reviewer", "security_reviewer", "qa_engineer"],
+    securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
+    antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
+    rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+  };
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -132,6 +162,104 @@ export default createReviewPrincipalAdapter(async ({ authContext }) => ({
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("executeWorkflowProofCommandFromArgs returns runtime-authoritative proof for an approved task", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Ship workflow proof",
+    request: "Make live checks trust runtime state."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared runtime workflow proof slice.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["verified command boundaries"],
+    executionEvidence: ["task packet written"],
+    qualityGateEvidence: ["tdd scenarios listed"],
+    contextRefs: ["brief://workflow-proof"]
+  });
+
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await executeWorkflowProofCommandFromArgs(
+    ["--run-id", run.id, "--task-id", "plan"],
+    {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    }
+  );
+
+  assert.equal(result.authorityLabel, "runtime_authoritative");
+  assert.equal(result.runId, run.id);
+  assert.equal(result.taskId, "plan");
+  assert.equal(result.taskStatus, "approved");
+  assert.equal(result.reviewDecision, "approved");
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.latestReviews.length, 3);
+  assert.equal(result.latestApproval?.decision, "approved");
+  assert.equal(result.latestApproval?.identityAssurance, "authenticated");
 });
 
 test("verify-review-identity command uses repo template defaults when no env adapter is configured", async () => {

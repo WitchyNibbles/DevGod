@@ -26,7 +26,7 @@ import { ObsidianMarkdownRenderer } from "./docs-export/renderer.ts";
 import { ObsidianVaultWriter } from "./docs-export/obsidian-writer.ts";
 import { buildObsidianTargetPath } from "./docs-export/targets.ts";
 import { RuntimeWorklogProvider, type WorklogProvider } from "./docs-export/worklog-provider.ts";
-import { isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
+import { effectiveRequiredReviews, isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import {
   createReviewActionContextResolver,
   createReviewPrincipalAdapter,
@@ -37,8 +37,10 @@ import {
   type ReviewPrincipalAdapter
 } from "./core/review-context.ts";
 import { DevgodCoreService } from "./core/service.ts";
+import { evaluateReviewDecision } from "./core/policy.ts";
 import type { ResolveReviewActionContext } from "./core/review-context.ts";
 import type {
+  ApprovalRecord,
   RecoveryApplyResult,
   RecoveryInspectionReport,
   ProjectRecord,
@@ -705,6 +707,25 @@ interface ExecuteReportCommandOptions extends ExecuteOpsCommandOptions {
     identityAssurance: "authenticated" | "legacy_backfill";
     decision: string;
   }[]>;
+}
+
+interface ExecuteWorkflowProofCommandOptions {
+  env?: EnvShape | undefined;
+  findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
+  getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
+  getReviews: (runId: string, taskId: string) => Promise<readonly ReviewRecord[]>;
+  getApprovals: (runId: string, taskId: string) => Promise<readonly ApprovalRecord[]>;
+}
+
+export interface WorkflowProofResult {
+  authorityLabel: "runtime_authoritative";
+  runId: string;
+  taskId: string;
+  taskStatus: TaskStatus;
+  reviewDecision: "approved";
+  blockers: [];
+  latestReviews: ReviewRecord[];
+  latestApproval: ApprovalRecord;
 }
 
 interface ExecutePlanContextCommandOptions {
@@ -1754,6 +1775,67 @@ export async function executeReportCommandFromArgs(
   };
 }
 
+export async function executeWorkflowProofCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteWorkflowProofCommandOptions
+): Promise<WorkflowProofResult> {
+  const taskId = resolveCommandFlag(args, "--task-id");
+  if (!taskId) {
+    throw new Error("workflow-proof requires --task-id <task-id>");
+  }
+
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const snapshot = await options.getStatusSnapshot(runId);
+  const task = snapshot.tasks.find((candidate) => candidate.packet.taskId === taskId);
+
+  if (!task) {
+    throw new Error(`Task ${taskId} not found in runtime run ${runId}`);
+  }
+
+  const reviews = await options.getReviews(runId, taskId);
+  const decision = evaluateReviewDecision(task, reviews);
+  if (decision.decision !== "approved") {
+    throw new Error(`Task ${taskId} is not approved in runtime: ${decision.blockers.join("; ")}`);
+  }
+
+  if (task.status !== "approved") {
+    throw new Error(`Task ${taskId} runtime status must be approved, found ${task.status}`);
+  }
+
+  const requiredReviews = effectiveRequiredReviews(task.packet.requiredReviews);
+  const latestReviews = requiredReviews
+    .map((role) => reviews.filter((review) => review.reviewerRole === role).at(-1))
+    .filter((review): review is ReviewRecord => review !== undefined);
+
+  if (latestReviews.length !== requiredReviews.length) {
+    throw new Error(`Task ${taskId} is missing one or more required runtime reviews`);
+  }
+
+  const latestApproval = (await options.getApprovals(runId, taskId)).at(-1);
+  if (!latestApproval) {
+    throw new Error(`Task ${taskId} is missing a runtime approval record`);
+  }
+  if (latestApproval.identityAssurance !== "authenticated" || latestApproval.decision !== "approved") {
+    throw new Error(
+      `Task ${taskId} latest runtime approval must be authenticated approved, found ${latestApproval.identityAssurance} ${latestApproval.decision}`
+    );
+  }
+
+  return {
+    authorityLabel: "runtime_authoritative",
+    runId,
+    taskId,
+    taskStatus: task.status,
+    reviewDecision: "approved",
+    blockers: [],
+    latestReviews,
+    latestApproval
+  };
+}
+
 export async function executeExportDocsCommandFromArgs(
   args: readonly string[],
   options: ExecuteExportDocsCommandOptions
@@ -1851,6 +1933,30 @@ async function reportCommand(args: readonly string[]) {
     }
 
     console.log(JSON.stringify(result.report));
+  });
+}
+
+async function workflowProofCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const result = await executeWorkflowProofCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    console.log(JSON.stringify(result));
   });
 }
 
@@ -2106,6 +2212,11 @@ async function main() {
 
   if (command === "report") {
     await reportCommand(args);
+    return;
+  }
+
+  if (command === "workflow-proof") {
+    await workflowProofCommand(args);
     return;
   }
 
