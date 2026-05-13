@@ -590,11 +590,11 @@ async function verifyReviewIdentityCommand() {
     throw new Error("DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity");
   }
 
+  const configuredAdapterPath = resolveAdapterModulePath(process.cwd(), process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE);
   const useTemplateFallbackAdapter =
     isRepoTemplateReviewIdentityPath(bindingsPath) &&
     isRepoTemplateReviewIdentityPath(fixturesPath) &&
-    (!process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE ||
-      !(await pathExists(resolveAdapterModulePath(process.cwd(), process.env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE))));
+    (!configuredAdapterPath || !(await pathExists(configuredAdapterPath)));
 
   const [bindings, fixtures, adapter] = await Promise.all([
     loadReviewIdentityBindings(bindingsPath),
