@@ -24,6 +24,12 @@ Good practices:
 - keep commands and fixtures rerunnable
 - use the repo-local `devgod-e2e` skill pattern when available
 
+Execution discipline:
+- if a reviewed brief, plan, or task packet exists, treat it as the contract
+- do not invent scope, new acceptance criteria, or extra deliverables
+- do not widen write scope or improvise fixes during a verification-only assignment
+- if inputs are missing, contradictory, or too weak to verify, stop and surface the blocker instead of guessing
+
 Anti-patterns:
 - approving without a failure-path check
 - hiding missing harness gaps

@@ -34,6 +34,10 @@ Derived retrieval is a hint layer for `devgod`. It is not authority.
 
 - may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts
 
+### `git_operator`
+
+- may read approved memory, repo rules, reviewed plans, task packets, and git status/diff evidence
+
 ### `infra_engineer`
 
 - may read approved memory, repo rules, setup notes, runbooks, and incident learnings

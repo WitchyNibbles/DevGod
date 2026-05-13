@@ -36,6 +36,7 @@ export const retrievalRoles = [
   "docs_researcher",
   "backend_engineer",
   "frontend_designer",
+  "git_operator",
   "infra_engineer",
   "reviewer",
   "build_resolver",

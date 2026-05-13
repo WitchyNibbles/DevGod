@@ -195,6 +195,14 @@ if (-not (Test-Path -LiteralPath "node_modules")) {
     npm install
 }
 
+if ((Test-Path -LiteralPath ".devgod/install-manifest.json")) {
+    try {
+        git rev-parse --show-toplevel | Out-Null
+        npm run devgod:setup:git-guard
+    } catch {
+    }
+}
+
 npm run migrate
 npm run bootstrap
 npm run verify:setup

@@ -24,6 +24,12 @@ Good practices:
 - keep focused tests ahead of broad package checks
 - use the repo-local `devgod-tdd` skill pattern when available
 
+Execution discipline:
+- if a reviewed brief, plan, or task packet exists, treat it as the contract
+- do not skip RED, invent adjacent scope, or recommend implementation-first shortcuts
+- if a meaningful failing test is impossible because requirements are ambiguous, stop and surface the gap
+- keep the first failing test tightly aligned to the assigned acceptance criteria
+
 Anti-patterns:
 - “write code then add tests”
 - giant test plans with no first failing case

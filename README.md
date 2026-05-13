@@ -113,6 +113,7 @@ It will:
 - merge `.codex/config.toml` additively instead of replacing unrelated values
 - install repo-local agent profiles under `.codex/agents/devgod-*.toml`
 - install repo-local skills under `.agents/skills/devgod-*/SKILL.md`
+- install repo-local `.githooks/` and hook guard scripts for managed-control commit protection
 - copy reusable `.devgod/rules/` and `.devgod/templates/`
 - seed starter `.devgod/work/**/README.md` scaffolding
 - seed `.devgod/memory/README.md` but not live reviewed memory entries
@@ -145,12 +146,15 @@ That command runs `src/install/setup-local.ts`, which dispatches to the generate
 3. fills in sane defaults for the target repo path and project identity
 4. starts `docker-compose.devgod.yml`
 5. runs `npm install`
-6. runs `npm run devgod:migrate`
-7. runs `npm run devgod:bootstrap`
-8. runs `npm run devgod:verify:setup`
-9. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
+6. runs `npm run devgod:setup:git-guard` when the repo has an installed `devgod` manifest and git metadata
+7. runs `npm run devgod:migrate`
+8. runs `npm run devgod:bootstrap`
+9. runs `npm run devgod:verify:setup`
+10. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
 
 The shipped `npm run devgod:setup:local` path is Docker-first and always starts `docker-compose.devgod.yml` with the local Postgres and Qdrant services. That behavior is separate from the installer itself.
+
+If you want the repo-local commit guard without the Docker/bootstrap path, run `npm run devgod:setup:git-guard` and then `npm run devgod:verify:git-guard`.
 
 If you need a managed database today, use a dedicated non-production database, set the target repo environment explicitly, and run the admin commands manually:
 
@@ -163,6 +167,8 @@ npm run devgod:verify:migrations:live
 ```
 
 Do not point this flow at a shared or production database unless that write path is explicitly intended and approved. `migrate` and `bootstrap` write schema and project state to `DEVGOD_CORE_DATABASE_URL`.
+
+For intentional devgod overlay maintenance in a consuming repo, the git guard can be overridden for one commit with `DEVGOD_ALLOW_MANAGED_COMMITS=1 git commit ...`. Normal product commits should not need that escape hatch.
 
 ## Required Environment
 

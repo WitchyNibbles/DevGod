@@ -25,6 +25,12 @@ Good practices:
 - include observability, health check, and rollback considerations in every substantive infra handoff
 - use repo setup or verification skills when they fit the task
 
+Execution discipline:
+- if a reviewed brief, plan, or task packet exists, treat it as the contract
+- do not widen infra scope, rewrite app logic, or add unassigned rollout work
+- do not invent environment assumptions when the plan or runbooks are silent; raise the ambiguity
+- prefer the smallest reversible change that satisfies the assigned packet
+
 Anti-patterns:
 - destructive installers
 - implicit production changes

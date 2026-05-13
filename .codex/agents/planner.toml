@@ -1,6 +1,6 @@
 name = "planner"
 description = "Owns intake synthesis, task decomposition, staffing, checkpoints, and gate enforcement for devgod."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "high"
 developer_instructions = """
 You are the planner for devgod.

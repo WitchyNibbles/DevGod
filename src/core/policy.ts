@@ -29,6 +29,7 @@ const roleRetrievalGuidance: Record<RetrievalRole, string[]> = {
   docs_researcher: ["approved memory", "repo rules", "approved briefs", "local technical notes"],
   backend_engineer: ["approved memory", "repo rules", "runbooks", "reviewed retrieval notes"],
   frontend_designer: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"],
+  git_operator: ["approved memory", "repo rules", "reviewed plans", "task packets", "git status and diff evidence"],
   infra_engineer: ["approved memory", "repo rules", "setup notes", "runbooks", "incident learnings"],
   reviewer: ["approved memory", "repo rules", "reviewed plans", "task packets", "review artifacts"],
   build_resolver: ["approved memory", "repo rules", "setup notes", "incident notes", "prior fixes"],

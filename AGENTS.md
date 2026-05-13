@@ -50,11 +50,18 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 
 - planning and routing: `planner`, `product_strategist`, `solution_architect`
 - delivery: `backend_engineer`, `frontend_designer`, `infra_engineer`, `build_resolver`
+- repo operations: `git_operator`
 - quality: `reviewer`, `qa_engineer`, `security_reviewer`, `tdd-guide`, `e2e-runner`, `release-readiness`
 - memory: `memory_curator`
 
 Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the
 local `caveman` skill for internal handoffs and terse coordination.
+
+## Git hygiene
+
+- use `git_operator` for staging, commit slicing, and commit-message prep when git work is part of the task
+- in consuming repos, `git_operator` must not stage `.devgod/`, `.agents/`, `.codex/`, or `AGENTS.md` unless the task explicitly targets devgod/control-layer installation or maintenance
+- commits should stay atomic and use brief conventional messages that describe the slice being committed
 
 ## Package boundary
 

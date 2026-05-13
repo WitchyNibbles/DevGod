@@ -45,12 +45,18 @@ ${workflowContractBlock}
 - create or update \`.devgod/ACTIVE\` and the matching brief before moving past intake
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
+- use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
 - use \`tdd-guide\`, \`e2e-runner\`, and \`release-readiness\` when the slice needs those gates
 - preserve the trivial fast path for single-scope low-risk work
 - unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
 - markdown review files are evidence summaries, not reviewer authority
 - reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\`
+
+## Git hygiene
+
+- in consuming repos, \`git_operator\` must not stage \`.devgod/\`, \`.agents/\`, \`.codex/\`, or \`AGENTS.md\` unless the task explicitly targets devgod/control-layer installation or maintenance
+- commits should stay atomic and use brief conventional messages that describe the committed slice
 
 ${AGENTS_END}`;
 
@@ -248,7 +254,11 @@ export function mergePackageJson(
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";
   scripts["devgod:verify:migrations:live"] = `${devgodEntry} verify-live-migrations`;
   scripts["devgod:verify:review-identity"] = `${devgodEntry} verify-review-identity`;
+  scripts["devgod:verify:git-guard"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts";
   scripts["devgod:record-review"] = `${devgodEntry} record-review --input .devgod/review-action.json`;
+  scripts["devgod:setup:git-guard"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts";
   scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);

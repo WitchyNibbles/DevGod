@@ -1,6 +1,6 @@
 name = "product_strategist"
 description = "Turns raw ideas into a product brief, scope boundaries, user flows, milestones, and acceptance criteria."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """

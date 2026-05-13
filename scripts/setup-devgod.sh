@@ -224,6 +224,10 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 
+if [[ -f .devgod/install-manifest.json ]] && git rev-parse --show-toplevel >/dev/null 2>&1; then
+  npm run devgod:setup:git-guard
+fi
+
 npm run migrate
 npm run bootstrap
 npm run verify:setup

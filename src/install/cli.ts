@@ -165,7 +165,8 @@ function buildNextSteps(
         "Rerun in apply mode to write the planned managed-file updates.",
         withGitNexus
           ? "After apply, run npm install and npm run devgod:gitnexus:analyze to refresh the advisory index."
-          : "Run verify after the upgrade to confirm the managed surface is clean."
+          : "Run verify after the upgrade to confirm the managed surface is clean.",
+        "After apply, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard."
       ];
     }
 
@@ -174,6 +175,7 @@ function buildNextSteps(
       withGitNexus
         ? "Run npm install, then npm run devgod:gitnexus:analyze to create or refresh the advisory index."
         : "Run verify to confirm the managed surface is clean.",
+      "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
       "Resolve any reported orphans manually if the current package no longer manages them."
     ];
   }
@@ -183,6 +185,7 @@ function buildNextSteps(
         "Review the planned file changes.",
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
+        "After npm install, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
         "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
         withGitNexus
           ? "After npm install, run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
@@ -194,6 +197,7 @@ function buildNextSteps(
   return [
     "cd into the target project",
     "npm install",
+    "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
     "If you want the shipped local Docker bootstrap path, run npm run devgod:setup:local.",
     withGitNexus
       ? "Run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
@@ -643,7 +647,7 @@ async function readInstallManifest(targetRoot: string): Promise<InstallManifest 
 async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   const manifest: InstallFile[] = [];
 
-  const recursiveRoots = [".devgod/rules", ".devgod/templates"];
+  const recursiveRoots = [".devgod/rules", ".devgod/templates", ".githooks"];
 
   for (const relativeRoot of recursiveRoots) {
     const sourcePath = path.join(sourceRoot, relativeRoot);
@@ -734,6 +738,16 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     {
       source: path.join(sourceRoot, "scripts/check-devgod-workflow-live.sh"),
       target: "scripts/check-devgod-workflow-live.sh",
+      overwriteManaged: true
+    },
+    {
+      source: path.join(sourceRoot, "scripts/check-devgod-git-guard.sh"),
+      target: "scripts/check-devgod-git-guard.sh",
+      overwriteManaged: true
+    },
+    {
+      source: path.join(sourceRoot, "scripts/check-devgod-commit-msg.sh"),
+      target: "scripts/check-devgod-commit-msg.sh",
       overwriteManaged: true
     }
   );

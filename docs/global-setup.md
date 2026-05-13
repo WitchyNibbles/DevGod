@@ -33,6 +33,8 @@ Useful runtime operator commands inside a consuming repo:
 - `npm run devgod:setup:local` for the loopback-only local Postgres and Qdrant bootstrap wrapper
 - `npm run devgod:doctor` for runtime registration, data-root, and Qdrant health even before the repo has any run history
 - `npm run devgod:verify:setup` for the blocking runtime setup proof after bootstrap
+- `npm run devgod:setup:git-guard` to activate the repo-local hook path that blocks managed control-layer files in normal product commits
+- `npm run devgod:verify:git-guard` to confirm the hook path, hook files, and install manifest are wired correctly
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for a synthetic install-proof fixture
 - `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
 - `npm run devgod:ops -- --run-id latest --format text` for the operator dashboard

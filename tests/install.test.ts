@@ -76,6 +76,7 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /devgod-intake/);
   assert.match(first, /`solution_architect`/);
   assert.match(first, /`planner`/);
+  assert.match(first, /`git_operator`/);
   assert.match(first, /check-devgod-workflow\.sh --task-id/);
   assert.match(first, /`tdd-guide`/);
   assert.match(first, /`e2e-runner`/);
@@ -186,9 +187,17 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
   );
+  assert.equal(
+    merged.scripts["devgod:verify:git-guard"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts"
+  );
   assert.match(
     merged.scripts["devgod:record-review"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
+  );
+  assert.equal(
+    merged.scripts["devgod:setup:git-guard"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts"
   );
   assert.match(
     merged.scripts["devgod:setup:local"],
@@ -300,6 +309,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".codex/agents/docs-researcher.toml",
     ".codex/agents/e2e-runner.toml",
     ".codex/agents/frontend-designer.toml",
+    ".codex/agents/git-operator.toml",
     ".codex/agents/infra-engineer.toml",
     ".codex/agents/memory-curator.toml",
     ".codex/agents/planner.toml",
@@ -315,10 +325,13 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
   const overlayPortableAssets = [
+    ".githooks/",
     ".env.example",
     "README.md",
     "docker-compose.yml",
     "docs/global-setup.md",
+    "scripts/check-devgod-commit-msg.sh",
+    "scripts/check-devgod-git-guard.sh",
     "scripts/check-quality.sh",
     "scripts/check-devgod-happy-path.sh",
     "scripts/check-devgod-workflow-live.sh",
@@ -337,9 +350,12 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/evals/retrieval-memory-baseline.ts",
     "src/index.ts",
     "src/install/cli.ts",
+    "src/install/git-guard.ts",
     "src/install/merge.ts",
+    "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
     "src/install/types.ts",
+    "src/install/verify-git-guard.ts",
     "src/mcp/",
     "src/runtime/",
     "src/sql/migrations/",
@@ -407,6 +423,8 @@ test("installDevgodIntoProject dry-run reports planned changes without writing",
     assert.equal(summary.mode, "dry-run");
     assert.equal(summary.writesPerformed, false);
     assert.match(summary.nextSteps.join("\n"), /Rerun in apply mode to write changes/);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:git-guard/);
+    assert.match(summary.nextSteps.join("\n"), /devgod:verify:git-guard/);
     assert.ok(summary.created.includes("AGENTS.md"));
     assert.ok(summary.created.includes("scripts/devgod-setup.sh"));
     assert.ok(summary.updated.includes("package.json"));
@@ -572,6 +590,7 @@ test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP con
     assert.match(codexConfig, /"--no-install"/);
     assert.match(gitignore, /\.gitnexus\//);
     assert.match(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:git-guard/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1216,6 +1235,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   const installedAgents = [
     ".codex/agents/devgod-build-resolver.toml",
     ".codex/agents/devgod-docs-researcher.toml",
+    ".codex/agents/devgod-git-operator.toml",
     ".codex/agents/devgod-reviewer.toml",
     ".codex/agents/devgod-tdd-guide.toml",
     ".codex/agents/devgod-e2e-runner.toml",
@@ -1267,9 +1287,17 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     targetPackageJson.scripts["devgod:verify:review-identity"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
   );
+  assert.equal(
+    targetPackageJson.scripts["devgod:verify:git-guard"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts"
+  );
   assert.match(
     targetPackageJson.scripts["devgod:record-review"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
+  );
+  assert.equal(
+    targetPackageJson.scripts["devgod:setup:git-guard"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts"
   );
 
   await assert.rejects(
@@ -1573,6 +1601,94 @@ test("workflow live wrapper forwards the active task id to the workflow checker"
   }
 });
 
+test("setup-git-guard configures hooks and blocks managed control-layer commits", async (t) => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-git-guard-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    try {
+      await execFileAsync("git", ["--version"]);
+    } catch {
+      t.skip("git is not available in this environment");
+      return;
+    }
+
+    await execFileAsync("git", ["init"], { cwd: targetRoot });
+    await execFileAsync("git", ["config", "user.email", "devgod@example.com"], { cwd: targetRoot });
+    await execFileAsync("git", ["config", "user.name", "Devgod Test"], { cwd: targetRoot });
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    const setup = await execFileAsync(
+      "node",
+      ["--experimental-strip-types", path.join(sourceRoot, "src/install/setup-git-guard.ts")],
+      { cwd: targetRoot }
+    );
+    assert.match(setup.stdout, /devgod git guard configured/);
+
+    const hooksPath = await execFileAsync("git", ["config", "--local", "--get", "core.hooksPath"], {
+      cwd: targetRoot
+    });
+    assert.equal(hooksPath.stdout.trim(), ".githooks");
+
+    const verify = await execFileAsync(
+      "node",
+      ["--experimental-strip-types", path.join(sourceRoot, "src/install/verify-git-guard.ts")],
+      { cwd: targetRoot }
+    );
+    assert.match(verify.stdout, /devgod git guard verified/);
+
+    await execFileAsync("git", ["add", "."], { cwd: targetRoot });
+    await execFileAsync("git", ["commit", "-m", "chore: install devgod overlay"], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        DEVGOD_ALLOW_MANAGED_COMMITS: "1"
+      }
+    });
+
+    await mkdir(path.join(targetRoot, "src"), { recursive: true });
+    await writeFile(path.join(targetRoot, "src", "app.ts"), "export const value = 1;\n", "utf8");
+    await execFileAsync("git", ["add", "src/app.ts"], { cwd: targetRoot });
+    await execFileAsync("git", ["commit", "-m", "feat: add app stub"], { cwd: targetRoot });
+
+    const agentsMd = await readFile(path.join(targetRoot, "AGENTS.md"), "utf8");
+    await writeFile(path.join(targetRoot, "AGENTS.md"), `${agentsMd}\n<!-- guard test -->\n`, "utf8");
+    await execFileAsync("git", ["add", "AGENTS.md"], { cwd: targetRoot });
+    await assert.rejects(
+      execFileAsync("git", ["commit", "-m", "docs: update agents overlay"], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /devgod git guard blocked managed control-layer files/
+        );
+        return true;
+      }
+    );
+    await execFileAsync("git", ["reset", "HEAD", "AGENTS.md"], { cwd: targetRoot });
+
+    await writeFile(path.join(targetRoot, "notes.md"), "guard check\n", "utf8");
+    await execFileAsync("git", ["add", "notes.md"], { cwd: targetRoot });
+    await assert.rejects(
+      execFileAsync("git", ["commit", "-m", "bad message"], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /devgod commit message guard/
+        );
+        return true;
+      }
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("PowerShell setup script keeps the same env-import safety contract textually", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const setupPowerShell = await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8");
@@ -1581,6 +1697,7 @@ test("PowerShell setup script keeps the same env-import safety contract textuall
   assert.match(setupPowerShell, /Strip-DevgodUnquotedComment/);
   assert.match(setupPowerShell, /Unescape-DevgodDoubleQuotedValue/);
   assert.match(setupPowerShell, /\^DEVGOD_\[A-Z0-9_\]\+\$/);
+  assert.match(setupPowerShell, /devgod:setup:git-guard/);
   assert.doesNotMatch(setupPowerShell, /Set-Item -Path "Env:PATH"/);
   assert.doesNotMatch(setupPowerShell, /Get-Content -LiteralPath "\.env"/);
 });
@@ -1616,6 +1733,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".codex/agents/docs-researcher.toml",
     ".codex/agents/e2e-runner.toml",
     ".codex/agents/frontend-designer.toml",
+    ".codex/agents/git-operator.toml",
     ".codex/agents/infra-engineer.toml",
     ".codex/agents/memory-curator.toml",
     ".codex/agents/planner.toml",
@@ -1635,9 +1753,13 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   assert.deepEqual(packedAgentFiles, expectedAgentFiles);
 
   for (const expectedPath of [
+    ".githooks/commit-msg",
+    ".githooks/pre-commit",
     ".devgod/rules/role-retrieval-policy.md",
     ".devgod/templates/review-identity-bindings.json",
     ".devgod/templates/review-identity-adapter.fixture.json",
+    "scripts/check-devgod-commit-msg.sh",
+    "scripts/check-devgod-git-guard.sh",
     "scripts/check-devgod-workflow.sh",
     "scripts/check-devgod-workflow-live.sh",
     "scripts/check-quality.sh",
@@ -1646,7 +1768,10 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     "src/admin.ts",
     "src/index.ts",
     "src/install/cli.ts",
+    "src/install/git-guard.ts",
+    "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
+    "src/install/verify-git-guard.ts",
     "src/sql/migrations/001_initial_schema.sql"
   ]) {
     assert.ok(packedFiles.has(expectedPath), `${expectedPath} should be present in npm pack --dry-run output`);

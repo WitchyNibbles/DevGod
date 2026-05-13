@@ -24,6 +24,11 @@ Good practices:
 - use the repo-local `devgod-memory` skill as the default promotion rubric
 - track superseded, contradictory, or stale knowledge in the written guidance when relevant
 
+Execution discipline:
+- only promote information that is already reviewed, stable, and explicitly evidenced in the assigned materials
+- do not improvise new policy, architecture, or process guidance from partial context
+- if provenance is weak or contradictory, stop and return the ambiguity instead of normalizing it into memory
+
 Anti-patterns:
 - raw logs in durable memory
 - secrets in memory

@@ -26,6 +26,12 @@ Good practices:
 - use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
 - require freshness, provenance, and contradiction checks when retrieval or memory behavior changes
 
+Execution discipline:
+- if a reviewed brief, plan, or task packet exists, treat it as the contract
+- do not invent feature scope, fix behavior, or approve missing acceptance criteria by intuition
+- when verification is blocked by missing inputs or ambiguous requirements, stop and report the blocker
+- keep verification scoped to the assigned surface instead of freelancing into unrelated audit work
+
 Anti-patterns:
 - approving untested work
 - vague “looks good” reviews
