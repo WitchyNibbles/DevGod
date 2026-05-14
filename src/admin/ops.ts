@@ -1,6 +1,7 @@
 import type {
   RecoveryInspectionReport,
-  RoutingRecommendationReport
+  RoutingRecommendationReport,
+  RunExecutionPlan
 } from "../domain/types.ts";
 import type { OperatorStatusReport } from "./status.ts";
 
@@ -8,6 +9,7 @@ export interface OperatorDashboardReport {
   authorityLabel: "derived_only";
   runId: string;
   status: OperatorStatusReport;
+  executionPlan: RunExecutionPlan;
   routing: RoutingRecommendationReport;
   recovery: RecoveryInspectionReport;
   alerts: string[];
@@ -16,6 +18,7 @@ export interface OperatorDashboardReport {
 
 export function buildOperatorDashboardReport(input: {
   status: OperatorStatusReport;
+  executionPlan: RunExecutionPlan;
   routing: RoutingRecommendationReport;
   recovery: RecoveryInspectionReport;
 }): OperatorDashboardReport {
@@ -49,18 +52,30 @@ export function buildOperatorDashboardReport(input: {
     }
   }
 
-  for (const recommendation of input.routing.recommendations) {
-    if (recommendation.recommendation === "owner_dispatch" && recommendation.targetRole) {
-      nextActions.push(`route ${recommendation.taskId} to ${recommendation.targetRole}`);
-    }
-
-    if (recommendation.recommendation === "review_dispatch" && recommendation.targetReviewRole) {
-      nextActions.push(`request ${recommendation.targetReviewRole} for ${recommendation.taskId}`);
-    }
-  }
-
-  for (const action of input.recovery.actions.filter((entry) => entry.safeToApply)) {
-    nextActions.push(`recover ${action.id}`);
+  switch (input.executionPlan.directive.kind) {
+    case "dispatch_owner":
+      nextActions.push(
+        `route ${input.executionPlan.directive.recommendation.taskId} to ${input.executionPlan.directive.recommendation.targetRole}`
+      );
+      break;
+    case "dispatch_reviews":
+      for (const recommendation of input.executionPlan.directive.recommendations) {
+        if (recommendation.targetReviewRole) {
+          nextActions.push(`request ${recommendation.targetReviewRole} for ${recommendation.taskId}`);
+        }
+      }
+      break;
+    case "apply_recovery":
+      for (const action of input.executionPlan.directive.actions) {
+        nextActions.push(`recover ${action.id}`);
+      }
+      break;
+    case "blocked":
+      alerts.push(...input.executionPlan.directive.blockers.map((blocker) => `execution blocked: ${blocker}`));
+      break;
+    case "complete":
+      nextActions.push("none");
+      break;
   }
 
   if (
@@ -74,6 +89,7 @@ export function buildOperatorDashboardReport(input: {
     authorityLabel: "derived_only",
     runId: input.status.run.id,
     status: input.status,
+    executionPlan: input.executionPlan,
     routing: input.routing,
     recovery: input.recovery,
     alerts: unique(alerts),
@@ -99,6 +115,7 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   }
   lines.push(`recovery-issues: ${report.recovery.summary.totalIssues}`);
   lines.push(`safe-recovery-actions: ${report.recovery.summary.safeActions}`);
+  lines.push(`execution-directive: ${report.executionPlan.directive.kind}`);
   lines.push(`next-ready: ${report.status.orchestration.nextTaskIds.join(", ") || "none"}`);
   lines.push(`gitnexus: ${report.status.gitNexus.state}`);
   if (report.status.gitNexus.configuredScopes.length > 0) {

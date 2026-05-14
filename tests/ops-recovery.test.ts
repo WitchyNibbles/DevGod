@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { executeOpsCommandFromArgs, executeRecoverCommandFromArgs } from "../src/admin.ts";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { executeLoopCommandFromArgs, executeOpsCommandFromArgs, executeRecoverCommandFromArgs } from "../src/admin.ts";
 import { createReviewActionContextResolver } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
 import type {
@@ -168,6 +171,9 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
       getRoutingReport(runId) {
         return service.recommendRouting(runId);
       },
@@ -297,12 +303,15 @@ test("executeOpsCommandFromArgs resolves latest runs and can return text output"
         headCommit: "abc123",
         notes: ["gitnexus advisory context is ready"]
       }),
-    getStatusSnapshot(runId) {
-      return service.getStatus(runId);
-    },
-    getRoutingReport(runId) {
-      return service.recommendRouting(runId);
-    },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
     inspectRecovery(runId, staleAfterHours) {
       return service.inspectRecovery(runId, { staleAfterHours });
     }
@@ -310,6 +319,262 @@ test("executeOpsCommandFromArgs resolves latest runs and can return text output"
 
   assert.equal(result.format, "text");
   assert.match(result.report.nextActions.join(" "), /route plan to planner/);
+  assert.equal(result.report.executionPlan.directive.kind, "dispatch_owner");
+});
+
+test("executeLoopCommandFromArgs returns the authoritative owner dispatch step", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+
+  const result = await executeLoopCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    applyRecovery(runId, actionIds, staleAfterHours) {
+      return service.applyRecovery(runId, actionIds, { staleAfterHours });
+    }
+  });
+
+  assert.equal(result.format, "json");
+  assert.equal(result.result.mode, "advisory_only");
+  assert.equal(result.result.initialPlan.directive.kind, "dispatch_owner");
+  assert.equal(result.result.finalPlan.directive.kind, "dispatch_owner");
+});
+
+test("executeLoopCommandFromArgs can auto-apply safe recovery and advance to the next directive", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] }),
+    taskPacket({
+      taskId: "build",
+      dependencies: ["plan"],
+      allowedWriteScope: ["src/store"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  mutateTask(store, "plan", (task) => ({
+    ...task,
+    updatedAt: "2026-05-01T00:00:00.000Z"
+  }));
+
+  const result = await executeLoopCommandFromArgs(
+    ["--run-id", run.id, "--format", "json", "--stale-after-hours", "24", "--apply-safe-recovery"],
+    {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, {
+          staleAfterHours,
+          now: "2026-05-03T00:00:00.000Z"
+        });
+      }
+    }
+  );
+
+  assert.equal(result.result.mode, "applied");
+  assert.equal(result.result.initialPlan.directive.kind, "apply_recovery");
+  assert.deepEqual(result.result.appliedRecoveryActionIds, ["reset-task:plan"]);
+  assert.equal(result.result.finalPlan.directive.kind, "dispatch_owner");
+  if (result.result.finalPlan.directive.kind === "dispatch_owner") {
+    assert.equal(result.result.finalPlan.directive.recommendation.taskId, "plan");
+  }
+});
+
+test("executeLoopCommandFromArgs can execute an owner dispatch after optional recovery", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", ownerRole: "planner" })]);
+
+  const result = await executeLoopCommandFromArgs(
+    ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
+    {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      executeDirectiveStep(runId, input) {
+        return service.executeDirectiveStep(runId, input);
+      }
+    }
+  );
+
+  assert.equal(result.result.mode, "executed");
+  assert.equal(result.result.initialPlan.directive.kind, "dispatch_owner");
+  assert.equal(result.result.executedSteps.length, 1);
+  assert.equal(result.result.executedSteps[0]?.directiveKind, "dispatch_owner");
+  assert.equal(result.result.executedSteps[0]?.outcome, "executed");
+  assert.equal(result.result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.result.snapshot.tasks[0]?.status, "in_progress");
+});
+
+test("executeLoopCommandFromArgs can execute supported review dispatch inputs and re-evaluate to completion", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-loop-review-inputs-"));
+
+  try {
+    await writeFile(
+      path.join(directory, "security.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "security-actor",
+          review: {
+            reviewerRole: "security_reviewer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, "qa.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "qa-actor",
+          review: {
+            reviewerRole: "qa_engineer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const executedRoles: string[] = [];
+    const result = await executeLoopCommandFromArgs(
+      [
+        "--run-id",
+        run.id,
+        "--format",
+        "json",
+        "--execute-supported-directives",
+        "--review-input",
+        "security.json",
+        "--review-input",
+        "qa.json"
+      ],
+      {
+        cwd: directory,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          return service.executeDirectiveStep(runId, {
+            ...input,
+            async executeReviewRecommendation({ directive }) {
+              const command = input.reviewCommands.find((candidate) =>
+                directive.recommendations.some(
+                  (recommendation) =>
+                    recommendation.taskId === candidate.taskId &&
+                    recommendation.targetReviewRole === candidate.review.reviewerRole
+                )
+              );
+              assert.ok(command, "expected a matching review command");
+              executedRoles.push(command.review.reviewerRole);
+              await service.recordReview(runId, command.taskId, command.actor, command.review);
+              return {
+                executed: true,
+                taskId: command.taskId,
+                actor: command.actor,
+                reviewRole: command.review.reviewerRole,
+                evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+              };
+            }
+          });
+        }
+      }
+    );
+
+    assert.deepEqual(executedRoles, ["security_reviewer", "qa_engineer"]);
+    assert.equal(result.result.mode, "executed");
+    assert.equal(result.result.initialPlan.directive.kind, "dispatch_reviews");
+    assert.equal(result.result.executedSteps.length, 2);
+    assert.equal(result.result.finalPlan.directive.kind, "complete");
+    assert.equal(result.result.snapshot.tasks[0]?.status, "approved");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("executeRecoverCommandFromArgs rejects conflicting apply flags", async () => {

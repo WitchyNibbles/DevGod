@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { installDevgodIntoProject } from "../src/install/cli.ts";
+import { installDevgodIntoProject, scaffoldWorkflowArtifacts } from "../src/install/cli.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,17 +40,20 @@ test("scaffold-workflow creates canonical starter artifacts", async () => {
   const targetRoot = await createTargetRoot("devgod-scaffold-create-");
 
   try {
-    const { stdout } = await runScaffold(targetRoot, taskId);
+    const summary = await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId,
+      force: false,
+      forceActive: false
+    });
     const packageJson = JSON.parse(await readFile(join(targetRoot, "package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };
 
-    assert.match(stdout, /devgod scaffold-workflow/);
-    assert.match(stdout, new RegExp(`task_id: ${taskId}`));
-    assert.match(
-      stdout,
-      new RegExp(`npm run devgod:check:happy-path -- --task-id ${taskId}`)
-    );
+    assert.equal(summary.taskId, taskId);
+    assert.ok(summary.created.length > 0);
+    assert.match(summary.nextSteps.join("\n"), new RegExp(`npm run devgod:check:happy-path -- --task-id ${taskId}`));
 
     const active = await readFile(join(targetRoot, ".devgod", "ACTIVE"), "utf8");
     const brief = await readFile(
@@ -90,10 +93,22 @@ test("scaffold-workflow refuses to overwrite existing artifacts without --force"
   const targetRoot = await createTargetRoot("devgod-scaffold-no-overwrite-");
 
   try {
-    await runScaffold(targetRoot, taskId);
+    await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId,
+      force: false,
+      forceActive: false
+    });
 
     await assert.rejects(
-      runScaffold(targetRoot, taskId),
+      scaffoldWorkflowArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId,
+        force: false,
+        forceActive: false
+      }),
       /refusing to overwrite existing workflow artifacts without --force/
     );
   } finally {
@@ -105,10 +120,22 @@ test("scaffold-workflow refuses to replace a different active task without --for
   const targetRoot = await createTargetRoot("devgod-scaffold-active-mismatch-");
 
   try {
-    await runScaffold(targetRoot, "DG-SCAFFOLD-OLD");
+    await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId: "DG-SCAFFOLD-OLD",
+      force: false,
+      forceActive: false
+    });
 
     await assert.rejects(
-      runScaffold(targetRoot, "DG-SCAFFOLD-NEW"),
+      scaffoldWorkflowArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId: "DG-SCAFFOLD-NEW",
+        force: false,
+        forceActive: false
+      }),
       /refusing to replace active task DG-SCAFFOLD-OLD without --force-active/
     );
   } finally {
@@ -121,7 +148,13 @@ test("scaffolded workflow artifacts remain blocked until reviews are completed",
   const targetRoot = await createTargetRoot("devgod-scaffold-pending-");
 
   try {
-    await runScaffold(targetRoot, taskId);
+    await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId,
+      force: false,
+      forceActive: false
+    });
 
     await assert.rejects(
       execFileAsync(
@@ -180,7 +213,13 @@ test("scaffold-workflow rejects symlinked targets even with force flags", async 
     await symlink(activeVictimPath, join(targetRoot, ".devgod", "ACTIVE"));
 
     await assert.rejects(
-      runScaffold(targetRoot, taskId, ["--force", "--force-active"]),
+      scaffoldWorkflowArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId,
+        force: true,
+        forceActive: true
+      }),
       /refusing to scaffold \.devgod\/ACTIVE: managed path is not an in-root regular file/
     );
     assert.equal(await readFile(activeVictimPath, "utf8"), "do-not-touch-active\n");
@@ -198,7 +237,13 @@ test("scaffold-workflow rejects symlinked targets even with force flags", async 
     );
 
     await assert.rejects(
-      runScaffold(targetRoot, taskId, ["--force"]),
+      scaffoldWorkflowArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId,
+        force: true,
+        forceActive: false
+      }),
       new RegExp(
         `refusing to scaffold \\.devgod/work/reviews/review-${taskId}-reviewer\\.md: managed path is not an in-root regular file`
       )

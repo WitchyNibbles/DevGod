@@ -168,6 +168,32 @@ export class MemoryStore implements DevgodStore {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   }
 
+  async findLatestRunForTask(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+    taskId: string;
+  }): Promise<RunRecord | undefined> {
+    const project = this.projects.get(`${params.workspaceSlug}:${params.projectSlug}`);
+    if (!project) {
+      return undefined;
+    }
+
+    const runs = [...this.runs.values()]
+      .filter((run) => run.projectId === project.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+    for (const run of runs) {
+      const hasTask = [...this.tasks.values()].some(
+        (task) => task.runId === run.id && task.packet.taskId === params.taskId
+      );
+      if (hasTask) {
+        return run;
+      }
+    }
+
+    return undefined;
+  }
+
   async findRunsByProjectActivity(params: {
     workspaceSlug: string;
     projectSlug: string;

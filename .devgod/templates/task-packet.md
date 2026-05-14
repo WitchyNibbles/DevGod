@@ -26,6 +26,7 @@ List the task-type gates that apply, for example:
 - `responsive_acceptance`
 - `tdd_required`
 - `e2e_required`
+- `regression_safety_required`
 - `release_readiness_required`
 - `performance_check_required`
 - `setup_replay_required`
@@ -48,9 +49,21 @@ List the task-type gates that apply, for example:
 
 ### Blocked assumptions
 
+## Behavior to preserve
+
+Required for refactors, migrations, command rewrites, and other behavior-preserving changes.
+
 ## Acceptance criteria
 
+## Good-path checks
+
+## Bad-path or edge-case checks
+
 ## Verification steps
+
+## Residual risk disposition
+
+Fix touched-scope defects before completion or record them as explicit blockers with owner and follow-up path.
 
 ## Required reviews
 

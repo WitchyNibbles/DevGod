@@ -260,6 +260,7 @@ Once the repo is configured, the intended operating rhythm is:
 - reviewer, QA, and security gates block completion for substantive work
 - `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof for the shipped workflow shape
 - `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is the live workflow-integrity proof before a substantive completion claim
+- if the runtime is reachable but no run exists yet, use `npm run devgod:seed-workflow-proof -- --workspace-slug <workspace> --project-slug <project> --task-id <task-id>` to seed an explicit local proof run before retrying the live gate
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
 
@@ -377,6 +378,7 @@ Installed target repos also get:
 - `npm run devgod:mcp` for a packaged stdio MCP server exposing devgod runtime tools
 - `npm run devgod:ui` for a local hosted operator UI over the same runtime surfaces
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>`
+- `npm run devgod:seed-workflow-proof -- --task-id <task-id>`
 - `.devgod/review-identity-bindings.json`
 - `.devgod/review-identity-adapter.fixture.json`
 - `devgod/review-identity-adapter.ts`

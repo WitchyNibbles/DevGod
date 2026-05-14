@@ -205,6 +205,7 @@ function createService(store: MemoryStore = new MemoryStore()) {
 
   return {
     service,
+    store,
     registerReviewContext(
       context: ReviewActionContext,
       principal: AuthenticatedPrincipal = {
@@ -1698,6 +1699,10 @@ test("resumeRun returns ready tasks with satisfied dependencies", async () => {
 
   let status = await service.resumeRun(run.id);
   assert.deepEqual(status.nextTaskIds, ["plan"]);
+  assert.equal(status.executionPlan.directive.kind, "dispatch_owner");
+  if (status.executionPlan.directive.kind === "dispatch_owner") {
+    assert.equal(status.executionPlan.directive.recommendation.taskId, "plan");
+  }
 
   await service.claimTask(run.id, "plan", "planner");
   await service.submitHandoff(run.id, "plan", {
@@ -1733,6 +1738,10 @@ test("resumeRun returns ready tasks with satisfied dependencies", async () => {
 
   status = await service.resumeRun(run.id);
   assert.ok(status.nextTaskIds.includes("build"));
+  assert.equal(status.executionPlan.directive.kind, "dispatch_owner");
+  if (status.executionPlan.directive.kind === "dispatch_owner") {
+    assert.equal(status.executionPlan.directive.recommendation.taskId, "build");
+  }
 });
 
 test("recommendRouting returns advisory owner, review, and wait recommendations without auto-dispatch", async () => {
@@ -1810,4 +1819,420 @@ test("recommendRouting returns advisory owner, review, and wait recommendations 
   assert.equal(ownerRecommendation?.recommendation, "owner_dispatch");
   assert.equal(ownerRecommendation?.targetRole, "backend_engineer");
   assert.deepEqual(ownerRecommendation?.allowedWriteScope, ["src/store"]);
+});
+
+test("getExecutionPlan returns review dispatch for missing required reviews", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.mode, "runtime_authoritative");
+  assert.equal(plan.directive.kind, "dispatch_reviews");
+  if (plan.directive.kind === "dispatch_reviews") {
+    assert.deepEqual(
+      plan.directive.recommendations.map((recommendation) => recommendation.targetReviewRole),
+      ["security_reviewer", "qa_engineer"]
+    );
+  }
+});
+
+test("executeDirectiveStep claims the owner-dispatch task, persists history, and re-evaluates the next directive", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+
+  const result = await service.executeDirectiveStep(run.id, {
+    ownerActor: "planner"
+  });
+
+  assert.equal(result.initialPlan.directive.kind, "dispatch_owner");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "dispatch_owner");
+  assert.equal(result.steps[0]?.outcome, "executed");
+  assert.equal(result.steps[0]?.taskId, "plan");
+  assert.equal(result.steps[0]?.actor, "planner");
+  assert.equal(result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.snapshot.tasks[0]?.status, "in_progress");
+  assert.equal(result.snapshot.tasks[0]?.claimedBy, "planner");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 1);
+  assert.equal(history[0]?.provenance.runId, run.id);
+  assert.equal(history[0]?.provenance.taskId, "plan");
+  assert.ok(history[0]?.metadata.tags.includes("runtime_loop_history"));
+  assert.ok(history[0]?.metadata.tags.includes("directive:dispatch_owner"));
+  assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
+
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  assert.equal(memoryEntries.size, 1);
+});
+
+test("executeDirectiveStep persists one history entry per supported review step", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const executedRoles: string[] = [];
+  const result = await service.executeDirectiveStep(run.id, {
+    async executeReviewRecommendation({ directive }) {
+      const recommendation = directive.recommendations[0];
+      assert.ok(recommendation);
+      assert.ok(recommendation.targetReviewRole);
+      executedRoles.push(recommendation.targetReviewRole);
+      const actor = reviewContext(recommendation.targetReviewRole).actor;
+      await service.recordReview(run.id, recommendation.taskId, actor, {
+        reviewerRole: recommendation.targetReviewRole,
+        state: "passed",
+        severity: "low",
+        findings: []
+      });
+      return {
+        executed: true,
+        taskId: recommendation.taskId,
+        actor,
+        reviewRole: recommendation.targetReviewRole,
+        evidence: [`recorded ${recommendation.targetReviewRole} for ${recommendation.taskId}`]
+      };
+    }
+  });
+
+  assert.deepEqual(executedRoles, ["security_reviewer", "qa_engineer"]);
+  assert.equal(result.initialPlan.directive.kind, "dispatch_reviews");
+  assert.equal(result.steps.length, 2);
+  assert.equal(result.steps[0]?.directiveKind, "dispatch_reviews");
+  assert.equal(result.steps[0]?.outcome, "executed");
+  assert.equal(result.steps[1]?.directiveKind, "dispatch_reviews");
+  assert.equal(result.steps[1]?.outcome, "executed");
+  assert.equal(result.finalPlan.directive.kind, "complete");
+  assert.equal(result.snapshot.tasks[0]?.status, "approved");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 2);
+  assert.ok(history.every((entry) => entry.metadata.tags.includes("runtime_loop_history")));
+  assert.ok(history.every((entry) => entry.metadata.tags.includes("directive:dispatch_reviews")));
+  assert.ok(history.some((entry) => entry.metadata.tags.includes("next:dispatch_reviews")));
+  assert.ok(history.some((entry) => entry.metadata.tags.includes("next:complete")));
+
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  assert.equal(memoryEntries.size, 2);
+});
+
+test("executeDirectiveStep fails closed on unsupported review dispatch and still records the stop reason", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.executeDirectiveStep(run.id);
+
+  assert.equal(result.initialPlan.directive.kind, "dispatch_reviews");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "dispatch_reviews");
+  assert.equal(result.steps[0]?.outcome, "unsupported");
+  assert.equal(result.finalPlan.directive.kind, "dispatch_reviews");
+  assert.equal(result.snapshot.tasks[0]?.status, "review_blocked");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 1);
+  assert.ok(history[0]?.metadata.tags.includes("directive:dispatch_reviews"));
+  assert.ok(history[0]?.metadata.tags.includes("outcome:unsupported"));
+
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  assert.equal(memoryEntries.size, 1);
+});
+
+test("executeDirectiveStep persists complete and blocked terminations without changing task state", async () => {
+  const { service, store } = createService();
+  const completeRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(completeRun.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(completeRun.id, "plan", "planner");
+  await service.submitHandoff(completeRun.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(completeRun.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(completeRun.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(completeRun.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const completeResult = await service.executeDirectiveStep(completeRun.id);
+  assert.equal(completeResult.initialPlan.directive.kind, "complete");
+  assert.equal(completeResult.steps[0]?.directiveKind, "complete");
+  assert.equal(completeResult.steps[0]?.outcome, "complete");
+  assert.equal(completeResult.snapshot.tasks[0]?.status, "approved");
+  const completeHistory = await service.getLoopExecutionHistory(completeRun.id);
+  assert.equal(completeHistory.length, 1);
+  assert.ok(completeHistory[0]?.metadata.tags.includes("directive:complete"));
+  assert.ok(completeHistory[0]?.metadata.tags.includes("outcome:complete"));
+
+  const blockedRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(blockedRun.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(blockedRun.id, "plan", "planner");
+
+  const blockedResult = await service.executeDirectiveStep(blockedRun.id);
+  assert.equal(blockedResult.initialPlan.directive.kind, "blocked");
+  assert.equal(blockedResult.steps[0]?.directiveKind, "blocked");
+  assert.equal(blockedResult.steps[0]?.outcome, "blocked");
+  assert.equal(blockedResult.snapshot.tasks[0]?.status, "in_progress");
+  const blockedHistory = await service.getLoopExecutionHistory(blockedRun.id);
+  assert.equal(blockedHistory.length, 1);
+  assert.ok(blockedHistory[0]?.metadata.tags.includes("directive:blocked"));
+  assert.ok(blockedHistory[0]?.metadata.tags.includes("outcome:blocked"));
+
+  const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
+  assert.equal(memoryEntries.size, 2);
+});
+
+test("getExecutionPlan returns safe recovery actions before more routing", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  mutateReviewWhere(
+    store,
+    (review) => review.taskId === "plan" && review.reviewerRole === "qa_engineer",
+    (review) => ({
+      ...review,
+      state: "blocked",
+      severity: "high",
+      findings: ["approval should be reblocked"]
+    })
+  );
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "apply_recovery");
+  if (plan.directive.kind === "apply_recovery") {
+    assert.ok(plan.directive.actions.some((action) => action.kind === "reblock_stale_approval"));
+  }
+});
+
+test("getExecutionPlan returns complete when all tasks are terminal", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "complete");
+});
+
+test("getExecutionPlan returns blocked when work is already in progress", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "blocked");
+  if (plan.directive.kind === "blocked") {
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("already claimed by planner")));
+  }
 });

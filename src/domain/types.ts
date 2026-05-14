@@ -56,11 +56,19 @@ export const qualityGates = [
   "responsive_acceptance",
   "tdd_required",
   "e2e_required",
+  "regression_safety_required",
   "release_readiness_required",
   "performance_check_required",
   "setup_replay_required"
 ] as const;
 export const routingRecommendationKinds = ["owner_dispatch", "review_dispatch", "wait"] as const;
+export const executionDirectiveKinds = [
+  "complete",
+  "dispatch_owner",
+  "dispatch_reviews",
+  "apply_recovery",
+  "blocked"
+] as const;
 export const recoveryIssueKinds = [
   "stalled_task",
   "stale_review_block",
@@ -91,6 +99,7 @@ export type GateReviewRole = (typeof requiredGateReviews)[number];
 export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
 export type QualityGate = (typeof qualityGates)[number];
 export type RoutingRecommendationKind = (typeof routingRecommendationKinds)[number];
+export type ExecutionDirectiveKind = (typeof executionDirectiveKinds)[number];
 export type RecoveryIssueKind = (typeof recoveryIssueKinds)[number];
 export type RecoveryActionKind = (typeof recoveryActionKinds)[number];
 
@@ -475,6 +484,53 @@ export interface RunStatusSnapshot {
   activeLocks: LockRecord[];
   blockers: string[];
   nextTaskIds: string[];
+}
+
+export interface BaseExecutionDirective {
+  kind: ExecutionDirectiveKind;
+  rationale: string[];
+}
+
+export interface CompleteExecutionDirective extends BaseExecutionDirective {
+  kind: "complete";
+}
+
+export interface DispatchOwnerExecutionDirective extends BaseExecutionDirective {
+  kind: "dispatch_owner";
+  recommendation: RoutingRecommendation;
+}
+
+export interface DispatchReviewsExecutionDirective extends BaseExecutionDirective {
+  kind: "dispatch_reviews";
+  recommendations: RoutingRecommendation[];
+}
+
+export interface ApplyRecoveryExecutionDirective extends BaseExecutionDirective {
+  kind: "apply_recovery";
+  actions: RecoveryAction[];
+}
+
+export interface BlockedExecutionDirective extends BaseExecutionDirective {
+  kind: "blocked";
+  blockers: string[];
+}
+
+export type RunExecutionDirective =
+  | CompleteExecutionDirective
+  | DispatchOwnerExecutionDirective
+  | DispatchReviewsExecutionDirective
+  | ApplyRecoveryExecutionDirective
+  | BlockedExecutionDirective;
+
+export interface RunExecutionPlan {
+  mode: "runtime_authoritative";
+  runId: string;
+  runStatus: RunStatus;
+  directive: RunExecutionDirective;
+}
+
+export interface RunResumeSnapshot extends RunStatusSnapshot {
+  executionPlan: RunExecutionPlan;
 }
 
 export interface RoutingRecommendation {

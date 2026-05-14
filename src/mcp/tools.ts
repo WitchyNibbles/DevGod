@@ -4,6 +4,7 @@ export interface McpRuntimeSurface {
   status(args: readonly string[]): Promise<unknown>;
   runtimeHealth(args: readonly string[]): Promise<unknown>;
   ops(args: readonly string[]): Promise<unknown>;
+  loop(args: readonly string[]): Promise<unknown>;
   report(args: readonly string[]): Promise<unknown>;
   planContext(args: readonly string[]): Promise<unknown>;
 }
@@ -106,6 +107,39 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         pushOptionalNumberFlag(args, "--stale-after-hours", input.staleAfterHours);
         const report = await runtime.ops(args);
         return buildTextResult("Returned the devgod operator dashboard.", report);
+      }
+    },
+    {
+      name: "devgod_loop",
+      description:
+        "Get the authoritative next devgod loop step for a run and optionally apply safe recovery first.",
+      inputSchema: {
+        runId: z.string().trim().optional(),
+        workspaceSlug: z.string().trim().optional(),
+        projectSlug: z.string().trim().optional(),
+        staleAfterHours: z.number().int().min(0).optional(),
+        applySafeRecovery: z.boolean().optional(),
+        executeSupportedDirectives: z.boolean().optional(),
+        ownerActor: z.string().trim().optional(),
+        reviewInputPaths: z.array(z.string().trim().min(1)).optional()
+      },
+      async invoke(input) {
+        const args = [...buildRunSelectorArgs(input), "--format", "json"];
+        pushOptionalNumberFlag(args, "--stale-after-hours", input.staleAfterHours);
+        if (input.applySafeRecovery === true) {
+          args.push("--apply-safe-recovery");
+        }
+        if (input.executeSupportedDirectives === true) {
+          args.push("--execute-supported-directives");
+        }
+        pushOptionalStringFlag(args, "--owner-actor", input.ownerActor);
+        if (Array.isArray(input.reviewInputPaths)) {
+          for (const reviewInputPath of input.reviewInputPaths) {
+            pushOptionalStringFlag(args, "--review-input", reviewInputPath);
+          }
+        }
+        const report = await runtime.loop(args);
+        return buildTextResult("Returned the devgod loop execution step.", report);
       }
     },
     {

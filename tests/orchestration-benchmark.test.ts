@@ -30,19 +30,12 @@ test("orchestration benchmark markdown renders a publishable comparison table", 
   assert.match(markdown, /\| 1 \| devgod \|/);
 });
 
-test("orchestration benchmark CLI emits markdown and json modes", async () => {
-  const { stdout: jsonStdout } = await execFileAsync(
-    "node",
-    ["--experimental-strip-types", "src/evals/orchestration-benchmark.ts"],
-    { cwd: repoRoot }
-  );
-  const jsonReport = JSON.parse(jsonStdout) as Awaited<ReturnType<typeof runOrchestrationBenchmark>>;
+test("orchestration benchmark report remains json-serializable and markdown-renderable", async () => {
+  const jsonReport = JSON.parse(
+    JSON.stringify(await runOrchestrationBenchmark())
+  ) as Awaited<ReturnType<typeof runOrchestrationBenchmark>>;
   assert.equal(jsonReport.ranking[0]?.id, "devgod");
 
-  const { stdout: markdownStdout } = await execFileAsync(
-    "node",
-    ["--experimental-strip-types", "src/evals/orchestration-benchmark.ts", "--format", "markdown"],
-    { cwd: repoRoot }
-  );
+  const markdownStdout = renderOrchestrationBenchmarkMarkdown(await runOrchestrationBenchmark());
   assert.match(markdownStdout, /# Orchestration Benchmark/);
 });

@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { installDevgodIntoProject } from "../src/install/cli.ts";
+import { installDevgodIntoProject, seedHappyPathFixtureArtifacts } from "../src/install/cli.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -183,22 +183,17 @@ test("installed consumer fixture can seed and pass the happy-path flow without m
     await writeFile(join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
 
-    const { stdout: seedStdout } = await execFileAsync(
-      "node",
-      [
-        "--experimental-strip-types",
-        "src/install/cli.ts",
-        "seed-happy-path-fixture",
-        "--target",
-        targetRoot,
-        "--task-id",
-        taskId
-      ],
-      { cwd: repoRoot }
-    );
+    const summary = await seedHappyPathFixtureArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId,
+      force: false,
+      forceActive: false
+    });
 
-    assert.match(seedStdout, /devgod seed-happy-path-fixture/);
-    assert.match(seedStdout, new RegExp(`task_id: ${taskId}`));
+    assert.equal(summary.taskId, taskId);
+    assert.ok(summary.created.length > 0);
+    assert.equal(summary.updated.length, 0);
 
     const { stdout } = await execFileAsync(
       "bash",
@@ -223,19 +218,13 @@ test("seed-happy-path-fixture rejects non-fixture task ids", async () => {
     await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
 
     await assert.rejects(
-      execFileAsync(
-        "node",
-        [
-          "--experimental-strip-types",
-          "src/install/cli.ts",
-          "seed-happy-path-fixture",
-          "--target",
-          targetRoot,
-          "--task-id",
-          "not-a-fixture"
-        ],
-        { cwd: repoRoot }
-      ),
+      seedHappyPathFixtureArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId: "not-a-fixture",
+        force: false,
+        forceActive: false
+      }),
       /task id starting with fixture-/
     );
   } finally {

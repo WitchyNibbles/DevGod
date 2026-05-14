@@ -14,6 +14,8 @@ Original user ask:
 
 ## Goal
 
+## Intended outcome
+
 ## User
 
 ## Problem
@@ -28,7 +30,17 @@ Original user ask:
 
 ## Unknowns
 
+## Clarifying questions
+
+## Assumptions
+
 ## Success Criteria
+
+## Completion bar
+
+## Good-path outcomes
+
+## Bad-path or edge-case outcomes
 
 ## Non-goals
 

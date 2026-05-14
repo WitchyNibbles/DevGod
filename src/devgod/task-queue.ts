@@ -41,6 +41,12 @@ export interface TaskQueueSummary {
   totalCount: number;
 }
 
+export interface AdvanceTaskQueueResult {
+  queue: TaskQueue;
+  completedTask: TaskQueueTask;
+  nextTask: TaskQueueTask | null;
+}
+
 function asRecord(value: unknown, context: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${context} must be an object`);
@@ -193,6 +199,64 @@ export function selectNextUnblockedTask(queue: TaskQueue): TaskQueueTask | null 
   }
 
   return null;
+}
+
+export function advanceTaskQueue(queue: TaskQueue, taskId: string): AdvanceTaskQueueResult {
+  const currentTask = queue.tasks.find((task) => task.id === taskId);
+  if (!currentTask) {
+    throw new Error(`task "${taskId}" does not exist in the queue`);
+  }
+
+  if (queue.current_task_id !== taskId) {
+    throw new Error(`task "${taskId}" is not the current active queue task`);
+  }
+
+  if (isTaskBlocked(currentTask)) {
+    throw new Error(`task "${taskId}" is blocked and cannot advance`);
+  }
+
+  if (currentTask.status === "done") {
+    throw new Error(`task "${taskId}" is already done`);
+  }
+
+  const updatedTasks = queue.tasks.map((task) =>
+    task.id === taskId
+      ? {
+          ...task,
+          status: "done" as const,
+          blocker: null
+        }
+      : { ...task }
+  );
+  const baseQueue: TaskQueue = {
+    ...queue,
+    current_task_id: null,
+    tasks: updatedTasks
+  };
+
+  const selectedNextTask = selectNextUnblockedTask(baseQueue);
+  const activatedTasks = updatedTasks.map((task) =>
+    selectedNextTask && task.id === selectedNextTask.id && task.status === "pending"
+      ? {
+          ...task,
+          status: "in_progress" as const
+        }
+      : task
+  );
+  const nextTask =
+    selectedNextTask === null
+      ? null
+      : activatedTasks.find((task) => task.id === selectedNextTask.id) ?? null;
+
+  return {
+    queue: {
+      ...baseQueue,
+      current_task_id: nextTask?.id ?? null,
+      tasks: activatedTasks
+    },
+    completedTask: updatedTasks.find((task) => task.id === taskId)!,
+    nextTask
+  };
 }
 
 export function summarizeTaskQueue(queue: TaskQueue): TaskQueueSummary {

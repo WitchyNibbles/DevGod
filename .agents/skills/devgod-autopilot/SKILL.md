@@ -24,7 +24,7 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
 
 ## Loop
 
-1. Restate the product goal, global acceptance criteria, current milestone, and stopping criteria.
+1. Restate the product goal, clarified user intent, global acceptance criteria, current milestone, and stopping criteria.
 2. Determine whether the product-level goal is complete.
 3. If complete, stop and report the evidence.
 4. If incomplete, select the first unblocked task where:
@@ -37,23 +37,25 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
    - rollback notes where the change can require rollback
    - owner role
    - expected artifacts
-6. Implement the smallest vertical slice that can produce real evidence.
-7. Run the task verification commands exactly as written.
-8. If verification fails, invoke `devgod-repair-loop`.
-9. Repeat repair until:
+6. Implement the smallest vertical slice that can produce real evidence and advances the full product, not just the current subtask.
+7. For refactors or hardening work, preserve intended behavior, add regression coverage, and treat discovered touched-scope defects as in-scope unless the manager records them as blockers.
+8. Run the task verification commands exactly as written, including good-path and bad-path coverage required by the task gates.
+9. If verification fails or acceptance evidence is incomplete, invoke `devgod-repair-loop`.
+10. Repeat repair until:
    - verification passes
    - a real blocker exists
    - or the bounded repair budget is exhausted
-10. Record review evidence according to task class:
+11. Record review evidence according to task class:
    - `prototype_slice`: reviewer and QA evidence, plus security evidence when trust boundaries changed
    - `security_sensitive`: reviewer, QA, and security evidence are mandatory
    - `release_candidate`: reviewer, QA, security, and release-readiness evidence are mandatory
    - `docs_only`: reviewer evidence is mandatory; QA and security evidence are required if commands, setup, policy, or behavior changed
-11. Update:
+12. Update:
    - `.devgod/work/product-state.md`
    - `.devgod/work/task-queue.json`
    - `.devgod/ACTIVE`
-12. Select the next unblocked task and continue immediately unless a stop condition is met.
+13. Select the next unblocked task and continue immediately unless a stop condition is met.
+14. Do not wait for the user to say "continue" between internal tasks; only stop for real blockers, approval-matrix actions, or explicit planning-only requests.
 
 ## State update rules
 
@@ -66,6 +68,8 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
 - do not stop after intake, architecture, planning, or one implementation slice
 - a completed phase is not a completed product
 - never mark work done without verification evidence
+- never treat a refactor as complete if touched-scope correctness, regression, or safety risks remain unaddressed without an explicit blocker
+- never stop after a single passing command when other required unit, integration, E2E, negative-case, or review evidence is still missing
 - never invent successful test results
 - stop only when:
   - all product-level acceptance criteria are complete

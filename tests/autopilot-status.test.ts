@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  advanceTaskQueue,
   parseTaskQueueContent,
   selectNextUnblockedTask,
   summarizeTaskQueue
@@ -215,4 +216,68 @@ test("parseTaskQueueContent rejects missing dependencies", () => {
       ),
     /missing dependency/i
   );
+});
+
+test("advanceTaskQueue marks the active task done and activates the next eligible task", () => {
+  const queue = parseTaskQueueContent(
+    JSON.stringify(
+      buildQueue({
+        current_task_id: "task-001",
+        tasks: [
+          {
+            id: "task-001",
+            title: "Current",
+            status: "in_progress",
+            class: "prototype_slice",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          },
+          {
+            id: "task-002",
+            title: "Blocked next",
+            status: "blocked",
+            class: "release_candidate",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: "waiting"
+          },
+          {
+            id: "task-003",
+            title: "Dependency gated",
+            status: "pending",
+            class: "release_candidate",
+            depends_on: ["task-002"],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          },
+          {
+            id: "task-004",
+            title: "Eligible",
+            status: "pending",
+            class: "release_candidate",
+            depends_on: ["task-001"],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          }
+        ]
+      })
+    )
+  );
+
+  const result = advanceTaskQueue(queue, "task-001");
+
+  assert.equal(result.completedTask.id, "task-001");
+  assert.equal(result.nextTask?.id, "task-004");
+  assert.equal(result.queue.current_task_id, "task-004");
+  assert.equal(result.queue.tasks.find((task) => task.id === "task-001")?.status, "done");
+  assert.equal(result.queue.tasks.find((task) => task.id === "task-004")?.status, "in_progress");
 });

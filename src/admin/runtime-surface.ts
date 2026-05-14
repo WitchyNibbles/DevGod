@@ -2,6 +2,9 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  createLiveLoopReviewCommandExecutor,
+  createQueuedLoopReviewExecutor,
+  executeLoopCommandFromArgs,
   createPlanContextEmbedQuery,
   createRuntimeStore,
   executeDoctorCommandFromArgs,
@@ -26,6 +29,23 @@ const repoRoot = path.resolve(moduleDir, "../..");
 
 interface RuntimeSurfaceService {
   getStatus(runId: string): Promise<RunStatusSnapshot>;
+  getExecutionPlan(
+    runId: string,
+    options?: { staleAfterHours?: number | undefined }
+  ): Promise<import("../domain/types.ts").RunExecutionPlan>;
+  applyRecovery(
+    runId: string,
+    actionIds: readonly string[],
+    options: { staleAfterHours: number }
+  ): Promise<import("../domain/types.ts").RecoveryApplyResult>;
+  executeDirectiveStep(
+    runId: string,
+    input: {
+      staleAfterHours?: number | undefined;
+      ownerActor?: string | undefined;
+      reviewCommands: readonly unknown[];
+    }
+  ): Promise<unknown>;
   recommendRouting(runId: string): Promise<RoutingRecommendationReport>;
   inspectRecovery(runId: string, input: { staleAfterHours: number }): Promise<RecoveryInspectionReport>;
   searchMemory(input: {
@@ -135,11 +155,70 @@ export async function getOpsSurface(args: readonly string[], options: RuntimeSur
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
       getRoutingReport(runId) {
         return service.recommendRouting(runId);
       },
       inspectRecovery(runId, staleAfterHours) {
         return service.inspectRecovery(runId, { staleAfterHours });
+      }
+    })
+  );
+}
+
+export async function getLoopSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env, cwd }) =>
+    executeLoopCommandFromArgs(args, {
+      cwd,
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      async executeDirectiveStep(runId, input) {
+        const reviewCommands = input.reviewCommands as readonly {
+          runId: string;
+          taskId: string;
+          actor: string;
+          review: import("../domain/types.ts").ReviewInput;
+        }[];
+
+        return service.executeDirectiveStep(runId, {
+          staleAfterHours: input.staleAfterHours,
+          ownerActor: input.ownerActor,
+          executeReviewRecommendation:
+            reviewCommands.length > 0
+              ? createQueuedLoopReviewExecutor(
+                  runId,
+                  reviewCommands,
+                  await createLiveLoopReviewCommandExecutor({
+                    cwd,
+                    env,
+                    recordReview({ command, resolver }) {
+                      const reviewService = new DevgodCoreService(store, {
+                        resolveReviewActionContext: resolver
+                      });
+                      return reviewService.recordReview(
+                        command.runId,
+                        command.taskId,
+                        command.actor,
+                        command.review
+                      );
+                    }
+                  })
+                )
+              : undefined
+        });
       }
     })
   );
@@ -170,6 +249,9 @@ export async function getReportSurface(args: readonly string[], options: Runtime
       },
       getApprovals(runId, taskId) {
         return store.getApprovals(runId, taskId);
+      },
+      getLoopHistory(runId, limit) {
+        return service.getLoopExecutionHistory(runId, { limit });
       }
     })
   );

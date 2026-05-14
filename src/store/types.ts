@@ -79,6 +79,11 @@ export interface DevgodStore {
   createRun(run: RunRecord): Promise<void>;
   getRun(runId: string): Promise<RunRecord | undefined>;
   findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined>;
+  findLatestRunForTask(params: {
+    workspaceSlug: string;
+    projectSlug: string;
+    taskId: string;
+  }): Promise<RunRecord | undefined>;
   findRunsByProjectActivity(params: {
     workspaceSlug: string;
     projectSlug: string;

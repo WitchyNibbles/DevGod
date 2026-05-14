@@ -2,6 +2,7 @@ import process from "node:process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  getLoopSurface,
   getOpsSurface,
   getPlanContextSurface,
   getReportSurface,
@@ -15,6 +16,7 @@ export function createDevgodMcpServer(
     status: getStatusSurface,
     runtimeHealth: getRuntimeHealthSurface,
     ops: getOpsSurface,
+    loop: getLoopSurface,
     report: getReportSurface,
     planContext: getPlanContextSurface
   }

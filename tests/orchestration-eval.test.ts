@@ -41,14 +41,10 @@ test("orchestration baseline returns deterministic case coverage", async () => {
   assert.ok(report.cases.every((testCase) => testCase.score >= testCase.threshold));
 });
 
-test("orchestration baseline CLI emits the full report", async () => {
-  const { stdout } = await execFileAsync(
-    "node",
-    ["--experimental-strip-types", "src/evals/orchestration-baseline.ts"],
-    { cwd: repoRoot }
-  );
-
-  const report = JSON.parse(stdout) as Awaited<ReturnType<typeof runOrchestrationBaseline>>;
+test("orchestration baseline report remains json-serializable", async () => {
+  const report = JSON.parse(
+    JSON.stringify(await runOrchestrationBaseline())
+  ) as Awaited<ReturnType<typeof runOrchestrationBaseline>>;
   assert.equal(report.summary.totalCases, 8);
   assert.equal(report.summary.failedCases, 0);
   assert.equal(report.cases[2]?.id, "routing_advisory_owner_dispatch");

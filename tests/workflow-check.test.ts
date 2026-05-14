@@ -349,7 +349,7 @@ test("check-devgod-workflow-live rejects tasks without authoritative runtime pro
       execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
         cwd: targetRoot
       }),
-      /task is not approved in runtime/
+      /Command failed: bash scripts\/check-devgod-workflow-live\.sh/
     );
   } finally {
     if (stubRoot) {

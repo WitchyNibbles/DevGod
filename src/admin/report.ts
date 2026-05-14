@@ -3,6 +3,7 @@ import type {
   HandoffRecord,
   ReviewRecord,
   RoutingRecommendationReport,
+  SearchMemoryResult,
   RunStatusSnapshot,
   RecoveryInspectionReport
 } from "../domain/types.ts";
@@ -38,10 +39,25 @@ export interface RunEvidenceTimelineEntry {
     | "handoff_recorded"
     | "review_recorded"
     | "approval_recorded"
+    | "loop_execution_recorded"
     | "recovery_issue_observed";
   taskId?: string | undefined;
   title: string;
   detail: string[];
+}
+
+export interface RunEvidenceLoopHistoryEntry {
+  authorityLabel: "runtime_authoritative";
+  at: string;
+  taskId?: string | undefined;
+  directiveKind: string;
+  outcome: string;
+  nextDirectiveKind?: string | undefined;
+  actor?: string | undefined;
+  reviewRole?: string | undefined;
+  title: string;
+  detail: string[];
+  citation: string;
 }
 
 export interface RunEvidenceReport {
@@ -59,12 +75,14 @@ export interface RunEvidenceReport {
     acceptanceCriteria: string[];
   } | undefined;
   tasks: RunEvidenceTaskReport[];
+  loopHistory: RunEvidenceLoopHistoryEntry[];
   timeline: RunEvidenceTimelineEntry[];
   summary: {
     totalTasks: number;
     totalHandoffs: number;
     totalReviews: number;
     totalApprovals: number;
+    totalLoopExecutions: number;
     reviewBlockedTaskIds: string[];
     inProgressTaskIds: string[];
   };
@@ -78,6 +96,7 @@ export function buildRunEvidenceReport(input: {
   handoffsByTask: Record<string, HandoffRecord[]>;
   reviewsByTask: Record<string, ReviewRecord[]>;
   approvalsByTask: Record<string, ApprovalRecord[]>;
+  loopHistoryResults?: readonly SearchMemoryResult[] | undefined;
   now?: string | undefined;
 }): RunEvidenceReport {
   const tasks = input.snapshot.tasks.map((task) => {
@@ -103,12 +122,14 @@ export function buildRunEvidenceReport(input: {
     };
   });
 
+  const loopHistory = buildLoopHistory(input.loopHistoryResults ?? []);
   const timeline = buildTimeline({
     snapshot: input.snapshot,
     recovery: input.recovery,
     handoffsByTask: input.handoffsByTask,
     reviewsByTask: input.reviewsByTask,
-    approvalsByTask: input.approvalsByTask
+    approvalsByTask: input.approvalsByTask,
+    loopHistory
   });
 
   const totalHandoffs = sumCounts(tasks.map((task) => task.handoffCount));
@@ -132,12 +153,14 @@ export function buildRunEvidenceReport(input: {
         }
       : undefined,
     tasks,
+    loopHistory,
     timeline,
     summary: {
       totalTasks: tasks.length,
       totalHandoffs,
       totalReviews,
       totalApprovals,
+      totalLoopExecutions: loopHistory.length,
       reviewBlockedTaskIds: tasks
         .filter((task) => task.status === "review_blocked")
         .map((task) => task.taskId),
@@ -159,6 +182,7 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   lines.push(`- handoffs: ${report.summary.totalHandoffs}`);
   lines.push(`- reviews: ${report.summary.totalReviews}`);
   lines.push(`- approvals: ${report.summary.totalApprovals}`);
+  lines.push(`- loop executions: ${report.summary.totalLoopExecutions}`);
   lines.push(`- recovery issues: ${report.recovery.summary.totalIssues}`);
   lines.push("");
 
@@ -197,6 +221,20 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   }
   lines.push("");
 
+  lines.push(`## Loop History`);
+  lines.push("");
+  if (report.loopHistory.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const entry of report.loopHistory) {
+      const taskLabel = entry.taskId ? ` task=\`${entry.taskId}\`` : "";
+      lines.push(
+        `- \`${entry.at}\`${taskLabel} ${entry.directiveKind}/${entry.outcome} next=${entry.nextDirectiveKind ?? "unknown"}`
+      );
+    }
+  }
+  lines.push("");
+
   lines.push(`## Timeline`);
   lines.push("");
   for (const entry of report.timeline) {
@@ -214,6 +252,7 @@ function buildTimeline(input: {
   handoffsByTask: Record<string, HandoffRecord[]>;
   reviewsByTask: Record<string, ReviewRecord[]>;
   approvalsByTask: Record<string, ApprovalRecord[]>;
+  loopHistory: readonly RunEvidenceLoopHistoryEntry[];
 }): RunEvidenceTimelineEntry[] {
   const events: RunEvidenceTimelineEntry[] = [
     {
@@ -290,6 +329,22 @@ function buildTimeline(input: {
     }
   }
 
+  for (const entry of input.loopHistory) {
+    events.push({
+      authorityLabel: entry.authorityLabel,
+      at: entry.at,
+      kind: "loop_execution_recorded",
+      taskId: entry.taskId,
+      title: entry.title,
+      detail: [
+        `directive=${entry.directiveKind}`,
+        `outcome=${entry.outcome}`,
+        ...(entry.nextDirectiveKind ? [`next=${entry.nextDirectiveKind}`] : []),
+        ...entry.detail
+      ]
+    });
+  }
+
   for (const issue of input.recovery.issues) {
     events.push({
       authorityLabel: "derived_only",
@@ -302,6 +357,41 @@ function buildTimeline(input: {
   }
 
   return events.sort((left, right) => left.at.localeCompare(right.at));
+}
+
+function buildLoopHistory(results: readonly SearchMemoryResult[]): RunEvidenceLoopHistoryEntry[] {
+  return [...results]
+    .map((result) => {
+      const directiveKind = readTaggedValue(result, "directive:");
+      const outcome = readTaggedValue(result, "outcome:");
+      if (!directiveKind || !outcome) {
+        return undefined;
+      }
+
+      return {
+        authorityLabel: "runtime_authoritative" as const,
+        at: result.provenance.createdAt,
+        taskId: readTaggedValue(result, "task:") ?? result.provenance.taskId,
+        directiveKind,
+        outcome,
+        nextDirectiveKind: readTaggedValue(result, "next:"),
+        actor: readTaggedValue(result, "actor:"),
+        reviewRole: readTaggedValue(result, "reviewRole:"),
+        title: result.title,
+        detail: result.content
+          .split("\n")
+          .filter((line) => line.startsWith("evidence="))
+          .map((line) => line.slice("evidence=".length)),
+        citation: result.citation.canonicalRef
+      };
+    })
+    .filter((entry): entry is RunEvidenceLoopHistoryEntry => entry !== undefined)
+    .sort((left, right) => left.at.localeCompare(right.at));
+}
+
+function readTaggedValue(result: SearchMemoryResult, prefix: string): string | undefined {
+  const tag = result.metadata.tags.find((candidate) => candidate.startsWith(prefix));
+  return tag ? tag.slice(prefix.length) : undefined;
 }
 
 function latestCreatedAt(records: ReadonlyArray<{ createdAt: string }>): string | undefined {

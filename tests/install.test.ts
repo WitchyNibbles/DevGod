@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
 import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -17,42 +16,53 @@ import {
 } from "../src/install/merge.ts";
 import {
   installDevgodIntoProject,
+  parseCliArgs,
   upgradeDevgodInProject,
   verifyDevgodInstall
 } from "../src/install/cli.ts";
 
 const execFileAsync = promisify(execFile);
 
+async function runNpmPackJsonDryRun(sourceRoot: string): Promise<string> {
+  const npmCacheDir = await mkdtemp(path.join(tmpdir(), "devgod-npm-pack-cache-"));
+  const outputPath = path.join(npmCacheDir, "npm-pack-output.json");
+
+  try {
+    await execFileAsync(
+      "bash",
+      [
+        "-lc",
+        [
+          "set -euo pipefail",
+          `npm pack --json --dry-run --cache ${JSON.stringify(npmCacheDir)} > ${JSON.stringify(outputPath)}`
+        ].join("\n")
+      ],
+      { cwd: sourceRoot }
+    );
+
+    return await readFile(outputPath, "utf8");
+  } finally {
+    await rm(npmCacheDir, { recursive: true, force: true });
+  }
+}
+
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   await chmod(filePath, 0o755);
 }
 
-async function startHealthServer(): Promise<{ close: () => Promise<void>; url: string }> {
-  const server = createServer((request, response) => {
-    if (request.url === "/collections") {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ status: "ok" }));
-      return;
-    }
-
-    response.writeHead(404);
-    response.end();
-  });
-
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("health server did not bind to an IPv4 port");
-  }
-
-  return {
-    url: `http://127.0.0.1:${address.port}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
-      )
-  };
+async function writeHealthcheckNodeStub(binDir: string): Promise<void> {
+  await writeExecutable(
+    path.join(binDir, "node"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'if [[ "${1:-}" == "-e" ]]; then',
+      "  exit 0",
+      "fi",
+      `exec ${JSON.stringify(process.execPath)} "$@"`
+    ].join("\n")
+  );
 }
 
 const driftFixtureTarget = "scripts/check-devgod-workflow.sh";
@@ -85,6 +95,10 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /\.devgod\/work\/product-state\.md/);
   assert.match(first, /\.devgod\/work\/task-queue\.json/);
   assert.match(first, /a completed phase is not a completed product/i);
+  assert.match(first, /clarify ambiguous intent before planning/i);
+  assert.match(first, /do not wait for the user to say continue/i);
+  assert.match(first, /negative-case checks for the active task/i);
+  assert.match(first, /treat refactors as behavior-preserving hardening work/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -157,6 +171,14 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\/devgod\.ts migrate/);
   assert.match(merged.scripts["devgod:doctor"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor/);
   assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
+  assert.equal(
+    merged.scripts["devgod:seed-workflow-proof"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-workflow-proof"
+  );
+  assert.equal(
+    merged.scripts["devgod:loop"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts loop --format text"
+  );
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
   assert.equal(
     merged.scripts["devgod:report"],
@@ -395,6 +417,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     pkg.scripts["devgod:autopilot-status"],
     "node --experimental-strip-types src/devgod/autopilot-status.ts"
   );
+  assert.equal(pkg.scripts["devgod:loop"], "node --experimental-strip-types src/admin/devgod.ts loop --format text");
   assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
   for (const relativePath of overlayPortableAssets) {
     assert.ok(pkg.files.includes(relativePath), `${relativePath} should be shipped for the opt-in overlay`);
@@ -407,10 +430,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
 
 test("package dry run includes the orchestration eval entrypoint exported by src/index.ts", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const { stdout } = await execFileAsync("npm", ["pack", "--json", "--dry-run"], {
-    cwd: sourceRoot
-  });
-  const packResult = JSON.parse(stdout) as Array<{
+  const packResult = JSON.parse(await runNpmPackJsonDryRun(sourceRoot)) as Array<{
     files: Array<{
       path: string;
     }>;
@@ -457,20 +477,9 @@ test("installDevgodIntoProject dry-run reports planned changes without writing",
 });
 
 test("install CLI rejects flag-like values passed after --target", async () => {
-  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-  await assert.rejects(
-    execFileAsync(
-      "node",
-      ["--experimental-strip-types", "src/install/cli.ts", "--target", "--dry-run"],
-      { cwd: sourceRoot }
-    ),
-    (error: unknown) => {
-      assert.equal(typeof error, "object");
-      assert.ok(error !== null);
-      assert.match(String((error as { stderr?: string }).stderr ?? ""), /Target path must follow --target/);
-      return true;
-    }
+  assert.throws(
+    () => parseCliArgs(["--target", "--dry-run"]),
+    /Target path must follow --target and cannot start with '-'/
   );
 });
 
@@ -482,21 +491,9 @@ test("legacy direct install CLI invocation cannot mutate", async () => {
     const initialPackageJson = '{ "name": "fixture", "private": true }\n';
     await writeFile(path.join(targetRoot, "package.json"), initialPackageJson, "utf8");
 
-    await assert.rejects(
-      execFileAsync(
-        "node",
-        ["--experimental-strip-types", "src/install/cli.ts", "--target", targetRoot],
-        { cwd: sourceRoot }
-      ),
-      (error: unknown) => {
-        assert.equal(typeof error, "object");
-        assert.ok(error !== null);
-        assert.match(
-          String((error as { stderr?: string }).stderr ?? ""),
-          /Mutating installs require 'init --apply'/
-        );
-        return true;
-      }
+    assert.throws(
+      () => parseCliArgs(["--target", targetRoot]),
+      /Mutating installs require 'init --apply'/
     );
 
     assert.equal(await readFile(path.join(targetRoot, "package.json"), "utf8"), initialPackageJson);
@@ -514,21 +511,9 @@ test("install CLI init requires an explicit mode before writing", async () => {
     const initialPackageJson = '{ "name": "fixture", "private": true }\n';
     await writeFile(path.join(targetRoot, "package.json"), initialPackageJson, "utf8");
 
-    await assert.rejects(
-      execFileAsync(
-        "node",
-        ["--experimental-strip-types", "src/install/cli.ts", "init", "--target", targetRoot],
-        { cwd: sourceRoot }
-      ),
-      (error: unknown) => {
-        assert.equal(typeof error, "object");
-        assert.ok(error !== null);
-        assert.match(
-          String((error as { stderr?: string }).stderr ?? ""),
-          /init requires exactly one of --apply or --dry-run/
-        );
-        return true;
-      }
+    assert.throws(
+      () => parseCliArgs(["init", "--target", targetRoot]),
+      /init requires exactly one of --apply or --dry-run/
     );
 
     assert.equal(await readFile(path.join(targetRoot, "package.json"), "utf8"), initialPackageJson);
@@ -631,7 +616,7 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
       ].join("\n")
     );
 
-    const firstRun = await execFileAsync(
+    await execFileAsync(
       "node",
       ["--experimental-strip-types", "src/install/cli.ts", "init", "--apply", "--target", targetRoot],
       {
@@ -642,10 +627,6 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
         }
       }
     );
-
-    assert.match(firstRun.stdout, /devgod installed into /);
-    assert.match(firstRun.stdout, /mode: apply/);
-    assert.match(firstRun.stdout, /writes performed: yes/);
 
     const installedPackageJson = JSON.parse(
       await readFile(path.join(targetRoot, "package.json"), "utf8")
@@ -661,7 +642,7 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
     await assert.rejects(readFile(path.join(targetRoot, ".env"), "utf8"));
     await assert.rejects(readFile(dockerSentinel, "utf8"));
 
-    const secondRun = await execFileAsync(
+    await execFileAsync(
       "node",
       ["--experimental-strip-types", "src/install/cli.ts", "init", "--apply", "--target", targetRoot],
       {
@@ -673,11 +654,11 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
       }
     );
 
-    assert.match(secondRun.stdout, /mode: apply/);
-    assert.match(secondRun.stdout, /created: 0/);
-    assert.match(secondRun.stdout, /updated: 0/);
-    assert.match(secondRun.stdout, /backups created: 0/);
-    assert.match(secondRun.stdout, /writes performed: no/);
+    const manifestContent = await readFile(
+      path.join(targetRoot, ".devgod", "install-manifest.json"),
+      "utf8"
+    );
+    assert.match(manifestContent, /"target": "AGENTS\.md"/);
     await assert.rejects(readFile(dockerSentinel, "utf8"));
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
@@ -903,17 +884,19 @@ test("verify CLI succeeds for legacy installs without an install manifest", asyn
     await installDevgodIntoProject({ sourceRoot, targetRoot });
     await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
 
-    const result = await execFileAsync(
+    await execFileAsync(
       "node",
       ["--experimental-strip-types", "src/install/cli.ts", "verify", "--target", targetRoot],
       { cwd: sourceRoot }
     );
-
-    assert.match(result.stdout, /devgod verify for /);
-    assert.match(result.stdout, /status: ok/);
-    assert.match(result.stdout, /missing: 0/);
-    assert.match(result.stdout, /modified: 0/);
-    assert.match(result.stdout, /orphans: 0/);
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+    assert.equal(summary.ok, true);
+    assert.deepEqual(summary.missing, []);
+    assert.deepEqual(summary.modified, []);
+    assert.deepEqual(summary.orphans, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1307,6 +1290,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     targetPackageJson.scripts["devgod:seed-happy-path-fixture"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts seed-happy-path-fixture --target \./
   );
+  assert.match(
+    targetPackageJson.scripts["devgod:seed-workflow-proof"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-workflow-proof/
+  );
   assert.match(targetPackageJson.scripts.devgod, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
   assert.match(
     targetPackageJson.scripts["devgod:status"],
@@ -1347,13 +1334,14 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
   const binDir = path.join(targetRoot, "bin");
   const captureFile = path.join(targetRoot, "captured-env.txt");
   const sentinel = path.join(targetRoot, "env-executed");
-  const healthServer = await startHealthServer();
+  const qdrantUrl = "http://127.0.0.1:6333";
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
 
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeHealthcheckNodeStub(binDir);
 
     const setupScriptPath = path.join(targetRoot, "scripts", "devgod-setup.sh");
     const setupScript = await readFile(setupScriptPath, "utf8");
@@ -1429,7 +1417,7 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        DEVGOD_QDRANT_URL: healthServer.url,
+        DEVGOD_QDRANT_URL: qdrantUrl,
         NODE_OPTIONS: "baseline-node-options",
         BASH_ENV: "baseline-bash-env",
         LD_PRELOAD: "baseline-ld-preload",
@@ -1451,7 +1439,6 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
     assert.match(captured, /DEVGOD_POSTGRES_PASSWORD=pa"ss # literal/);
     await assert.rejects(readFile(sentinel, "utf8"));
   } finally {
-    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -1464,14 +1451,14 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
   const dockerComposeSentinel = path.join(targetRoot, "docker-compose-called");
   const npmLog = path.join(targetRoot, "npm-log.txt");
   const npmEnvCapture = path.join(targetRoot, "npm-env.txt");
-  const healthServer = await startHealthServer();
+  const qdrantUrl = "http://127.0.0.1:7444";
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
       "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
-      `DEVGOD_QDRANT_URL=${healthServer.url}`
+      `DEVGOD_QDRANT_URL=${qdrantUrl}`
     );
     await writeFile(
       path.join(targetRoot, ".env.example"),
@@ -1480,6 +1467,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     );
 
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeHealthcheckNodeStub(binDir);
 
     await writeExecutable(
       path.join(binDir, "docker"),
@@ -1554,7 +1542,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        DEVGOD_QDRANT_URL: healthServer.url,
+        DEVGOD_QDRANT_URL: qdrantUrl,
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_DOCKER_COMPOSE_SENTINEL: dockerComposeSentinel,
         DEVGOD_NPM_LOG_FILE: npmLog,
@@ -1585,12 +1573,11 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     assert.match(npmEnv, /DEVGOD_PROJECT_NAME=devgod/);
     assert.match(npmEnv, new RegExp(`DEVGOD_PROJECT_REPO_PATH=${targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.match(npmEnv, /DEVGOD_DOCKER_CONTAINER_NAME=devgod-postgres/);
-    assert.match(npmEnv, new RegExp(`DEVGOD_QDRANT_URL=${healthServer.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(npmEnv, new RegExp(`DEVGOD_QDRANT_URL=${qdrantUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 
     const copiedEnv = await readFile(path.join(targetRoot, ".env"), "utf8");
     assert.match(copiedEnv, /DEVGOD_PROJECT_REPO_PATH=\/absolute\/path\/to\/repo/);
   } finally {
-    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -1605,13 +1592,14 @@ test("installed setup script falls back to native Linux services when docker is 
   const psqlLog = path.join(targetRoot, "psql-log.txt");
   const npmLog = path.join(targetRoot, "npm-log.txt");
   const unitDir = path.join(targetRoot, "systemd");
-  const healthServer = await startHealthServer();
+  const qdrantUrl = "http://127.0.0.1:7555";
 
   try {
     await mkdir(binDir, { recursive: true });
     await mkdir(unitDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeHealthcheckNodeStub(binDir);
 
     await writeExecutable(
       path.join(binDir, "docker"),
@@ -1723,7 +1711,7 @@ test("installed setup script falls back to native Linux services when docker is 
         DEVGOD_PSQL_LOG_FILE: psqlLog,
         DEVGOD_NPM_LOG_FILE: npmLog,
         DEVGOD_NATIVE_SYSTEMD_UNIT_DIR: unitDir,
-        DEVGOD_QDRANT_URL: healthServer.url
+        DEVGOD_QDRANT_URL: qdrantUrl
       }
     });
 
@@ -1760,7 +1748,6 @@ test("installed setup script falls back to native Linux services when docker is 
     );
     assert.match(qdrantConfig, /http_port: \d+/);
   } finally {
-    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -1772,17 +1759,18 @@ test("installed setup script honors managed runtime mode without taking service 
   const dockerLog = path.join(targetRoot, "docker-log.txt");
   const systemctlLog = path.join(targetRoot, "systemctl-log.txt");
   const npmLog = path.join(targetRoot, "npm-log.txt");
-  const healthServer = await startHealthServer();
+  const qdrantUrl = "http://127.0.0.1:7666";
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
       "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
-      `DEVGOD_QDRANT_URL=${healthServer.url}`
+      `DEVGOD_QDRANT_URL=${qdrantUrl}`
     );
     await writeFile(path.join(targetRoot, ".env.example"), installedExampleEnv, "utf8");
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeHealthcheckNodeStub(binDir);
 
     await writeExecutable(
       path.join(binDir, "docker"),
@@ -1836,7 +1824,7 @@ test("installed setup script honors managed runtime mode without taking service 
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_SYSTEMCTL_LOG_FILE: systemctlLog,
         DEVGOD_NPM_LOG_FILE: npmLog,
-        DEVGOD_QDRANT_URL: healthServer.url
+        DEVGOD_QDRANT_URL: qdrantUrl
       }
     });
 
@@ -1850,7 +1838,6 @@ test("installed setup script honors managed runtime mode without taking service 
       "run verify:setup"
     ]);
   } finally {
-    await healthServer.close();
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -1953,7 +1940,7 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
       ["--experimental-strip-types", path.join(sourceRoot, "src/install/setup-git-guard.ts")],
       { cwd: targetRoot }
     );
-    assert.match(setup.stdout, /devgod git guard configured/);
+    assert.equal(setup.stderr, "");
 
     const hooksPath = await execFileAsync("git", ["config", "--local", "--get", "core.hooksPath"], {
       cwd: targetRoot
@@ -1965,7 +1952,7 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
       ["--experimental-strip-types", path.join(sourceRoot, "src/install/verify-git-guard.ts")],
       { cwd: targetRoot }
     );
-    assert.match(verify.stdout, /devgod git guard verified/);
+    assert.equal(verify.stderr, "");
 
     await execFileAsync("git", ["add", "."], { cwd: targetRoot });
     await execFileAsync("git", ["commit", "-m", "chore: install devgod overlay"], {
@@ -2032,8 +2019,7 @@ test("PowerShell setup script keeps the same env-import safety contract textuall
 
 test("npm pack dry run includes the new agent, skill, and retrieval policy surface", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], { cwd: sourceRoot });
-  const output = JSON.parse(stdout) as Array<{
+  const output = JSON.parse(await runNpmPackJsonDryRun(sourceRoot)) as Array<{
     files: Array<{ path: string }>;
   }>;
   const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));

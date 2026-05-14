@@ -1,6 +1,6 @@
 import { cp, lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import {
@@ -1012,7 +1012,7 @@ function parseWorkflowMutationCommand(
   };
 }
 
-function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
+export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   const command = rawArgs[0];
 
   if (command === "init" || command === "upgrade") {
@@ -1954,7 +1954,9 @@ export async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions
   };
 }
 
-async function seedHappyPathFixtureArtifacts(options: WorkflowScaffoldOptions): Promise<WorkflowScaffoldSummary> {
+export async function seedHappyPathFixtureArtifacts(
+  options: WorkflowScaffoldOptions
+): Promise<WorkflowScaffoldSummary> {
   assertHappyPathFixtureTaskId(options.taskId);
   if (options.forceActive) {
     throw new Error("seed-happy-path-fixture does not support --force-active because fixtures never become active");
@@ -2070,10 +2072,10 @@ async function main() {
   }
 }
 
-const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-const modulePath = fileURLToPath(import.meta.url);
+const isEntrypoint =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-if (entryPath === modulePath) {
+if (isEntrypoint) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);

@@ -28,6 +28,8 @@ import type {
   MemoryPromotionInput,
   PlanArtifact,
   PlanInput,
+  RunExecutionPlan,
+  RunResumeSnapshot,
   ReviewInput,
   ReviewRecord,
   RecoveryApplyResult,
@@ -49,6 +51,42 @@ export interface DevgodCoreServiceOptions {
   resolveReviewActionContext?: ResolveReviewActionContext | undefined;
 }
 
+export interface ExecuteReviewRecommendationResult {
+  executed: boolean;
+  taskId?: string | undefined;
+  actor?: string | undefined;
+  reviewRole?: RoutingRecommendation["targetReviewRole"] | undefined;
+  evidence: string[];
+}
+
+export interface DirectiveExecutionStep {
+  directiveKind: RunExecutionPlan["directive"]["kind"];
+  outcome: "executed" | "unsupported" | "blocked" | "complete";
+  taskId?: string | undefined;
+  actor?: string | undefined;
+  reviewRole?: RoutingRecommendation["targetReviewRole"] | undefined;
+  nextDirectiveKind?: RunExecutionPlan["directive"]["kind"] | undefined;
+  evidence: string[];
+}
+
+export interface ExecuteDirectiveStepOptions {
+  staleAfterHours?: number | undefined;
+  ownerActor?: string | undefined;
+  maxReviewDispatchSteps?: number | undefined;
+  executeReviewRecommendation?: (input: {
+    runId: string;
+    directive: Extract<RunExecutionPlan["directive"], { kind: "dispatch_reviews" }>;
+  }) => Promise<ExecuteReviewRecommendationResult>;
+}
+
+export interface DirectiveExecutionResult {
+  runId: string;
+  initialPlan: RunExecutionPlan;
+  steps: DirectiveExecutionStep[];
+  finalPlan: RunExecutionPlan;
+  snapshot: RunStatusSnapshot;
+}
+
 function timestamp(): string {
   return new Date().toISOString();
 }
@@ -61,6 +99,28 @@ function parseHoursSince(createdAt: string, now: string): number | undefined {
   }
 
   return Number(((nowMs - createdAtMs) / (1000 * 60 * 60)).toFixed(2));
+}
+
+const LOOP_HISTORY_TAG = "runtime_loop_history";
+const LOOP_HISTORY_ACTOR = "devgod-runtime-loop";
+const LOOP_HISTORY_QUERY_PREFIX = "runtime loop history";
+
+function parseWorkspaceSlugFromId(workspaceId: string): string | undefined {
+  return workspaceId.startsWith("workspace:") ? workspaceId.slice("workspace:".length) : undefined;
+}
+
+function parseProjectSelectorFromId(projectId: string):
+  | { workspaceSlug: string; projectSlug: string }
+  | undefined {
+  const parts = projectId.split(":");
+  if (parts.length < 3 || parts[0] !== "project") {
+    return undefined;
+  }
+
+  return {
+    workspaceSlug: parts[1]!,
+    projectSlug: parts.slice(2).join(":")
+  };
 }
 
 function deriveRunStatus(tasks: readonly TaskRecord[]): RunRecord["status"] {
@@ -426,8 +486,288 @@ export class DevgodCoreService {
     };
   }
 
-  async resumeRun(runId: string): Promise<RunStatusSnapshot> {
-    return this.getStatus(runId);
+  async getExecutionPlan(
+    runId: string,
+    options: {
+      staleAfterHours?: number | undefined;
+    } = {}
+  ): Promise<RunExecutionPlan> {
+    const snapshot = await this.getStatus(runId);
+    const routing = await this.recommendRouting(runId);
+    const recovery = await this.inspectRecovery(runId, {
+      staleAfterHours: options.staleAfterHours
+    });
+
+    const safeRecoveryActions = recovery.actions.filter((action) => action.safeToApply);
+    if (safeRecoveryActions.length > 0) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        directive: {
+          kind: "apply_recovery",
+          actions: safeRecoveryActions,
+          rationale: [
+            "runtime recovery surfaced safe corrective actions before further routing",
+            ...safeRecoveryActions.map((action) => `${action.kind}: ${action.rationale.join("; ")}`)
+          ]
+        }
+      };
+    }
+
+    const reviewRecommendations = routing.recommendations.filter(
+      (recommendation) => recommendation.recommendation === "review_dispatch"
+    );
+    if (reviewRecommendations.length > 0) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        directive: {
+          kind: "dispatch_reviews",
+          recommendations: reviewRecommendations,
+          rationale: [
+            "one or more tasks are blocked on required authenticated reviews",
+            ...reviewRecommendations.map(
+              (recommendation) =>
+                `${recommendation.taskId}: ${recommendation.rationale.join("; ")}`
+            )
+          ]
+        }
+      };
+    }
+
+    const ownerRecommendation = routing.recommendations.find(
+      (recommendation) => recommendation.recommendation === "owner_dispatch"
+    );
+    if (ownerRecommendation) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        directive: {
+          kind: "dispatch_owner",
+          recommendation: ownerRecommendation,
+          rationale: [
+            "a ready task with satisfied dependencies is available for execution",
+            ...ownerRecommendation.rationale
+          ]
+        }
+      };
+    }
+
+    if (snapshot.tasks.length > 0 && snapshot.tasks.every((task) => task.status === "approved" || task.status === "done")) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        directive: {
+          kind: "complete",
+          rationale: ["all tasks have reached terminal approved or done states"]
+        }
+      };
+    }
+
+    const blockers = this.collectExecutionBlockers(snapshot, routing, recovery);
+    return {
+      mode: "runtime_authoritative",
+      runId,
+      runStatus: snapshot.run.status,
+      directive: {
+        kind: "blocked",
+        blockers,
+        rationale: [
+          blockers.length > 0
+            ? "runtime state has no executable next step"
+            : "run has no executable next step and no task graph progress can be derived"
+        ]
+      }
+    };
+  }
+
+  async resumeRun(runId: string): Promise<RunResumeSnapshot> {
+    const snapshot = await this.getStatus(runId);
+    const executionPlan = await this.getExecutionPlan(runId);
+    return {
+      ...snapshot,
+      executionPlan
+    };
+  }
+
+  async executeDirectiveStep(
+    runId: string,
+    options: ExecuteDirectiveStepOptions = {}
+  ): Promise<DirectiveExecutionResult> {
+    const staleAfterHours = options.staleAfterHours;
+    const initialPlan = await this.getExecutionPlan(runId, { staleAfterHours });
+    const steps: DirectiveExecutionStep[] = [];
+    let finalPlan = initialPlan;
+
+    if (initialPlan.directive.kind === "dispatch_owner") {
+      const recommendation = initialPlan.directive.recommendation;
+      const actor = options.ownerActor?.trim() || recommendation.targetRole;
+      if (!actor) {
+        steps.push({
+          directiveKind: "dispatch_owner",
+          outcome: "unsupported",
+          taskId: recommendation.taskId,
+          nextDirectiveKind: finalPlan.directive.kind,
+          evidence: [
+            "owner dispatch did not execute because no owner actor was supplied",
+            "runtime state was left unchanged"
+          ]
+        });
+      } else {
+        await this.claimTask(runId, recommendation.taskId, actor);
+        finalPlan = await this.getExecutionPlan(runId, { staleAfterHours });
+        steps.push({
+          directiveKind: "dispatch_owner",
+          outcome: "executed",
+          taskId: recommendation.taskId,
+          actor,
+          nextDirectiveKind: finalPlan.directive.kind,
+          evidence: [
+            `claimed ${recommendation.taskId} as ${actor}`,
+            `re-evaluated runtime plan and reached ${finalPlan.directive.kind}`
+          ]
+        });
+      }
+    } else if (initialPlan.directive.kind === "dispatch_reviews") {
+      const executeReviewRecommendation = options.executeReviewRecommendation;
+      if (!executeReviewRecommendation) {
+        steps.push({
+          directiveKind: "dispatch_reviews",
+          outcome: "unsupported",
+          taskId: initialPlan.directive.recommendations[0]?.taskId,
+          reviewRole: initialPlan.directive.recommendations[0]?.targetReviewRole,
+          nextDirectiveKind: finalPlan.directive.kind,
+          evidence: [
+            "no supported authenticated review executor was supplied",
+            "review dispatch failed closed without fabricating progress"
+          ]
+        });
+      } else {
+        const maxReviewDispatchSteps = Math.max(
+          1,
+          options.maxReviewDispatchSteps ?? initialPlan.directive.recommendations.length
+        );
+
+        for (let index = 0; index < maxReviewDispatchSteps; index += 1) {
+          if (finalPlan.directive.kind !== "dispatch_reviews") {
+            break;
+          }
+
+          const result = await executeReviewRecommendation({
+            runId,
+            directive: finalPlan.directive
+          });
+          if (!result.executed) {
+            steps.push({
+              directiveKind: "dispatch_reviews",
+              outcome: "unsupported",
+              taskId: result.taskId ?? finalPlan.directive.recommendations[0]?.taskId,
+              actor: result.actor,
+              reviewRole: result.reviewRole ?? finalPlan.directive.recommendations[0]?.targetReviewRole,
+              nextDirectiveKind: finalPlan.directive.kind,
+              evidence:
+                result.evidence.length > 0
+                  ? [...result.evidence]
+                  : ["review dispatch executor declined to apply the next authenticated review"]
+            });
+            break;
+          }
+
+          finalPlan = await this.getExecutionPlan(runId, { staleAfterHours });
+          steps.push({
+            directiveKind: "dispatch_reviews",
+            outcome: "executed",
+            taskId: result.taskId,
+            actor: result.actor,
+            reviewRole: result.reviewRole,
+            nextDirectiveKind: finalPlan.directive.kind,
+            evidence: [
+              ...result.evidence,
+              `re-evaluated runtime plan and reached ${finalPlan.directive.kind}`
+            ]
+          });
+        }
+      }
+    } else if (initialPlan.directive.kind === "complete") {
+      steps.push({
+        directiveKind: "complete",
+        outcome: "complete",
+        nextDirectiveKind: finalPlan.directive.kind,
+        evidence: ["all tasks are already terminal; no further directive execution was needed"]
+      });
+    } else if (initialPlan.directive.kind === "blocked") {
+      steps.push({
+        directiveKind: "blocked",
+        outcome: "blocked",
+        nextDirectiveKind: finalPlan.directive.kind,
+        evidence:
+          initialPlan.directive.blockers.length > 0
+            ? [...initialPlan.directive.blockers]
+            : ["run has no executable next step"]
+      });
+    } else if (initialPlan.directive.kind === "apply_recovery") {
+      steps.push({
+        directiveKind: "apply_recovery",
+        outcome: "blocked",
+        nextDirectiveKind: finalPlan.directive.kind,
+        evidence: [
+          "safe recovery must be applied explicitly before directive execution can continue"
+        ]
+      });
+    }
+
+    if (steps.length > 0) {
+      await this.persistLoopExecutionHistory(runId, steps);
+    }
+
+    const snapshot = await this.getStatus(runId);
+    return {
+      runId,
+      initialPlan,
+      steps,
+      finalPlan,
+      snapshot
+    };
+  }
+
+  async getLoopExecutionHistory(
+    runId: string,
+    options: {
+      limit?: number | undefined;
+      requesterRole?: TaskPacketInput["requiredSpecialistRoles"][number] | undefined;
+    } = {}
+  ): Promise<SearchMemoryResult[]> {
+    const run = await this.requireRun(runId);
+    const workspaceSlug = parseWorkspaceSlugFromId(run.workspaceId);
+    const projectSelector = parseProjectSelectorFromId(run.projectId);
+
+    if (!workspaceSlug || !projectSelector || projectSelector.workspaceSlug !== workspaceSlug) {
+      return [];
+    }
+
+    const results = await this.store.searchMemory({
+      workspaceSlug,
+      projectSlug: projectSelector.projectSlug,
+      query: `${LOOP_HISTORY_QUERY_PREFIX} ${runId}`,
+      limit: Math.max(1, options.limit ?? 10),
+      includeGlobal: false,
+      requesterRole: options.requesterRole ?? "planner"
+    });
+
+    return annotateConflictSignals(
+      results
+        .filter((result) => canRoleAccessSearchResult(result, options.requesterRole ?? "planner"))
+        .filter(isProvenancedSearchResult)
+        .filter(
+          (result) =>
+            result.provenance.runId === runId && result.metadata.tags.includes(LOOP_HISTORY_TAG)
+        )
+        .sort((left, right) => right.provenance.createdAt.localeCompare(left.provenance.createdAt))
+    );
   }
 
   async recommendRouting(runId: string): Promise<RoutingRecommendationReport> {
@@ -629,7 +969,7 @@ export class DevgodCoreService {
 
     for (const lock of snapshot.activeLocks) {
       const task = taskById.get(lock.taskId);
-      if (task && task.status === "in_progress") {
+      if (task && (task.status === "in_progress" || task.status === "review_blocked")) {
         continue;
       }
 
@@ -775,6 +1115,69 @@ export class DevgodCoreService {
     return run;
   }
 
+  private async persistLoopExecutionHistory(
+    runId: string,
+    steps: readonly DirectiveExecutionStep[]
+  ): Promise<void> {
+    if (steps.length === 0) {
+      return;
+    }
+
+    const run = await this.requireRun(runId);
+    const recordedAt = timestamp();
+
+    for (const [index, step] of steps.entries()) {
+      await this.store.saveMemoryEntry({
+        id: randomUUID(),
+        workspaceId: run.workspaceId,
+        projectId: run.projectId,
+        runId,
+        taskId: step.taskId,
+        scope: "project",
+        entryType: "fact",
+        title: `${LOOP_HISTORY_QUERY_PREFIX} ${runId} ${step.directiveKind} ${step.outcome}`,
+        content: [
+          `runId=${runId}`,
+          `step=${index + 1}`,
+          `directive=${step.directiveKind}`,
+          `outcome=${step.outcome}`,
+          step.taskId ? `taskId=${step.taskId}` : undefined,
+          step.actor ? `actor=${step.actor}` : undefined,
+          step.reviewRole ? `reviewRole=${step.reviewRole}` : undefined,
+          step.nextDirectiveKind ? `nextDirective=${step.nextDirectiveKind}` : undefined,
+          ...step.evidence.map((evidence) => `evidence=${evidence}`)
+        ]
+          .filter((line): line is string => Boolean(line))
+          .join("\n"),
+        reviewer: LOOP_HISTORY_ACTOR,
+        actor: LOOP_HISTORY_ACTOR,
+        status: "approved",
+        metadata: normalizeRetrievalMetadata({
+          tags: [
+            LOOP_HISTORY_TAG,
+            `run:${runId}`,
+            `directive:${step.directiveKind}`,
+            `outcome:${step.outcome}`,
+            `step:${index + 1}`,
+            ...(step.taskId ? [`task:${step.taskId}`] : []),
+            ...(step.actor ? [`actor:${step.actor}`] : []),
+            ...(step.reviewRole ? [`reviewRole:${step.reviewRole}`] : []),
+            ...(step.nextDirectiveKind ? [`next:${step.nextDirectiveKind}`] : [])
+          ],
+          reviewedAt: recordedAt,
+          staleAfterDays: 3650,
+          authorityLevel: "operational_context"
+        }),
+        createdAt: recordedAt
+      });
+    }
+
+    await this.store.updateRun({
+      ...run,
+      updatedAt: recordedAt
+    });
+  }
+
   private async requireTask(runId: string, taskId: string): Promise<TaskRecord> {
     const task = await this.store.getTask(runId, taskId);
     if (!task) {
@@ -826,6 +1229,47 @@ export class DevgodCoreService {
     }
 
     return blockers;
+  }
+
+  private collectExecutionBlockers(
+    snapshot: RunStatusSnapshot,
+    routing: RoutingRecommendationReport,
+    recovery: RecoveryInspectionReport
+  ): string[] {
+    const blockers = new Set<string>();
+
+    for (const blocker of snapshot.blockers) {
+      blockers.add(blocker);
+    }
+
+    for (const recommendation of routing.recommendations) {
+      if (recommendation.recommendation !== "wait") {
+        continue;
+      }
+
+      if (recommendation.blockers.length > 0) {
+        for (const blocker of recommendation.blockers) {
+          blockers.add(blocker);
+        }
+        continue;
+      }
+
+      for (const rationale of recommendation.rationale) {
+        blockers.add(rationale);
+      }
+    }
+
+    for (const issue of recovery.issues) {
+      for (const detail of issue.details) {
+        blockers.add(detail);
+      }
+    }
+
+    if (blockers.size === 0 && snapshot.tasks.length === 0) {
+      blockers.add("run has no task graph");
+    }
+
+    return [...blockers];
   }
 }
 

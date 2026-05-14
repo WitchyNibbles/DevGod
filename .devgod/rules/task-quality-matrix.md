@@ -8,6 +8,8 @@ Use task-type quality gates in addition to the generic review trio.
 - `specialist_verified` tasks must name at least one required specialist role
 - the task packet must list the relevant quality gates explicitly
 - handoffs and review gates must cite evidence for the claimed specialist execution and quality checks
+- refactors and rewrites must preserve intended behavior and include regression evidence for relevant good-path and bad-path cases
+- discovered `CRITICAL` or `HIGH` defects in touched scope must be fixed or carried as explicit blockers before completion
 
 ## Gate guidance
 
@@ -37,6 +39,11 @@ Use task-type quality gates in addition to the generic review trio.
 ### `e2e_required`
 
 - use for critical user, setup, install, or upgrade flows
+
+### `regression_safety_required`
+
+- use for refactors, rewrites, migrations, and behavior-preserving hardening work
+- requires explicit invariants, regression checks, and negative-case coverage for the touched flow
 
 ### `release_readiness_required`
 
