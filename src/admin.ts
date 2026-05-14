@@ -745,12 +745,12 @@ interface ExecuteOpsCommandOptions extends ExecuteStatusCommandOptions {
 interface ExecuteLoopCommandOptions extends ExecuteStatusCommandOptions {
   getExecutionPlan: (runId: string, staleAfterHours: number) => Promise<RunExecutionPlan>;
   applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
-  executeDirectiveStep: (
+  executeDirectiveStep?: ((
     runId: string,
     input: Omit<ExecuteDirectiveStepOptions, "executeReviewRecommendation"> & {
       reviewCommands: readonly RecordReviewCommandInput[];
     }
-  ) => Promise<DirectiveExecutionResult>;
+  ) => Promise<DirectiveExecutionResult>) | undefined;
 }
 
 interface ExecuteRecoverCommandOptions extends ExecuteStatusCommandOptions {
@@ -758,7 +758,9 @@ interface ExecuteRecoverCommandOptions extends ExecuteStatusCommandOptions {
   applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
 }
 
-interface ExecuteReportCommandOptions extends ExecuteOpsCommandOptions {
+interface ExecuteReportCommandOptions extends ExecuteStatusCommandOptions {
+  getRoutingReport: (runId: string) => Promise<RoutingRecommendationReport>;
+  inspectRecovery: (runId: string, staleAfterHours: number) => Promise<RecoveryInspectionReport>;
   getHandoffs: (runId: string, taskId: string) => Promise<readonly {
     createdAt: string;
     actor: string;
@@ -1363,11 +1365,12 @@ export async function createLiveLoopReviewCommandExecutor(
   if (!liveAdapter.modulePath) {
     throw new Error("loop review execution requires a resolved live adapter module path");
   }
+  const adapterModulePath = liveAdapter.modulePath;
 
   return (command) =>
     executeRecordReviewCommand(command, {
       adapter: liveAdapter.adapter,
-      adapterModulePath: liveAdapter.modulePath,
+      adapterModulePath,
       selectedBackend: liveAdapter.selectedBackend,
       availableBackends: liveAdapter.availableBackends,
       bindingsPath,
@@ -2050,6 +2053,9 @@ export async function executeLoopCommandFromArgs(
   }
 
   if (executeSupportedDirectives) {
+    if (!options.executeDirectiveStep) {
+      throw new Error("loop directive execution is not available for this runtime surface");
+    }
     const executionResult = await options.executeDirectiveStep(runId, {
       staleAfterHours,
       ownerActor,
@@ -2099,31 +2105,33 @@ async function loopCommand(args: readonly string[]) {
         return service.applyRecovery(runId, actionIds, { staleAfterHours });
       },
       async executeDirectiveStep(runId, input) {
+        const executeReviewRecommendation =
+          input.reviewCommands.length > 0
+            ? createQueuedLoopReviewExecutor(
+                runId,
+                input.reviewCommands,
+                await createLiveLoopReviewCommandExecutor({
+                  cwd: process.cwd(),
+                  env: process.env,
+                  recordReview({ command, resolver }) {
+                    const reviewService = new DevgodCoreService(store, {
+                      resolveReviewActionContext: resolver
+                    });
+                    return reviewService.recordReview(
+                      command.runId,
+                      command.taskId,
+                      command.actor,
+                      command.review
+                    );
+                  }
+                })
+              )
+            : undefined;
+
         return service.executeDirectiveStep(runId, {
           staleAfterHours: input.staleAfterHours,
           ownerActor: input.ownerActor,
-          executeReviewRecommendation:
-            input.reviewCommands.length > 0
-              ? createQueuedLoopReviewExecutor(
-                  runId,
-                  input.reviewCommands,
-                  await createLiveLoopReviewCommandExecutor({
-                    cwd: process.cwd(),
-                    env: process.env,
-                    recordReview({ command, resolver }) {
-                      const reviewService = new DevgodCoreService(store, {
-                        resolveReviewActionContext: resolver
-                      });
-                      return reviewService.recordReview(
-                        command.runId,
-                        command.taskId,
-                        command.actor,
-                        command.review
-                      );
-                    }
-                  })
-                )
-              : undefined
+          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
         });
       }
     });

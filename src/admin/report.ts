@@ -360,33 +360,34 @@ function buildTimeline(input: {
 }
 
 function buildLoopHistory(results: readonly SearchMemoryResult[]): RunEvidenceLoopHistoryEntry[] {
-  return [...results]
-    .map((result) => {
-      const directiveKind = readTaggedValue(result, "directive:");
-      const outcome = readTaggedValue(result, "outcome:");
-      if (!directiveKind || !outcome) {
-        return undefined;
-      }
+  const entries: RunEvidenceLoopHistoryEntry[] = [];
 
-      return {
-        authorityLabel: "runtime_authoritative" as const,
-        at: result.provenance.createdAt,
-        taskId: readTaggedValue(result, "task:") ?? result.provenance.taskId,
-        directiveKind,
-        outcome,
-        nextDirectiveKind: readTaggedValue(result, "next:"),
-        actor: readTaggedValue(result, "actor:"),
-        reviewRole: readTaggedValue(result, "reviewRole:"),
-        title: result.title,
-        detail: result.content
-          .split("\n")
-          .filter((line) => line.startsWith("evidence="))
-          .map((line) => line.slice("evidence=".length)),
-        citation: result.citation.canonicalRef
-      };
-    })
-    .filter((entry): entry is RunEvidenceLoopHistoryEntry => entry !== undefined)
-    .sort((left, right) => left.at.localeCompare(right.at));
+  for (const result of results) {
+    const directiveKind = readTaggedValue(result, "directive:");
+    const outcome = readTaggedValue(result, "outcome:");
+    if (!directiveKind || !outcome) {
+      continue;
+    }
+
+    entries.push({
+      authorityLabel: "runtime_authoritative",
+      at: result.provenance.createdAt,
+      taskId: readTaggedValue(result, "task:") ?? result.provenance.taskId,
+      directiveKind,
+      outcome,
+      nextDirectiveKind: readTaggedValue(result, "next:"),
+      actor: readTaggedValue(result, "actor:"),
+      reviewRole: readTaggedValue(result, "reviewRole:"),
+      title: result.title,
+      detail: result.content
+        .split("\n")
+        .filter((line) => line.startsWith("evidence="))
+        .map((line) => line.slice("evidence=".length)),
+      citation: result.citation.canonicalRef
+    });
+  }
+
+  return entries.sort((left, right) => left.at.localeCompare(right.at));
 }
 
 function readTaggedValue(result: SearchMemoryResult, prefix: string): string | undefined {

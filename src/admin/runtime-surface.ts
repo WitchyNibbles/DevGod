@@ -18,9 +18,11 @@ import type {
   RecoveryInspectionReport,
   RetrievalRole,
   RoutingRecommendationReport,
+  RunExecutionPlan,
   RunStatusSnapshot,
   SearchMemoryResult
 } from "../domain/types.ts";
+import type { DirectiveExecutionResult } from "../core/service.ts";
 import { PostgresStore } from "../store/postgres-store.ts";
 import { loadDotEnv, withClient } from "./db.ts";
 
@@ -32,20 +34,16 @@ interface RuntimeSurfaceService {
   getExecutionPlan(
     runId: string,
     options?: { staleAfterHours?: number | undefined }
-  ): Promise<import("../domain/types.ts").RunExecutionPlan>;
+  ): Promise<RunExecutionPlan>;
   applyRecovery(
     runId: string,
     actionIds: readonly string[],
     options: { staleAfterHours: number }
   ): Promise<import("../domain/types.ts").RecoveryApplyResult>;
-  executeDirectiveStep(
+  executeDirectiveStep?: ((
     runId: string,
-    input: {
-      staleAfterHours?: number | undefined;
-      ownerActor?: string | undefined;
-      reviewCommands: readonly unknown[];
-    }
-  ): Promise<unknown>;
+    input: import("../core/service.ts").ExecuteDirectiveStepOptions
+  ) => Promise<DirectiveExecutionResult>) | undefined;
   recommendRouting(runId: string): Promise<RoutingRecommendationReport>;
   inspectRecovery(runId: string, input: { staleAfterHours: number }): Promise<RecoveryInspectionReport>;
   searchMemory(input: {
@@ -58,6 +56,13 @@ interface RuntimeSurfaceService {
     embeddingModel?: string | undefined;
     requesterRole?: RetrievalRole | undefined;
   }): Promise<readonly SearchMemoryResult[]>;
+  getLoopExecutionHistory?: ((
+    runId: string,
+    options?: {
+      limit?: number | undefined;
+      requesterRole?: import("../domain/types.ts").TaskPacketInput["requiredSpecialistRoles"][number] | undefined;
+    }
+  ) => Promise<SearchMemoryResult[]>) | undefined;
 }
 
 type RuntimeClient = Parameters<Parameters<typeof withClient>[0]>[0];
@@ -186,6 +191,9 @@ export async function getLoopSurface(args: readonly string[], options: RuntimeSu
         return service.applyRecovery(runId, actionIds, { staleAfterHours });
       },
       async executeDirectiveStep(runId, input) {
+        if (!service.executeDirectiveStep) {
+          throw new Error("runtime surface does not support directive execution");
+        }
         const reviewCommands = input.reviewCommands as readonly {
           runId: string;
           taskId: string;
@@ -193,31 +201,33 @@ export async function getLoopSurface(args: readonly string[], options: RuntimeSu
           review: import("../domain/types.ts").ReviewInput;
         }[];
 
+        const executeReviewRecommendation =
+          reviewCommands.length > 0
+            ? createQueuedLoopReviewExecutor(
+                runId,
+                reviewCommands,
+                await createLiveLoopReviewCommandExecutor({
+                  cwd,
+                  env,
+                  recordReview({ command, resolver }) {
+                    const reviewService = new DevgodCoreService(store, {
+                      resolveReviewActionContext: resolver
+                    });
+                    return reviewService.recordReview(
+                      command.runId,
+                      command.taskId,
+                      command.actor,
+                      command.review
+                    );
+                  }
+                })
+              )
+            : undefined;
+
         return service.executeDirectiveStep(runId, {
           staleAfterHours: input.staleAfterHours,
           ownerActor: input.ownerActor,
-          executeReviewRecommendation:
-            reviewCommands.length > 0
-              ? createQueuedLoopReviewExecutor(
-                  runId,
-                  reviewCommands,
-                  await createLiveLoopReviewCommandExecutor({
-                    cwd,
-                    env,
-                    recordReview({ command, resolver }) {
-                      const reviewService = new DevgodCoreService(store, {
-                        resolveReviewActionContext: resolver
-                      });
-                      return reviewService.recordReview(
-                        command.runId,
-                        command.taskId,
-                        command.actor,
-                        command.review
-                      );
-                    }
-                  })
-                )
-              : undefined
+          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
         });
       }
     })
@@ -251,7 +261,9 @@ export async function getReportSurface(args: readonly string[], options: Runtime
         return store.getApprovals(runId, taskId);
       },
       getLoopHistory(runId, limit) {
-        return service.getLoopExecutionHistory(runId, { limit });
+        return service.getLoopExecutionHistory
+          ? service.getLoopExecutionHistory(runId, { limit })
+          : Promise.resolve([]);
       }
     })
   );

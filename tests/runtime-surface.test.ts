@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getLoopSurface, getPlanContextSurface } from "../src/admin/runtime-surface.ts";
+import type { RunExecutionPlan } from "../src/domain/types.ts";
 
 test("getPlanContextSurface wires query embedding through the runtime surface", async () => {
   let capturedInput:
@@ -136,45 +137,49 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
                 nextTaskIds: []
               };
             },
-            async getExecutionPlan(runId: string) {
+            async getExecutionPlan(runId: string): Promise<RunExecutionPlan> {
               calls.push({ method: "getExecutionPlan", args: [runId] });
+              if (calls.some((entry) => entry.method === "applyRecovery")) {
+                return {
+                  mode: "runtime_authoritative",
+                  runId,
+                  runStatus: "review_blocked",
+                  directive: {
+                    kind: "dispatch_owner",
+                    recommendation: {
+                      taskId: "build",
+                      taskStatus: "ready",
+                      recommendation: "owner_dispatch",
+                      authorityLabel: "derived_only",
+                      targetRole: "backend_engineer",
+                      rationale: ["ready after recovery"],
+                      blockers: [],
+                      allowedWriteScope: ["src/core"],
+                      retrievalGuidance: [],
+                      approvalCheckpoints: []
+                    },
+                    rationale: ["ready after recovery"]
+                  }
+                };
+              }
+
               return {
                 mode: "runtime_authoritative",
                 runId,
                 runStatus: "review_blocked",
                 directive: {
-                  kind: calls.some((entry) => entry.method === "applyRecovery")
-                    ? "dispatch_owner"
-                    : "apply_recovery",
-                  ...(calls.some((entry) => entry.method === "applyRecovery")
-                    ? {
-                        recommendation: {
-                          taskId: "build",
-                          taskStatus: "ready",
-                          recommendation: "owner_dispatch",
-                          authorityLabel: "derived_only",
-                          targetRole: "backend_engineer",
-                          rationale: ["ready after recovery"],
-                          blockers: [],
-                          allowedWriteScope: ["src/core"],
-                          retrievalGuidance: [],
-                          approvalCheckpoints: []
-                        },
-                        rationale: ["ready after recovery"]
-                      }
-                    : {
-                        actions: [
-                          {
-                            id: "reset-task:plan",
-                            authorityLabel: "derived_only",
-                            kind: "reset_task_to_ready",
-                            taskId: "plan",
-                            safeToApply: true,
-                            rationale: ["stalled task"]
-                          }
-                        ],
-                        rationale: ["safe recovery available"]
-                      })
+                  kind: "apply_recovery",
+                  actions: [
+                    {
+                      id: "reset-task:plan",
+                      authorityLabel: "derived_only",
+                      kind: "reset_task_to_ready",
+                      taskId: "plan",
+                      safeToApply: true,
+                      rationale: ["stalled task"]
+                    }
+                  ],
+                  rationale: ["safe recovery available"]
                 }
               };
             },
