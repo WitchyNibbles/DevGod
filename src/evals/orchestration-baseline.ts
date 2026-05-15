@@ -57,7 +57,58 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "orchestration baseline default reasoning",
+        hypothesis: "the baseline task packet should remain executable under strict defaults",
+        alternatives: ["downgrade mode explicitly for compatibility-only cases"],
+        evidenceRefs: ["src/evals/orchestration-baseline.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "eval://orchestration-baseline/task-packet",
+        outcome: "supported",
+        summary: "default baseline fixture includes strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "eval://orchestration-baseline/task-packet",
+        status: "passed",
+        summary: "default baseline fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default baseline fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? {
+      claim: "the baseline fixture has enough evidence to exercise routing behavior",
+      facts: ["the orchestration baseline is under test"],
+      assumptions: ["task packet scope remains bounded"],
+      hypotheses: ["strict-complete packets should keep the lifecycle cases green"],
+      evidenceRefs: ["src/evals/orchestration-baseline.ts"],
+      counterEvidence: [],
+      openQuestions: [],
+      verificationPlan: ["npm test"],
+      fallbacks: ["make compatibility mode explicit in eval cases when needed"],
+      budgets: { researchSteps: 1, debugSteps: 1, reviewPasses: 1, toolRetries: 1 },
+      confidence: "medium",
+      decision: "supported"
+    }
   };
 }
 

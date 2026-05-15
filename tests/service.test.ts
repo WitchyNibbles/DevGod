@@ -39,11 +39,47 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
-    reasoningPolicy: overrides.reasoningPolicy,
-    reasoningAttempts: overrides.reasoningAttempts,
-    reasoningVerifications: overrides.reasoningVerifications,
-    reasoningVerdict: overrides.reasoningVerdict,
-    reasoningQuality: overrides.reasoningQuality
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "default task reasoning",
+        hypothesis: "the scoped task packet is sufficient to proceed",
+        alternatives: ["expand evidence before changing scope"],
+        evidenceRefs: ["tests/service.test.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "test://service-task-packet",
+        outcome: "supported",
+        summary: "default test fixture carries strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "test://service-task-packet",
+        status: "passed",
+        summary: "default service fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default service fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? reasoningQualityBlock({
+      confidence: "medium",
+      decision: "supported"
+    })
   };
 }
 
@@ -285,7 +321,15 @@ test("recordReview keeps task blocked on high severity finding", async () => {
     request: "Ship the shared orchestration backend."
   });
 
-  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      reasoningQuality: reasoningQualityBlock({
+        confidence: "low",
+        openQuestions: ["final runtime behavior still needs confirmation"],
+        decision: "continue"
+      })
+    })
+  ]);
   await service.claimTask(run.id, "task-1", "planner");
   await service.submitHandoff(run.id, "task-1", {
     actor: "planner",
@@ -656,7 +700,7 @@ test("createPlan rejects malformed reasoning-quality blocks for architecture pla
   );
 });
 
-test("recommendRouting surfaces reasoning-quality warnings without changing authority", async () => {
+test("recommendRouting keeps owner dispatch advisory with a reasoning-quality checkpoint", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
@@ -675,13 +719,8 @@ test("recommendRouting surfaces reasoning-quality warnings without changing auth
 
   assert.ok(recommendation);
   assert.ok(
-    recommendation.rationale.some((line) =>
-      line.includes("reasoning-quality: task task-1 is missing a reasoning-quality block")
-    )
-  );
-  assert.ok(
     recommendation.approvalCheckpoints.some((line) =>
-      line.includes("reasoning-quality warnings")
+      line.includes("reasoning-quality block includes evidence, alternatives, and a verification plan")
     )
   );
 });
@@ -757,6 +796,38 @@ test("recommendRouting does not owner-dispatch tasks with blocked reasoning deci
   assert.equal(recommendation.recommendation, "wait");
   assert.ok(
     recommendation.blockers.some((line) => line.includes("explicitly blocked by its reasoning decision"))
+  );
+});
+
+test("recommendRouting treats unspecified reasoning mode as strict by default", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Default strict mode",
+    request: "Unspecified reasoning mode should fail closed."
+  });
+
+  const packet = taskPacket({ taskId: "implicit-strict-task" });
+  delete (packet as Partial<TaskPacketInput>).reasoningPolicy;
+  delete (packet as Partial<TaskPacketInput>).reasoningAttempts;
+  delete (packet as Partial<TaskPacketInput>).reasoningVerifications;
+  delete (packet as Partial<TaskPacketInput>).reasoningVerdict;
+  delete (packet as Partial<TaskPacketInput>).reasoningQuality;
+
+  await service.createTaskGraph(run.id, [packet]);
+
+  const report = await service.recommendRouting(run.id);
+  const recommendation = report.recommendations.find((entry) => entry.taskId === "implicit-strict-task");
+
+  assert.ok(recommendation);
+  assert.equal(recommendation.recommendation, "wait");
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("missing a reasoning-quality block"))
+  );
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("records no reasoning attempts"))
   );
 });
 
@@ -2149,7 +2220,7 @@ test("recommendRouting returns advisory owner, review, and wait recommendations 
   assert.deepEqual(reviewRecommendation?.approvalCheckpoints, [
     "review actor must authenticate through the trusted review identity resolver",
     "manager must persist or attach authenticated reviewer evidence before completion",
-    "resolve or explicitly record reasoning-quality warnings before finalizing the task"
+    "reasoning-quality block includes evidence, alternatives, and a verification plan"
   ]);
 
   await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {

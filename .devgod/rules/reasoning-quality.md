@@ -23,7 +23,7 @@ Use this rule when planning, debugging, implementing, researching, reviewing, or
 
 For plans, task packets, and related artifacts, capture:
 
-- reasoning policy mode: `legacy`, `dual`, or `strict`
+- reasoning policy mode: `strict` by default, with `dual` or `legacy` only when explicitly needed
 - claim
 - facts, assumptions, and guesses or hypotheses
 - evidence references
@@ -33,13 +33,14 @@ For plans, task packets, and related artifacts, capture:
 - verification plan
 - fallback or recovery behavior
 - bounded research, debug, review, or tool-retry budgets
-- bounded reasoning attempts with trace refs when dual or strict mode is used
+- bounded reasoning attempts with trace refs when strict or dual mode is used
 - verification records that distinguish deterministic checks from critic/reviewer checks
 - a verdict: `supported`, `insufficient_evidence`, `contradicted`, `budget_exhausted`, or `needs_review`
 
 ## Enforcement model
 
 - reasoning signals are derived workflow controls, not approval authority by themselves
+- strict is the default reasoning mode for new or unspecified work
 - strict mode may block routing or final completion until attempts, verification, critic evidence, and verdict state are sufficient
 - authenticated reviews and workflow proof remain the authority boundary for completion
 - dual mode is the migration bridge for upgraded legacy tasks

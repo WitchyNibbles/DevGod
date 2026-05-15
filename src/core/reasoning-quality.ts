@@ -70,7 +70,7 @@ function inferMode(input: {
   if (input.qualityGates?.includes("reasoning_dual_required")) {
     return "dual";
   }
-  return "legacy";
+  return "strict";
 }
 
 function addModeWarnings(mode: ReasoningWorkflowMode, label: string, warnings: ReasoningQualityWarning[]) {

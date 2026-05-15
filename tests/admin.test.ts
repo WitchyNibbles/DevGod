@@ -42,7 +42,57 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
-    reasoningQuality: overrides.reasoningQuality
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "admin task default reasoning",
+        hypothesis: "the admin fixture task is ready for workflow operations",
+        alternatives: ["narrow the workflow surface before proceeding"],
+        evidenceRefs: ["tests/admin.test.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "test://admin-task-packet",
+        outcome: "supported",
+        summary: "default admin fixture includes strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "test://admin-task-packet",
+        status: "passed",
+        summary: "default admin fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default admin fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? {
+      claim: "the admin fixture task has sufficient evidence",
+      facts: ["admin command path is under test"],
+      assumptions: ["task fixture remains scoped"],
+      hypotheses: ["the command should accept a strict-ready task packet"],
+      evidenceRefs: ["tests/admin.test.ts"],
+      counterEvidence: [],
+      openQuestions: [],
+      verificationPlan: ["npm test"],
+      fallbacks: ["tighten the fixture if a command relies on weaker semantics"],
+      budgets: { researchSteps: 1, debugSteps: 1, reviewPasses: 1, toolRetries: 1 },
+      confidence: "medium",
+      decision: "supported"
+    }
   };
 }
 

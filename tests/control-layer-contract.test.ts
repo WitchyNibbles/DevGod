@@ -51,6 +51,7 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(qualityMatrix, /discovered `CRITICAL` or `HIGH` defects in touched scope/i);
   assert.match(reasoningQuality, /facts, assumptions, and guesses/i);
   assert.match(reasoningQuality, /multiple plausible hypotheses/i);
+  assert.match(reasoningQuality, /strict is the default reasoning mode/i);
   assert.match(reasoningQuality, /dual mode is the migration bridge/i);
   assert.match(reasoningQuality, /bounded research, debug, and review budgets/i);
 });
@@ -64,7 +65,7 @@ test("reasoning-quality skills call for bounded skepticism and evidence discipli
   assert.match(debugging, /next most plausible hypothesis/i);
   assert.match(debugging, /debug budget/i);
   assert.match(planning, /reasoning-quality section/i);
-  assert.match(planning, /reasoning policy mode/i);
+  assert.match(planning, /strict.*default/i);
   assert.match(review, /low-confidence conclusions/i);
   assert.match(review, /unsupported reasoning verdicts/i);
   assert.match(docsResearch, /unresolved drift/i);

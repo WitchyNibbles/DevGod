@@ -75,7 +75,9 @@ List the task-type gates that apply, for example:
 
 ### Mode
 
-`legacy | dual | strict`
+`strict | dual | legacy`
+
+Use `strict` by default. Use `dual` or `legacy` only when compatibility needs are explicit.
 
 ### Requirements
 
@@ -83,7 +85,7 @@ State whether this task requires explicit reasoning blocks, attempts, trace refs
 
 ### Max attempts
 
-Record the bounded attempt budget when dual or strict mode is used.
+Record the bounded attempt budget when strict or dual mode is used.
 
 ## Reasoning attempts
 

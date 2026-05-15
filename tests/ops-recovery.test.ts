@@ -41,7 +41,47 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
-    reasoningQuality: overrides.reasoningQuality
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "ops recovery fixture reasoning",
+        hypothesis: "the fixture task is valid under strict defaults",
+        alternatives: ["mark compatibility mode explicitly if needed"],
+        evidenceRefs: ["tests/ops-recovery.test.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "test://ops-task-packet",
+        outcome: "supported",
+        summary: "default ops fixture includes strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "test://ops-task-packet",
+        status: "passed",
+        summary: "default ops fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default ops fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? reasoningQualityBlock({
+      confidence: "medium",
+      decision: "supported"
+    })
   };
 }
 

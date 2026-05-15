@@ -31,6 +31,7 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 | Verification harness compatibility under restricted/sandboxed execution | done | `src/install/cli.ts`, `tests/install.test.ts`, `tests/workflow-check.test.ts`, `tests/workflow-scaffold.test.ts`, `tests/orchestration-benchmark.test.ts`, `tests/orchestration-eval.test.ts`, `tests/ui-server.test.ts` |
 | Reasoning-quality skepticism layer across prompts, workflow artifacts, and runtime reporting | done | `src/core/reasoning-quality.ts`, `src/core/service.ts`, `src/admin/report.ts`, `src/admin/ops.ts`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/report-command.test.ts`, `tests/control-layer-contract.test.ts` |
 | Reasoning-quality hardening with strict lifecycle enforcement and legacy upgrade tooling | done | `src/domain/types.ts`, `src/domain/contracts.ts`, `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `scripts/check-devgod-workflow.sh`, `tests/install.test.ts`, `tests/workflow-check.test.ts` |
+| Strict reasoning mode as the default for unspecified workflows | done | `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `.devgod/templates/task-packet.md`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/install.test.ts`, `tests/orchestration-eval.test.ts` |
 
 ## Current Milestone
 
@@ -43,10 +44,11 @@ Autonomy loop rollout
 - Local runtime proof bootstrap restored live workflow validation for package-maintainer work
 - Reasoning-quality skepticism and evidence discipline standardized across prompts, workflow artifacts, runtime routing, and reporting
 - Reasoning-quality hardening added strict/dual/legacy lifecycle enforcement, migration tooling, and completion blocking on insufficient evidence
+- Strict reasoning is now the default for unspecified runtime, CLI, template, and planning flows, with dual and legacy retained only as explicit compatibility modes
 
 ## Current Task
 
-The queue remains idle, and the active maintenance slice `2026-05-15-reasoning-quality-hardening` is fully verified. This task upgraded reasoning quality from advisory-only semantics into a strict/dual/legacy lifecycle with structured attempts, verification records, verdicts, migration tooling, and strict runtime blocking while preserving authenticated approval authority.
+The queue remains idle, and the active maintenance slice `2026-05-15-strict-default-reasoning` is fully verified. This task aligned the runtime fallback, upgrade CLI, planning guidance, templates, rules, and regression fixtures so unspecified reasoning work now defaults to `strict` instead of drifting into compatibility behavior.
 
 ## Next Task
 
@@ -75,6 +77,10 @@ None queued. The current control-layer backlog for this autonomy milestone is co
 - `npm test` passed on 2026-05-15 for `2026-05-15-reasoning-quality-hardening`, including strict routing, strict terminal blocking, legacy upgrade tooling, and dual-mode workflow checks.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15.
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15 after seeding authoritative runtime proof run `bc242568-80c2-4de6-8768-7a25597306e8`.
+- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-strict-default-reasoning`.
+- `npm test` passed on 2026-05-15 for `2026-05-15-strict-default-reasoning`, including strict-default runtime routing, CLI default parsing, report semantics, and orchestration eval fixture coverage.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15 after seeding authoritative runtime proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad`.
 - `node --experimental-strip-types --test tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/admin.test.ts` passed.
 - `npm test` passed.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-loop-surface` passed.
@@ -103,6 +109,7 @@ Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, an
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-upgrade-configure`, and an authoritative local proof run `9edb1449-4718-4e4e-8db8-24434910928a` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-layer`, and authoritative local proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-hardening`, and authoritative local proof run `bc242568-80c2-4de6-8768-7a25597306e8` approved the task on 2026-05-15.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-strict-default-reasoning`, and authoritative local proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-13-runtime-loop-surface`, `2026-05-13-runtime-proof-seed`, `2026-05-13-runtime-directive-executor`, `2026-05-14-runtime-loop-history`, `2026-05-14-verification-harness-compat`, and `2026-05-14-runtime-task-advance`. The original control-layer gap around runtime-approved queue advancement is now closed.
 
 ## Active Verification Blocker

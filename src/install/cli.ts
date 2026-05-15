@@ -1033,7 +1033,7 @@ function parseUpgradeReasoningWorkflowCommand(
   }
 
   const modeIndex = args.indexOf("--mode");
-  const modeRaw = modeIndex === -1 ? "dual" : args[modeIndex + 1];
+  const modeRaw = modeIndex === -1 ? "strict" : args[modeIndex + 1];
   if (!modeRaw || modeRaw.startsWith("-")) {
     throw new Error("Mode must follow --mode and cannot start with '-'.");
   }
@@ -1723,7 +1723,7 @@ function appendReasoningHardeningSections(
     mode === "strict"
       ? "- status: `needs_review`"
       : "- status: `supported`",
-    "- summary: upgraded from legacy semantics; verify attempt, trace, and critic evidence before relying on this verdict",
+    "- summary: upgraded from legacy semantics under the strict-by-default workflow; verify attempt, trace, and critic evidence before relying on this verdict",
     "- supporting attempt ids: `attempt-1`",
     `- blocking issues: ${counterEvidence.replace(/\n+/g, " ")}`,
     ""

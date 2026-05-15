@@ -34,11 +34,57 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
-    reasoningPolicy: overrides.reasoningPolicy,
-    reasoningAttempts: overrides.reasoningAttempts,
-    reasoningVerifications: overrides.reasoningVerifications,
-    reasoningVerdict: overrides.reasoningVerdict,
-    reasoningQuality: overrides.reasoningQuality
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "report fixture reasoning",
+        hypothesis: "the report fixture should be strict-complete by default",
+        alternatives: ["downgrade only when a compatibility-specific report is under test"],
+        evidenceRefs: ["tests/report-command.test.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "test://report-task-packet",
+        outcome: "supported",
+        summary: "default report fixture includes strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "test://report-task-packet",
+        status: "passed",
+        summary: "default report fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default report fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? {
+      claim: "the report fixture has sufficient evidence",
+      facts: ["report output is under test"],
+      assumptions: ["the task packet remains bounded"],
+      hypotheses: ["strict-ready packets should still render correctly"],
+      evidenceRefs: ["tests/report-command.test.ts"],
+      counterEvidence: [],
+      openQuestions: [],
+      verificationPlan: ["npm test"],
+      fallbacks: ["make compatibility mode explicit in report fixtures when required"],
+      budgets: { researchSteps: 1, debugSteps: 1, reviewPasses: 1, toolRetries: 1 },
+      confidence: "medium",
+      decision: "supported"
+    }
   };
 }
 
@@ -222,10 +268,12 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   assert.equal(result.report.summary.totalHandoffs, 1);
   assert.equal(result.report.summary.totalReviews, 3);
   assert.equal(result.report.summary.totalApprovals, 3);
-  assert.equal(result.report.reasoningQuality.status, "warn");
-  assert.ok(result.report.reasoningQuality.warningCount >= 2);
-  assert.ok(result.report.reasoningQuality.legacyTaskIds.includes("build"));
-  assert.ok(result.report.reasoningQuality.taskIdsWithWarnings.includes("plan"));
+  assert.equal(result.report.reasoningQuality.status, "pass");
+  assert.equal(result.report.reasoningQuality.warningCount, 0);
+  assert.deepEqual(result.report.reasoningQuality.legacyTaskIds, []);
+  assert.ok(result.report.reasoningQuality.strictTaskIds.includes("plan"));
+  assert.ok(result.report.reasoningQuality.strictTaskIds.includes("build"));
+  assert.deepEqual(result.report.reasoningQuality.taskIdsWithWarnings, []);
   assert.deepEqual(result.report.summary.reviewBlockedTaskIds, []);
   assert.ok(result.report.timeline.some((entry) => entry.kind === "handoff_recorded"));
   assert.ok(result.report.timeline.some((entry) => entry.kind === "review_recorded"));
@@ -242,7 +290,7 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   assert.match(markdown, /# devgod run report/);
   assert.match(markdown, /Plan runtime wrapper/);
   assert.match(markdown, /## Reasoning Quality/);
-  assert.match(markdown, /legacy tasks:/);
-  assert.match(markdown, /reasoning-quality: warn/);
+  assert.match(markdown, /strict tasks:/);
+  assert.match(markdown, /reasoning-quality: pass/);
   assert.match(markdown, /approval_recorded task=`plan`/);
 });

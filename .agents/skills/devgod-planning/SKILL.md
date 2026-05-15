@@ -11,7 +11,7 @@ Goal: produce a plan that is executable, reviewable, and safe to hand off.
 
 1. Restate goal, audience, constraints, risks, unknowns, success criteria, and stop/go.
 2. Separate approved assumptions, blocked assumptions, and user questions.
-3. Require a reasoning-quality section that captures claim, evidence refs, alternatives, confidence, bounded budgets, and the intended reasoning policy mode (`legacy`, `dual`, or `strict`).
+3. Require a reasoning-quality section that captures claim, evidence refs, alternatives, confidence, bounded budgets, and the intended reasoning policy mode (`strict` by default; `dual` or `legacy` only when explicitly justified).
 4. For dual or strict work, include reasoning attempts, verification records, and a verdict path instead of leaving critique implicit.
 5. Split work by trust boundary and write scope.
 6. Define the smallest useful slice first.

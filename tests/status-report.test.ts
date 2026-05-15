@@ -32,7 +32,57 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
     handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
-    reasoningQuality: overrides.reasoningQuality
+    reasoningPolicy: overrides.reasoningPolicy ?? {
+      mode: "strict",
+      requireBlock: true,
+      requireAttempts: true,
+      requireTraceRefs: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      maxAttempts: 3
+    },
+    reasoningAttempts: overrides.reasoningAttempts ?? [
+      {
+        id: "attempt-1",
+        label: "status report fixture reasoning",
+        hypothesis: "the status fixture should remain runnable under strict defaults",
+        alternatives: ["downgrade explicitly for compatibility-only cases"],
+        evidenceRefs: ["tests/status-report.test.ts"],
+        verificationRefs: ["verification-1"],
+        traceRef: "test://status-task-packet",
+        outcome: "supported",
+        summary: "default status fixture includes strict reasoning evidence"
+      }
+    ],
+    reasoningVerifications: overrides.reasoningVerifications ?? [
+      {
+        id: "verification-1",
+        kind: "critic_review",
+        ref: "test://status-task-packet",
+        status: "passed",
+        summary: "default status fixture includes critic verification"
+      }
+    ],
+    reasoningVerdict: overrides.reasoningVerdict ?? {
+      status: "supported",
+      summary: "default status fixture is strict-complete",
+      supportingAttemptIds: ["attempt-1"],
+      blockingIssues: []
+    },
+    reasoningQuality: overrides.reasoningQuality ?? {
+      claim: "the status fixture has sufficient evidence",
+      facts: ["status report is under test"],
+      assumptions: ["task scope remains bounded"],
+      hypotheses: ["strict-ready task packets should keep status reporting green"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      counterEvidence: [],
+      openQuestions: [],
+      verificationPlan: ["npm test"],
+      fallbacks: ["narrow the status fixture if a weaker mode is required"],
+      budgets: { researchSteps: 1, debugSteps: 1, reviewPasses: 1, toolRetries: 1 },
+      confidence: "medium",
+      decision: "supported"
+    }
   };
 }
 

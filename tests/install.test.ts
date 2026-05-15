@@ -548,7 +548,7 @@ test("parseCliArgs accepts upgrade-reasoning-workflow with explicit mode", () =>
   });
 });
 
-test("parseCliArgs defaults upgrade-reasoning-workflow mode to dual", () => {
+test("parseCliArgs defaults upgrade-reasoning-workflow mode to strict", () => {
   const parsed = parseCliArgs([
     "upgrade-reasoning-workflow",
     "--target",
@@ -561,7 +561,7 @@ test("parseCliArgs defaults upgrade-reasoning-workflow mode to dual", () => {
     command: "upgrade-reasoning-workflow",
     targetArg: "/tmp/project",
     taskId: "task-123",
-    mode: "dual",
+    mode: "strict",
     force: false
   });
 });

@@ -42,6 +42,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - create or update `.devgod/ACTIVE` and the matching brief before moving past intake
 - use bounded investigation packets when evidence is needed: owner role, question, read scope, forbidden write scope, evidence required, max output, stop condition
 - require a reasoning-quality pass on substantive work: separate facts, assumptions, and guesses; generate plausible alternatives; note counter-evidence; record confidence and remaining uncertainty
+- treat `strict` as the default reasoning mode for substantive work unless a compatibility-only `dual` or `legacy` choice is explicit
 - when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial
 - use explicit bounded budgets for research, debugging, review, and tool retries so skepticism stays finite
 - evidence first, then `solution_architect`, then `planner`, then explicit task packets, then specialist execution

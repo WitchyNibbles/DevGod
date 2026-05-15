@@ -60,9 +60,11 @@ Use task-type quality gates in addition to the generic review trio.
 ### `reasoning_dual_required`
 
 - use when a task is being upgraded from legacy reasoning semantics into the new structured model
+- dual is an explicit compatibility mode, not the default
 - requires explicit reasoning policy, attempt records, verification records, and a verdict, but does not yet hard-block completion on every reasoning deficiency
 
 ### `reasoning_strict_required`
 
+- strict is the default mode for new substantive reasoning work
 - use when the task should hard-block routing or final completion on missing reasoning attempts, trace refs, verification records, critic verification, or unsupported verdicts
 - requires explicit reasoning policy, attempt records, verification records, and a verdict

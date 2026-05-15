@@ -3,6 +3,33 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-05-15-strict-default-reasoning",
+      "title": "Make strict reasoning mode the default for unspecified workflows",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-15-reasoning-quality-hardening"
+      ],
+      "acceptance_criteria": [
+        "Runtime reasoning inference defaults to strict when no mode or gate is specified.",
+        "CLI, templates, rules, and planning guidance align with strict as the default and keep dual or legacy only as explicit compatibility modes.",
+        "Regression coverage proves unspecified workflows now fail closed under strict semantics instead of drifting into compatibility behavior."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "npm test",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-strict-default-reasoning",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-strict-default-reasoning"
+      ],
+      "evidence": [
+        "Full npm test suite passed on 2026-05-15 with strict-default runtime routing, CLI parsing, report semantics, and orchestration eval fixture coverage.",
+        "Artifact workflow check passed on 2026-05-15 for 2026-05-15-strict-default-reasoning.",
+        "Authoritative seeded run 411b83b2-4bda-4abe-a2e8-67d5528e21ad approved task 2026-05-15-strict-default-reasoning.",
+        "Live workflow check passed on 2026-05-15 for 2026-05-15-strict-default-reasoning."
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-05-15-reasoning-quality-hardening",
       "title": "Harden reasoning quality into a strict or dual lifecycle with upgrade tooling and completion blocking",
       "status": "done",
