@@ -43,6 +43,13 @@ test("executePlanContextCommandFromArgs returns ranked planning context and mark
         DEVGOD_WORKSPACE_SLUG: "team",
         DEVGOD_PROJECT_SLUG: "devgod"
       },
+      async getRetrievalFreshness() {
+        return {
+          authorityLabel: "derived_only",
+          state: "fresh",
+          summary: "repo retrieval index matches the current repo snapshot"
+        };
+      },
       searchMemory(input) {
         return service.searchMemory(input);
       }
@@ -53,11 +60,13 @@ test("executePlanContextCommandFromArgs returns ranked planning context and mark
   assert.equal(result.report.requesterRole, "planner");
   assert.equal(result.report.totalResults, 2);
   assert.equal(result.report.items[0]?.title, "Project incident playbook");
+  assert.equal(result.report.retrieval?.state, "fresh");
   assert.ok((result.report.items[0]?.reasoningWarnings.length ?? 0) > 0);
   assert.match(result.report.items[0]?.citation ?? "", /^memory:\/\//);
 
   const markdown = formatPlanningContextReportMarkdown(result.report);
   assert.match(markdown, /# devgod planning context/);
+  assert.match(markdown, /retrieval: fresh/);
   assert.match(markdown, /Project incident playbook/);
   assert.match(markdown, /reasoning-warnings:/);
   assert.match(markdown, /memory:\/\//);
@@ -84,6 +93,11 @@ test("buildPlanningContextReport flags stale and conflicting evidence for review
   const report = buildPlanningContextReport({
     query: "schema drift",
     requesterRole: "planner",
+    retrieval: {
+      authorityLabel: "derived_only",
+      state: "stale",
+      summary: "repo retrieval index does not match the current repo snapshot"
+    },
     results: [
       {
         id: "memory-1",
@@ -135,6 +149,8 @@ test("buildPlanningContextReport flags stale and conflicting evidence for review
     "evidence freshness is stale",
     "related contradictory evidence detected"
   ]);
+  assert.equal(report.retrieval?.state, "stale");
+  assert.match(formatPlanningContextReportMarkdown(report), /retrieval: stale/);
 });
 
 test("executePlanContextCommandFromArgs derives a query embedding when an embedding model is configured", async () => {
@@ -179,4 +195,97 @@ test("executePlanContextCommandFromArgs derives a query embedding when an embedd
 
   assert.deepEqual(capturedInput?.queryEmbedding, [0.25, 0.75]);
   assert.equal(capturedInput?.embeddingModel, "devgod-local-hash-1536");
+});
+
+test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before searching", async () => {
+  const callOrder: string[] = [];
+  let freshnessChecks = 0;
+  let refreshCalls = 0;
+
+  const result = await executePlanContextCommandFromArgs(["--query", "retrieval freshness"], {
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    async getRetrievalFreshness() {
+      callOrder.push(`freshness:${freshnessChecks}`);
+      freshnessChecks += 1;
+      return freshnessChecks === 1
+        ? {
+            authorityLabel: "derived_only",
+            state: "stale",
+            summary: "repo retrieval index does not match the current repo snapshot"
+          }
+        : {
+            authorityLabel: "derived_only",
+            state: "fresh",
+            summary: "repo retrieval index matches the current repo snapshot"
+          };
+    },
+    async refreshRetrieval() {
+      callOrder.push("refresh");
+      refreshCalls += 1;
+      return {
+        authorityLabel: "runtime_authoritative",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        repoRoot: "/repo",
+        filesIndexed: 2,
+        chunksStored: 4,
+        jobsQueued: 4,
+        embeddingJobs: {
+          leased: 4,
+          completed: 4,
+          failed: 0
+        }
+      };
+    },
+    async searchMemory() {
+      callOrder.push("search");
+      return [];
+    }
+  });
+
+  assert.equal(refreshCalls, 1);
+  assert.deepEqual(callOrder, ["freshness:0", "refresh", "freshness:1", "search"]);
+  assert.equal(result.report.retrieval?.state, "fresh");
+});
+
+test("executePlanContextCommandFromArgs can skip automatic retrieval refresh", async () => {
+  let refreshCalls = 0;
+
+  const result = await executePlanContextCommandFromArgs(
+    ["--query", "retrieval freshness", "--no-auto-refresh-retrieval"],
+    {
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async getRetrievalFreshness() {
+        return {
+          authorityLabel: "derived_only",
+          state: "stale",
+          summary: "repo retrieval index does not match the current repo snapshot"
+        };
+      },
+      async refreshRetrieval() {
+        refreshCalls += 1;
+        return {
+          authorityLabel: "runtime_authoritative",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          repoRoot: "/repo",
+          filesIndexed: 2,
+          chunksStored: 4,
+          jobsQueued: 4
+        };
+      },
+      async searchMemory() {
+        return [];
+      }
+    }
+  );
+
+  assert.equal(refreshCalls, 0);
+  assert.equal(result.report.retrieval?.state, "stale");
 });

@@ -186,6 +186,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts report --format markdown"
   );
   assert.equal(
+    merged.scripts["devgod:refresh-retrieval"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval"
+  );
+  assert.equal(
     merged.scripts["devgod:autopilot-status"],
     "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts"
   );
@@ -1632,7 +1636,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      migrate|bootstrap|verify:setup)",
+        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1661,6 +1665,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
       "install",
       "run migrate",
       "run bootstrap",
+      "run devgod:refresh-retrieval",
       "run verify:setup"
     ]);
 
@@ -1793,7 +1798,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      migrate|bootstrap|verify:setup)",
+        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1838,6 +1843,7 @@ test("installed setup script falls back to native Linux services when docker is 
       "install",
       "run migrate",
       "run bootstrap",
+      "run devgod:refresh-retrieval",
       "run verify:setup"
     ]);
 
@@ -1910,7 +1916,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      migrate|bootstrap|verify:setup)",
+        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1941,6 +1947,7 @@ test("installed setup script honors managed runtime mode without taking service 
       "install",
       "run migrate",
       "run bootstrap",
+      "run devgod:refresh-retrieval",
       "run verify:setup"
     ]);
   } finally {

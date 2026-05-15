@@ -258,6 +258,7 @@ export function mergePackageJson(
   scripts["devgod:recover"] = `${devgodEntry} recover`;
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
+  scripts["devgod:refresh-retrieval"] = `${devgodEntry} refresh-retrieval`;
   scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;
   scripts["devgod:autopilot-status"] =
     "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts";

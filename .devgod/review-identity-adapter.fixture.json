@@ -1,0 +1,116 @@
+{
+  "fixtures": [
+    {
+      "name": "allow reviewer actor",
+      "authContext": {
+        "provider": "devgod-local-seed",
+        "subject": "reviewer-actor",
+        "verified": true
+      },
+      "review": {
+        "actor": "reviewer-actor",
+        "reviewerRole": "reviewer",
+        "reviewState": "passed"
+      },
+      "expect": {
+        "outcome": "allow",
+        "principal": {
+          "provider": "devgod-local-seed",
+          "subject": "reviewer-actor",
+          "verified": true
+        },
+        "context": {
+          "actor": "reviewer-actor",
+          "actorRole": "reviewer",
+          "waiverAuthority": "none"
+        }
+      }
+    },
+    {
+      "name": "allow security actor",
+      "authContext": {
+        "provider": "devgod-local-seed",
+        "subject": "security-actor",
+        "verified": true
+      },
+      "review": {
+        "actor": "security-actor",
+        "reviewerRole": "security_reviewer",
+        "reviewState": "passed"
+      },
+      "expect": {
+        "outcome": "allow",
+        "principal": {
+          "provider": "devgod-local-seed",
+          "subject": "security-actor",
+          "verified": true
+        },
+        "context": {
+          "actor": "security-actor",
+          "actorRole": "security_reviewer",
+          "waiverAuthority": "none"
+        }
+      }
+    },
+    {
+      "name": "allow qa actor",
+      "authContext": {
+        "provider": "devgod-local-seed",
+        "subject": "qa-actor",
+        "verified": true
+      },
+      "review": {
+        "actor": "qa-actor",
+        "reviewerRole": "qa_engineer",
+        "reviewState": "passed"
+      },
+      "expect": {
+        "outcome": "allow",
+        "principal": {
+          "provider": "devgod-local-seed",
+          "subject": "qa-actor",
+          "verified": true
+        },
+        "context": {
+          "actor": "qa-actor",
+          "actorRole": "qa_engineer",
+          "waiverAuthority": "none"
+        }
+      }
+    },
+    {
+      "name": "deny unverified principal",
+      "authContext": {
+        "provider": "devgod-local-seed",
+        "subject": "reviewer-actor",
+        "verified": false
+      },
+      "review": {
+        "actor": "reviewer-actor",
+        "reviewerRole": "reviewer",
+        "reviewState": "passed"
+      },
+      "expect": {
+        "outcome": "deny",
+        "errorIncludes": ["not verified"]
+      }
+    },
+    {
+      "name": "deny unauthorized actor-role pairing",
+      "authContext": {
+        "provider": "devgod-local-seed",
+        "subject": "reviewer-actor",
+        "verified": true
+      },
+      "review": {
+        "actor": "reviewer-actor",
+        "reviewerRole": "qa_engineer",
+        "reviewState": "passed"
+      },
+      "expect": {
+        "outcome": "deny",
+        "errorIncludes": ["is not allowed to record qa_engineer"]
+      }
+    }
+  ]
+}

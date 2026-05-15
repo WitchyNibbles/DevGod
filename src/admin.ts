@@ -12,10 +12,18 @@ import {
   validateRuntimeQdrantUrl
 } from "./runtime/config.ts";
 import { createHashEmbeddingProvider } from "./runtime/hash-embedding-provider.ts";
-import { indexRepoMarkdown } from "./runtime/repo-markdown-indexer.ts";
+import {
+  captureRepoMarkdownSnapshot,
+  DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS,
+  indexRepoMarkdown
+} from "./runtime/repo-markdown-indexer.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
-import { buildPlanningContextReport, formatPlanningContextReportMarkdown } from "./admin/planning-context.ts";
+import {
+  buildPlanningContextReport,
+  formatPlanningContextReportMarkdown,
+  type PlanningContextRetrievalState
+} from "./admin/planning-context.ts";
 import { dispatchGithubWorkItem } from "./admin/github-dispatch.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
 import { inspectGitNexusStatus, type GitNexusStatusObservation } from "./admin/gitnexus.ts";
@@ -69,12 +77,28 @@ import type { WorkspaceRecord } from "./domain/types.ts";
 import type { ExportDocsCommandResult } from "./docs-export/models.ts";
 import { PostgresStore } from "./store/postgres-store.ts";
 import { QdrantArtifactIndex, type ArtifactVectorIndex } from "./store/qdrant-artifact-index.ts";
+import type { DevgodStore as DevgodStoreContract } from "./store/types.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 type EnvShape = NodeJS.ProcessEnv;
 type PostgresStoreClient = ConstructorParameters<typeof PostgresStore>[0];
 type IndexRepoMarkdownStore = Parameters<typeof indexRepoMarkdown>[0]["store"];
+type RetrievalFreshnessStore = Pick<
+  DevgodStoreContract,
+  "getProjectContext" | "getProjectRuntimeRegistration"
+>;
+type RefreshRetrievalStore = IndexRepoMarkdownStore &
+  Pick<
+    DevgodStoreContract,
+    | "getProjectContext"
+    | "getProjectRuntimeRegistration"
+    | "saveProjectRuntimeRegistration"
+    | "leaseEmbeddingJobs"
+    | "getEmbeddingSource"
+    | "completeEmbeddingJob"
+    | "failEmbeddingJob"
+  >;
 
 interface LoadedReviewIdentityAdapter {
   adapter: ReviewPrincipalAdapter<unknown>;
@@ -830,6 +854,105 @@ export interface AdvanceActiveTaskCommandResult {
   queue: TaskQueue;
 }
 
+function resolveRepoMarkdownInclude(env: EnvShape): string[] {
+  const includeValue = env.DEVGOD_REPO_MARKDOWN_INCLUDE ?? DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS.join(",");
+  return includeValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+const repoMarkdownCommandFlagsWithValues = new Set([
+  "--workspace-slug",
+  "--workspace-name",
+  "--project-slug",
+  "--project-name",
+  "--embedding-model"
+]);
+
+function resolveCommandPositionals(
+  args: readonly string[],
+  flagsWithValues: ReadonlySet<string> = new Set()
+): string[] {
+  const positionals: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === "--") {
+      positionals.push(...args.slice(index + 1));
+      break;
+    }
+
+    if (value.startsWith("-")) {
+      if (flagsWithValues.has(value)) {
+        index += 1;
+      }
+      continue;
+    }
+
+    positionals.push(value);
+  }
+
+  return positionals;
+}
+
+function resolveRepoMarkdownTargetRoot(
+  env: EnvShape,
+  args: readonly string[] = [],
+  cwd = process.cwd()
+): string {
+  const [targetRoot] = resolveCommandPositionals(args, repoMarkdownCommandFlagsWithValues);
+  if (targetRoot) {
+    return path.resolve(cwd, targetRoot);
+  }
+
+  if (env.DEVGOD_REPO_MARKDOWN_ROOT) {
+    return path.resolve(cwd, env.DEVGOD_REPO_MARKDOWN_ROOT);
+  }
+
+  return path.resolve(cwd);
+}
+
+function resolveEmbeddingJobLimit(env: EnvShape, candidate?: string | undefined): number {
+  const limitValue = candidate ?? env.DEVGOD_EMBEDDING_JOB_LIMIT ?? "10";
+  const limit = Number.parseInt(limitValue, 10);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`Invalid embedding job limit: ${limitValue}`);
+  }
+  return limit;
+}
+
+interface RetrievalIndexManifestRecord {
+  status?: string | undefined;
+  repoRoot?: string | undefined;
+  include?: string[] | undefined;
+  fileCount?: number | undefined;
+  fingerprint?: string | undefined;
+  embeddingModel?: string | undefined;
+  indexedAt?: string | undefined;
+  jobsQueued?: number | undefined;
+  chunksStored?: number | undefined;
+  filesIndexed?: number | undefined;
+  embeddingLeased?: number | undefined;
+  embeddingCompleted?: number | undefined;
+  embeddingFailed?: number | undefined;
+  embeddedAt?: string | undefined;
+}
+
+function readRetrievalIndexManifest(
+  registration: RuntimeProjectRegistrationRecord
+): RetrievalIndexManifestRecord | undefined {
+  const candidate = registration.manifest.retrievalIndex;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  return candidate as RetrievalIndexManifestRecord;
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 interface ExecutePlanContextCommandOptions {
   env?: EnvShape | undefined;
   searchMemory: (input: {
@@ -843,6 +966,8 @@ interface ExecutePlanContextCommandOptions {
     requesterRole: RetrievalRole;
   }) => Promise<readonly SearchMemoryResult[]>;
   embedQuery?: ((input: { model: string; text: string }) => Promise<readonly number[]>) | undefined;
+  getRetrievalFreshness?: (() => Promise<PlanningContextRetrievalState>) | undefined;
+  refreshRetrieval?: (() => Promise<RefreshRetrievalResult>) | undefined;
 }
 
 interface ExecuteExportDocsCommandOptions {
@@ -863,6 +988,34 @@ export interface ExecuteIndexRepoMarkdownCommandOptions {
   withClient?: typeof withClient | undefined;
   createStore?: ((client: PostgresStoreClient) => IndexRepoMarkdownStore) | undefined;
   indexRepoMarkdown?: typeof indexRepoMarkdown | undefined;
+}
+
+export interface ExecuteRefreshRetrievalCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  argv?: readonly string[] | undefined;
+  withClient?: typeof withClient | undefined;
+  createStore?: ((client: PostgresStoreClient) => RefreshRetrievalStore) | undefined;
+  captureSnapshot?: typeof captureRepoMarkdownSnapshot | undefined;
+  indexRepoMarkdown?: typeof indexRepoMarkdown | undefined;
+  runEmbeddingJobs?: typeof runEmbeddingJobs | undefined;
+  createEmbeddingProvider?: typeof createEmbeddingProvider | undefined;
+  now?: (() => Date) | undefined;
+}
+
+export interface RefreshRetrievalResult {
+  authorityLabel: "runtime_authoritative";
+  workspaceSlug: string;
+  projectSlug: string;
+  repoRoot: string;
+  filesIndexed: number;
+  chunksStored: number;
+  jobsQueued: number;
+  embeddingJobs?: {
+    leased: number;
+    completed: number;
+    failed: number;
+  } | undefined;
 }
 
 export interface CreateRuntimeStoreOptions {
@@ -896,6 +1049,61 @@ export async function createPlanContextEmbedQuery(
       model,
       text
     });
+}
+
+function resolveAutoRefreshRetrievalEnabled(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--no-auto-refresh-retrieval")) {
+    return false;
+  }
+
+  const candidate = env.DEVGOD_AUTO_REFRESH_RETRIEVAL?.trim().toLowerCase();
+  if (!candidate) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(candidate)) {
+    return false;
+  }
+
+  if (["1", "true", "yes", "on"].includes(candidate)) {
+    return true;
+  }
+
+  return true;
+}
+
+async function resolvePlanningRetrievalState(
+  args: readonly string[],
+  env: EnvShape,
+  options: ExecutePlanContextCommandOptions
+): Promise<PlanningContextRetrievalState | undefined> {
+  if (!options.getRetrievalFreshness) {
+    return undefined;
+  }
+
+  let retrieval = await options.getRetrievalFreshness();
+  if (!options.refreshRetrieval || !resolveAutoRefreshRetrievalEnabled(args, env) || retrieval.state === "fresh") {
+    return retrieval;
+  }
+
+  try {
+    await options.refreshRetrieval();
+    retrieval = await options.getRetrievalFreshness();
+    if (retrieval.state === "fresh") {
+      return {
+        ...retrieval,
+        summary: `${retrieval.summary} after automatic refresh`
+      };
+    }
+
+    return retrieval;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...retrieval,
+      summary: `${retrieval.summary}; automatic refresh failed: ${message}`
+    };
+  }
 }
 
 function normalizeRecordReviewCommandInput(raw: string): RecordReviewCommandInput {
@@ -2738,6 +2946,7 @@ export async function executePlanContextCommandFromArgs(
 
   const format = resolveMarkdownFormatFlag(args);
   const includeGlobal = !args.includes("--project-only");
+  const retrieval = await resolvePlanningRetrievalState(args, env, options);
   const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim();
   const queryEmbedding =
     embeddingModel && options.embedQuery
@@ -2762,6 +2971,7 @@ export async function executePlanContextCommandFromArgs(
     report: buildPlanningContextReport({
       query,
       requesterRole: roleCandidate,
+      retrieval,
       results
     })
   };
@@ -2769,13 +2979,38 @@ export async function executePlanContextCommandFromArgs(
 
 async function planContextCommand(args: readonly string[]) {
   const embedQuery = await createPlanContextEmbedQuery(process.env);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? process.env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? process.env.DEVGOD_PROJECT_SLUG;
 
   await withClient(async (client) => {
-    const service = new DevgodCoreService(createRuntimeStore(client));
+    const store = createRuntimeStore(client);
+    const service = new DevgodCoreService(store);
     const result = await executePlanContextCommandFromArgs(args, {
       env: process.env,
       searchMemory(input) {
         return service.searchMemory(input);
+      },
+      getRetrievalFreshness() {
+        return inspectRetrievalFreshness({
+          cwd: process.cwd(),
+          env: process.env,
+          store
+        });
+      },
+      refreshRetrieval() {
+        return executeRefreshRetrievalCommand({
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ...(workspaceSlug ? { DEVGOD_WORKSPACE_SLUG: workspaceSlug } : {}),
+            ...(projectSlug ? { DEVGOD_PROJECT_SLUG: projectSlug } : {})
+          },
+          argv: ["node", "src/admin.ts", "refresh-retrieval"],
+          withClient: async (callback) => callback(client),
+          createStore() {
+            return store;
+          }
+        });
       },
       embedQuery
     });
@@ -2832,13 +3067,7 @@ async function githubDispatchCommand(args: readonly string[]) {
 
 async function runEmbeddingJobsCommand() {
   const provider = await createEmbeddingProvider();
-  const limitArg = process.argv[3];
-  const limitValue = limitArg ?? process.env.DEVGOD_EMBEDDING_JOB_LIMIT ?? "10";
-  const limit = Number.parseInt(limitValue, 10);
-
-  if (!Number.isInteger(limit) || limit <= 0) {
-    throw new Error(`Invalid embedding job limit: ${limitValue}`);
-  }
+  const limit = resolveEmbeddingJobLimit(process.env, process.argv[3]);
 
   await withClient(async (client) => {
     const result = await runEmbeddingJobs({
@@ -2853,24 +3082,19 @@ async function runEmbeddingJobsCommand() {
 export async function executeIndexRepoMarkdownCommand(options: ExecuteIndexRepoMarkdownCommandOptions = {}) {
   const env = options.env ?? process.env;
   const argv = options.argv ?? process.argv;
+  const args = argv.slice(3);
   const withClientImpl = options.withClient ?? withClient;
   const createStoreImpl = options.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
   const indexRepoMarkdownImpl = options.indexRepoMarkdown ?? indexRepoMarkdown;
 
-  const targetRepoRoot = argv[3]
-    ? path.resolve(process.cwd(), argv[3])
-    : env.DEVGOD_REPO_MARKDOWN_ROOT
-      ? path.resolve(process.cwd(), env.DEVGOD_REPO_MARKDOWN_ROOT)
-      : repoRoot;
-  const workspaceSlug = env.DEVGOD_WORKSPACE_SLUG ?? "default";
-  const workspaceName = env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
-  const projectSlug = env.DEVGOD_PROJECT_SLUG;
-  const projectName = env.DEVGOD_PROJECT_NAME;
-  const include = (env.DEVGOD_REPO_MARKDOWN_INCLUDE ?? "README.md,AGENTS.md,docs,.devgod,.agents/skills")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const embeddingModel = env.DEVGOD_EMBEDDING_MODEL;
+  const targetRepoRoot = resolveRepoMarkdownTargetRoot(env, args);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const workspaceName =
+    resolveCommandFlag(args, "--workspace-name") ?? env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+  const projectName = resolveCommandFlag(args, "--project-name") ?? env.DEVGOD_PROJECT_NAME;
+  const include = resolveRepoMarkdownInclude(env);
+  const embeddingModel = resolveCommandFlag(args, "--embedding-model") ?? env.DEVGOD_EMBEDDING_MODEL;
 
   if (!projectSlug) {
     throw new Error("DEVGOD_PROJECT_SLUG is required");
@@ -2892,6 +3116,239 @@ export async function executeIndexRepoMarkdownCommand(options: ExecuteIndexRepoM
 
 async function indexRepoMarkdownCommand() {
   console.log(JSON.stringify(await executeIndexRepoMarkdownCommand()));
+}
+
+export async function inspectRetrievalFreshness(input: {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  store: RetrievalFreshnessStore;
+  captureSnapshot?: typeof captureRepoMarkdownSnapshot | undefined;
+}): Promise<PlanningContextRetrievalState> {
+  const env = input.env ?? process.env;
+  const workspaceSlug = env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = env.DEVGOD_PROJECT_SLUG;
+  if (!workspaceSlug || !projectSlug) {
+    return {
+      authorityLabel: "derived_only",
+      state: "degraded",
+      summary: "workspace/project context is missing for retrieval freshness"
+    };
+  }
+
+  const context = await input.store.getProjectContext({ workspaceSlug, projectSlug });
+  if (!context) {
+    return {
+      authorityLabel: "derived_only",
+      state: "degraded",
+      summary: `project ${workspaceSlug}/${projectSlug} is not bootstrapped for retrieval freshness`
+    };
+  }
+
+  const registration = await input.store.getProjectRuntimeRegistration(context.project.id);
+  if (!registration) {
+    return {
+      authorityLabel: "derived_only",
+      state: "missing",
+      summary: "runtime registration is missing retrieval metadata"
+    };
+  }
+
+  const manifest = readRetrievalIndexManifest(registration);
+  if (!manifest) {
+    return {
+      authorityLabel: "derived_only",
+      state: "missing",
+      summary: "retrieval index has not been bootstrapped yet"
+    };
+  }
+
+  const include = resolveRepoMarkdownInclude(env);
+  const captureSnapshotImpl = input.captureSnapshot ?? captureRepoMarkdownSnapshot;
+  const repoPath = path.resolve(registration.repoPath || input.cwd || process.cwd());
+
+  try {
+    const snapshot = await captureSnapshotImpl({
+      repoRoot: repoPath,
+      include
+    });
+    const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim() || undefined;
+
+    if (!sameStringArray(manifest.include ?? [], snapshot.include)) {
+      return {
+        authorityLabel: "derived_only",
+        state: "stale",
+        summary: "repo retrieval index does not match the current repo snapshot"
+      };
+    }
+
+    if ((manifest.fingerprint ?? "") !== snapshot.fingerprint) {
+      return {
+        authorityLabel: "derived_only",
+        state: "stale",
+        summary: "repo retrieval index does not match the current repo snapshot"
+      };
+    }
+
+    if ((manifest.embeddingModel ?? undefined) !== embeddingModel) {
+      return {
+        authorityLabel: "derived_only",
+        state: "stale",
+        summary: "repo retrieval embeddings no longer match the configured embedding model"
+      };
+    }
+
+    const manifestStatus = manifest.status ?? "missing";
+    if (embeddingModel && manifestStatus !== "ready") {
+      return {
+        authorityLabel: "derived_only",
+        state: "degraded",
+        summary: `repo retrieval index is ${manifestStatus}`
+      };
+    }
+
+    if (!embeddingModel && !["ready", "artifacts_only"].includes(manifestStatus)) {
+      return {
+        authorityLabel: "derived_only",
+        state: "degraded",
+        summary: `repo retrieval index is ${manifestStatus}`
+      };
+    }
+
+    return {
+      authorityLabel: "derived_only",
+      state: "fresh",
+      summary: "repo retrieval index matches the current repo snapshot"
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      authorityLabel: "derived_only",
+      state: "degraded",
+      summary: `retrieval freshness check failed: ${message}`
+    };
+  }
+}
+
+export async function executeRefreshRetrievalCommand(
+  options: ExecuteRefreshRetrievalCommandOptions = {}
+): Promise<RefreshRetrievalResult> {
+  const env = options.env ?? process.env;
+  const argv = options.argv ?? process.argv;
+  const args = argv.slice(3);
+  const cwd = options.cwd ?? process.cwd();
+  const withClientImpl = options.withClient ?? withClient;
+  const createStoreImpl = options.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
+  const captureSnapshotImpl = options.captureSnapshot ?? captureRepoMarkdownSnapshot;
+  const indexRepoMarkdownImpl = options.indexRepoMarkdown ?? indexRepoMarkdown;
+  const runEmbeddingJobsImpl = options.runEmbeddingJobs ?? runEmbeddingJobs;
+  const createEmbeddingProviderImpl = options.createEmbeddingProvider ?? createEmbeddingProvider;
+  const now = (options.now ?? (() => new Date()))().toISOString();
+
+  const targetRepoRoot = resolveRepoMarkdownTargetRoot(env, args, cwd);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const workspaceName =
+    resolveCommandFlag(args, "--workspace-name") ?? env.DEVGOD_WORKSPACE_NAME ?? "Default Workspace";
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+  const projectName = resolveCommandFlag(args, "--project-name") ?? env.DEVGOD_PROJECT_NAME;
+  const include = resolveRepoMarkdownInclude(env);
+  const embeddingModel = (resolveCommandFlag(args, "--embedding-model") ?? env.DEVGOD_EMBEDDING_MODEL)?.trim()
+    || undefined;
+
+  if (!projectSlug) {
+    throw new Error("DEVGOD_PROJECT_SLUG is required");
+  }
+
+  return withClientImpl(async (client) => {
+    const store = createStoreImpl(client);
+    const snapshot = await captureSnapshotImpl({
+      repoRoot: targetRepoRoot,
+      include
+    });
+    const indexResult = await indexRepoMarkdownImpl({
+      store,
+      repoRoot: targetRepoRoot,
+      workspaceSlug,
+      workspaceName,
+      projectSlug,
+      projectName,
+      include,
+      embeddingModel
+    });
+
+    let embeddingJobs:
+      | {
+          leased: number;
+          completed: number;
+          failed: number;
+        }
+      | undefined;
+    if (embeddingModel) {
+      const provider = await createEmbeddingProviderImpl(env);
+      embeddingJobs = await runEmbeddingJobsImpl({
+        store,
+        provider,
+        limit: Math.max(resolveEmbeddingJobLimit(env), indexResult.jobsQueued || 0)
+      });
+    }
+
+    const context = await store.getProjectContext({
+      workspaceSlug,
+      projectSlug
+    });
+    if (!context) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} must be bootstrapped before retrieval refresh`);
+    }
+
+    const registration = await store.getProjectRuntimeRegistration(context.project.id);
+    if (!registration) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} must be runtime-registered before retrieval refresh`);
+    }
+
+    const retrievalStatus = embeddingModel
+      ? (embeddingJobs?.failed ?? 0) === 0
+        ? "ready"
+        : "degraded"
+      : "artifacts_only";
+
+    await store.saveProjectRuntimeRegistration({
+      ...registration,
+      manifest: {
+        ...registration.manifest,
+        retrievalIndex: {
+          status: retrievalStatus,
+          repoRoot: targetRepoRoot,
+          include: [...snapshot.include],
+          fileCount: snapshot.fileCount,
+          fingerprint: snapshot.fingerprint,
+          embeddingModel,
+          indexedAt: now,
+          filesIndexed: indexResult.filesIndexed,
+          chunksStored: indexResult.chunksStored,
+          jobsQueued: indexResult.jobsQueued,
+          embeddingLeased: embeddingJobs?.leased,
+          embeddingCompleted: embeddingJobs?.completed,
+          embeddingFailed: embeddingJobs?.failed,
+          embeddedAt: embeddingJobs ? now : undefined
+        }
+      },
+      updatedAt: now
+    });
+
+    return {
+      authorityLabel: "runtime_authoritative",
+      workspaceSlug,
+      projectSlug,
+      repoRoot: targetRepoRoot,
+      filesIndexed: indexResult.filesIndexed,
+      chunksStored: indexResult.chunksStored,
+      jobsQueued: indexResult.jobsQueued,
+      embeddingJobs
+    };
+  });
+}
+
+async function refreshRetrievalCommand() {
+  console.log(JSON.stringify(await executeRefreshRetrievalCommand()));
 }
 
 async function main() {
@@ -2926,6 +3383,11 @@ async function main() {
 
   if (command === "run-embedding-jobs") {
     await runEmbeddingJobsCommand();
+    return;
+  }
+
+  if (command === "refresh-retrieval") {
+    await refreshRetrievalCommand();
     return;
   }
 

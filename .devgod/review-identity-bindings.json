@@ -1,0 +1,40 @@
+{
+  "bindings": [
+    {
+      "principal": {
+        "provider": "devgod-local-seed",
+        "subject": "reviewer-actor"
+      },
+      "actors": [
+        {
+          "actor": "reviewer-actor",
+          "roles": ["reviewer"]
+        }
+      ]
+    },
+    {
+      "principal": {
+        "provider": "devgod-local-seed",
+        "subject": "security-actor"
+      },
+      "actors": [
+        {
+          "actor": "security-actor",
+          "roles": ["security_reviewer"]
+        }
+      ]
+    },
+    {
+      "principal": {
+        "provider": "devgod-local-seed",
+        "subject": "qa-actor"
+      },
+      "actors": [
+        {
+          "actor": "qa-actor",
+          "roles": ["qa_engineer"]
+        }
+      ]
+    }
+  ]
+}

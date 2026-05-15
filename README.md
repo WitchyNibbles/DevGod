@@ -137,7 +137,7 @@ It will not:
 
 ## Setup After Install
 
-Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped runtime-owned setup path. That path resolves a runtime mode, provisions or validates Postgres and Qdrant accordingly, and only then runs the repo bootstrap commands.
+Inside the target repo, `npm run devgod:setup:local` is the optional local bootstrap wrapper after install when you intentionally want the shipped runtime-owned setup path. That path resolves a runtime mode, provisions or validates Postgres and Qdrant accordingly, seeds repo retrieval automatically, and only then finishes the repo bootstrap flow.
 
 That command runs `src/install/setup-local.ts`, which dispatches to the generated target-repo setup script, and then does this:
 
@@ -153,8 +153,9 @@ That command runs `src/install/setup-local.ts`, which dispatches to the generate
 6. runs `npm run devgod:setup:git-guard` when the repo has an installed `devgod` manifest and git metadata
 7. runs `npm run devgod:migrate`
 8. runs `npm run devgod:bootstrap`
-9. runs `npm run devgod:verify:setup`
-10. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
+9. runs `npm run devgod:refresh-retrieval`
+10. runs `npm run devgod:verify:setup`
+11. leaves `npm run devgod:doctor` available for explicit runtime registration, data-root, Qdrant, and review-identity health checks
 
 The shipped `npm run devgod:setup:local` path now treats the runtime as mandatory. If Docker is unavailable on Linux/WSL, the setup path falls back to native local services instead of failing immediately. Managed mode remains validation-only.
 
@@ -614,10 +615,14 @@ This is the Phase 5 opt-in overlay. It now includes a packaged `devgod` wrapper,
 Repo markdown retrieval is now available through the admin surface:
 
 - `node --experimental-strip-types src/admin.ts index-repo-markdown [repo-root]`
+- `node --experimental-strip-types src/admin.ts refresh-retrieval [repo-root]`
 - `DEVGOD_REPO_MARKDOWN_INCLUDE=README.md,AGENTS.md,docs,.devgod,.agents/skills` controls the allowlist
 - `DEVGOD_EMBEDDING_MODEL=devgod-local-hash-1536` enables the shipped local deterministic embedding path
+- `npm run devgod:setup:local` now calls `refresh-retrieval` automatically so first-run retrieval state is populated without a manual indexing step
 - `node --experimental-strip-types src/admin.ts run-embedding-jobs [limit]` writes vectors for queued chunks and syncs artifact vectors into Qdrant
 - `node --experimental-strip-types src/admin.ts plan-context --query "<topic>"` now derives a query embedding when `DEVGOD_EMBEDDING_MODEL` is configured, then uses Qdrant-backed artifact recall plus canonical Postgres hydration
+- `plan-context` now auto-refreshes retrieval when the repo index is missing, stale, or degraded; use `--no-auto-refresh-retrieval` or `DEVGOD_AUTO_REFRESH_RETRIEVAL=false` to opt out
+- `plan-context` still reports retrieval freshness so auto-refresh results remain visible in the output
 
 GitHub intake templates now ship in `.devgod/templates/`:
 

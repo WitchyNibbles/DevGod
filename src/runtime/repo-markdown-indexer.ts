@@ -4,7 +4,13 @@ import path from "node:path";
 import { retrievalRoles, type MarkdownArtifactRecord, type RetrievalRole, type RunRecord } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
 
-const DEFAULT_INCLUDE_PATHS = ["README.md", "AGENTS.md", "docs", ".devgod", ".agents/skills"] as const;
+export const DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS = [
+  "README.md",
+  "AGENTS.md",
+  "docs",
+  ".devgod",
+  ".agents/skills"
+] as const;
 const DEFAULT_EXCLUDED_SEGMENTS = new Set([".git", "node_modules", "dist", "build", "coverage"]);
 const MARKDOWN_INDEX_RUN_ACTOR = "repo_indexer";
 const MARKDOWN_INDEX_RUN_TITLE = "Repo markdown index";
@@ -30,6 +36,13 @@ export interface IndexRepoMarkdownResult {
   jobsQueued: number;
 }
 
+export interface RepoMarkdownSnapshot {
+  repoRoot: string;
+  include: string[];
+  fileCount: number;
+  fingerprint: string;
+}
+
 interface MarkdownSection {
   title: string;
   sourceAnchor?: string | undefined;
@@ -51,7 +64,8 @@ export async function indexRepoMarkdown(input: IndexRepoMarkdownInput): Promise<
     projectId: project.id
   });
 
-  const includePaths = input.include && input.include.length > 0 ? input.include : DEFAULT_INCLUDE_PATHS;
+  const includePaths =
+    input.include && input.include.length > 0 ? input.include : DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS;
   const relativePaths = await collectMarkdownFiles(input.repoRoot, includePaths);
   const artifacts: MarkdownArtifactRecord[] = [];
 
@@ -96,6 +110,33 @@ export async function indexRepoMarkdown(input: IndexRepoMarkdownInput): Promise<
     filesIndexed: relativePaths.length,
     chunksStored: artifacts.length,
     jobsQueued
+  };
+}
+
+export async function captureRepoMarkdownSnapshot(input: {
+  repoRoot: string;
+  include?: readonly string[] | undefined;
+}): Promise<RepoMarkdownSnapshot> {
+  const include =
+    input.include && input.include.length > 0
+      ? [...input.include]
+      : [...DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS];
+  const relativePaths = await collectMarkdownFiles(input.repoRoot, include);
+  const fingerprint = createHash("sha256");
+
+  for (const relativePath of relativePaths) {
+    const markdown = await readMarkdownFileWithinRepo(input.repoRoot, relativePath);
+    fingerprint.update(relativePath);
+    fingerprint.update("\0");
+    fingerprint.update(markdown);
+    fingerprint.update("\0");
+  }
+
+  return {
+    repoRoot: input.repoRoot,
+    include: [...include],
+    fileCount: relativePaths.length,
+    fingerprint: fingerprint.digest("hex")
   };
 }
 

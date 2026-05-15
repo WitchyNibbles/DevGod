@@ -1,6 +1,12 @@
 import type { RetrievalRole, SearchMemoryResult } from "../domain/types.ts";
 import { buildPlanningContextReasoningWarnings } from "../core/reasoning-quality.ts";
 
+export interface PlanningContextRetrievalState {
+  authorityLabel: "derived_only";
+  state: "fresh" | "stale" | "missing" | "degraded";
+  summary: string;
+}
+
 export interface PlanningContextItem {
   id: string;
   title: string;
@@ -20,6 +26,7 @@ export interface PlanningContextReport {
   query: string;
   requesterRole: RetrievalRole;
   totalResults: number;
+  retrieval?: PlanningContextRetrievalState | undefined;
   summary: string[];
   items: PlanningContextItem[];
 }
@@ -27,6 +34,7 @@ export interface PlanningContextReport {
 export function buildPlanningContextReport(input: {
   query: string;
   requesterRole: RetrievalRole;
+  retrieval?: PlanningContextRetrievalState | undefined;
   results: readonly SearchMemoryResult[];
 }): PlanningContextReport {
   const items = input.results.map((result) => ({
@@ -54,6 +62,7 @@ export function buildPlanningContextReport(input: {
     query: input.query,
     requesterRole: input.requesterRole,
     totalResults: items.length,
+    retrieval: input.retrieval,
     summary,
     items
   };
@@ -66,6 +75,10 @@ export function formatPlanningContextReportMarkdown(report: PlanningContextRepor
   lines.push(`- query: ${report.query}`);
   lines.push(`- role: \`${report.requesterRole}\``);
   lines.push(`- results: ${report.totalResults}`);
+  if (report.retrieval) {
+    lines.push(`- retrieval: ${report.retrieval.state}`);
+    lines.push(`- retrieval-summary: ${report.retrieval.summary}`);
+  }
   lines.push("");
   if (report.summary.length > 0) {
     lines.push(`## Summary`);

@@ -1374,3 +1374,52 @@ test("executeIndexRepoMarkdownCommand wires the runtime store into markdown inde
     jobsQueued: 4
   });
 });
+
+test("executeIndexRepoMarkdownCommand accepts flags before the positional repo root", async () => {
+  const result = await executeIndexRepoMarkdownCommand({
+    argv: [
+      "node",
+      "src/admin.ts",
+      "index-repo-markdown",
+      "--workspace-slug",
+      "team",
+      "--workspace-name",
+      "Team Workspace",
+      "--project-slug",
+      "devgod",
+      "--project-name",
+      "Devgod",
+      "--embedding-model",
+      "devgod-local-hash-1536",
+      "docs"
+    ],
+    env: {},
+    async withClient(callback) {
+      return callback({ kind: "client" } as never);
+    },
+    createStore() {
+      return { kind: "store" } as never;
+    },
+    async indexRepoMarkdown(input) {
+      assert.equal(input.repoRoot, path.resolve(process.cwd(), "docs"));
+      assert.equal(input.workspaceSlug, "team");
+      assert.equal(input.workspaceName, "Team Workspace");
+      assert.equal(input.projectSlug, "devgod");
+      assert.equal(input.projectName, "Devgod");
+      assert.equal(input.embeddingModel, "devgod-local-hash-1536");
+      return {
+        runId: "run-markdown",
+        filesIndexed: 1,
+        chunksStored: 2,
+        jobsQueued: 2
+      };
+    }
+  });
+
+  assert.deepEqual(result, {
+    runId: "run-markdown",
+    filesIndexed: 1,
+    chunksStored: 2,
+    jobsQueued: 2
+  });
+});

@@ -293,6 +293,7 @@ if ((Test-Path -LiteralPath ".devgod/install-manifest.json")) {
 
 npm run migrate
 npm run bootstrap
+npm run devgod:refresh-retrieval
 npm run verify:setup
 
 Write-Host ""

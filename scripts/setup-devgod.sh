@@ -554,6 +554,7 @@ fi
 
 npm run migrate
 npm run bootstrap
+npm run devgod:refresh-retrieval
 npm run verify:setup
 
 echo ""

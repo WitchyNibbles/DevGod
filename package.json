@@ -116,6 +116,7 @@
     "devgod:loop": "node --experimental-strip-types src/admin/devgod.ts loop --format text",
     "recover": "node --experimental-strip-types src/admin.ts recover",
     "export:docs": "node --experimental-strip-types src/admin.ts export-docs",
+    "devgod:refresh-retrieval": "node --experimental-strip-types src/admin/devgod.ts refresh-retrieval",
     "devgod:autopilot-status": "node --experimental-strip-types src/devgod/autopilot-status.ts",
     "verify:workflow": "bash scripts/verify-devgod-workflow-check.sh",
     "verify:release-overlay": "bash scripts/verify-release-overlay.sh",

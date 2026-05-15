@@ -131,6 +131,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
       'if "%~1"=="run" (',
       '  if /i "%~2"=="migrate" exit /b 0',
       '  if /i "%~2"=="bootstrap" exit /b 0',
+      '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
       '  if /i "%~2"=="verify:setup" exit /b 0',
       ")",
       "echo unexpected npm call: %* 1>&2",
@@ -155,6 +156,7 @@ smoke("PowerShell setup script bootstraps a clean workspace with synthetic docke
       "install",
       "run migrate",
       "run bootstrap",
+      "run devgod:refresh-retrieval",
       "run verify:setup"
     ]);
 
