@@ -1,7 +1,28 @@
 {
-  "project_status": "complete",
-  "current_task_id": null,
+  "project_status": "in_progress",
+  "current_task_id": "2026-05-15-autonomous-execution-redesign",
   "tasks": [
+    {
+      "id": "2026-05-15-autonomous-execution-redesign",
+      "title": "Design the strict autonomous execution and audit upgrade for DevGod",
+      "status": "in_progress",
+      "class": "docs_only",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "The redesign specification covers all required systems, the execution state machine, coverage ledger, continuation loop, subagent model, anti-shallowness rules, and rewrite-mode gating.",
+        "The specification names concrete runtime, CLI, template, rule, and test insertion points in the existing package.",
+        "The active workflow artifacts and package docs reflect the new redesign task."
+      ],
+      "verification": [
+        "rg -n \"EXHAUSTIVE EXECUTION MODE|COVERAGE LEDGER SYSTEM|GOLD STANDARD OPERATIONAL PROMPT\" docs/autonomous-execution-redesign.md",
+        "rg -n \"2026-05-15-autonomous-execution-redesign\" .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-15-autonomous-execution-redesign.md .devgod/work/plans/plan-2026-05-15-autonomous-execution-redesign.md .devgod/work/tasks/task-2026-05-15-autonomous-execution-redesign.md"
+      ],
+      "evidence": [
+        "The repo now contains an authoritative redesign specification at docs/autonomous-execution-redesign.md.",
+        "The current task id is aligned across ACTIVE, brief, plan, task packet, product state, and task queue."
+      ],
+      "blocker": null
+    },
     {
       "id": "2026-05-15-strict-default-reasoning",
       "title": "Make strict reasoning mode the default for unspecified workflows",

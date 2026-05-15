@@ -52,6 +52,7 @@
     ".env.example",
     "AGENTS.md",
     "README.md",
+    "docs/autonomous-execution-redesign.md",
     "docker-compose.yml",
     "docs/benchmarks/orchestration-benchmark.md",
     "docs/global-setup.md",

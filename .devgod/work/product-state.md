@@ -32,10 +32,11 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 | Reasoning-quality skepticism layer across prompts, workflow artifacts, and runtime reporting | done | `src/core/reasoning-quality.ts`, `src/core/service.ts`, `src/admin/report.ts`, `src/admin/ops.ts`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/report-command.test.ts`, `tests/control-layer-contract.test.ts` |
 | Reasoning-quality hardening with strict lifecycle enforcement and legacy upgrade tooling | done | `src/domain/types.ts`, `src/domain/contracts.ts`, `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `scripts/check-devgod-workflow.sh`, `tests/install.test.ts`, `tests/workflow-check.test.ts` |
 | Strict reasoning mode as the default for unspecified workflows | done | `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `.devgod/templates/task-packet.md`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/install.test.ts`, `tests/orchestration-eval.test.ts` |
+| Autonomous execution redesign specification | in_progress | `docs/autonomous-execution-redesign.md`, `.devgod/work/briefs/brief-2026-05-15-autonomous-execution-redesign.md`, `.devgod/work/plans/plan-2026-05-15-autonomous-execution-redesign.md`, `.devgod/work/tasks/task-2026-05-15-autonomous-execution-redesign.md` |
 
 ## Current Milestone
 
-Autonomy loop rollout
+Autonomous execution hardening
 
 ## Completed Milestones
 
@@ -48,11 +49,11 @@ Autonomy loop rollout
 
 ## Current Task
 
-The queue remains idle, and the active maintenance slice `2026-05-15-strict-default-reasoning` is fully verified. This task aligned the runtime fallback, upgrade CLI, planning guidance, templates, rules, and regression fixtures so unspecified reasoning work now defaults to `strict` instead of drifting into compatibility behavior.
+The active design slice is `2026-05-15-autonomous-execution-redesign`. It introduces the implementation-grade specification for upgrading DevGod from advisory workflow automation into a strict autonomous execution and audit system with coverage ledgers, gap detection, comprehension gates, reverse-engineering mode, checkpoint/resume, and progress proofs.
 
 ## Next Task
 
-None queued. The current control-layer backlog for this autonomy milestone is complete.
+After the specification is accepted, the recommended first implementation slice is the runtime/domain schema layer for coverage items, gap records, checkpoints, and progress proofs.
 
 ## Blockers
 
