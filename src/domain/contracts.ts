@@ -5,6 +5,7 @@ import {
   type IntakeRequestInput,
   type IntakeSummary,
   type MemoryPromotionInput,
+  type PlanInput,
   type ReviewInput,
   type ReviewRecord,
   type TrustedReviewActionContext,
@@ -14,10 +15,24 @@ import {
   type SearchMemoryInput,
   type StopGoDecision,
   type CompletionStandard,
+  type ReasoningConfidenceLevel,
+  type ReasoningDecision,
+  type ReasoningPolicy,
+  type ReasoningQualityBlock,
+  type ReasoningAttempt,
+  type ReasoningVerification,
+  type ReasoningVerdict,
   type QualityGate,
   completionStandards,
   identityAssurances,
   qualityGates,
+  reasoningAttemptOutcomes,
+  reasoningConfidenceLevels,
+  reasoningDecisions,
+  reasoningVerificationKinds,
+  reasoningVerificationStatuses,
+  reasoningVerdictStatuses,
+  reasoningWorkflowModes,
   reviewSeverities,
   reviewStates,
   reviewWaiverAuthorities,
@@ -37,6 +52,13 @@ const reviewWaiverAuthoritySet = new Set<string>(reviewWaiverAuthorities);
 const identityAssuranceSet = new Set<string>(identityAssurances);
 const completionStandardSet = new Set<string>(completionStandards);
 const qualityGateSet = new Set<string>(qualityGates);
+const reasoningConfidenceSet = new Set<string>(reasoningConfidenceLevels);
+const reasoningDecisionSet = new Set<string>(reasoningDecisions);
+const reasoningWorkflowModeSet = new Set<string>(reasoningWorkflowModes);
+const reasoningVerdictStatusSet = new Set<string>(reasoningVerdictStatuses);
+const reasoningAttemptOutcomeSet = new Set<string>(reasoningAttemptOutcomes);
+const reasoningVerificationKindSet = new Set<string>(reasoningVerificationKinds);
+const reasoningVerificationStatusSet = new Set<string>(reasoningVerificationStatuses);
 const managerWaiverRoles = new Set<RetrievalRole>(["planner", "solution_architect"]);
 
 export const DEFAULT_RETRIEVAL_ROLE: RetrievalRole = "planner";
@@ -152,8 +174,117 @@ export function isCompletionStandard(value: string): value is CompletionStandard
   return completionStandardSet.has(value);
 }
 
+export function isReasoningConfidenceLevel(value: string): value is ReasoningConfidenceLevel {
+  return reasoningConfidenceSet.has(value);
+}
+
+export function isReasoningDecision(value: string): value is ReasoningDecision {
+  return reasoningDecisionSet.has(value);
+}
+
+export function isReasoningWorkflowMode(value: string): value is ReasoningPolicy["mode"] {
+  return reasoningWorkflowModeSet.has(value);
+}
+
 export function isQualityGate(value: string): value is QualityGate {
   return qualityGateSet.has(value);
+}
+
+function validateReasoningPolicy(policy: ReasoningPolicy | undefined, label: string): string[] {
+  if (!policy) {
+    return [];
+  }
+
+  const errors: string[] = [];
+  if (!isReasoningWorkflowMode(policy.mode)) {
+    errors.push(`${label}.mode must be one of: ${reasoningWorkflowModes.join(", ")}`);
+  }
+
+  if (policy.maxAttempts !== undefined) {
+    if (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 0) {
+      errors.push(`${label}.maxAttempts must be a non-negative integer`);
+    }
+  }
+
+  return errors;
+}
+
+function validateReasoningAttempt(attempt: ReasoningAttempt, label: string): string[] {
+  const errors: string[] = [];
+  if (attempt.id.trim().length === 0) {
+    errors.push(`${label}.id is required`);
+  }
+  if (attempt.label.trim().length === 0) {
+    errors.push(`${label}.label is required`);
+  }
+  if (attempt.hypothesis.trim().length === 0) {
+    errors.push(`${label}.hypothesis is required`);
+  }
+  if (uniqueTrimmedItems(attempt.evidenceRefs).length !== attempt.evidenceRefs.length) {
+    errors.push(`${label}.evidenceRefs must not contain empty or duplicate values`);
+  }
+  if (uniqueTrimmedItems(attempt.verificationRefs).length !== attempt.verificationRefs.length) {
+    errors.push(`${label}.verificationRefs must not contain empty or duplicate values`);
+  }
+  if (
+    attempt.alternatives &&
+    uniqueTrimmedItems(attempt.alternatives).length !== attempt.alternatives.length
+  ) {
+    errors.push(`${label}.alternatives must not contain empty or duplicate values`);
+  }
+  if (attempt.summary.trim().length === 0) {
+    errors.push(`${label}.summary is required`);
+  }
+  if (!reasoningAttemptOutcomeSet.has(attempt.outcome)) {
+    errors.push(`${label}.outcome must be one of: ${reasoningAttemptOutcomes.join(", ")}`);
+  }
+  return errors;
+}
+
+function validateReasoningVerification(verification: ReasoningVerification, label: string): string[] {
+  const errors: string[] = [];
+  if (verification.id.trim().length === 0) {
+    errors.push(`${label}.id is required`);
+  }
+  if (!reasoningVerificationKindSet.has(verification.kind)) {
+    errors.push(`${label}.kind must be one of: ${reasoningVerificationKinds.join(", ")}`);
+  }
+  if (verification.ref.trim().length === 0) {
+    errors.push(`${label}.ref is required`);
+  }
+  if (!reasoningVerificationStatusSet.has(verification.status)) {
+    errors.push(`${label}.status must be one of: ${reasoningVerificationStatuses.join(", ")}`);
+  }
+  if (verification.summary.trim().length === 0) {
+    errors.push(`${label}.summary is required`);
+  }
+  return errors;
+}
+
+function validateReasoningVerdict(verdict: ReasoningVerdict | undefined, label: string): string[] {
+  if (!verdict) {
+    return [];
+  }
+
+  const errors: string[] = [];
+  if (!reasoningVerdictStatusSet.has(verdict.status)) {
+    errors.push(`${label}.status must be one of: ${reasoningVerdictStatuses.join(", ")}`);
+  }
+  if (verdict.summary.trim().length === 0) {
+    errors.push(`${label}.summary is required`);
+  }
+  if (
+    uniqueTrimmedItems(verdict.supportingAttemptIds).length !== verdict.supportingAttemptIds.length
+  ) {
+    errors.push(`${label}.supportingAttemptIds must not contain empty or duplicate values`);
+  }
+  if (
+    verdict.blockingIssues &&
+    uniqueTrimmedItems(verdict.blockingIssues).length !== verdict.blockingIssues.length
+  ) {
+    errors.push(`${label}.blockingIssues must not contain empty or duplicate values`);
+  }
+  return errors;
 }
 
 export function canActorWaiveReview(input: {
@@ -227,6 +358,136 @@ export function normalizeIntakeRequest(input: IntakeRequestInput): IntakeSummary
     ...summaryBase,
     stopGo: deriveStopGo(summaryBase)
   };
+}
+
+function uniqueTrimmedOptionalItems(values: readonly string[] | undefined): string[] {
+  return uniqueTrimmedItems(values);
+}
+
+export function validateReasoningQualityBlock(
+  block: ReasoningQualityBlock | undefined,
+  input: { label: string; requireEvidenceRefs?: boolean | undefined } = { label: "reasoningQuality" }
+): string[] {
+  if (!block) {
+    return [];
+  }
+
+  const errors: string[] = [];
+  const label = input.label;
+  const facts = uniqueTrimmedOptionalItems(block.facts);
+  const assumptions = uniqueTrimmedItems(block.assumptions);
+  const hypotheses = uniqueTrimmedItems(block.hypotheses);
+  const evidenceRefs = uniqueTrimmedItems(block.evidenceRefs);
+  const counterEvidence = uniqueTrimmedOptionalItems(block.counterEvidence);
+  const openQuestions = uniqueTrimmedOptionalItems(block.openQuestions);
+  const verificationPlan = uniqueTrimmedItems(block.verificationPlan);
+  const fallbacks = uniqueTrimmedOptionalItems(block.fallbacks);
+
+  if (block.claim.trim().length === 0) {
+    errors.push(`${label}.claim is required`);
+  }
+
+  if (facts.length !== (block.facts?.length ?? 0)) {
+    errors.push(`${label}.facts must not contain empty or duplicate values`);
+  }
+
+  if (assumptions.length !== block.assumptions.length) {
+    errors.push(`${label}.assumptions must not contain empty or duplicate values`);
+  }
+
+  if (hypotheses.length !== block.hypotheses.length) {
+    errors.push(`${label}.hypotheses must not contain empty or duplicate values`);
+  }
+
+  if (evidenceRefs.length !== block.evidenceRefs.length) {
+    errors.push(`${label}.evidenceRefs must not contain empty or duplicate values`);
+  }
+
+  if (counterEvidence.length !== (block.counterEvidence?.length ?? 0)) {
+    errors.push(`${label}.counterEvidence must not contain empty or duplicate values`);
+  }
+
+  if (openQuestions.length !== (block.openQuestions?.length ?? 0)) {
+    errors.push(`${label}.openQuestions must not contain empty or duplicate values`);
+  }
+
+  if (verificationPlan.length !== block.verificationPlan.length) {
+    errors.push(`${label}.verificationPlan must not contain empty or duplicate values`);
+  }
+
+  if (fallbacks.length !== (block.fallbacks?.length ?? 0)) {
+    errors.push(`${label}.fallbacks must not contain empty or duplicate values`);
+  }
+
+  if (!isReasoningConfidenceLevel(block.confidence)) {
+    errors.push(
+      `${label}.confidence must be one of: ${reasoningConfidenceLevels.join(", ")}`
+    );
+  }
+
+  if (!isReasoningDecision(block.decision)) {
+    errors.push(`${label}.decision must be one of: ${reasoningDecisions.join(", ")}`);
+  }
+
+  if (block.hypotheses.length === 0) {
+    errors.push(`${label}.hypotheses is required`);
+  }
+
+  if (block.verificationPlan.length === 0) {
+    errors.push(`${label}.verificationPlan is required`);
+  }
+
+  if (input.requireEvidenceRefs && block.evidenceRefs.length === 0) {
+    errors.push(`${label}.evidenceRefs is required`);
+  }
+
+  if (block.budgets) {
+    for (const [budgetKey, budgetValue] of Object.entries(block.budgets)) {
+      if (budgetValue === undefined) {
+        continue;
+      }
+
+      if (!Number.isInteger(budgetValue) || budgetValue < 0) {
+        errors.push(`${label}.budgets.${budgetKey} must be a non-negative integer`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validatePlanInput(plan: PlanInput): string[] {
+  const errors = [
+    ...validateReasoningQualityBlock(plan.reasoningQuality, {
+      label: "plan.reasoningQuality"
+    }),
+    ...validateReasoningPolicy(plan.reasoningPolicy, "plan.reasoningPolicy"),
+    ...(plan.reasoningAttempts ?? []).flatMap((attempt, index) =>
+      validateReasoningAttempt(attempt, `plan.reasoningAttempts[${index}]`)
+    ),
+    ...(plan.reasoningVerifications ?? []).flatMap((verification, index) =>
+      validateReasoningVerification(verification, `plan.reasoningVerifications[${index}]`)
+    ),
+    ...validateReasoningVerdict(plan.reasoningVerdict, "plan.reasoningVerdict")
+  ];
+
+  if (plan.title.trim().length === 0) {
+    errors.push("plan.title is required");
+  }
+
+  if (plan.summary.trim().length === 0) {
+    errors.push("plan.summary is required");
+  }
+
+  if (plan.milestones.length === 0) {
+    errors.push("plan.milestones is required");
+  }
+
+  if (plan.acceptanceCriteria.length === 0) {
+    errors.push("plan.acceptanceCriteria is required");
+  }
+
+  return errors;
 }
 
 export function validateTaskPacket(packet: TaskPacketInput): string[] {
@@ -306,6 +567,39 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
 
   if (packet.verificationSteps.length === 0) {
     errors.push("verificationSteps is required");
+  }
+
+  errors.push(
+    ...validateReasoningQualityBlock(packet.reasoningQuality, {
+      label: "taskPacket.reasoningQuality"
+    })
+  );
+  errors.push(...validateReasoningPolicy(packet.reasoningPolicy, "taskPacket.reasoningPolicy"));
+  errors.push(
+    ...(packet.reasoningAttempts ?? []).flatMap((attempt, index) =>
+      validateReasoningAttempt(attempt, `taskPacket.reasoningAttempts[${index}]`)
+    )
+  );
+  errors.push(
+    ...(packet.reasoningVerifications ?? []).flatMap((verification, index) =>
+      validateReasoningVerification(verification, `taskPacket.reasoningVerifications[${index}]`)
+    )
+  );
+  errors.push(...validateReasoningVerdict(packet.reasoningVerdict, "taskPacket.reasoningVerdict"));
+
+  if (packet.reasoningPolicy?.mode === "strict") {
+    if (!packet.reasoningQuality && packet.reasoningPolicy.requireBlock !== false) {
+      errors.push("strict reasoning mode requires reasoningQuality");
+    }
+    if ((packet.reasoningPolicy.requireAttempts ?? true) && (packet.reasoningAttempts?.length ?? 0) === 0) {
+      errors.push("strict reasoning mode requires reasoningAttempts");
+    }
+    if ((packet.reasoningPolicy.requireVerification ?? true) && (packet.reasoningVerifications?.length ?? 0) === 0) {
+      errors.push("strict reasoning mode requires reasoningVerifications");
+    }
+    if (!packet.reasoningVerdict) {
+      errors.push("strict reasoning mode requires reasoningVerdict");
+    }
   }
 
   if (packet.requiredReviews.length === 0) {

@@ -52,6 +52,20 @@ export function buildOperatorDashboardReport(input: {
     }
   }
 
+  for (const recommendation of input.routing.recommendations) {
+    for (const rationale of recommendation.rationale) {
+      if (rationale.startsWith("reasoning-quality: ")) {
+        alerts.push(`reasoning-quality: ${recommendation.taskId}: ${rationale.slice("reasoning-quality: ".length)}`);
+      }
+    }
+  }
+
+  for (const rationale of input.executionPlan.directive.rationale) {
+    if (rationale.startsWith("reasoning-quality: ")) {
+      alerts.push(rationale);
+    }
+  }
+
   switch (input.executionPlan.directive.kind) {
     case "dispatch_owner":
       nextActions.push(
@@ -75,6 +89,9 @@ export function buildOperatorDashboardReport(input: {
       break;
     case "complete":
       nextActions.push("none");
+      if (input.executionPlan.directive.rationale.some((rationale) => rationale.startsWith("reasoning-quality: "))) {
+        nextActions.push("review reasoning-quality warnings before declaring the run done");
+      }
       break;
   }
 
@@ -83,6 +100,15 @@ export function buildOperatorDashboardReport(input: {
     input.status.gitNexus.recommendedCommand
   ) {
     nextActions.push(input.status.gitNexus.recommendedCommand);
+  }
+
+  for (const recommendation of input.routing.recommendations) {
+    const hasReasoningWarning = recommendation.rationale.some((rationale) =>
+      rationale.startsWith("reasoning-quality: ")
+    );
+    if (hasReasoningWarning) {
+      nextActions.push(`strengthen reasoning evidence for ${recommendation.taskId}`);
+    }
   }
 
   return {

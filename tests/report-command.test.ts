@@ -33,7 +33,12 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningPolicy: overrides.reasoningPolicy,
+    reasoningAttempts: overrides.reasoningAttempts,
+    reasoningVerifications: overrides.reasoningVerifications,
+    reasoningVerdict: overrides.reasoningVerdict,
+    reasoningQuality: overrides.reasoningQuality
   };
 }
 
@@ -217,6 +222,10 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   assert.equal(result.report.summary.totalHandoffs, 1);
   assert.equal(result.report.summary.totalReviews, 3);
   assert.equal(result.report.summary.totalApprovals, 3);
+  assert.equal(result.report.reasoningQuality.status, "warn");
+  assert.ok(result.report.reasoningQuality.warningCount >= 2);
+  assert.ok(result.report.reasoningQuality.legacyTaskIds.includes("build"));
+  assert.ok(result.report.reasoningQuality.taskIdsWithWarnings.includes("plan"));
   assert.deepEqual(result.report.summary.reviewBlockedTaskIds, []);
   assert.ok(result.report.timeline.some((entry) => entry.kind === "handoff_recorded"));
   assert.ok(result.report.timeline.some((entry) => entry.kind === "review_recorded"));
@@ -232,5 +241,8 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   const markdown = formatRunEvidenceReportMarkdown(result.report);
   assert.match(markdown, /# devgod run report/);
   assert.match(markdown, /Plan runtime wrapper/);
+  assert.match(markdown, /## Reasoning Quality/);
+  assert.match(markdown, /legacy tasks:/);
+  assert.match(markdown, /reasoning-quality: warn/);
   assert.match(markdown, /approval_recorded task=`plan`/);
 });

@@ -7,7 +7,13 @@ import {
   type ReviewIdentityBindings
 } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
-import type { MemoryEntryRecord, ReviewActionContext, ReviewRecord, TaskPacketInput } from "../src/domain/types.ts";
+import type {
+  MemoryEntryRecord,
+  ReasoningQualityBlock,
+  ReviewActionContext,
+  ReviewRecord,
+  TaskPacketInput
+} from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
@@ -32,7 +38,31 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningPolicy: overrides.reasoningPolicy,
+    reasoningAttempts: overrides.reasoningAttempts,
+    reasoningVerifications: overrides.reasoningVerifications,
+    reasoningVerdict: overrides.reasoningVerdict,
+    reasoningQuality: overrides.reasoningQuality
+  };
+}
+
+function reasoningQualityBlock(
+  overrides: Partial<ReasoningQualityBlock> = {}
+): ReasoningQualityBlock {
+  return {
+    claim: overrides.claim ?? "The chosen approach is the strongest current option.",
+    facts: overrides.facts ?? ["code path reproduced locally"],
+    assumptions: overrides.assumptions ?? ["upstream contract is stable"],
+    hypotheses: overrides.hypotheses ?? ["fix the narrowest failing boundary first"],
+    evidenceRefs: overrides.evidenceRefs ?? ["src/core/service.ts", "tests/service.test.ts"],
+    counterEvidence: overrides.counterEvidence ?? [],
+    openQuestions: overrides.openQuestions ?? [],
+    verificationPlan: overrides.verificationPlan ?? ["npm test"],
+    fallbacks: overrides.fallbacks ?? ["escalate to reviewer if evidence stays weak"],
+    budgets: overrides.budgets ?? { researchSteps: 2, debugSteps: 2, reviewPasses: 1, toolRetries: 1 },
+    confidence: overrides.confidence ?? "medium",
+    decision: overrides.decision ?? "continue"
   };
 }
 
@@ -571,6 +601,327 @@ test("recordReview rejects spoofed actor roles", async () => {
       findings: []
     }),
     /Invalid review action/
+  );
+});
+
+test("createTaskGraph rejects malformed reasoning-quality blocks", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await assert.rejects(
+    service.createTaskGraph(run.id, [
+      taskPacket({
+        reasoningQuality: reasoningQualityBlock({
+          claim: "",
+          hypotheses: [],
+          verificationPlan: []
+        })
+      })
+    ]),
+    /Invalid task graph/
+  );
+});
+
+test("createPlan rejects malformed reasoning-quality blocks for architecture planning", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Plan architecture",
+    request: "Design the runtime surface."
+  });
+
+  await assert.rejects(
+    service.createPlan({
+      runId: run.id,
+      title: "Architecture slice",
+      summary: "Define the runtime surface.",
+      milestones: ["runtime surface"],
+      decisions: ["keep reviews authenticated"],
+      residualRisks: [],
+      acceptanceCriteria: ["plan exists"],
+      reasoningQuality: reasoningQualityBlock({
+        evidenceRefs: [],
+        hypotheses: []
+      })
+    }),
+    /Invalid plan/
+  );
+});
+
+test("recommendRouting surfaces reasoning-quality warnings without changing authority", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+
+  const report = await service.recommendRouting(run.id);
+  const recommendation = report.recommendations.find(
+    (entry) => entry.taskId === "task-1" && entry.recommendation === "owner_dispatch"
+  );
+
+  assert.ok(recommendation);
+  assert.ok(
+    recommendation.rationale.some((line) =>
+      line.includes("reasoning-quality: task task-1 is missing a reasoning-quality block")
+    )
+  );
+  assert.ok(
+    recommendation.approvalCheckpoints.some((line) =>
+      line.includes("reasoning-quality warnings")
+    )
+  );
+});
+
+test("recommendRouting warns on low-confidence schema investigation after failed tool query", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Investigate schema drift",
+    request: "Check whether the migration path is safe."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "schema-check",
+      title: "Investigate schema drift",
+      reasoningQuality: reasoningQualityBlock({
+        claim: "The current migration path is probably safe.",
+        facts: ["migration files were inspected locally"],
+        assumptions: ["the live schema matches the checked migration state"],
+        hypotheses: ["missing index is causing the issue", "tool output is incomplete"],
+        evidenceRefs: ["src/sql/migrations/001_initial_schema.sql"],
+        openQuestions: ["live schema tool query failed before verification completed"],
+        verificationPlan: ["re-run schema inspection with a working connection"],
+        confidence: "low",
+        decision: "continue"
+      })
+    })
+  ]);
+
+  const report = await service.recommendRouting(run.id);
+  const recommendation = report.recommendations.find((entry) => entry.taskId === "schema-check");
+
+  assert.ok(recommendation);
+  assert.ok(
+    recommendation.rationale.some((line) =>
+      line.includes("reasoning-quality: task schema-check still has unresolved open questions")
+    )
+  );
+  assert.ok(
+    recommendation.rationale.some((line) =>
+      line.includes("reasoning-quality: task schema-check is operating at low confidence")
+    )
+  );
+});
+
+test("recommendRouting does not owner-dispatch tasks with blocked reasoning decisions", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Investigate risky change",
+    request: "Do not proceed until the reasoning blocker is cleared."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "blocked-task",
+      reasoningQuality: reasoningQualityBlock({
+        evidenceRefs: ["src/core/service.ts"],
+        decision: "blocked"
+      })
+    })
+  ]);
+
+  const report = await service.recommendRouting(run.id);
+  const recommendation = report.recommendations.find((entry) => entry.taskId === "blocked-task");
+
+  assert.ok(recommendation);
+  assert.equal(recommendation.recommendation, "wait");
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("explicitly blocked by its reasoning decision"))
+  );
+});
+
+test("recommendRouting blocks strict reasoning tasks that lack attempts, verification, and verdict", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Strict reasoning rollout",
+    request: "Require strong reasoning evidence before execution."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "strict-task",
+      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningPolicy: {
+        mode: "strict",
+        requireAttempts: true,
+        requireVerification: true,
+        requireCriticVerification: true,
+        requireTraceRefs: true
+      },
+      reasoningQuality: reasoningQualityBlock({
+        evidenceRefs: ["src/core/service.ts"],
+        verificationPlan: ["npm test"],
+        decision: "supported"
+      }),
+      reasoningAttempts: [
+        {
+          id: "attempt-1",
+          label: "partial strict record",
+          hypothesis: "the change is safe",
+          alternatives: ["coverage is incomplete"],
+          evidenceRefs: ["src/core/service.ts"],
+          verificationRefs: ["verification-1"],
+          outcome: "supported",
+          summary: "attempt exists but trace evidence is missing"
+        }
+      ],
+      reasoningVerifications: [
+        {
+          id: "verification-1",
+          kind: "test",
+          ref: "npm test",
+          status: "passed",
+          summary: "tests passed but critic review is still missing"
+        }
+      ],
+      reasoningVerdict: {
+        status: "insufficient_evidence",
+        summary: "needs stronger review evidence",
+        supportingAttemptIds: ["attempt-1"],
+        blockingIssues: ["trace and critic review are missing"]
+      }
+    })
+  ]);
+
+  const report = await service.recommendRouting(run.id);
+  const recommendation = report.recommendations.find((entry) => entry.taskId === "strict-task");
+
+  assert.ok(recommendation);
+  assert.equal(recommendation.recommendation, "wait");
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("without trace references"))
+  );
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("no passed critic or reviewer verification"))
+  );
+  assert.ok(
+    recommendation.blockers.some((line) => line.includes("verdict remains insufficient_evidence"))
+  );
+});
+
+test("getExecutionPlan blocks terminal strict tasks when reasoning verdict still needs review", async () => {
+  const { service, registerReviewContext } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Strict completion gate",
+    request: "Keep completion blocked until strict reasoning verdict is supported."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "strict-finish",
+      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningPolicy: {
+        mode: "strict",
+        requireAttempts: true,
+        requireVerification: true,
+        requireCriticVerification: true,
+        requireTraceRefs: true
+      },
+      reasoningQuality: reasoningQualityBlock({
+        evidenceRefs: ["src/core/service.ts"],
+        verificationPlan: ["npm test"],
+        decision: "supported"
+      }),
+      reasoningAttempts: [
+        {
+          id: "attempt-1",
+          label: "initial pass",
+          hypothesis: "the fix is correct",
+          alternatives: ["the tests are incomplete"],
+          evidenceRefs: ["src/core/service.ts"],
+          verificationRefs: ["verification-1"],
+          traceRef: "memory://attempt-1",
+          outcome: "supported",
+          summary: "initial investigation completed"
+        }
+      ],
+      reasoningVerifications: [
+        {
+          id: "verification-1",
+          kind: "critic_review",
+          ref: "review://critic-1",
+          status: "passed",
+          summary: "critic pass completed"
+        }
+      ],
+      reasoningVerdict: {
+        status: "needs_review",
+        summary: "awaiting stronger review confirmation",
+        supportingAttemptIds: ["attempt-1"],
+        blockingIssues: ["verdict not yet supported"]
+      }
+    })
+  ]);
+
+  await service.claimTask(run.id, "strict-finish", "planner");
+  await service.submitHandoff(run.id, "strict-finish", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["npm test"],
+    executionEvidence: ["strict reasoning path implemented"],
+    qualityGateEvidence: ["reasoning strict checks replayed"],
+    contextRefs: ["brief://strict-finish"]
+  });
+
+  for (const role of ["reviewer", "security_reviewer", "qa_engineer"] as const) {
+    registerReviewContext({
+      actor: `${role}-actor`,
+      actorRole: role,
+      waiverAuthority: "none"
+    });
+    await service.recordReview(run.id, "strict-finish", `${role}-actor`, {
+      reviewerRole: role,
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+  }
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "blocked");
+  assert.ok(
+    plan.directive.blockers.some((line) => line.includes("still needs trusted review before conclusion"))
   );
 });
 
@@ -1797,7 +2148,8 @@ test("recommendRouting returns advisory owner, review, and wait recommendations 
   assert.equal(reviewRecommendation?.recommendation, "review_dispatch");
   assert.deepEqual(reviewRecommendation?.approvalCheckpoints, [
     "review actor must authenticate through the trusted review identity resolver",
-    "manager must persist or attach authenticated reviewer evidence before completion"
+    "manager must persist or attach authenticated reviewer evidence before completion",
+    "resolve or explicitly record reasoning-quality warnings before finalizing the task"
   ]);
 
   await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {

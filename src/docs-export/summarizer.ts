@@ -77,7 +77,14 @@ export class DocsSummarizer {
     const decisions = dedupe([
       ...planDecisions,
       ...approvals
-        .filter((approval) => approval.rationale.trim().length > 0)
+        .filter(
+          (approval) =>
+            approval.decision === "approved" &&
+            approval.rationale.trim().length > 0 &&
+            approval.rationale !== "All required reviews passed" &&
+            !approval.rationale.startsWith("missing required review:") &&
+            !approval.rationale.startsWith("required review")
+        )
         .map((approval) => approval.rationale)
     ]);
 

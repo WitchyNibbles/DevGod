@@ -6,6 +6,7 @@ import {
   normalizeRetrievalMetadata,
   normalizeSearchInput,
   validateMemoryPromotion,
+  validatePlanInput,
   validateTaskPacket
 } from "../domain/contracts.ts";
 import {
@@ -46,6 +47,7 @@ import type {
   TaskRecord
 } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
+import { assessTaskPacketReasoning } from "./reasoning-quality.ts";
 
 export interface DevgodCoreServiceOptions {
   resolveReviewActionContext?: ResolveReviewActionContext | undefined;
@@ -177,6 +179,11 @@ export class DevgodCoreService {
 
   async createPlan(plan: PlanInput): Promise<PlanArtifact> {
     const run = await this.requireRun(plan.runId);
+    const validationErrors = validatePlanInput(plan);
+    if (validationErrors.length > 0) {
+      throw new Error(`Invalid plan: ${validationErrors.join("; ")}`);
+    }
+
     const now = timestamp();
     const artifact: PlanArtifact = {
       id: randomUUID(),
@@ -557,13 +564,49 @@ export class DevgodCoreService {
     }
 
     if (snapshot.tasks.length > 0 && snapshot.tasks.every((task) => task.status === "approved" || task.status === "done")) {
+      const reasoningAssessments = snapshot.tasks.map((task) => ({
+        taskId: task.packet.taskId,
+        assessment: assessTaskPacketReasoning(task.packet)
+      }));
+      const reasoningBlockers = reasoningAssessments.flatMap(({ taskId, assessment }) =>
+        assessment.blockers.map((warning) => `${taskId}: ${warning.message}`)
+      );
+      if (reasoningBlockers.length > 0) {
+        return {
+          mode: "runtime_authoritative",
+          runId,
+          runStatus: snapshot.run.status,
+          directive: {
+            kind: "blocked",
+            blockers: reasoningBlockers,
+            rationale: [
+              "all tasks are terminal, but strict reasoning blockers still prevent final completion",
+              ...reasoningBlockers.map((warning) => `reasoning-quality: ${warning}`)
+            ]
+          }
+        };
+      }
+
+      const reasoningWarnings = reasoningAssessments.flatMap(({ taskId, assessment }) =>
+        assessment.warnings.map((warning) => `${taskId}: ${warning.message}`)
+      );
       return {
         mode: "runtime_authoritative",
         runId,
         runStatus: snapshot.run.status,
         directive: {
           kind: "complete",
-          rationale: ["all tasks have reached terminal approved or done states"]
+          rationale: [
+            "all tasks have reached terminal approved or done states",
+            ...(reasoningWarnings.length > 0
+              ? [
+                  "reasoning-quality: derived warnings remain advisory-only",
+                  ...reasoningWarnings.map(
+                    (warning) => `reasoning-quality: ${warning}`
+                  )
+                ]
+              : [])
+          ]
         }
       };
     }
@@ -777,10 +820,23 @@ export class DevgodCoreService {
 
     for (const task of snapshot.tasks) {
       const blockers = await this.findTaskBlockers(task, snapshot.tasks, snapshot.activeLocks);
-      blockerMap.set(task.packet.taskId, blockers);
+      const reasoningAssessment = assessTaskPacketReasoning(task.packet);
+      const reasoningBlockers = reasoningAssessment.blockers.map((warning) => warning.message);
+      const effectiveBlockers = [...blockers, ...reasoningBlockers];
+      blockerMap.set(task.packet.taskId, effectiveBlockers);
       const ownerRole = task.packet.ownerRole as TaskPacketInput["requiredSpecialistRoles"][number];
+      const reasoningRationale = reasoningAssessment.warnings.map(
+        (warning) => `reasoning-quality: ${warning.message}`
+      );
+      const reasoningBlockingRationale = reasoningAssessment.blockers.map(
+        (warning) => `reasoning-quality: ${warning.message}`
+      );
+      const reasoningCheckpoint =
+        reasoningAssessment.status === "warn"
+          ? "resolve or explicitly record reasoning-quality warnings before finalizing the task"
+          : "reasoning-quality block includes evidence, alternatives, and a verification plan";
 
-      if (task.status === "ready" && blockers.length === 0) {
+      if (task.status === "ready" && effectiveBlockers.length === 0) {
         recommendations.push({
           taskId: task.packet.taskId,
           taskStatus: task.status,
@@ -789,7 +845,9 @@ export class DevgodCoreService {
           targetRole: ownerRole,
           rationale: [
             "task is ready with dependencies satisfied",
-            `owner role is ${ownerRole}`
+            `owner role is ${ownerRole}`,
+            ...reasoningRationale,
+            ...reasoningBlockingRationale
           ],
           blockers: [],
           allowedWriteScope: [...task.packet.allowedWriteScope],
@@ -797,7 +855,8 @@ export class DevgodCoreService {
           approvalCheckpoints: [
             "manager must explicitly choose to route this task",
             `writer must claim ${task.packet.taskId} before edits`,
-            `required reviews before completion: ${task.packet.requiredReviews.join(", ")}`
+            `required reviews before completion: ${task.packet.requiredReviews.join(", ")}`,
+            reasoningCheckpoint
           ]
         });
         continue;
@@ -816,19 +875,29 @@ export class DevgodCoreService {
             targetRole: reviewRole,
             targetReviewRole: reviewRole,
             rationale: [`review gate ${reviewRole} is still unsatisfied`],
-            blockers: blockers.length > 0 ? [...blockers] : [`missing required review: ${reviewRole}`],
+            blockers:
+              effectiveBlockers.length > 0
+                ? [...effectiveBlockers]
+                : [`missing required review: ${reviewRole}`],
             allowedWriteScope: [],
             retrievalGuidance: getRoleRetrievalGuidance(reviewRole),
             approvalCheckpoints: [
               "review actor must authenticate through the trusted review identity resolver",
-              "manager must persist or attach authenticated reviewer evidence before completion"
+              "manager must persist or attach authenticated reviewer evidence before completion",
+              reasoningCheckpoint
             ]
           });
+          if (reasoningRationale.length > 0) {
+            recommendations[recommendations.length - 1]!.rationale.push(...reasoningRationale);
+          }
+          if (reasoningBlockingRationale.length > 0) {
+            recommendations[recommendations.length - 1]!.rationale.push(...reasoningBlockingRationale);
+          }
         }
         continue;
       }
 
-      if (task.status === "in_progress" || blockers.length > 0) {
+      if (task.status === "in_progress" || effectiveBlockers.length > 0) {
         recommendations.push({
           taskId: task.packet.taskId,
           taskStatus: task.status,
@@ -839,14 +908,21 @@ export class DevgodCoreService {
             task.status === "in_progress" && task.claimedBy
               ? [`task is already claimed by ${task.claimedBy}`]
               : ["task is not yet ready for routing"],
-          blockers: [...blockers],
+          blockers: [...effectiveBlockers],
           allowedWriteScope: [...task.packet.allowedWriteScope],
           retrievalGuidance: getRoleRetrievalGuidance(ownerRole),
           approvalCheckpoints: [
             "do not route an overlapping writer while the task remains claimed or blocked",
-            "clear blockers before assigning the next specialist"
+            "clear blockers before assigning the next specialist",
+            reasoningCheckpoint
           ]
         });
+        if (reasoningRationale.length > 0) {
+          recommendations[recommendations.length - 1]!.rationale.push(...reasoningRationale);
+        }
+        if (reasoningBlockingRationale.length > 0) {
+          recommendations[recommendations.length - 1]!.rationale.push(...reasoningBlockingRationale);
+        }
       }
     }
 

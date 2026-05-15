@@ -1,6 +1,7 @@
 import type {
   ApprovalRecord,
   HandoffRecord,
+  ReasoningWorkflowMode,
   ReviewRecord,
   RoutingRecommendationReport,
   SearchMemoryResult,
@@ -8,6 +9,8 @@ import type {
   RecoveryInspectionReport
 } from "../domain/types.ts";
 import type { OperatorStatusReport } from "./status.ts";
+import { assessPlanReasoning, assessTaskPacketReasoning } from "../core/reasoning-quality.ts";
+import type { ReasoningQualityAssessment } from "../core/reasoning-quality.ts";
 
 type TimelineAuthority = "runtime_authoritative" | "derived_only";
 
@@ -26,6 +29,9 @@ export interface RunEvidenceTaskReport {
   latestHandoffAt?: string | undefined;
   latestReviewAt?: string | undefined;
   latestApprovalAt?: string | undefined;
+  reasoningMode: ReasoningWorkflowMode;
+  reasoningVerdictStatus?: string | undefined;
+  reasoningQuality: ReasoningQualityAssessment;
 }
 
 export interface RunEvidenceTimelineEntry {
@@ -75,6 +81,17 @@ export interface RunEvidenceReport {
     acceptanceCriteria: string[];
   } | undefined;
   tasks: RunEvidenceTaskReport[];
+  reasoningQuality: {
+    authorityLabel: "derived_only";
+    status: "pass" | "warn";
+    warningCount: number;
+    plan: ReasoningQualityAssessment;
+    legacyTaskIds: string[];
+    dualTaskIds: string[];
+    strictTaskIds: string[];
+    taskIdsWithWarnings: string[];
+    warnings: string[];
+  };
   loopHistory: RunEvidenceLoopHistoryEntry[];
   timeline: RunEvidenceTimelineEntry[];
   summary: {
@@ -103,6 +120,7 @@ export function buildRunEvidenceReport(input: {
     const handoffs = input.handoffsByTask[task.packet.taskId] ?? [];
     const reviews = input.reviewsByTask[task.packet.taskId] ?? [];
     const approvals = input.approvalsByTask[task.packet.taskId] ?? [];
+    const reasoningQuality = assessTaskPacketReasoning(task.packet);
 
     return {
       taskId: task.packet.taskId,
@@ -118,9 +136,20 @@ export function buildRunEvidenceReport(input: {
       approvalCount: approvals.length,
       latestHandoffAt: latestCreatedAt(handoffs),
       latestReviewAt: latestCreatedAt(reviews),
-      latestApprovalAt: latestCreatedAt(approvals)
+      latestApprovalAt: latestCreatedAt(approvals),
+      reasoningMode: reasoningQuality.mode,
+      reasoningVerdictStatus: reasoningQuality.verdictStatus,
+      reasoningQuality
     };
   });
+
+  const planReasoning = assessPlanReasoning(input.snapshot.plan?.content);
+  const reasoningWarnings = [
+    ...planReasoning.warnings.map((warning) => `plan: ${warning.message}`),
+    ...tasks.flatMap((task) =>
+      task.reasoningQuality.warnings.map((warning) => `${task.taskId}: ${warning.message}`)
+    )
+  ];
 
   const loopHistory = buildLoopHistory(input.loopHistoryResults ?? []);
   const timeline = buildTimeline({
@@ -153,6 +182,19 @@ export function buildRunEvidenceReport(input: {
         }
       : undefined,
     tasks,
+    reasoningQuality: {
+      authorityLabel: "derived_only",
+      status: reasoningWarnings.length > 0 ? "warn" : "pass",
+      warningCount: reasoningWarnings.length,
+      plan: planReasoning,
+      legacyTaskIds: tasks.filter((task) => task.reasoningMode === "legacy").map((task) => task.taskId),
+      dualTaskIds: tasks.filter((task) => task.reasoningMode === "dual").map((task) => task.taskId),
+      strictTaskIds: tasks.filter((task) => task.reasoningMode === "strict").map((task) => task.taskId),
+      taskIdsWithWarnings: tasks
+        .filter((task) => task.reasoningQuality.status === "warn")
+        .map((task) => task.taskId),
+      warnings: reasoningWarnings
+    },
     loopHistory,
     timeline,
     summary: {
@@ -184,6 +226,7 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   lines.push(`- approvals: ${report.summary.totalApprovals}`);
   lines.push(`- loop executions: ${report.summary.totalLoopExecutions}`);
   lines.push(`- recovery issues: ${report.recovery.summary.totalIssues}`);
+  lines.push(`- reasoning-quality: ${report.reasoningQuality.status} (${report.reasoningQuality.warningCount} warnings)`);
   lines.push("");
 
   if (report.plan) {
@@ -203,7 +246,23 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   lines.push(`## Tasks`);
   lines.push("");
   for (const task of report.tasks) {
-    lines.push(`- \`${task.taskId}\` ${task.status} owner=${task.ownerRole} handoffs=${task.handoffCount} reviews=${task.reviewCount} approvals=${task.approvalCount}`);
+    lines.push(
+      `- \`${task.taskId}\` ${task.status} owner=${task.ownerRole} handoffs=${task.handoffCount} reviews=${task.reviewCount} approvals=${task.approvalCount} reasoning=${task.reasoningQuality.status}/${task.reasoningMode}${task.reasoningVerdictStatus ? ` verdict=${task.reasoningVerdictStatus}` : ""}`
+    );
+  }
+  lines.push("");
+
+  lines.push(`## Reasoning Quality`);
+  lines.push("");
+  lines.push(`- legacy tasks: ${report.reasoningQuality.legacyTaskIds.join(", ") || "none"}`);
+  lines.push(`- dual tasks: ${report.reasoningQuality.dualTaskIds.join(", ") || "none"}`);
+  lines.push(`- strict tasks: ${report.reasoningQuality.strictTaskIds.join(", ") || "none"}`);
+  if (report.reasoningQuality.warnings.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const warning of report.reasoningQuality.warnings) {
+      lines.push(`- ${warning}`);
+    }
   }
   lines.push("");
 

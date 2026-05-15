@@ -142,6 +142,42 @@ test("validateTaskPacket accepts newly shipped specialist roles", () => {
   assert.ok(!errors.some((error) => error.includes("ownerRole must be one of")));
 });
 
+test("validateTaskPacket requires strict reasoning artifacts when strict mode is selected", () => {
+  const errors = validateTaskPacket({
+    taskId: "task-1",
+    title: "Strict reasoning task",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: ["planner"],
+    qualityGates: ["reasoning_strict_required"],
+    goal: "gate completion on strong reasoning evidence",
+    inputs: ["brief"],
+    outputs: ["task packet"],
+    dependencies: [],
+    allowedWriteScope: [".devgod/work/tasks"],
+    outOfScope: ["deploy"],
+    acceptanceCriteria: ["strict mode is explicit"],
+    verificationSteps: ["npm test"],
+    requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
+    securityChecks: ["preserve authenticated review authority"],
+    antiPatterns: ["confidence without evidence"],
+    rollbackNotes: "revert packet",
+    handoffFormat: "summary",
+    reasoningPolicy: {
+      mode: "strict",
+      requireAttempts: true,
+      requireVerification: true,
+      requireCriticVerification: true,
+      requireTraceRefs: true
+    }
+  });
+
+  assert.ok(errors.includes("strict reasoning mode requires reasoningQuality"));
+  assert.ok(errors.includes("strict reasoning mode requires reasoningAttempts"));
+  assert.ok(errors.includes("strict reasoning mode requires reasoningVerifications"));
+  assert.ok(errors.includes("strict reasoning mode requires reasoningVerdict"));
+});
+
 test("validateTaskPacket rejects duplicate gates, roles, and write scope", () => {
   const errors = validateTaskPacket({
     taskId: "task-1",

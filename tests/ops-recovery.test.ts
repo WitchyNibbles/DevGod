@@ -10,7 +10,12 @@ import type {
   AuthenticatedPrincipal,
   ReviewIdentityBindings
 } from "../src/core/review-context.ts";
-import type { ReviewActionContext, TaskPacketInput, TaskRecord } from "../src/domain/types.ts";
+import type {
+  ReasoningQualityBlock,
+  ReviewActionContext,
+  TaskPacketInput,
+  TaskRecord
+} from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
@@ -35,7 +40,27 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningQuality: overrides.reasoningQuality
+  };
+}
+
+function reasoningQualityBlock(
+  overrides: Partial<ReasoningQualityBlock> = {}
+): ReasoningQualityBlock {
+  return {
+    claim: overrides.claim ?? "The task still needs stronger reasoning evidence.",
+    facts: overrides.facts ?? ["runtime status was inspected"],
+    assumptions: overrides.assumptions ?? ["current proof is incomplete"],
+    hypotheses: overrides.hypotheses ?? ["the weak evidence should remain visible in ops"],
+    evidenceRefs: overrides.evidenceRefs ?? ["src/core/service.ts"],
+    counterEvidence: overrides.counterEvidence ?? [],
+    openQuestions: overrides.openQuestions ?? [],
+    verificationPlan: overrides.verificationPlan ?? ["npm test"],
+    fallbacks: overrides.fallbacks ?? ["escalate before declaring done"],
+    budgets: overrides.budgets ?? { researchSteps: 1, debugSteps: 1, reviewPasses: 1, toolRetries: 1 },
+    confidence: overrides.confidence ?? "low",
+    decision: overrides.decision ?? "continue"
   };
 }
 
@@ -258,6 +283,83 @@ test("executeRecoverCommandFromArgs applies safe recovery to requeue stalled wor
   assert.equal(applied.mode, "applied");
   assert.deepEqual(applied.appliedActionIds, ["reset-task:plan"]);
   assert.equal(applied.snapshot.tasks[0]?.status, "ready");
+});
+
+test("executeOpsCommandFromArgs surfaces reasoning warnings for complete runs", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Close reasoning slice",
+    request: "Finish the current slice."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      reasoningQuality: reasoningQualityBlock({
+        openQuestions: ["tool query failed before stronger proof was gathered"],
+        confidence: "low"
+      })
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["tests written"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+
+  for (const [role, actor] of [
+    ["reviewer", "reviewer-actor"],
+    ["security_reviewer", "security-actor"],
+    ["qa_engineer", "qa-actor"]
+  ] as const) {
+    await service.recordReview(run.id, "plan", actor, {
+      reviewerRole: role,
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+  }
+
+  const result = await executeOpsCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    inspectReviewIdentity: async () => ({
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: ["devgod_local_seed"],
+      bindingsPresent: true,
+      bindingsPath: ".devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    }),
+    inspectGitNexus: async () => gitNexusObservation(),
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    }
+  });
+
+  assert.match(result.report.alerts.join(" "), /reasoning-quality/);
+  assert.match(result.report.nextActions.join(" "), /review reasoning-quality warnings/);
 });
 
 test("executeOpsCommandFromArgs resolves latest runs and can return text output", async () => {

@@ -1,4 +1,5 @@
 import type { RetrievalRole, SearchMemoryResult } from "../domain/types.ts";
+import { buildPlanningContextReasoningWarnings } from "../core/reasoning-quality.ts";
 
 export interface PlanningContextItem {
   id: string;
@@ -11,6 +12,7 @@ export interface PlanningContextItem {
   preview: string;
   tags: string[];
   conflictDetected: boolean;
+  reasoningWarnings: string[];
 }
 
 export interface PlanningContextReport {
@@ -37,12 +39,14 @@ export function buildPlanningContextReport(input: {
     freshness: result.freshness.status,
     preview: summarize(result.content),
     tags: [...result.metadata.tags],
-    conflictDetected: result.conflict.detected
+    conflictDetected: result.conflict.detected,
+    reasoningWarnings: buildPlanningContextReasoningWarnings(result)
   }));
 
   const summary = items.slice(0, 5).map((item) => {
     const conflict = item.conflictDetected ? " conflict" : "";
-    return `${item.title} (${item.authority}, ${item.freshness}${conflict})`;
+    const warning = item.reasoningWarnings.length > 0 ? " warn" : "";
+    return `${item.title} (${item.authority}, ${item.freshness}${conflict}${warning})`;
   });
 
   return {
@@ -79,6 +83,9 @@ export function formatPlanningContextReportMarkdown(report: PlanningContextRepor
     lines.push(`  authority: ${item.authority}`);
     lines.push(`  freshness: ${item.freshness}`);
     lines.push(`  preview: ${item.preview}`);
+    if (item.reasoningWarnings.length > 0) {
+      lines.push(`  reasoning-warnings: ${item.reasoningWarnings.join("; ")}`);
+    }
   }
   lines.push("");
   return `${lines.join("\n")}\n`;

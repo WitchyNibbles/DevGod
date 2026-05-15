@@ -5,6 +5,7 @@ import { MemoryStore } from "../src/store/memory-store.ts";
 import { executePlanContextCommandFromArgs } from "../src/admin.ts";
 import { formatPlanningContextReportMarkdown } from "../src/admin/planning-context.ts";
 import type { RetrievalRole } from "../src/domain/types.ts";
+import { buildPlanningContextReport } from "../src/admin/planning-context.ts";
 
 test("executePlanContextCommandFromArgs returns ranked planning context and markdown output", async () => {
   const service = new DevgodCoreService(new MemoryStore());
@@ -52,11 +53,13 @@ test("executePlanContextCommandFromArgs returns ranked planning context and mark
   assert.equal(result.report.requesterRole, "planner");
   assert.equal(result.report.totalResults, 2);
   assert.equal(result.report.items[0]?.title, "Project incident playbook");
+  assert.ok((result.report.items[0]?.reasoningWarnings.length ?? 0) > 0);
   assert.match(result.report.items[0]?.citation ?? "", /^memory:\/\//);
 
   const markdown = formatPlanningContextReportMarkdown(result.report);
   assert.match(markdown, /# devgod planning context/);
   assert.match(markdown, /Project incident playbook/);
+  assert.match(markdown, /reasoning-warnings:/);
   assert.match(markdown, /memory:\/\//);
 });
 
@@ -75,6 +78,63 @@ test("executePlanContextCommandFromArgs honors --project-only when querying memo
   });
 
   assert.equal(includeGlobal, false);
+});
+
+test("buildPlanningContextReport flags stale and conflicting evidence for review", () => {
+  const report = buildPlanningContextReport({
+    query: "schema drift",
+    requesterRole: "planner",
+    results: [
+      {
+        id: "memory-1",
+        title: "Schema drift note",
+        content: "tool query failed and the remaining evidence is stale",
+        scope: "project",
+        projectSlug: "devgod",
+        score: 9,
+        authority: {
+          source: "shared_backend_memory",
+          precedence: "retrieval_hint",
+          scope: "project",
+          allowedRoles: ["planner"]
+        },
+        freshness: {
+          status: "stale",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          ageDays: 120,
+          staleAfterDays: 30
+        },
+        citation: {
+          kind: "memory_entry",
+          memoryId: "memory-1",
+          label: "Schema drift note",
+          canonicalRef: "memory://memory-1"
+        },
+        provenance: {
+          entryType: "decision",
+          runId: "run-1",
+          createdAt: "2026-01-01T00:00:00.000Z"
+        },
+        metadata: {
+          allowedRoles: ["planner"],
+          tags: ["schema"],
+          staleAfterDays: 30,
+          supersededBy: [],
+          contradicts: []
+        },
+        conflict: {
+          detected: true,
+          relatedIds: ["memory-2"]
+        }
+      }
+    ]
+  });
+
+  assert.deepEqual(report.items[0]?.reasoningWarnings, [
+    "retrieval hint only; re-anchor in canonical files",
+    "evidence freshness is stale",
+    "related contradictory evidence detected"
+  ]);
 });
 
 test("executePlanContextCommandFromArgs derives a query embedding when an embedding model is configured", async () => {

@@ -29,6 +29,33 @@ export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
 export const artifactKinds = ["plan", "markdown_chunk"] as const;
 export const stopGoDecisions = ["go", "needs_review", "stop"] as const;
 export const completionStandards = ["artifact_complete", "specialist_verified"] as const;
+export const reasoningConfidenceLevels = ["low", "medium", "high"] as const;
+export const reasoningDecisions = ["continue", "supported", "blocked"] as const;
+export const reasoningWorkflowModes = ["legacy", "dual", "strict"] as const;
+export const reasoningVerdictStatuses = [
+  "supported",
+  "insufficient_evidence",
+  "contradicted",
+  "budget_exhausted",
+  "needs_review"
+] as const;
+export const reasoningAttemptOutcomes = [
+  "supported",
+  "contradicted",
+  "inconclusive",
+  "failed"
+] as const;
+export const reasoningVerificationKinds = [
+  "test",
+  "docs",
+  "schema",
+  "runtime",
+  "tool_output",
+  "critic_review",
+  "diff_review",
+  "human_review"
+] as const;
+export const reasoningVerificationStatuses = ["passed", "failed", "pending", "skipped"] as const;
 export const retrievalRoles = [
   "planner",
   "product_strategist",
@@ -59,7 +86,9 @@ export const qualityGates = [
   "regression_safety_required",
   "release_readiness_required",
   "performance_check_required",
-  "setup_replay_required"
+  "setup_replay_required",
+  "reasoning_dual_required",
+  "reasoning_strict_required"
 ] as const;
 export const routingRecommendationKinds = ["owner_dispatch", "review_dispatch", "wait"] as const;
 export const executionDirectiveKinds = [
@@ -94,6 +123,13 @@ export type MemoryStatus = (typeof memoryStatuses)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
 export type CompletionStandard = (typeof completionStandards)[number];
+export type ReasoningConfidenceLevel = (typeof reasoningConfidenceLevels)[number];
+export type ReasoningDecision = (typeof reasoningDecisions)[number];
+export type ReasoningWorkflowMode = (typeof reasoningWorkflowModes)[number];
+export type ReasoningVerdictStatus = (typeof reasoningVerdictStatuses)[number];
+export type ReasoningAttemptOutcome = (typeof reasoningAttemptOutcomes)[number];
+export type ReasoningVerificationKind = (typeof reasoningVerificationKinds)[number];
+export type ReasoningVerificationStatus = (typeof reasoningVerificationStatuses)[number];
 export type RetrievalRole = (typeof retrievalRoles)[number];
 export type GateReviewRole = (typeof requiredGateReviews)[number];
 export type ReviewWaiverAuthority = (typeof reviewWaiverAuthorities)[number];
@@ -155,6 +191,66 @@ export interface IntakeSummary {
   stopGo: StopGoDecision;
 }
 
+export interface ReasoningQualityBudget {
+  researchSteps?: number | undefined;
+  debugSteps?: number | undefined;
+  reviewPasses?: number | undefined;
+  toolRetries?: number | undefined;
+}
+
+export interface ReasoningQualityBlock {
+  claim: string;
+  facts?: string[] | undefined;
+  assumptions: string[];
+  hypotheses: string[];
+  evidenceRefs: string[];
+  counterEvidence?: string[] | undefined;
+  openQuestions?: string[] | undefined;
+  verificationPlan: string[];
+  fallbacks?: string[] | undefined;
+  budgets?: ReasoningQualityBudget | undefined;
+  confidence: ReasoningConfidenceLevel;
+  decision: ReasoningDecision;
+}
+
+export interface ReasoningPolicy {
+  mode: ReasoningWorkflowMode;
+  requireBlock?: boolean | undefined;
+  requireEvidenceRefs?: boolean | undefined;
+  requireAttempts?: boolean | undefined;
+  requireTraceRefs?: boolean | undefined;
+  requireVerification?: boolean | undefined;
+  requireCriticVerification?: boolean | undefined;
+  maxAttempts?: number | undefined;
+}
+
+export interface ReasoningVerification {
+  id: string;
+  kind: ReasoningVerificationKind;
+  ref: string;
+  status: ReasoningVerificationStatus;
+  summary: string;
+}
+
+export interface ReasoningAttempt {
+  id: string;
+  label: string;
+  hypothesis: string;
+  alternatives?: string[] | undefined;
+  evidenceRefs: string[];
+  verificationRefs: string[];
+  traceRef?: string | undefined;
+  outcome: ReasoningAttemptOutcome;
+  summary: string;
+}
+
+export interface ReasoningVerdict {
+  status: ReasoningVerdictStatus;
+  summary: string;
+  supportingAttemptIds: string[];
+  blockingIssues?: string[] | undefined;
+}
+
 export interface PlanInput {
   runId: string;
   title: string;
@@ -163,6 +259,11 @@ export interface PlanInput {
   decisions: string[];
   residualRisks: string[];
   acceptanceCriteria: string[];
+  reasoningPolicy?: ReasoningPolicy | undefined;
+  reasoningAttempts?: ReasoningAttempt[] | undefined;
+  reasoningVerifications?: ReasoningVerification[] | undefined;
+  reasoningVerdict?: ReasoningVerdict | undefined;
+  reasoningQuality?: ReasoningQualityBlock | undefined;
 }
 
 export interface TaskPacketInput {
@@ -185,6 +286,11 @@ export interface TaskPacketInput {
   antiPatterns: string[];
   rollbackNotes: string;
   handoffFormat: string;
+  reasoningPolicy?: ReasoningPolicy | undefined;
+  reasoningAttempts?: ReasoningAttempt[] | undefined;
+  reasoningVerifications?: ReasoningVerification[] | undefined;
+  reasoningVerdict?: ReasoningVerdict | undefined;
+  reasoningQuality?: ReasoningQualityBlock | undefined;
 }
 
 export interface HandoffInput {

@@ -31,7 +31,8 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningQuality: overrides.reasoningQuality
   };
 }
 
