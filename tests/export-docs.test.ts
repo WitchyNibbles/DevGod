@@ -13,7 +13,7 @@ import { parseExportDocsRequest } from "../src/docs-export/parser.ts";
 import { ObsidianMarkdownRenderer } from "../src/docs-export/renderer.ts";
 import type { ExportDocsRequest, ExportDocsSummary } from "../src/docs-export/models.ts";
 import { RuntimeWorklogProvider } from "../src/docs-export/worklog-provider.ts";
-import type { IntakeSummary, PlanArtifact, RunRecord, TaskRecord } from "../src/domain/types.ts";
+import type { IntakeSummary, MemoryEntryRecord, PlanArtifact, RunRecord, TaskRecord } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function buildSummary(): IntakeSummary {
@@ -198,6 +198,40 @@ async function seedExportFixture(store: MemoryStore) {
     createdAt: "2026-05-10T14:00:00.000Z"
   });
 
+  const memoryOnlyRun: RunRecord = {
+    id: "run-2026-05-08",
+    workspaceId: workspace.id,
+    projectId: project.id,
+    actor: "manager",
+    title: "Decision-memory follow-up",
+    request: "Capture a reviewed runtime decision",
+    summary: buildSummary(),
+    status: "approved",
+    createdAt: "2026-05-08T09:00:00.000Z",
+    updatedAt: "2026-05-08T12:00:00.000Z"
+  };
+  await store.createRun(memoryOnlyRun);
+
+  const decisionMemoryEntry: MemoryEntryRecord = {
+    id: "memory-1",
+    workspaceId: workspace.id,
+    projectId: project.id,
+    runId: memoryOnlyRun.id,
+    taskId: "memory-review",
+    scope: "project",
+    entryType: "decision",
+    title: "Export promoted decisions",
+    content: "Promoted decision memory should appear in exports.",
+    reviewer: "memory_curator",
+    actor: "memory_curator",
+    status: "approved",
+    metadata: {
+      authorityLevel: "reviewed_memory"
+    },
+    createdAt: "2026-05-10T11:00:00.000Z"
+  };
+  await store.saveMemoryEntry(decisionMemoryEntry);
+
   const outsideRun: RunRecord = {
     id: "run-2026-05-12",
     workspaceId: workspace.id,
@@ -374,13 +408,14 @@ test("executeExportDocsCommandFromArgs writes a daily note for the 10th of this 
       }
     );
 
-    assert.equal(result.matchedEntries, 1);
+    assert.equal(result.matchedEntries, 2);
     assert.equal(result.targetPath, path.join(directory, "Devgod/Daily/2026-05-10.md"));
 
     const markdown = await readFile(result.targetPath!, "utf8");
     assert.match(markdown, /title: "Devgod work summary - 2026-05-10"/);
     assert.match(markdown, /## Main topics/);
     assert.match(markdown, /Use runtime history as the worklog source\./);
+    assert.match(markdown, /Promoted decision memory should appear in exports\./);
     assert.match(markdown, /src\/docs-export\/parser\.ts/);
     assert.match(markdown, /Need overwrite semantics/);
     assert.match(markdown, /## Next steps/);

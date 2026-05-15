@@ -119,6 +119,12 @@ export interface DevgodStore {
   saveApproval(approval: ApprovalRecord): Promise<void>;
   getApprovals(runId: string, taskId: string): Promise<ApprovalRecord[]>;
   saveMemoryEntry(entry: MemoryEntryRecord): Promise<void>;
+  listMemoryEntries(params: {
+    runId: string;
+    taskId?: string | undefined;
+    entryType?: MemoryEntryRecord["entryType"] | undefined;
+    status?: MemoryEntryRecord["status"] | undefined;
+  }): Promise<MemoryEntryRecord[]>;
   replaceMarkdownArtifacts(input: {
     workspaceId: string;
     projectId: string;

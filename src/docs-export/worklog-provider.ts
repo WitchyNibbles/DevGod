@@ -49,10 +49,15 @@ export class RuntimeWorklogProvider implements WorklogProvider {
         const plan = await this.store.getPlan(run.id);
         const tasks = await this.store.getTasksByRun(run.id);
         const taskIds = tasks.map((task) => task.packet.taskId);
-        const [handoffsByTask, reviewsByTask, approvalsByTask] = await Promise.all([
+        const [handoffsByTask, reviewsByTask, approvalsByTask, decisionMemoryEntries] = await Promise.all([
           collectTaskScopedRecords(taskIds, (taskId) => this.store.getHandoffs(run.id, taskId) as Promise<HandoffRecord[]>),
           collectTaskScopedRecords(taskIds, (taskId) => this.store.getReviews(run.id, taskId) as Promise<ReviewRecord[]>),
-          collectTaskScopedRecords(taskIds, (taskId) => this.store.getApprovals(run.id, taskId) as Promise<ApprovalRecord[]>)
+          collectTaskScopedRecords(taskIds, (taskId) => this.store.getApprovals(run.id, taskId) as Promise<ApprovalRecord[]>),
+          this.store.listMemoryEntries({
+            runId: run.id,
+            entryType: "decision",
+            status: "approved"
+          })
         ]);
 
         return {
@@ -61,7 +66,8 @@ export class RuntimeWorklogProvider implements WorklogProvider {
           tasks,
           handoffsByTask,
           reviewsByTask,
-          approvalsByTask
+          approvalsByTask,
+          decisionMemoryEntries
         };
       })
     );

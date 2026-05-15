@@ -267,7 +267,8 @@ export class MemoryStore implements DevgodStore {
           ...(awaitableTaskDates(run.id, this.tasks)),
           ...(awaitableCreatedDates(run.id, taskIds, this.handoffs)),
           ...(awaitableCreatedDates(run.id, taskIds, this.reviews)),
-          ...(awaitableCreatedDates(run.id, taskIds, this.approvals))
+          ...(awaitableCreatedDates(run.id, taskIds, this.approvals)),
+          ...(awaitableMemoryEntryDates(run.id, this.memoryEntries))
         ];
 
         return activityTimestamps.some((timestamp) =>
@@ -373,6 +374,20 @@ export class MemoryStore implements DevgodStore {
 
   async saveMemoryEntry(entry: MemoryEntryRecord): Promise<void> {
     this.memoryEntries.set(entry.id, entry);
+  }
+
+  async listMemoryEntries(params: {
+    runId: string;
+    taskId?: string | undefined;
+    entryType?: MemoryEntryRecord["entryType"] | undefined;
+    status?: MemoryEntryRecord["status"] | undefined;
+  }): Promise<MemoryEntryRecord[]> {
+    return [...this.memoryEntries.values()]
+      .filter((entry) => entry.runId === params.runId)
+      .filter((entry) => (params.taskId ? entry.taskId === params.taskId : true))
+      .filter((entry) => (params.entryType ? entry.entryType === params.entryType : true))
+      .filter((entry) => (params.status ? entry.status === params.status : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   async replaceMarkdownArtifacts(input: {
@@ -681,6 +696,15 @@ function awaitableCreatedDates<RecordShape extends { runId: string; taskId: stri
   return [...records.values()]
     .filter((record) => record.runId === runId && taskIdSet.has(record.taskId))
     .map((record) => record.createdAt);
+}
+
+function awaitableMemoryEntryDates(
+  runId: string,
+  memoryEntries: ReadonlyMap<string, MemoryEntryRecord>
+): string[] {
+  return [...memoryEntries.values()]
+    .filter((entry) => entry.runId === runId)
+    .map((entry) => entry.createdAt);
 }
 
 function cosineSimilarity(left: readonly number[], right: readonly number[]): number {

@@ -1,5 +1,13 @@
 import type { ExportDocsRequest, ExportDocsSummary, WorklogEntry } from "./models.ts";
 
+function formatDecisionMemoryEntry(input: { title: string; content: string }): string {
+  const content = input.content.trim();
+  if (content.length > 0) {
+    return content;
+  }
+  return input.title.trim();
+}
+
 function dedupe(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
@@ -56,6 +64,14 @@ export class DocsSummarizer {
     const reviews = entries.flatMap((entry) => Object.values(entry.reviewsByTask).flat());
     const approvals = entries.flatMap((entry) => Object.values(entry.approvalsByTask).flat());
     const planDecisions = entries.flatMap((entry) => entry.plan?.content.decisions ?? []);
+    const memoryDecisions = entries.flatMap((entry) =>
+      entry.decisionMemoryEntries.map((memoryEntry) =>
+        formatDecisionMemoryEntry({
+          title: memoryEntry.title,
+          content: memoryEntry.content
+        })
+      )
+    );
     const planMilestones = entries.flatMap((entry) => entry.plan?.content.milestones ?? []);
     const handoffFiles = handoffs.flatMap((handoff) => handoff.changedFiles);
     const blockedFindings = reviews.flatMap((review) => review.findings);
@@ -76,6 +92,7 @@ export class DocsSummarizer {
 
     const decisions = dedupe([
       ...planDecisions,
+      ...memoryDecisions,
       ...approvals
         .filter(
           (approval) =>

@@ -1,6 +1,7 @@
 import type {
   ApprovalRecord,
   HandoffRecord,
+  MemoryEntryRecord,
   PlanArtifact,
   ReviewRecord,
   RunRecord,
@@ -58,6 +59,7 @@ export interface WorklogEntry {
   handoffsByTask: Record<string, HandoffRecord[]>;
   reviewsByTask: Record<string, ReviewRecord[]>;
   approvalsByTask: Record<string, ApprovalRecord[]>;
+  decisionMemoryEntries: MemoryEntryRecord[];
 }
 
 export interface ObsidianExportConfig {

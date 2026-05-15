@@ -603,6 +603,12 @@ export class PostgresStore implements DevgodStore {
              where ap.run_id = r.id
                and ((ap.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
            )
+           or exists (
+             select 1
+             from memory_entries me
+             where me.run_id = r.id
+               and ((me.created_at at time zone $5)::date between coalesce($3::date, '-infinity'::date) and coalesce($4::date, 'infinity'::date))
+           )
          )
        order by ((r.updated_at at time zone $5)::date) asc, r.created_at asc`,
       [
@@ -982,6 +988,42 @@ export class PostgresStore implements DevgodStore {
         JSON.stringify(entry.metadata ?? {})
       ]
     );
+  }
+
+  async listMemoryEntries(params: {
+    runId: string;
+    taskId?: string | undefined;
+    entryType?: MemoryEntryRecord["entryType"] | undefined;
+    status?: MemoryEntryRecord["status"] | undefined;
+  }): Promise<MemoryEntryRecord[]> {
+    const result = await this.client.query<JsonRow<MemoryEntryRecord>>(
+      `select jsonb_build_object(
+          'id', id,
+          'workspaceId', workspace_id,
+          'projectId', project_id,
+          'runId', run_id,
+          'taskId', task_id,
+          'scope', scope,
+          'entryType', entry_type,
+          'title', title,
+          'content', content,
+          'reviewer', reviewer,
+          'actor', actor,
+          'status', status,
+          'sourcePath', source_path,
+          'sourceAnchor', source_anchor,
+          'metadata', metadata,
+          'createdAt', created_at
+       ) as payload
+       from memory_entries
+       where run_id = $1
+         and ($2::text is null or task_id = $2)
+         and ($3::text is null or entry_type = $3)
+         and ($4::text is null or status = $4)
+       order by created_at asc`,
+      [params.runId, params.taskId ?? null, params.entryType ?? null, params.status ?? null]
+    );
+    return result.rows.map((row) => row.payload);
   }
 
   async replaceMarkdownArtifacts(input: {
