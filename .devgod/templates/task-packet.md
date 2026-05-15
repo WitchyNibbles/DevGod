@@ -30,6 +30,10 @@ List the task-type gates that apply, for example:
 - `release_readiness_required`
 - `performance_check_required`
 - `setup_replay_required`
+- `coverage_ledger_required`
+- `progress_proof_required`
+- `checkpoint_resume_required`
+- `memory_compaction_required`
 
 ## Goal
 
@@ -38,6 +42,16 @@ List the task-type gates that apply, for example:
 ## Dependencies
 
 ## Outputs
+
+## Coverage impact
+
+## Touched ledger items
+
+## Required runtime traces
+
+## Progress proof
+
+## Interrupt checkpoint policy
 
 ## Allowed write scope
 

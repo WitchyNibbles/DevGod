@@ -36,6 +36,9 @@ export const workflowDocumentKinds = [
   "review_summary",
   "product_state",
   "task_queue",
+  "coverage_manifest",
+  "progress_proof",
+  "checkpoint_summary",
   "export_snapshot",
   "policy_bundle"
 ] as const;
@@ -99,6 +102,10 @@ export const qualityGates = [
   "release_readiness_required",
   "performance_check_required",
   "setup_replay_required",
+  "coverage_ledger_required",
+  "progress_proof_required",
+  "checkpoint_resume_required",
+  "memory_compaction_required",
   "reasoning_dual_required",
   "reasoning_strict_required"
 ] as const;
@@ -122,6 +129,80 @@ export const recoveryActionKinds = [
   "reblock_stale_approval",
   "request_missing_reviews"
 ] as const;
+export const coverageItemCategories = [
+  "models",
+  "services",
+  "apis",
+  "routes",
+  "controllers_views",
+  "serializers_forms",
+  "database_access",
+  "queries",
+  "background_jobs",
+  "async_tasks",
+  "frontend_components",
+  "state_management",
+  "authentication",
+  "authorization",
+  "permissions",
+  "caching",
+  "feature_flags",
+  "external_integrations",
+  "infrastructure",
+  "deployment",
+  "ci_cd",
+  "tests",
+  "migrations",
+  "dead_code",
+  "duplicated_logic",
+  "configuration",
+  "environment_coupling",
+  "runtime_side_effects"
+] as const;
+export const coverageItemStates = [
+  "undiscovered",
+  "discovered",
+  "partially_analyzed",
+  "fully_analyzed",
+  "validated",
+  "migrated",
+  "deprecated",
+  "blocked"
+] as const;
+export const coverageCriticalities = ["low", "medium", "high", "critical"] as const;
+export const gapKinds = [
+  "missing_inventory",
+  "missing_callsite_coverage",
+  "missing_dependency_edge",
+  "missing_runtime_trace",
+  "missing_validation",
+  "contradicting_evidence",
+  "hidden_write_side_effect",
+  "orphaned_config_coupling",
+  "dead_code_suspicion",
+  "duplicate_logic_suspicion",
+  "architecture_recommendation_before_threshold"
+] as const;
+export const gapSeverities = ["low", "medium", "high", "critical"] as const;
+export const gapStatuses = ["open", "closed"] as const;
+export const analysisPhases = [
+  "discovery",
+  "inventory",
+  "dependency_mapping",
+  "runtime_tracing",
+  "subsystem_classification",
+  "risk_analysis",
+  "modernization_strategy",
+  "migration_sequencing",
+  "implementation",
+  "validation",
+  "regression_detection",
+  "final_verification",
+  "blocked",
+  "done"
+] as const;
+export const runProfiles = ["standard_delivery", "legacy_rewrite", "debug_heavy"] as const;
+export const phaseReadinessStatuses = ["ready", "blocked"] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -151,6 +232,15 @@ export type RoutingRecommendationKind = (typeof routingRecommendationKinds)[numb
 export type ExecutionDirectiveKind = (typeof executionDirectiveKinds)[number];
 export type RecoveryIssueKind = (typeof recoveryIssueKinds)[number];
 export type RecoveryActionKind = (typeof recoveryActionKinds)[number];
+export type CoverageItemCategory = (typeof coverageItemCategories)[number];
+export type CoverageItemState = (typeof coverageItemStates)[number];
+export type CoverageCriticality = (typeof coverageCriticalities)[number];
+export type GapKind = (typeof gapKinds)[number];
+export type GapSeverity = (typeof gapSeverities)[number];
+export type GapStatus = (typeof gapStatuses)[number];
+export type AnalysisPhase = (typeof analysisPhases)[number];
+export type RunProfile = (typeof runProfiles)[number];
+export type PhaseReadinessStatus = (typeof phaseReadinessStatuses)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -421,6 +511,137 @@ export interface WorkflowDocumentRecord {
   updatedAt: string;
 }
 
+export interface CoverageManifestThresholds {
+  criticalItemCoverage?: number | undefined;
+  criticalItemValidation?: number | undefined;
+  callsiteCoverage?: number | undefined;
+  runtimeTraceCoverage?: number | undefined;
+}
+
+export interface CoverageManifestRecord {
+  runId: string;
+  profile: RunProfile;
+  requiredCategories: CoverageItemCategory[];
+  thresholds: CoverageManifestThresholds;
+}
+
+export interface CoverageItemRecord {
+  id: string;
+  category: CoverageItemCategory;
+  state: CoverageItemState;
+  criticality: CoverageCriticality;
+  ownerAgent?: string | undefined;
+  sources: string[];
+  entryPoints?: string[] | undefined;
+  dependencies?: string[] | undefined;
+  dependents?: string[] | undefined;
+  callsiteCount?: number | undefined;
+  callsitesAnalyzed?: number | undefined;
+  runtimeTraced?: boolean | undefined;
+  behaviorSummary?: string | undefined;
+  businessRules?: string[] | undefined;
+  sideEffects?: string[] | undefined;
+  openQuestions?: string[] | undefined;
+  evidenceRefs: string[];
+  verificationRefs?: string[] | undefined;
+  confidence?: number | undefined;
+  gapScore?: number | undefined;
+  lastUpdatedAt: string;
+}
+
+export interface CoverageGapRecord {
+  id: string;
+  targetId: string;
+  kind: GapKind;
+  severity: GapSeverity;
+  description: string;
+  blocking: boolean;
+  evidenceRefs: string[];
+  createdBy: string;
+  suggestedNextActions: string[];
+  status: GapStatus;
+}
+
+export interface ProgressProofRecord {
+  cycle: number;
+  proofId: string;
+  phaseBefore: AnalysisPhase;
+  phaseAfter: AnalysisPhase;
+  evidenceRefs: string[];
+  coverageDelta: Partial<Record<CoverageItemState, number>>;
+  blockingGapDelta?: {
+    closed?: number | undefined;
+    opened?: number | undefined;
+  } | undefined;
+  nextTarget: string;
+  whyNext?: string | undefined;
+  createdAt: string;
+}
+
+export interface CheckpointRecord {
+  runId: string;
+  checkpointId: string;
+  phase: AnalysisPhase;
+  activeTargets: string[];
+  recentEvidenceRefs: string[];
+  openGaps: string[];
+  nextActions: string[];
+  compressedContextRef?: string | undefined;
+  createdAt: string;
+}
+
+export interface CoverageSummary {
+  totalItems: number;
+  discoveredItems: number;
+  partiallyAnalyzedItems: number;
+  fullyAnalyzedItems: number;
+  validatedItems: number;
+  migratedItems: number;
+  blockedItems: number;
+  criticalItemCoverage: number;
+  criticalItemValidation: number;
+  callsiteCoverage: number;
+  runtimeTraceCoverage: number;
+  openGapCount: number;
+  blockingGapCount: number;
+}
+
+export interface PhaseReadinessRecord {
+  phase: AnalysisPhase;
+  status: PhaseReadinessStatus;
+  reasons: string[];
+}
+
+export interface AutonomousExecutionState {
+  enabled: boolean;
+  profile: RunProfile;
+  phase: AnalysisPhase;
+  manifest?: CoverageManifestRecord | undefined;
+  coverageItems: CoverageItemRecord[];
+  gaps: CoverageGapRecord[];
+  checkpoints: CheckpointRecord[];
+  progressProofs: ProgressProofRecord[];
+  pendingInvestigations: string[];
+  executionEpoch: number;
+  lastCheckpointId?: string | undefined;
+  lastSuccessfulCheckpointId?: string | undefined;
+  lastProgressProofId?: string | undefined;
+  recoveryReason?: string | undefined;
+  retryBudgetRemaining?: number | undefined;
+  updatedAt: string;
+}
+
+export interface AutonomousExecutionSnapshot {
+  state: AutonomousExecutionState;
+  coverageSummary: CoverageSummary;
+  phaseReadiness: PhaseReadinessRecord;
+  blockingGaps: CoverageGapRecord[];
+}
+
+export interface ProjectRuntimeMetadata extends Record<string, unknown> {
+  autonomousExecution?: AutonomousExecutionState | undefined;
+}
+
 export interface ProjectRuntimeStateRecord {
   projectId: string;
   workspaceId: string;
@@ -429,7 +650,7 @@ export interface ProjectRuntimeStateRecord {
   taskQueue: TaskQueue;
   productState: Record<string, unknown>;
   lastVerifiedRunId?: string | undefined;
-  metadata: Record<string, unknown>;
+  metadata: ProjectRuntimeMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -631,6 +852,7 @@ export interface RunStatusSnapshot {
   activeLocks: LockRecord[];
   blockers: string[];
   nextTaskIds: string[];
+  autonomousExecution?: AutonomousExecutionSnapshot | undefined;
 }
 
 export interface BaseExecutionDirective {
@@ -674,6 +896,7 @@ export interface RunExecutionPlan {
   runId: string;
   runStatus: RunStatus;
   directive: RunExecutionDirective;
+  autonomousExecution?: AutonomousExecutionSnapshot | undefined;
 }
 
 export interface RunResumeSnapshot extends RunStatusSnapshot {

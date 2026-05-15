@@ -18,6 +18,9 @@ async function createInstalledWorkflowFixture(taskId: string, prefix: string): P
   await installDevgodIntoProject({ sourceRoot: repoRoot, targetRoot });
 
   await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "checkpoints"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "coverage"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
   await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
   await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
 
@@ -110,6 +113,11 @@ async function writeLiveTaskPacket(
     ["## Inputs", ["- active workflow artifact set"]],
     ["## Dependencies", ["- brief artifact"]],
     ["## Outputs", ["- validated live task packet"]],
+    ["## Coverage impact", ["- touched analysis coverage must be tracked explicitly"]],
+    ["## Touched ledger items", ["- `service:workflow-checker`"]],
+    ["## Required runtime traces", ["- `trace://workflow-proof/live-check`"]],
+    ["## Progress proof", ["- `.devgod/work/proofs/progress-task.json` records measurable deltas"]],
+    ["## Interrupt checkpoint policy", ["- checkpoint before yielding when state changes"]],
     ["## Allowed write scope", ["- `scripts/`", "- `tests/`"]],
     ["## Out of scope", ["- historical artifact cleanup"]],
     ["## Assumptions", []],
@@ -154,6 +162,83 @@ async function writeLiveTaskPacket(
     .join("\n");
 
   await writeFile(join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`), `${content}\n`, "utf8");
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `coverage-${taskId}.json`),
+    JSON.stringify(
+      {
+        run_id: taskId,
+        profile: "standard_delivery",
+        required_categories: ["services", "tests"],
+        thresholds: {
+          critical_item_coverage: 0.8,
+          critical_item_validation: 0.6,
+          callsite_coverage: 0.85,
+          runtime_trace_coverage: 0.75
+        }
+      },
+      null,
+      2
+    ) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "proofs", `progress-${taskId}.json`),
+    JSON.stringify(
+      {
+        cycle: 1,
+        proof_id: `proof-${taskId}`,
+        phase_before: "inventory",
+        phase_after: "dependency_mapping",
+        evidence_refs: ["scripts/check-devgod-workflow.sh"],
+        coverage_delta: { fully_analyzed: 1 },
+        blocking_gap_delta: { closed: 1, opened: 0 },
+        next_target: "service:workflow-checker",
+        why_next: "exercise quality-gate proof enforcement"
+      },
+      null,
+      2
+    ) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "checkpoints", `checkpoint-${taskId}.md`),
+    [
+      "# Checkpoint Summary",
+      "",
+      "## Run ID",
+      "",
+      `\`${taskId}\``,
+      "",
+      "## Checkpoint ID",
+      "",
+      `\`cp-${taskId}\``,
+      "",
+      "## Phase",
+      "",
+      "`dependency_mapping`",
+      "",
+      "## Active targets",
+      "",
+      "- `service:workflow-checker`",
+      "",
+      "## Recent evidence refs",
+      "",
+      "- `scripts/check-devgod-workflow.sh`",
+      "",
+      "## Open gaps",
+      "",
+      "- `gap:workflow-checker:none`",
+      "",
+      "## Next actions",
+      "",
+      "- verify workflow-proof gating",
+      "",
+      "## Compressed context ref",
+      "",
+      `memory://checkpoint/${taskId}`
+    ].join("\n") + "\n",
+    "utf8"
+  );
 }
 
 async function writeWorkflowReview(
@@ -303,6 +388,9 @@ test("check-devgod-workflow-live accepts CRLF active files", async () => {
     stubRoot = await attachWorkflowProofStub(targetRoot);
 
     await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "checkpoints"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "coverage"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
 
@@ -405,6 +493,43 @@ test("check-devgod-workflow-live rejects task packets missing required live sect
         cwd: targetRoot
       }),
       /missing heading ## Goal/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects missing coverage or proof artifacts when autonomous gates are enabled", async () => {
+  const taskId = "DG-LIVE-MISSING-AUTONOMOUS-ARTIFACTS";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-missing-autonomous-artifacts-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required",
+        "memory_compaction_required"
+      ]
+    });
+    await rm(join(targetRoot, ".devgod", "work", "coverage", `coverage-${taskId}.json`), {
+      force: true
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /missing file: \.devgod\/work\/coverage\/coverage-DG-LIVE-MISSING-AUTONOMOUS-ARTIFACTS\.json/
     );
   } finally {
     if (stubRoot) {

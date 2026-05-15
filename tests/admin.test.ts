@@ -629,7 +629,7 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     activeTaskId: "active-proof-task",
     taskQueue: {
       project_status: "ready",
-      current_task_id: "active-proof-task",
+      current_task_id: null,
       tasks: []
     },
     productState: { status: "ready", items: [] },
@@ -692,6 +692,12 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
   const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
   assert.equal(runtimeState?.activeTaskId, "active-proof-task");
   assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
+  const queue = runtimeState?.taskQueue as
+    | { current_task_id?: string | null; project_status?: string; tasks?: Array<{ id: string; status: string }> }
+    | undefined;
+  assert.equal(queue?.project_status, "in_progress");
+  assert.equal(queue?.current_task_id, "active-proof-task");
+  assert.equal(queue?.tasks?.find((task) => task.id === "active-proof-task")?.status, "in_progress");
 });
 
 test("executeSeedWorkflowProofCommandFromArgs requires a task id when no active workflow exists", async () => {

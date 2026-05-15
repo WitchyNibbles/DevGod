@@ -48,6 +48,9 @@ EOF
 cp "$repo_root/.devgod/templates/intake-brief.md" "$fixture_root/.devgod/templates/intake-brief.md"
 cp "$repo_root/.devgod/templates/task-packet.md" "$fixture_root/.devgod/templates/task-packet.md"
 cp "$repo_root/.devgod/templates/review-gate.md" "$fixture_root/.devgod/templates/review-gate.md"
+cp "$repo_root/.devgod/templates/coverage-manifest.json" "$fixture_root/.devgod/templates/coverage-manifest.json"
+cp "$repo_root/.devgod/templates/checkpoint-summary.md" "$fixture_root/.devgod/templates/checkpoint-summary.md"
+cp "$repo_root/.devgod/templates/progress-proof.json" "$fixture_root/.devgod/templates/progress-proof.json"
 
 cat > "$fixture_root/.devgod/work/briefs/brief-$task_id.md" <<EOF
 # Intake Brief

@@ -32,7 +32,7 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 | Reasoning-quality skepticism layer across prompts, workflow artifacts, and runtime reporting | done | `src/core/reasoning-quality.ts`, `src/core/service.ts`, `src/admin/report.ts`, `src/admin/ops.ts`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/report-command.test.ts`, `tests/control-layer-contract.test.ts` |
 | Reasoning-quality hardening with strict lifecycle enforcement and legacy upgrade tooling | done | `src/domain/types.ts`, `src/domain/contracts.ts`, `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `scripts/check-devgod-workflow.sh`, `tests/install.test.ts`, `tests/workflow-check.test.ts` |
 | Strict reasoning mode as the default for unspecified workflows | done | `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `.devgod/templates/task-packet.md`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/install.test.ts`, `tests/orchestration-eval.test.ts` |
-| Autonomous execution redesign specification | in_progress | `docs/autonomous-execution-redesign.md`, `.devgod/work/briefs/brief-2026-05-15-autonomous-execution-redesign.md`, `.devgod/work/plans/plan-2026-05-15-autonomous-execution-redesign.md`, `.devgod/work/tasks/task-2026-05-15-autonomous-execution-redesign.md` |
+| Autonomous execution schema and workflow-enforcement slice | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/core/service.ts`, `scripts/check-devgod-workflow.sh`, `tests/service.test.ts`, `tests/workflow-check.test.ts`, `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-execution-redesign` |
 
 ## Current Milestone
 
@@ -49,15 +49,15 @@ Autonomous execution hardening
 
 ## Current Task
 
-The active design slice is `2026-05-15-autonomous-execution-redesign`. It introduces the implementation-grade specification for upgrading DevGod from advisory workflow automation into a strict autonomous execution and audit system with coverage ledgers, gap detection, comprehension gates, reverse-engineering mode, checkpoint/resume, and progress proofs.
+The active workflow artifact remains `2026-05-15-autonomous-execution-redesign`. Its implementation, review, live workflow-proof gates, and runtime queue rollover validation are complete through authoritative run `4e634017-e28e-4a29-8f9d-e0fa3366ae7b`, and the next slice has not yet been selected in repo-local queue state.
 
 ## Next Task
 
-After the specification is accepted, the recommended first implementation slice is the runtime/domain schema layer for coverage items, gap records, checkpoints, and progress proofs.
+After this slice clears review and live-proof gates, the next recommended slice is CLI/report/status expansion for `coverage`, `gaps`, `checkpoint`, and `resume` surfaces plus richer gap reporting.
 
 ## Blockers
 
-- None.
+- None at the package-maintainer workflow layer. The next recommended work is follow-up CLI/report/status expansion for autonomous coverage, gaps, checkpoint, and resume surfaces.
 
 ## Verification Summary
 
@@ -82,6 +82,19 @@ After the specification is accepted, the recommended first implementation slice 
 - `npm test` passed on 2026-05-15 for `2026-05-15-strict-default-reasoning`, including strict-default runtime routing, CLI default parsing, report semantics, and orchestration eval fixture coverage.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15.
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15 after seeding authoritative runtime proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad`.
+- `node --experimental-strip-types --test tests/service.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including autonomous-execution runtime state and terminal completion blocking coverage.
+- `node --experimental-strip-types --test tests/workflow-check.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including autonomous artifact enforcement and fixture verification coverage.
+- `node --experimental-strip-types --test tests/workflow-scaffold.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including starter-workflow compatibility under the stronger contract.
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`.
+- `npm run health` passed on 2026-05-15 after repairing the source repo to use an isolated local PG18 + `pgvector` runtime on port `55432`.
+- `npm run migrate` passed on 2026-05-15 against the repaired local runtime.
+- `npm run bootstrap` passed on 2026-05-15 against the repaired local runtime.
+- `npm run verify:setup` passed on 2026-05-15 against the repaired local runtime.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 and produced authoritative run `4e634017-e28e-4a29-8f9d-e0fa3366ae7b`.
+- `node --experimental-strip-types src/admin.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 with `authorityLabel=runtime_authoritative`, `taskStatus=approved`, and authenticated required reviews.
+- `node --experimental-strip-types src/admin.ts advance-active-task --workspace-slug default --project-slug devgod` returned a clean dry run on 2026-05-15 after queue-state backfill from the repaired seed path.
+- `node --experimental-strip-types src/admin.ts advance-active-task --workspace-slug default --project-slug devgod --apply` passed on 2026-05-15 and left runtime queue state with no current task.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 after the local runtime repair and authoritative workflow-proof seeding.
 - `node --experimental-strip-types --test tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/admin.test.ts` passed.
 - `npm test` passed.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-loop-surface` passed.
@@ -111,6 +124,7 @@ Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, an
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-layer`, and authoritative local proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-hardening`, and authoritative local proof run `bc242568-80c2-4de6-8768-7a25597306e8` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-strict-default-reasoning`, and authoritative local proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad` approved the task on 2026-05-15.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-autonomous-execution-redesign`, and authoritative local proof run `4e634017-e28e-4a29-8f9d-e0fa3366ae7b` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-13-runtime-loop-surface`, `2026-05-13-runtime-proof-seed`, `2026-05-13-runtime-directive-executor`, `2026-05-14-runtime-loop-history`, `2026-05-14-verification-harness-compat`, and `2026-05-14-runtime-task-advance`. The original control-layer gap around runtime-approved queue advancement is now closed.
 
 ## Active Verification Blocker

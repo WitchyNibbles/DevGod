@@ -257,6 +257,9 @@ config_file="$repo_root/.codex/config.toml"
 brief_template="$repo_root/.devgod/templates/intake-brief.md"
 task_template="$repo_root/.devgod/templates/task-packet.md"
 review_template="$repo_root/.devgod/templates/review-gate.md"
+coverage_manifest_template="$repo_root/.devgod/templates/coverage-manifest.json"
+checkpoint_template="$repo_root/.devgod/templates/checkpoint-summary.md"
+progress_proof_template="$repo_root/.devgod/templates/progress-proof.json"
 
 require_file "$active_file"
 require_file "$agents_file"
@@ -264,6 +267,9 @@ require_file "$config_file"
 require_file "$brief_template"
 require_file "$task_template"
 require_file "$review_template"
+require_file "$coverage_manifest_template"
+require_file "$checkpoint_template"
+require_file "$progress_proof_template"
 
 contract_mode="legacy"
 if grep -Fq 'workflow_runtime=postgres' "$agents_file"; then
@@ -336,6 +342,11 @@ require_heading "## Required reviews" "$task_template"
 require_heading "## Reasoning quality" "$task_template"
 require_heading "## Reasoning policy" "$task_template"
 require_heading "## Reasoning attempts" "$task_template"
+require_heading "## Coverage impact" "$task_template"
+require_heading "## Touched ledger items" "$task_template"
+require_heading "## Required runtime traces" "$task_template"
+require_heading "## Progress proof" "$task_template"
+require_heading "## Interrupt checkpoint policy" "$task_template"
 require_grep '`reviewer`' "$task_template"
 require_grep '`qa_engineer`' "$task_template"
 require_grep '`security_reviewer`' "$task_template"
@@ -399,6 +410,11 @@ if [[ "$live_mode" -eq 1 ]]; then
     "## Inputs" \
     "## Dependencies" \
     "## Outputs" \
+    "## Coverage impact" \
+    "## Touched ledger items" \
+    "## Required runtime traces" \
+    "## Progress proof" \
+    "## Interrupt checkpoint policy" \
     "## Allowed write scope" \
     "## Out of scope" \
     "## Assumptions" \
@@ -462,6 +478,11 @@ if [[ "$live_mode" -eq 1 ]]; then
     "## Inputs" \
     "## Dependencies" \
     "## Outputs" \
+    "## Coverage impact" \
+    "## Touched ledger items" \
+    "## Required runtime traces" \
+    "## Progress proof" \
+    "## Interrupt checkpoint policy" \
     "## Allowed write scope" \
     "## Out of scope" \
     "## Acceptance criteria" \
@@ -503,6 +524,31 @@ if [[ "$live_mode" -eq 1 ]]; then
   [[ "${#live_quality_gates[@]}" -gt 0 ]] || fail "missing live quality gates in ${task_file#"$repo_root"/}"
   for gate in "${live_quality_gates[@]}"; do
     [[ -n "${supported_quality_gate_map[$gate]:-}" ]] || fail "unsupported quality gate in ${task_file#"$repo_root"/}: $gate"
+  done
+fi
+
+if [[ -f "$task_file" ]]; then
+  mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
+  coverage_manifest_file="$repo_root/.devgod/work/coverage/coverage-${artifact_task_id}.json"
+  progress_proof_file="$repo_root/.devgod/work/proofs/progress-${artifact_task_id}.json"
+  checkpoint_file="$repo_root/.devgod/work/checkpoints/checkpoint-${artifact_task_id}.md"
+
+  for gate in "${task_quality_gates[@]}"; do
+    case "$gate" in
+      coverage_ledger_required)
+        require_file "$coverage_manifest_file"
+        ;;
+      progress_proof_required)
+        require_file "$progress_proof_file"
+        ;;
+      checkpoint_resume_required)
+        require_file "$checkpoint_file"
+        ;;
+      memory_compaction_required)
+        require_file "$checkpoint_file"
+        require_grep 'memory://' "$checkpoint_file"
+        ;;
+    esac
   done
 fi
 

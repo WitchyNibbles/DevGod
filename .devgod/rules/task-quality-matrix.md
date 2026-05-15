@@ -57,6 +57,26 @@ Use task-type quality gates in addition to the generic review trio.
 
 - use when setup, bootstrap, migrations, or environment-sensitive flows change
 
+### `coverage_ledger_required`
+
+- use when completion depends on measurable subsystem or analysis coverage, not only task status
+- requires a coverage manifest plus touched-scope ledger evidence
+
+### `progress_proof_required`
+
+- use when the task must prove stateful forward progress across loop cycles
+- requires at least one recorded progress proof with coverage or gap deltas
+
+### `checkpoint_resume_required`
+
+- use when the task must survive interruption without losing execution authority
+- requires at least one checkpoint with resume-ready next actions
+
+### `memory_compaction_required`
+
+- use when long-running work needs compressed context linked back to authoritative state
+- requires the latest checkpoint to cite a compressed context reference
+
 ### `reasoning_dual_required`
 
 - use when a task is being upgraded from legacy reasoning semantics into the new structured model

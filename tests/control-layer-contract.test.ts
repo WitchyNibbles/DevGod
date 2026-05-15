@@ -38,15 +38,26 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(intakeBrief, /## Bad-path or edge-case outcomes/);
 
   assert.match(taskPacket, /`regression_safety_required`/);
+  assert.match(taskPacket, /`coverage_ledger_required`/);
+  assert.match(taskPacket, /`progress_proof_required`/);
+  assert.match(taskPacket, /`checkpoint_resume_required`/);
   assert.match(taskPacket, /## Behavior to preserve/);
   assert.match(taskPacket, /## Reasoning quality/);
   assert.match(taskPacket, /## Reasoning policy/);
   assert.match(taskPacket, /## Reasoning attempts/);
+  assert.match(taskPacket, /## Coverage impact/);
+  assert.match(taskPacket, /## Touched ledger items/);
+  assert.match(taskPacket, /## Required runtime traces/);
+  assert.match(taskPacket, /## Progress proof/);
+  assert.match(taskPacket, /## Interrupt checkpoint policy/);
   assert.match(taskPacket, /## Bad-path or edge-case checks/);
   assert.match(taskPacket, /## Residual risk disposition/);
 
   assert.match(qualityMatrix, /refactors and rewrites must preserve intended behavior/i);
   assert.match(qualityMatrix, /### `regression_safety_required`/);
+  assert.match(qualityMatrix, /### `coverage_ledger_required`/);
+  assert.match(qualityMatrix, /### `progress_proof_required`/);
+  assert.match(qualityMatrix, /### `checkpoint_resume_required`/);
   assert.match(qualityMatrix, /### `reasoning_strict_required`/);
   assert.match(qualityMatrix, /discovered `CRITICAL` or `HIGH` defects in touched scope/i);
   assert.match(reasoningQuality, /facts, assumptions, and guesses/i);

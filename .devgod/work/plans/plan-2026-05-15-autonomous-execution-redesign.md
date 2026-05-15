@@ -6,25 +6,26 @@
 
 ## Scope
 
-- define the strict autonomous execution model for DevGod
-- specify coverage-ledger, gap-detection, continuation, and validation systems
-- map the redesign onto current runtime, CLI, workflow, and rule surfaces
-- produce a gold-standard operational prompt and implementation roadmap
+- implement the first autonomous-execution redesign slice in runtime and workflow enforcement code
+- keep storage additive by using typed runtime metadata rather than a new persistence backend
+- harden scaffolded and installed workflow artifacts around coverage manifests, progress proofs, and checkpoints
 
 ## Research summary
 
-- Current DevGod already has authoritative runtime workflow proof, queue advancement, and reasoning-quality enforcement.
-- The main missing layer is coverage authority across codebase surfaces and a deeper execution state machine for repo comprehension, runtime tracing, and rewrite gating.
-- Existing artifacts already provide a good insertion point for persistent ledgers, execution checkpoints, and review evidence.
+- the redesign spec already identifies schema/runtime state, workflow checks, and template changes as the recommended first slice
+- current `project_runtime_state.metadata` is the least disruptive place to persist autonomous-execution state
+- the workflow checker and scaffold generator are the highest-leverage repo surfaces for fail-closed enforcement
 
 ## Planned changes
 
-1. Create the active-task workflow artifacts for the redesign slice.
-2. Write a full redesign spec in `docs/` covering the mandatory systems, state machine, subagents, ledgers, and enforcement model.
-3. Update live product-state and task-queue artifacts so the new redesign task is visible in current package operations.
-4. Run a consistency pass on the spec and workflow artifact references.
+1. Extend domain types with autonomous-execution state, coverage/gap/proof/checkpoint records, and new quality gates.
+2. Add runtime helpers plus core-service persistence and completion blocking for autonomous execution state.
+3. Extend workflow templates, quality-gate rules, checker enforcement, and fixture/scaffold generation for the new artifact contract.
+4. Add targeted tests and task-local coverage/proof/checkpoint artifacts for this active slice.
 
 ## Verification
 
-- `rg -n "EXHAUSTIVE EXECUTION MODE|COVERAGE LEDGER SYSTEM|GOLD STANDARD OPERATIONAL PROMPT" docs/autonomous-execution-redesign.md`
-- `rg -n "2026-05-15-autonomous-execution-redesign" .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-15-autonomous-execution-redesign.md .devgod/work/plans/plan-2026-05-15-autonomous-execution-redesign.md .devgod/work/tasks/task-2026-05-15-autonomous-execution-redesign.md`
+- `node --experimental-strip-types --test tests/service.test.ts`
+- `node --experimental-strip-types --test tests/workflow-check.test.ts`
+- `node --experimental-strip-types --test tests/workflow-scaffold.test.ts`
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts`

@@ -1238,6 +1238,45 @@ function parseTaskQueueRecord(candidate: TaskQueue | Record<string, unknown> | u
   return parseTaskQueueContent(JSON.stringify(candidate ?? buildDefaultTaskQueue()));
 }
 
+function alignQueueToActiveTask(
+  candidate: TaskQueue | Record<string, unknown> | undefined,
+  taskId: string
+): TaskQueue {
+  const queue = parseTaskQueueRecord(candidate);
+  const existingTask = queue.tasks.find((task) => task.id === taskId);
+
+  const tasks = existingTask
+    ? queue.tasks.map((task) =>
+        task.id === taskId
+      ? {
+          ...task,
+          status: "in_progress" as const,
+          blocker: null
+        }
+          : task
+      )
+    : [
+        ...queue.tasks,
+        {
+          id: taskId,
+          title: taskId,
+          status: "in_progress" as const,
+          class: "release_candidate" as const,
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ];
+
+  return {
+    project_status: "in_progress",
+    current_task_id: taskId,
+    tasks
+  };
+}
+
 function collectCommandFlagValues(args: readonly string[], flag: string): string[] {
   const values: string[] = [];
 
@@ -2639,7 +2678,7 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     workspaceId: projectContext.workspace.id,
     activeRunId: run.id,
     activeTaskId: resolvedTaskId,
-    taskQueue: projectRuntimeState?.taskQueue ?? buildDefaultTaskQueue(),
+    taskQueue: alignQueueToActiveTask(projectRuntimeState?.taskQueue, resolvedTaskId),
     productState: projectRuntimeState?.productState ?? buildDefaultProductState(),
     lastVerifiedRunId: proof.runId,
     metadata: projectRuntimeState?.metadata ?? {},

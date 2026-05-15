@@ -2639,6 +2639,265 @@ test("getExecutionPlan returns complete when all tasks are terminal", async () =
   assert.equal(plan.directive.kind, "complete");
 });
 
+test("getStatus surfaces autonomous execution coverage and readiness when configured", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite readiness",
+    request: "Track coverage and progress for the rewrite gate."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "runtime_tracing",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "task:final-review",
+    whyNext: "all critical coverage thresholds are now satisfied",
+    createdAt: new Date().toISOString()
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-1",
+    phase: "final_verification",
+    activeTargets: ["task:final-review"],
+    recentEvidenceRefs: ["src/core/service.ts:1"],
+    openGaps: [],
+    nextActions: ["request final reviews"],
+    compressedContextRef: "memory://cp-1",
+    createdAt: new Date().toISOString()
+  });
+
+  const status = await service.getStatus(run.id);
+
+  assert.ok(status.autonomousExecution);
+  assert.equal(status.autonomousExecution?.state.profile, "legacy_rewrite");
+  assert.equal(status.autonomousExecution?.coverageSummary.criticalItemCoverage, 1);
+  assert.equal(status.autonomousExecution?.coverageSummary.runtimeTraceCoverage, 1);
+  assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
+});
+
+test("getExecutionPlan blocks terminal tasks when autonomous execution evidence is missing", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite readiness",
+    request: "Do not mark the rewrite ready without coverage evidence."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["task packet captured autonomous execution gates"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "blocked");
+  if (plan.directive.kind === "blocked") {
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("coverage manifest")));
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("progress proof")));
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("checkpoint")));
+  }
+});
+
+test("getExecutionPlan returns complete once autonomous execution evidence satisfies the gates", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite readiness",
+    request: "Allow completion only after the autonomous proof stack is in place."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required",
+        "memory_compaction_required"
+      ]
+    })
+  ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous execution artifacts recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 4,
+      callsitesAnalyzed: 4,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 2, opened: 0 },
+    nextTarget: "review:authenticated",
+    whyNext: "all required autonomous gates are satisfied",
+    createdAt: new Date().toISOString()
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-1",
+    phase: "final_verification",
+    activeTargets: ["review:authenticated"],
+    recentEvidenceRefs: ["src/core/service.ts:1"],
+    openGaps: [],
+    nextActions: ["run workflow proof"],
+    compressedContextRef: "memory://cp-1",
+    createdAt: new Date().toISOString()
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "complete");
+  assert.ok(plan.autonomousExecution);
+  assert.equal(plan.autonomousExecution?.phaseReadiness.status, "ready");
+});
+
 test("getExecutionPlan returns blocked when work is already in progress", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({

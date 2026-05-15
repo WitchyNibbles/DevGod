@@ -1644,7 +1644,38 @@ function buildBriefFromTemplate(templateContent: string, taskId: string): string
 function buildTaskFromTemplate(templateContent: string, taskId: string): string {
   return replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
-    .replace("`artifact_complete | specialist_verified`", "`artifact_complete`");
+    .replace("`artifact_complete | specialist_verified`", "`artifact_complete`")
+    .replace(
+      [
+        "List the specialist roles whose execution must be evidenced before completion.",
+        "",
+        "## Quality gates",
+        "",
+        "List the task-type gates that apply, for example:",
+        "",
+        "- `product_acceptance`",
+        "- `frontend_acceptance`",
+        "- `accessibility_acceptance`",
+        "- `responsive_acceptance`",
+        "- `tdd_required`",
+        "- `e2e_required`",
+        "- `regression_safety_required`",
+        "- `release_readiness_required`",
+        "- `performance_check_required`",
+        "- `setup_replay_required`",
+        "- `coverage_ledger_required`",
+        "- `progress_proof_required`",
+        "- `checkpoint_resume_required`",
+        "- `memory_compaction_required`"
+      ].join("\n"),
+      [
+        "- `planner`",
+        "",
+        "## Quality gates",
+        "",
+        "- `product_acceptance`"
+      ].join("\n")
+    );
 }
 
 function extractMarkdownSection(content: string, heading: string): string | undefined {

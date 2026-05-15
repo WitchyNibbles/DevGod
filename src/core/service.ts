@@ -18,18 +18,34 @@ import {
   findTaskDependencies,
   getRoleRetrievalGuidance
 } from "./policy.ts";
+import {
+  buildAutonomousExecutionSnapshot,
+  collectAutonomousExecutionBlockers,
+  createAutonomousExecutionState,
+  mergeCoverageGaps,
+  mergeCoverageItems,
+  runRequiresAutonomousExecution
+} from "../runtime/autonomous-execution.ts";
 import { annotateConflictSignals, isProvenancedSearchResult } from "./search-memory-results.ts";
 import type {
   ResolveReviewActionContext,
   ReviewActionContextResolverInput
 } from "./review-context.ts";
 import type {
+  AnalysisPhase,
+  AutonomousExecutionState,
+  CheckpointRecord,
+  CoverageGapRecord,
+  CoverageItemRecord,
+  CoverageManifestRecord,
   HandoffInput,
   IntakeRequestInput,
   LockRecord,
   MemoryPromotionInput,
   PlanArtifact,
   PlanInput,
+  ProgressProofRecord,
+  ProjectRuntimeMetadata,
   RunExecutionPlan,
   RunResumeSnapshot,
   ReviewInput,
@@ -141,6 +157,23 @@ function buildDefaultProductState(): Record<string, unknown> {
   };
 }
 
+function asProjectRuntimeMetadata(
+  metadata: ProjectRuntimeMetadata | Record<string, unknown> | undefined
+): ProjectRuntimeMetadata {
+  return { ...(metadata ?? {}) };
+}
+
+function readAutonomousExecutionState(
+  metadata: ProjectRuntimeMetadata | Record<string, unknown> | undefined
+): AutonomousExecutionState | undefined {
+  const candidate = (metadata as ProjectRuntimeMetadata | undefined)?.autonomousExecution;
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+
+  return candidate;
+}
+
 function mapTaskStatusToQueueStatus(status: TaskRecord["status"]): QueueTaskStatus {
   switch (status) {
     case "ready":
@@ -222,6 +255,196 @@ export class DevgodCoreService {
   constructor(store: DevgodStore, options: DevgodCoreServiceOptions = {}) {
     this.store = store;
     this.resolveReviewActionContext = options.resolveReviewActionContext;
+  }
+
+  private async saveAutonomousExecutionState(
+    run: RunRecord,
+    update: (current: AutonomousExecutionState | undefined, now: string) => AutonomousExecutionState
+  ): Promise<AutonomousExecutionState> {
+    const now = timestamp();
+    const existingState = await this.store.getProjectRuntimeState(run.projectId);
+    const metadata = asProjectRuntimeMetadata(existingState?.metadata);
+    const nextAutonomousExecution = update(readAutonomousExecutionState(metadata), now);
+
+    await this.store.saveProjectRuntimeState({
+      projectId: run.projectId,
+      workspaceId: run.workspaceId,
+      activeRunId: existingState?.activeRunId ?? run.id,
+      activeTaskId: existingState?.activeTaskId,
+      taskQueue: existingState?.taskQueue ?? buildDefaultTaskQueue(),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: {
+        ...metadata,
+        autonomousExecution: {
+          ...nextAutonomousExecution,
+          updatedAt: now
+        }
+      },
+      createdAt: existingState?.createdAt ?? now,
+      updatedAt: now
+    });
+
+    return {
+      ...nextAutonomousExecution,
+      updatedAt: now
+    };
+  }
+
+  async getAutonomousExecutionState(runId: string): Promise<AutonomousExecutionState | undefined> {
+    const run = await this.requireRun(runId);
+    const state = await this.store.getProjectRuntimeState(run.projectId);
+    return readAutonomousExecutionState(state?.metadata);
+  }
+
+  async configureAutonomousExecution(
+    runId: string,
+    input: {
+      profile?: AutonomousExecutionState["profile"] | undefined;
+      phase?: AnalysisPhase | undefined;
+      manifest?: CoverageManifestRecord | undefined;
+      pendingInvestigations?: string[] | undefined;
+    }
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const nextState = await this.saveAutonomousExecutionState(run, (current, now) => ({
+      ...(current ?? createAutonomousExecutionState({
+        now,
+        profile: input.profile,
+        manifest: input.manifest,
+        phase: input.phase
+      })),
+      enabled: true,
+      profile: input.profile ?? current?.profile ?? "standard_delivery",
+      phase: input.phase ?? current?.phase ?? "discovery",
+      manifest: input.manifest ?? current?.manifest,
+      pendingInvestigations: input.pendingInvestigations ?? current?.pendingInvestigations ?? [],
+      coverageItems: current?.coverageItems ?? [],
+      gaps: current?.gaps ?? [],
+      checkpoints: current?.checkpoints ?? [],
+      progressProofs: current?.progressProofs ?? [],
+      executionEpoch: current?.executionEpoch ?? 1
+    }));
+
+    if (nextState.manifest) {
+      await this.store.saveWorkflowDocument({
+        id: randomUUID(),
+        workspaceId: run.workspaceId,
+        projectId: run.projectId,
+        runId: run.id,
+        kind: "coverage_manifest",
+        title: `coverage manifest ${run.id}`,
+        body: JSON.stringify(nextState.manifest, null, 2),
+        metadata: {
+          source: "runtime_autonomous_execution"
+        },
+        createdAt: nextState.updatedAt,
+        updatedAt: nextState.updatedAt
+      });
+    }
+
+    return nextState;
+  }
+
+  async upsertCoverageItems(runId: string, items: CoverageItemRecord[]): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        coverageItems: mergeCoverageItems(base.coverageItems, items)
+      };
+    });
+  }
+
+  async upsertCoverageGaps(runId: string, gaps: CoverageGapRecord[]): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        gaps: mergeCoverageGaps(base.gaps, gaps)
+      };
+    });
+  }
+
+  async recordProgressProof(
+    runId: string,
+    proof: ProgressProofRecord
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      const progressProofs = [...base.progressProofs, proof].sort((left, right) => left.cycle - right.cycle);
+      return {
+        ...base,
+        enabled: true,
+        phase: proof.phaseAfter,
+        progressProofs,
+        lastProgressProofId: proof.proofId
+      };
+    });
+
+    await this.store.saveWorkflowDocument({
+      id: randomUUID(),
+      workspaceId: run.workspaceId,
+      projectId: run.projectId,
+      runId: run.id,
+      kind: "progress_proof",
+      title: `progress proof ${proof.proofId}`,
+      body: JSON.stringify(proof, null, 2),
+      metadata: {
+        source: "runtime_autonomous_execution"
+      },
+      createdAt: proof.createdAt,
+      updatedAt: nextState.updatedAt
+    });
+
+    return nextState;
+  }
+
+  async checkpointRun(
+    runId: string,
+    checkpoint: Omit<CheckpointRecord, "runId">
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const fullCheckpoint: CheckpointRecord = {
+      ...checkpoint,
+      runId
+    };
+    const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      const checkpoints = [...base.checkpoints, fullCheckpoint].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt)
+      );
+      return {
+        ...base,
+        enabled: true,
+        phase: checkpoint.phase,
+        checkpoints,
+        lastCheckpointId: checkpoint.checkpointId,
+        lastSuccessfulCheckpointId: checkpoint.checkpointId
+      };
+    });
+
+    await this.store.saveWorkflowDocument({
+      id: randomUUID(),
+      workspaceId: run.workspaceId,
+      projectId: run.projectId,
+      runId: run.id,
+      kind: "checkpoint_summary",
+      title: `checkpoint ${checkpoint.checkpointId}`,
+      body: JSON.stringify(fullCheckpoint, null, 2),
+      metadata: {
+        source: "runtime_autonomous_execution"
+      },
+      createdAt: checkpoint.createdAt,
+      updatedAt: nextState.updatedAt
+    });
+
+    return nextState;
   }
 
   async intakeRequest(input: IntakeRequestInput): Promise<RunRecord> {
@@ -363,6 +586,16 @@ export class DevgodCoreService {
       createdAt: existingState?.createdAt ?? now,
       updatedAt: now
     });
+
+    if (runRequiresAutonomousExecution(tasks)) {
+      await this.saveAutonomousExecutionState(run, (current, currentNow) =>
+        current ??
+        createAutonomousExecutionState({
+          now: currentNow
+        })
+      );
+    }
+
     return tasks;
   }
 
@@ -672,6 +905,8 @@ export class DevgodCoreService {
     const plan = await this.store.getPlan(runId);
     const tasks = await this.store.getTasksByRun(runId);
     const activeLocks = await this.store.getActiveLocks(run.projectId);
+    const runtimeState = await this.store.getProjectRuntimeState(run.projectId);
+    const autonomousExecutionState = readAutonomousExecutionState(runtimeState?.metadata);
     const blockerEntries = await Promise.all(
       tasks.map(async (task) => ({
         taskId: task.packet.taskId,
@@ -691,7 +926,11 @@ export class DevgodCoreService {
       tasks,
       activeLocks,
       blockers,
-      nextTaskIds
+      nextTaskIds,
+      autonomousExecution:
+        autonomousExecutionState && autonomousExecutionState.enabled
+          ? buildAutonomousExecutionSnapshot(autonomousExecutionState)
+          : undefined
     };
   }
 
@@ -706,6 +945,10 @@ export class DevgodCoreService {
     const recovery = await this.inspectRecovery(runId, {
       staleAfterHours: options.staleAfterHours
     });
+    const autonomousExecution = snapshot.autonomousExecution;
+    const autonomousExecutionBlockers = autonomousExecution
+      ? collectAutonomousExecutionBlockers(autonomousExecution.state, snapshot.tasks)
+      : [];
 
     const safeRecoveryActions = recovery.actions.filter((action) => action.safeToApply);
     if (safeRecoveryActions.length > 0) {
@@ -713,6 +956,7 @@ export class DevgodCoreService {
         mode: "runtime_authoritative",
         runId,
         runStatus: snapshot.run.status,
+        autonomousExecution,
         directive: {
           kind: "apply_recovery",
           actions: safeRecoveryActions,
@@ -732,6 +976,7 @@ export class DevgodCoreService {
         mode: "runtime_authoritative",
         runId,
         runStatus: snapshot.run.status,
+        autonomousExecution,
         directive: {
           kind: "dispatch_reviews",
           recommendations: reviewRecommendations,
@@ -754,6 +999,7 @@ export class DevgodCoreService {
         mode: "runtime_authoritative",
         runId,
         runStatus: snapshot.run.status,
+        autonomousExecution,
         directive: {
           kind: "dispatch_owner",
           recommendation: ownerRecommendation,
@@ -778,6 +1024,7 @@ export class DevgodCoreService {
           mode: "runtime_authoritative",
           runId,
           runStatus: snapshot.run.status,
+          autonomousExecution,
           directive: {
             kind: "blocked",
             blockers: reasoningBlockers,
@@ -792,10 +1039,28 @@ export class DevgodCoreService {
       const reasoningWarnings = reasoningAssessments.flatMap(({ taskId, assessment }) =>
         assessment.warnings.map((warning) => `${taskId}: ${warning.message}`)
       );
+      if (autonomousExecutionBlockers.length > 0) {
+        return {
+          mode: "runtime_authoritative",
+          runId,
+          runStatus: snapshot.run.status,
+          autonomousExecution,
+          directive: {
+            kind: "blocked",
+            blockers: autonomousExecutionBlockers,
+            rationale: [
+              "all tasks are terminal, but autonomous execution requirements still block completion",
+              ...autonomousExecutionBlockers.map((blocker) => `autonomous-execution: ${blocker}`)
+            ]
+          }
+        };
+      }
+
       return {
         mode: "runtime_authoritative",
         runId,
         runStatus: snapshot.run.status,
+        autonomousExecution,
         directive: {
           kind: "complete",
           rationale: [
@@ -818,6 +1083,7 @@ export class DevgodCoreService {
       mode: "runtime_authoritative",
       runId,
       runStatus: snapshot.run.status,
+      autonomousExecution,
       directive: {
         kind: "blocked",
         blockers,
