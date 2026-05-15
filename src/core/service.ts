@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { TaskClass, TaskStatus as QueueTaskStatus, TaskQueue } from "../devgod/task-queue.ts";
 import {
   validateReviewAction,
   validateHandoff,
@@ -125,6 +126,71 @@ function parseProjectSelectorFromId(projectId: string):
   };
 }
 
+function buildDefaultTaskQueue(): TaskQueue {
+  return {
+    project_status: "idle",
+    current_task_id: null,
+    tasks: []
+  };
+}
+
+function buildDefaultProductState(): Record<string, unknown> {
+  return {
+    status: "idle",
+    items: []
+  };
+}
+
+function mapTaskStatusToQueueStatus(status: TaskRecord["status"]): QueueTaskStatus {
+  switch (status) {
+    case "ready":
+      return "pending";
+    case "in_progress":
+      return "in_progress";
+    case "approved":
+    case "done":
+      return "done";
+    case "blocked":
+    case "review_blocked":
+      return "blocked";
+  }
+}
+
+function mapTaskPacketToQueueClass(packet: TaskPacketInput): TaskClass {
+  if (packet.qualityGates.includes("release_readiness_required")) {
+    return "release_candidate";
+  }
+
+  if (packet.qualityGates.includes("product_acceptance")) {
+    return "prototype_slice";
+  }
+
+  return "docs_only";
+}
+
+function buildRuntimeTaskQueue(runStatus: RunRecord["status"], tasks: readonly TaskRecord[], activeTaskId?: string | undefined): TaskQueue {
+  return {
+    project_status: runStatus,
+    current_task_id: activeTaskId ?? tasks.find((task) => task.status === "in_progress")?.packet.taskId ?? null,
+    tasks: tasks.map((task) => ({
+      id: task.packet.taskId,
+      title: task.packet.title,
+      status: mapTaskStatusToQueueStatus(task.status),
+      class: mapTaskPacketToQueueClass(task.packet),
+      depends_on: [...task.packet.dependencies],
+      acceptance_criteria: [...task.packet.acceptanceCriteria],
+      verification: [...task.packet.verificationSteps],
+      evidence: [],
+      blocker:
+        task.status === "blocked"
+          ? "runtime task blocked"
+          : task.status === "review_blocked"
+            ? "awaiting required reviews"
+            : null
+    }))
+  };
+}
+
 function deriveRunStatus(tasks: readonly TaskRecord[]): RunRecord["status"] {
   if (tasks.length === 0) {
     return "decomposed";
@@ -174,6 +240,19 @@ export class DevgodCoreService {
       updatedAt: now
     };
     await this.store.createRun(run);
+    const existingState = await this.store.getProjectRuntimeState(project.id);
+    await this.store.saveProjectRuntimeState({
+      projectId: project.id,
+      workspaceId: workspace.id,
+      activeRunId: run.id,
+      activeTaskId: existingState?.activeTaskId,
+      taskQueue: existingState?.taskQueue ?? buildDefaultTaskQueue(),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: existingState?.metadata ?? {},
+      createdAt: existingState?.createdAt ?? now,
+      updatedAt: now
+    });
     return run;
   }
 
@@ -195,6 +274,20 @@ export class DevgodCoreService {
     };
 
     await this.store.savePlan(artifact);
+    await this.store.saveWorkflowDocument({
+      id: randomUUID(),
+      workspaceId: run.workspaceId,
+      projectId: run.projectId,
+      runId: run.id,
+      kind: "plan",
+      title: artifact.title,
+      body: JSON.stringify(plan, null, 2),
+      metadata: {
+        source: "runtime_plan"
+      },
+      createdAt: now,
+      updatedAt: now
+    });
     await this.store.updateRun({
       ...run,
       status: "planned",
@@ -235,9 +328,39 @@ export class DevgodCoreService {
     }));
 
     await this.store.replaceTasks(tasks);
+    for (const task of tasks) {
+      await this.store.saveWorkflowDocument({
+        id: randomUUID(),
+        workspaceId: task.workspaceId,
+        projectId: task.projectId,
+        runId: task.runId,
+        taskId: task.packet.taskId,
+        kind: "task_packet",
+        title: task.packet.title,
+        body: JSON.stringify(task.packet, null, 2),
+        metadata: {
+          source: "runtime_task_graph"
+        },
+        createdAt: now,
+        updatedAt: now
+      });
+    }
     await this.store.updateRun({
       ...run,
       status: "decomposed",
+      updatedAt: now
+    });
+    const existingState = await this.store.getProjectRuntimeState(run.projectId);
+    await this.store.saveProjectRuntimeState({
+      projectId: run.projectId,
+      workspaceId: run.workspaceId,
+      activeRunId: run.id,
+      activeTaskId: existingState?.activeTaskId,
+      taskQueue: buildRuntimeTaskQueue("decomposed", tasks, existingState?.activeTaskId),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: existingState?.metadata ?? {},
+      createdAt: existingState?.createdAt ?? now,
       updatedAt: now
     });
     return tasks;
@@ -276,6 +399,21 @@ export class DevgodCoreService {
       createdAt: timestamp()
     });
     await this.bumpRunState(runId, "in_progress");
+    const existingState = await this.store.getProjectRuntimeState(task.projectId);
+    await this.store.saveProjectRuntimeState({
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      activeRunId: runId,
+      activeTaskId: taskId,
+      taskQueue: buildRuntimeTaskQueue("in_progress", allTasks.map((candidate) =>
+        candidate.packet.taskId === taskId ? claimedTask : candidate
+      ), taskId),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: existingState?.metadata ?? {},
+      createdAt: existingState?.createdAt ?? timestamp(),
+      updatedAt: timestamp()
+    });
     return claimedTask;
   }
 
@@ -324,6 +462,29 @@ export class DevgodCoreService {
       updatedAt: timestamp()
     });
     await this.bumpRunState(runId, "review_blocked");
+    const allTasks = await this.store.getTasksByRun(runId);
+    const reviewBlockedTasks = allTasks.map((candidate) =>
+      candidate.packet.taskId === taskId
+        ? {
+            ...candidate,
+            status: "review_blocked" as const,
+            updatedAt: record.createdAt
+          }
+        : candidate
+    );
+    const existingState = await this.store.getProjectRuntimeState(task.projectId);
+    await this.store.saveProjectRuntimeState({
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      activeRunId: runId,
+      activeTaskId: taskId,
+      taskQueue: buildRuntimeTaskQueue("review_blocked", reviewBlockedTasks, taskId),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: existingState?.metadata ?? {},
+      createdAt: existingState?.createdAt ?? record.createdAt,
+      updatedAt: record.createdAt
+    });
     return record;
   }
 
@@ -402,6 +563,47 @@ export class DevgodCoreService {
 
     await this.store.updateTask(updatedTask);
     await this.bumpRunState(runId, nextStatus);
+    const allTasks = await this.store.getTasksByRun(runId);
+    const syncedTasks = allTasks.map((candidate) =>
+      candidate.packet.taskId === taskId ? updatedTask : candidate
+    );
+    const existingState = await this.store.getProjectRuntimeState(task.projectId);
+    const activeTaskId = syncedTasks.find((candidate) => candidate.status === "in_progress")?.packet.taskId;
+    await this.store.saveProjectRuntimeState({
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      activeRunId: runId,
+      activeTaskId,
+      taskQueue: buildRuntimeTaskQueue(deriveRunStatus(syncedTasks), syncedTasks, activeTaskId),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: nextStatus === "approved" ? runId : existingState?.lastVerifiedRunId,
+      metadata: existingState?.metadata ?? {},
+      createdAt: existingState?.createdAt ?? timestamp(),
+      updatedAt: timestamp()
+    });
+    await this.store.saveWorkflowDocument({
+      id: randomUUID(),
+      workspaceId: task.workspaceId,
+      projectId: task.projectId,
+      runId,
+      taskId,
+      kind: "review_summary",
+      title: `Review summary: ${taskId}`,
+      body: JSON.stringify(
+        {
+          review: reviewRecord,
+          blockers: decision.blockers,
+          status: nextStatus
+        },
+        null,
+        2
+      ),
+      metadata: {
+        source: "runtime_review"
+      },
+      createdAt: reviewRecord.createdAt,
+      updatedAt: reviewRecord.createdAt
+    });
     return {
       review: reviewRecord,
       blockers: decision.blockers,

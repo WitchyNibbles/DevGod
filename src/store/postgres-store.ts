@@ -5,6 +5,7 @@ import type {
   MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
+  ProjectRuntimeStateRecord,
   ProjectRecord,
   RetrievalRole,
   ReviewRecord,
@@ -13,6 +14,7 @@ import type {
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
+  WorkflowDocumentRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
 import {
@@ -302,6 +304,146 @@ export class PostgresStore implements DevgodStore {
        order by created_at asc`,
       [projectId]
     );
+    return result.rows.map((row) => row.payload);
+  }
+
+  async saveProjectRuntimeState(state: ProjectRuntimeStateRecord): Promise<void> {
+    await this.client.query(
+      `insert into project_runtime_state (
+         project_id,
+         workspace_id,
+         active_run_id,
+         active_task_id,
+         task_queue,
+         product_state,
+         last_verified_run_id,
+         metadata
+       )
+       values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb)
+       on conflict (project_id) do update
+       set workspace_id = excluded.workspace_id,
+           active_run_id = excluded.active_run_id,
+           active_task_id = excluded.active_task_id,
+           task_queue = excluded.task_queue,
+           product_state = excluded.product_state,
+           last_verified_run_id = excluded.last_verified_run_id,
+           metadata = excluded.metadata,
+           updated_at = now()`,
+      [
+        state.projectId,
+        state.workspaceId,
+        state.activeRunId ?? null,
+        state.activeTaskId ?? null,
+        JSON.stringify(state.taskQueue),
+        JSON.stringify(state.productState),
+        state.lastVerifiedRunId ?? null,
+        JSON.stringify(state.metadata)
+      ]
+    );
+  }
+
+  async getProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStateRecord | undefined> {
+    const result = await this.client.query<JsonRow<ProjectRuntimeStateRecord>>(
+      `select jsonb_build_object(
+          'projectId', project_id,
+          'workspaceId', workspace_id,
+          'activeRunId', active_run_id,
+          'activeTaskId', active_task_id,
+          'taskQueue', task_queue,
+          'productState', product_state,
+          'lastVerifiedRunId', last_verified_run_id,
+          'metadata', metadata,
+          'createdAt', created_at,
+          'updatedAt', updated_at
+       ) as payload
+       from project_runtime_state
+       where project_id = $1`,
+      [projectId]
+    );
+
+    return result.rows[0]?.payload;
+  }
+
+  async saveWorkflowDocument(document: WorkflowDocumentRecord): Promise<void> {
+    await this.client.query(
+      `insert into workflow_documents (
+         id,
+         workspace_id,
+         project_id,
+         run_id,
+         task_id,
+         kind,
+         title,
+         body,
+         metadata
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       on conflict (id) do update
+       set workspace_id = excluded.workspace_id,
+           project_id = excluded.project_id,
+           run_id = excluded.run_id,
+           task_id = excluded.task_id,
+           kind = excluded.kind,
+           title = excluded.title,
+           body = excluded.body,
+           metadata = excluded.metadata,
+           updated_at = now()`,
+      [
+        document.id,
+        document.workspaceId,
+        document.projectId,
+        document.runId ?? null,
+        document.taskId ?? null,
+        document.kind,
+        document.title,
+        document.body,
+        JSON.stringify(document.metadata)
+      ]
+    );
+  }
+
+  async listWorkflowDocuments(params: {
+    projectId: string;
+    runId?: string | undefined;
+    taskId?: string | undefined;
+    kind?: WorkflowDocumentRecord["kind"] | undefined;
+  }): Promise<WorkflowDocumentRecord[]> {
+    const clauses = ["project_id = $1"];
+    const values: unknown[] = [params.projectId];
+
+    if (params.runId) {
+      values.push(params.runId);
+      clauses.push(`run_id = $${values.length}`);
+    }
+    if (params.taskId) {
+      values.push(params.taskId);
+      clauses.push(`task_id = $${values.length}`);
+    }
+    if (params.kind) {
+      values.push(params.kind);
+      clauses.push(`kind = $${values.length}`);
+    }
+
+    const result = await this.client.query<JsonRow<WorkflowDocumentRecord>>(
+      `select jsonb_build_object(
+          'id', id,
+          'workspaceId', workspace_id,
+          'projectId', project_id,
+          'runId', run_id,
+          'taskId', task_id,
+          'kind', kind,
+          'title', title,
+          'body', body,
+          'metadata', metadata,
+          'createdAt', created_at,
+          'updatedAt', updated_at
+       ) as payload
+       from workflow_documents
+       where ${clauses.join(" and ")}
+       order by created_at asc`,
+      values
+    );
+
     return result.rows.map((row) => row.payload);
   }
 

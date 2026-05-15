@@ -1,3 +1,5 @@
+import type { TaskQueue } from "../devgod/task-queue.ts";
+
 export const runStatuses = [
   "intake",
   "planned",
@@ -26,7 +28,17 @@ export const identityAssurances = ["authenticated", "legacy_backfill"] as const;
 export const memoryScopes = ["global", "project"] as const;
 export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
 export const memoryStatuses = ["proposed", "approved", "rejected"] as const;
-export const artifactKinds = ["plan", "markdown_chunk"] as const;
+export const artifactKinds = ["plan", "markdown_chunk", "workflow_document"] as const;
+export const workflowDocumentKinds = [
+  "brief",
+  "plan",
+  "task_packet",
+  "review_summary",
+  "product_state",
+  "task_queue",
+  "export_snapshot",
+  "policy_bundle"
+] as const;
 export const stopGoDecisions = ["go", "needs_review", "stop"] as const;
 export const completionStandards = ["artifact_complete", "specialist_verified"] as const;
 export const reasoningConfidenceLevels = ["low", "medium", "high"] as const;
@@ -121,6 +133,7 @@ export type MemoryScope = (typeof memoryScopes)[number];
 export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];
+export type WorkflowDocumentKind = (typeof workflowDocumentKinds)[number];
 export type StopGoDecision = (typeof stopGoDecisions)[number];
 export type CompletionStandard = (typeof completionStandards)[number];
 export type ReasoningConfidenceLevel = (typeof reasoningConfidenceLevels)[number];
@@ -394,6 +407,33 @@ export interface RuntimeMigrationJournalRecord {
   updatedAt: string;
 }
 
+export interface WorkflowDocumentRecord {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  runId?: string | undefined;
+  taskId?: string | undefined;
+  kind: WorkflowDocumentKind;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRuntimeStateRecord {
+  projectId: string;
+  workspaceId: string;
+  activeRunId?: string | undefined;
+  activeTaskId?: string | undefined;
+  taskQueue: TaskQueue;
+  productState: Record<string, unknown>;
+  lastVerifiedRunId?: string | undefined;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RunRecord {
   id: string;
   workspaceId: string;
@@ -505,8 +545,8 @@ export interface MemoryEntryRecord {
 }
 
 export interface SearchMemoryAuthority {
-  source: "shared_backend_memory" | "repo_artifact";
-  precedence: "retrieval_hint" | "repo_context";
+  source: "shared_backend_memory" | "repo_artifact" | "runtime_document";
+  precedence: "retrieval_hint" | "repo_context" | "runtime_context";
   scope: MemoryScope;
   reviewedBy?: string | undefined;
   authorityLevel?: RetrievalMetadata["authorityLevel"];
@@ -521,9 +561,10 @@ export interface SearchMemoryFreshness {
 }
 
 export interface SearchMemoryCitation {
-  kind: "memory_entry" | "artifact";
+  kind: "memory_entry" | "artifact" | "workflow_document";
   memoryId?: string | undefined;
   artifactId?: string | undefined;
+  documentId?: string | undefined;
   label: string;
   sourcePath?: string | undefined;
   sourceAnchor?: string | undefined;

@@ -8,7 +8,6 @@ export const DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS = [
   "README.md",
   "AGENTS.md",
   "docs",
-  ".devgod",
   ".agents/skills"
 ] as const;
 const DEFAULT_EXCLUDED_SEGMENTS = new Set([".git", "node_modules", "dist", "build", "coverage"]);
@@ -47,6 +46,10 @@ interface MarkdownSection {
   title: string;
   sourceAnchor?: string | undefined;
   lines: string[];
+}
+
+function isRuntimeManagedMarkdownPath(relativePath: string): boolean {
+  return relativePath.startsWith(".devgod/work/") || relativePath.startsWith(".devgod/memory/");
 }
 
 export async function indexRepoMarkdown(input: IndexRepoMarkdownInput): Promise<IndexRepoMarkdownResult> {
@@ -189,7 +192,7 @@ async function collectMarkdownFiles(repoRoot: string, includePaths: readonly str
     }
 
     if (stats === "file") {
-      if (absolutePath.endsWith(".md")) {
+      if (absolutePath.endsWith(".md") && !isRuntimeManagedMarkdownPath(relativePath)) {
         results.add(relativePath);
       }
       continue;
@@ -210,6 +213,9 @@ async function walkMarkdownFiles(repoRoot: string, directory: string): Promise<s
   for (const entry of entries) {
     const absolutePath = path.join(directory, entry.name);
     const relativePath = normalizeRelativePath(repoRoot, absolutePath);
+    if (isRuntimeManagedMarkdownPath(relativePath)) {
+      continue;
+    }
     const pathSegments = relativePath.split("/");
     if (pathSegments.some((segment) => DEFAULT_EXCLUDED_SEGMENTS.has(segment))) {
       continue;
@@ -306,52 +312,8 @@ function buildArtifactMetadata(relativePath: string, chunkIndex: number): Markdo
 }
 
 function rolesForMarkdownPath(relativePath: string): RetrievalRole[] {
-  if (relativePath === "README.md" || relativePath.startsWith(".devgod/rules/") || relativePath.startsWith(".devgod/memory/")) {
+  if (relativePath === "README.md") {
     return [...retrievalRoles];
-  }
-
-  if (relativePath.startsWith(".devgod/work/reviews/")) {
-    return [
-      "planner",
-      "solution_architect",
-      "reviewer",
-      "build_resolver",
-      "security_reviewer",
-      "qa_engineer",
-      "memory_curator"
-    ];
-  }
-
-  if (relativePath.startsWith(".devgod/work/briefs/")) {
-    return [
-      "planner",
-      "product_strategist",
-      "solution_architect",
-      "docs_researcher",
-      "reviewer",
-      "security_reviewer",
-      "qa_engineer",
-      "memory_curator"
-    ];
-  }
-
-  if (
-    relativePath.startsWith(".devgod/work/plans/") ||
-    relativePath.startsWith(".devgod/work/tasks/") ||
-    relativePath.startsWith(".devgod/templates/")
-  ) {
-    return [
-      "planner",
-      "solution_architect",
-      "backend_engineer",
-      "frontend_designer",
-      "infra_engineer",
-      "reviewer",
-      "build_resolver",
-      "security_reviewer",
-      "qa_engineer",
-      "memory_curator"
-    ];
   }
 
   if (relativePath.startsWith("docs/")) {

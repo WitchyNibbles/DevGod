@@ -253,14 +253,14 @@ Once the repo is configured, the intended operating rhythm is:
 
 - substantive requests become `devgod` work by default unless the user opts out
 - the root thread acts as the manager on first contact
-- `.devgod/ACTIVE` is the canonical current-task marker during substantive work
-- active briefs, plans, tasks, and reviews live under `.devgod/work/`
-- repo-local rules live under `.devgod/rules/`
-- reviewed durable memory lives under `.devgod/memory/`
+- canonical active run/task, workflow documents, queue state, and product state live in the runtime store
+- any `.devgod/` workflow markdown is generated export/debug material, not workflow authority
+- repo-local rules are package assets or generated bundles, not consuming-repo authority
+- durable memory is runtime-owned and retrieval-managed
 - repo-local skills live under `.agents/skills/devgod-*`
 - reviewer, QA, and security gates block completion for substantive work
-- `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof for the shipped workflow shape
-- `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is the live workflow-integrity proof before a substantive completion claim
+- `devgod workflow-proof --run-id latest --task-id <task-id>` is the runtime workflow proof before a substantive completion claim
+- `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` remains a local wrapper around runtime proof checks
 - if the runtime is reachable but no run exists yet, use `npm run devgod:seed-workflow-proof -- --workspace-slug <workspace> --project-slug <project> --task-id <task-id>` to seed an explicit local proof run before retrying the live gate
 
 If Codex is deciding how to bootstrap a repo, the `devgod-setup` skill is the preferred setup path.
@@ -545,28 +545,27 @@ The spellbook has three layers:
 1. `Codex interaction layer`
    The user speaks to Codex. Requests are treated as real work by default, not as toy prompts waiting for a magic keyword.
 2. `Repo-local control layer`
-   Each consuming repo keeps its own `AGENTS.md`, `.devgod/rules/`, `.devgod/work/`, `.devgod/memory/`, and repo-local skills.
+   Each consuming repo keeps its own `AGENTS.md`, package assets, generated exports, and repo-local skills.
 3. `Shared backend layer`
    The shared core stores runs, task graphs, locks, reviews, approvals, retrieval metadata, and runtime registration state in Node/Postgres with `pgvector`, while the local runtime keeps Qdrant configuration machine-local and replayable.
 
 Source-of-truth split:
 
-- repo markdown: reviewed project policy, durable decisions, patterns, and lessons
-- Postgres: live operational state, audit trail, and runtime registration state
+- runtime records in Postgres: canonical workflow state, audit trail, durable memory, and runtime registration state
+- generated markdown exports: optional human-readable projections for docs, audits, or Obsidian
 - Qdrant: local vector retrieval collections and runtime-managed collection configuration
-- `pgvector`: semantic retrieval over memory plus indexed repo markdown chunks
+- `pgvector`: semantic retrieval over approved memory and indexed runtime documents
 
 This package owns the reusable bootstrap layer:
 
 - installer behavior
 - setup scripts
 - reusable skills and agent profiles
-- starter `.devgod/rules/`, `.devgod/templates/`, and `.devgod/work/` scaffolding
+- starter `.devgod/rules/` and `.devgod/templates/` assets plus runtime-aware install scaffolding
 
 Consuming repos remain the source of truth for:
 
-- live `.devgod/work/` tasks, plans, reviews, and release artifacts
-- reviewed `.devgod/memory/` entries such as decisions, patterns, and lessons
+- code under execution and repo-local configuration
 - repo-specific `AGENTS.md` additions
 - repo-local environment files such as `.env.devgod`
 

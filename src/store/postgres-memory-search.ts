@@ -3,12 +3,14 @@ import type {
   MemoryEntryRecord,
   RetrievalMetadata,
   RetrievalRole,
-  SearchMemoryResult
+  SearchMemoryResult,
+  WorkflowDocumentRecord
 } from "../domain/types.ts";
 import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
 import {
   buildArtifactSearchResult,
   buildMemorySearchResult,
+  buildWorkflowDocumentSearchResult,
   canRoleAccessRetrievalMetadata,
   compareMemorySearchResults
 } from "../core/policy.ts";
@@ -16,13 +18,14 @@ import type { SqlClient } from "./postgres-store.ts";
 
 interface SearchMemoryRow {
   id: string;
-  sourceKind: "memory_entry" | "artifact";
+  sourceKind: "memory_entry" | "artifact" | "workflow_document";
   title: string;
   content: string;
   scope: SearchMemoryResult["scope"];
   metadata?: RetrievalMetadata | null;
   entryType?: MemoryEntryRecord["entryType"] | null;
   artifactKind?: MarkdownArtifactRecord["kind"] | null;
+  workflowDocumentKind?: WorkflowDocumentRecord["kind"] | null;
   actor?: string | null;
   reviewer?: string | null;
   runId: string;
@@ -337,13 +340,50 @@ export async function searchMemory(
         )
       : { rows: [], rowCount: 0 };
 
+  const workflowLexicalClauses = buildLexicalBackfillClauses(params.query, 4, "d", "d.body");
+  const backfillWorkflowDocumentResult = await client.query<SearchMemoryRow>(
+    `with project_context as (
+       select p.id as project_id
+       from projects p
+       join workspaces w on w.id = p.workspace_id
+       where w.slug = $1 and p.slug = $2
+     )
+     select
+       d.id::text as id,
+       'workflow_document'::text as "sourceKind",
+       d.title,
+       d.body as content,
+       'project'::text as scope,
+       d.metadata as metadata,
+       null::text as "entryType",
+       null::text as "artifactKind",
+       d.kind as "workflowDocumentKind",
+       null::text as actor,
+       null::text as reviewer,
+       d.run_id::text as "runId",
+       d.task_id as "taskId",
+       null::text as "sourcePath",
+       null::text as "sourceAnchor",
+       d.project_id as "projectId",
+       d.created_at as "createdAt"
+     from workflow_documents d
+     join project_context pc on d.project_id = pc.project_id
+     where ${workflowLexicalClauses.sql}
+     order by
+       case when d.title ilike $3 then 0 else 1 end,
+       d.created_at desc
+     limit $${workflowLexicalClauses.nextParam}`,
+    [`${params.workspaceSlug}`, `${params.projectSlug}`, `%${params.query}%`, ...workflowLexicalClauses.values, backfillLimit]
+  );
+
   return dedupeMemoryRows([
     ...recentMemoryResult.rows,
     ...backfillMemoryResult.rows,
     ...vectorMemoryResult.rows,
     ...recentArtifactResult.rows,
     ...backfillArtifactResult.rows,
-    ...vectorArtifactResult.rows
+    ...vectorArtifactResult.rows,
+    ...backfillWorkflowDocumentResult.rows
   ])
     .filter((entry) => canRoleAccessRetrievalMetadata(entry.metadata ?? undefined, requesterRole))
     .map((entry) => {
@@ -359,6 +399,27 @@ export async function searchMemory(
             metadata: (entry.metadata ?? {}) as MarkdownArtifactRecord["metadata"],
             createdAt: entry.createdAt,
             runId: entry.runId
+          },
+          params.query,
+          params.projectSlug
+        );
+        return {
+          ...baseResult,
+          score: baseResult.score + vectorScoreBoost(entry.vectorScore)
+        };
+      }
+
+      if (entry.sourceKind === "workflow_document") {
+        const baseResult = buildWorkflowDocumentSearchResult(
+          {
+            id: entry.id,
+            title: entry.title,
+            body: entry.content,
+            kind: entry.workflowDocumentKind ?? "brief",
+            metadata: (entry.metadata ?? {}) as WorkflowDocumentRecord["metadata"],
+            createdAt: entry.createdAt,
+            runId: entry.runId,
+            taskId: entry.taskId ?? undefined
           },
           params.query,
           params.projectSlug

@@ -1122,7 +1122,7 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
     includeGlobal: false
   });
 
-  assert.equal(capture.length, 4);
+  assert.equal(capture.length, 5);
   assert.match(capture[0]?.text ?? "", /with project_context as/);
   assert.match(capture[0]?.text ?? "", /where w\.slug = \$1 and p\.slug = \$2/);
   assert.match(capture[0]?.text ?? "", /join project_context pc on true/);
@@ -1137,6 +1137,8 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
   assert.deepEqual(capture[2]?.values, ["team", "devgod", 25]);
   assert.match(capture[3]?.text ?? "", /coalesce\(a\.content->>'text', a\.content::text\) ilike/);
   assert.deepEqual(capture[3]?.values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+  assert.match(capture[4]?.text ?? "", /from workflow_documents d/);
+  assert.deepEqual(capture[4]?.values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
 });
 
 test("PostgresStore.searchMemory issues a vector query when query embeddings are supplied", async () => {
@@ -1180,7 +1182,7 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
   });
 
   assert.equal(result?.id, "vector-best");
-  assert.equal(capture.length, 6);
+  assert.equal(capture.length, 7);
   assert.match(capture[2]?.text ?? "", /m\.embedding <=> \$4::vector/);
   assert.match(capture[2]?.text ?? "", /m\.embedding_model = \$5/);
   assert.deepEqual(capture[2]?.values, [
@@ -1202,6 +1204,7 @@ test("PostgresStore.searchMemory augments artifact vector retrieval with configu
   const store = new PostgresStore(
     sqlClientWithRows(
       [
+        [],
         [],
         [],
         [],
@@ -1275,9 +1278,9 @@ test("PostgresStore.searchMemory augments artifact vector retrieval with configu
       limit: 15
     }
   ]);
-  assert.match(capture[6]?.text ?? "", /from runtime_project_registrations/);
-  assert.match(capture[7]?.text ?? "", /from artifacts a/);
-  assert.match(capture[7]?.text ?? "", /a\.id::text = any\(\$2::text\[\]\)/);
+  assert.match(capture[7]?.text ?? "", /from runtime_project_registrations/);
+  assert.match(capture[8]?.text ?? "", /from artifacts a/);
+  assert.match(capture[8]?.text ?? "", /a\.id::text = any\(\$2::text\[\]\)/);
 });
 
 test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {

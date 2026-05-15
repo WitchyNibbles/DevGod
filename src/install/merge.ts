@@ -4,20 +4,18 @@ const AGENTS_BEGIN = "<!-- BEGIN DEVGOD MANAGED -->";
 const AGENTS_END = "<!-- END DEVGOD MANAGED -->";
 const workflowContractBlock = `<!-- devgod-workflow-contract:start -->
 workflow=devgod
-active_file=.devgod/ACTIVE
-brief_file=.devgod/work/briefs/brief-<task-id>.md
-plan_file=.devgod/work/plans/plan-<task-id>.md
-task_file=.devgod/work/tasks/task-<task-id>.md
-review_file=.devgod/work/reviews/review-<task-id>-<role>.md
-brief_template=.devgod/templates/intake-brief.md
-task_template=.devgod/templates/task-packet.md
-review_template=.devgod/templates/review-gate.md
+workflow_runtime=postgres
+active_run_pointer=project_runtime_state.active_run_id
+active_task_pointer=project_runtime_state.active_task_id
+workflow_documents=workflow_documents
+task_queue=project_runtime_state.task_queue
+product_state=project_runtime_state.product_state
 required_review_roles=reviewer,qa_engineer,security_reviewer
-review_aliases=reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer
-workflow_check=bash scripts/check-devgod-workflow.sh --task-id <task-id>
-workflow_check_scope=artifact_contract_only
-review_artifact_trust=manager_summary_evidence_only
-ci_scope=artifact_contract_regression_fixtures_only
+review_authority=runtime_authenticated_only
+workflow_check=node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts workflow-proof --run-id latest --task-id <task-id>
+workflow_check_scope=runtime_authority_only
+review_artifact_trust=runtime_records_only
+ci_scope=runtime_contract_and_export_regressions
 local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
 <!-- devgod-workflow-contract:end -->`;
 
@@ -27,14 +25,14 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - treat \`devgod\` as implicitly invoked on every prompt unless the user explicitly opts out
 - treat substantive requests as devgod work by default unless the user opts out
 - use \`devgod-intake\` as the default first skill for substantive work
-- keep one canonical active marker at \`.devgod/ACTIVE\` with \`task_id=<task-id>\`, \`workflow=devgod\`, and \`state=active\`
-- use \`.devgod/work/\` for briefs, plans, tasks, and reviews
-- use \`.devgod/rules/\` and \`.devgod/memory/\` as local policy and durable-memory layers
+- keep canonical workflow state in runtime records, not repo markdown files
+- treat repo files under \`.devgod/\` as package assets or generated exports, never as workflow authority
+- use runtime-approved memory and workflow documents instead of repo-local durable-memory authority
 - if devgod is not configured yet, use the setup path before relying on it
 
 ## Workflow contract
 
-The block below is the canonical repo-local artifact contract.
+The block below is the canonical runtime contract.
 
 ${workflowContractBlock}
 
@@ -43,7 +41,7 @@ ${workflowContractBlock}
 - root Codex thread acts as engineering manager on first contact
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
-- create or update \`.devgod/ACTIVE\` and the matching brief before moving past intake
+- create or update the runtime intake record before moving past intake
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
@@ -51,9 +49,9 @@ ${workflowContractBlock}
 - treat refactors as behavior-preserving hardening work: preserve behavior, add regression coverage, and either fix or explicitly block discovered touched-scope risks
 - preserve the trivial fast path for single-scope low-risk work
 - unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
-- markdown review files are evidence summaries, not reviewer authority
+- exported review markdown, if present, is evidence only and never reviewer authority
 - reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
-- substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\`
+- substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
 
 ## Autonomy Loop
 
@@ -61,7 +59,7 @@ ${workflowContractBlock}
 - the manager must not stop after intake, architecture, planning, or one implementation slice unless product-level acceptance is complete, a real blocker requires user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
 - do not wait for the user to say continue between internal tasks; keep executing until the product-level stop condition is met
 - verification must cover the required unit, integration, E2E, regression, and negative-case checks for the active task before completion is claimed
-- after each completed task, update \`.devgod/work/product-state.md\`, update \`.devgod/work/task-queue.json\`, update \`.devgod/ACTIVE\`, select the next unblocked task, and continue execution
+- after each completed task, update runtime product state, update runtime task queue, advance the active task pointer, select the next unblocked task, and continue execution
 - a completed phase is not a completed product
 
 ## Git hygiene

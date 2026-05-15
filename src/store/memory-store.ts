@@ -1,8 +1,10 @@
 import {
   buildArtifactSearchResult,
   buildMemorySearchResult,
+  buildWorkflowDocumentSearchResult,
   canRoleAccessRetrievalMetadata,
-  compareMemorySearchResults
+  compareMemorySearchResults,
+  scoreSearchableResult
 } from "../core/policy.ts";
 import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
 import type {
@@ -12,6 +14,7 @@ import type {
   MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
+  ProjectRuntimeStateRecord,
   ProjectRecord,
   RetrievalRole,
   ReviewRecord,
@@ -20,6 +23,7 @@ import type {
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
+  WorkflowDocumentRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
 import type {
@@ -66,6 +70,20 @@ function embeddingJobKey(input: Pick<QueueEmbeddingJobInput, "sourceTable" | "so
   return `${input.sourceTable}:${input.sourceId}:${input.embeddingModel}`;
 }
 
+function matchesWorkflowDocumentQuery(document: WorkflowDocumentRecord, query: string): boolean {
+  return (
+    scoreSearchableResult(
+      {
+        title: document.title,
+        content: document.body,
+        scope: "project"
+      },
+      query,
+      true
+    ) > 4
+  );
+}
+
 export class MemoryStore implements DevgodStore {
   private readonly workspaces = new Map<string, WorkspaceRecord>();
   private readonly projects = new Map<string, ProjectRecord>();
@@ -80,6 +98,8 @@ export class MemoryStore implements DevgodStore {
   private readonly markdownArtifacts = new Map<string, MarkdownArtifactRecord>();
   private readonly runtimeProjectRegistrations = new Map<string, RuntimeProjectRegistrationRecord>();
   private readonly runtimeMigrationJournals = new Map<string, RuntimeMigrationJournalRecord>();
+  private readonly projectRuntimeStates = new Map<string, ProjectRuntimeStateRecord>();
+  private readonly workflowDocuments = new Map<string, WorkflowDocumentRecord>();
   private readonly embeddingJobs = new Map<string, EmbeddingJobRecord>();
   private readonly artifactEmbeddings = new Map<string, EmbeddingVectorRecord>();
   private readonly memoryEntryEmbeddings = new Map<string, EmbeddingVectorRecord>();
@@ -146,6 +166,32 @@ export class MemoryStore implements DevgodStore {
   async listRuntimeMigrationJournals(projectId: string): Promise<RuntimeMigrationJournalRecord[]> {
     return [...this.runtimeMigrationJournals.values()]
       .filter((journal) => journal.projectId === projectId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async saveProjectRuntimeState(state: ProjectRuntimeStateRecord): Promise<void> {
+    this.projectRuntimeStates.set(state.projectId, state);
+  }
+
+  async getProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStateRecord | undefined> {
+    return this.projectRuntimeStates.get(projectId);
+  }
+
+  async saveWorkflowDocument(document: WorkflowDocumentRecord): Promise<void> {
+    this.workflowDocuments.set(document.id, document);
+  }
+
+  async listWorkflowDocuments(params: {
+    projectId: string;
+    runId?: string | undefined;
+    taskId?: string | undefined;
+    kind?: WorkflowDocumentRecord["kind"] | undefined;
+  }): Promise<WorkflowDocumentRecord[]> {
+    return [...this.workflowDocuments.values()]
+      .filter((document) => document.projectId === params.projectId)
+      .filter((document) => (params.runId ? document.runId === params.runId : true))
+      .filter((document) => (params.taskId ? document.taskId === params.taskId : true))
+      .filter((document) => (params.kind ? document.kind === params.kind : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -563,7 +609,23 @@ export class MemoryStore implements DevgodStore {
           })
       : [];
 
-    return [...memoryResults, ...artifactResults].sort(compareMemorySearchResults).slice(0, params.limit);
+    const workflowDocumentResults = project
+      ? [...this.workflowDocuments.values()]
+          .filter((document) => document.projectId === project.id)
+          .filter((document) => matchesWorkflowDocumentQuery(document, params.query))
+          .filter((document) => canRoleAccessRetrievalMetadata(document.metadata, requesterRole))
+          .map((document) => {
+            const baseResult = buildWorkflowDocumentSearchResult(document, params.query, params.projectSlug);
+            return {
+              ...baseResult,
+              score: baseResult.score
+            };
+          })
+      : [];
+
+    return [...memoryResults, ...artifactResults, ...workflowDocumentResults]
+      .sort(compareMemorySearchResults)
+      .slice(0, params.limit);
   }
 
   private clearDerivedEmbedding(sourceTable: EmbeddingJobSourceTable, sourceId: string): void {

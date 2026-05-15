@@ -265,6 +265,11 @@ require_file "$brief_template"
 require_file "$task_template"
 require_file "$review_template"
 
+contract_mode="legacy"
+if grep -Fq 'workflow_runtime=postgres' "$agents_file"; then
+  contract_mode="runtime"
+fi
+
 mapfile -t active_lines < "$active_file"
 active_lines=("${active_lines[@]%$'\r'}")
 [[ "${#active_lines[@]}" -eq 3 ]] || fail "unexpected .devgod/ACTIVE content"
@@ -283,21 +288,35 @@ if [[ -n "$requested_task_id" && "$requested_task_id" != "$task_id" ]]; then
 fi
 
 require_contract_equals "workflow" "devgod" "$agents_file"
-require_contract_equals "active_file" ".devgod/ACTIVE" "$agents_file"
-require_contract_equals "brief_file" ".devgod/work/briefs/brief-<task-id>.md" "$agents_file"
-require_contract_equals "plan_file" ".devgod/work/plans/plan-<task-id>.md" "$agents_file"
-require_contract_equals "task_file" ".devgod/work/tasks/task-<task-id>.md" "$agents_file"
-require_contract_equals "review_file" ".devgod/work/reviews/review-<task-id>-<role>.md" "$agents_file"
-require_contract_equals "brief_template" ".devgod/templates/intake-brief.md" "$agents_file"
-require_contract_equals "task_template" ".devgod/templates/task-packet.md" "$agents_file"
-require_contract_equals "review_template" ".devgod/templates/review-gate.md" "$agents_file"
 require_contract_equals "required_review_roles" "reviewer,qa_engineer,security_reviewer" "$agents_file"
-require_contract_equals "review_aliases" "reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer" "$agents_file"
-require_contract_equals "workflow_check" "bash scripts/check-devgod-workflow.sh --task-id <task-id>" "$agents_file"
-require_contract_equals "workflow_check_scope" "artifact_contract_only" "$agents_file"
-require_contract_equals "review_artifact_trust" "manager_summary_evidence_only" "$agents_file"
-require_contract_equals "ci_scope" "artifact_contract_regression_fixtures_only" "$agents_file"
 require_contract_equals "local_live_check" "bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]" "$agents_file"
+
+if [[ "$contract_mode" == "legacy" ]]; then
+  require_contract_equals "active_file" ".devgod/ACTIVE" "$agents_file"
+  require_contract_equals "brief_file" ".devgod/work/briefs/brief-<task-id>.md" "$agents_file"
+  require_contract_equals "plan_file" ".devgod/work/plans/plan-<task-id>.md" "$agents_file"
+  require_contract_equals "task_file" ".devgod/work/tasks/task-<task-id>.md" "$agents_file"
+  require_contract_equals "review_file" ".devgod/work/reviews/review-<task-id>-<role>.md" "$agents_file"
+  require_contract_equals "brief_template" ".devgod/templates/intake-brief.md" "$agents_file"
+  require_contract_equals "task_template" ".devgod/templates/task-packet.md" "$agents_file"
+  require_contract_equals "review_template" ".devgod/templates/review-gate.md" "$agents_file"
+  require_contract_equals "review_aliases" "reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer" "$agents_file"
+  require_contract_equals "workflow_check" "bash scripts/check-devgod-workflow.sh --task-id <task-id>" "$agents_file"
+  require_contract_equals "workflow_check_scope" "artifact_contract_only" "$agents_file"
+  require_contract_equals "review_artifact_trust" "manager_summary_evidence_only" "$agents_file"
+  require_contract_equals "ci_scope" "artifact_contract_regression_fixtures_only" "$agents_file"
+else
+  require_contract_equals "workflow_runtime" "postgres" "$agents_file"
+  require_contract_equals "active_run_pointer" "project_runtime_state.active_run_id" "$agents_file"
+  require_contract_equals "active_task_pointer" "project_runtime_state.active_task_id" "$agents_file"
+  require_contract_equals "workflow_documents" "workflow_documents" "$agents_file"
+  require_contract_equals "task_queue" "project_runtime_state.task_queue" "$agents_file"
+  require_contract_equals "product_state" "project_runtime_state.product_state" "$agents_file"
+  require_contract_equals "review_authority" "runtime_authenticated_only" "$agents_file"
+  require_contract_equals "workflow_check_scope" "runtime_authority_only" "$agents_file"
+  require_contract_equals "review_artifact_trust" "runtime_records_only" "$agents_file"
+  require_contract_equals "ci_scope" "runtime_contract_and_export_regressions" "$agents_file"
+fi
 require_grep 'AGENTS.md' "$config_file"
 require_grep '.agents.md' "$config_file"
 

@@ -222,7 +222,7 @@ test("indexRepoMarkdown replaces stale markdown chunks when files are removed", 
   }
 });
 
-test("indexRepoMarkdown assigns role-scoped metadata to review artifacts", async () => {
+test("indexRepoMarkdown skips runtime-managed workflow markdown even when .devgod is explicitly included", async () => {
   const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-markdown-roles-"));
   const store = new MemoryStore();
   const service = new DevgodCoreService(store);
@@ -257,11 +257,7 @@ test("indexRepoMarkdown assigns role-scoped metadata to review artifacts", async
       query: "auth bypass findings",
       requesterRole: "reviewer"
     });
-
-    assert.equal(reviewerResults[0]?.citation.sourcePath, ".devgod/work/reviews/security.md");
-    assert.ok(reviewerResults[0]?.metadata.allowedRoles.includes("reviewer"));
-    assert.ok(reviewerResults[0]?.metadata.allowedRoles.includes("security_reviewer"));
-    assert.equal(reviewerResults[0]?.authority.authorityLevel, "repo_context");
+    assert.equal(reviewerResults.length, 0);
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
   }

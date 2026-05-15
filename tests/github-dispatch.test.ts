@@ -1,21 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { dispatchGithubWorkItem } from "../src/admin/github-dispatch.ts";
+import { MemoryStore } from "../src/store/memory-store.ts";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-test("dispatchGithubWorkItem scaffolds canonical workflow artifacts from a GitHub issue payload", async () => {
+test("dispatchGithubWorkItem creates a runtime intake run and workflow document from a GitHub issue payload", async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "devgod-github-dispatch-"));
-  const targetRoot = path.join(tempRoot, "target");
   const inputPath = path.join(tempRoot, "issue-event.json");
+  const store = new MemoryStore();
 
   try {
-    await mkdir(targetRoot, { recursive: true });
-    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
     await writeFile(
       inputPath,
       `${JSON.stringify(
@@ -37,8 +33,9 @@ test("dispatchGithubWorkItem scaffolds canonical workflow artifacts from a GitHu
     );
 
     const result = await dispatchGithubWorkItem({
-      sourceRoot: repoRoot,
-      targetRoot,
+      store,
+      workspaceSlug: "team",
+      projectSlug: "devgod",
       inputPath
     });
 
@@ -47,18 +44,30 @@ test("dispatchGithubWorkItem scaffolds canonical workflow artifacts from a GitHu
     assert.equal(result.repository, "acme/devgod");
     assert.equal(result.actor, "reporter");
     assert.equal(result.taskId, "issue-42-ship-operator-report");
-    assert.match(result.briefPath ?? "", /brief-issue-42-ship-operator-report\.md$/);
+    assert.ok(result.runId);
+    assert.ok(result.workflowDocumentId);
 
-    const active = await readFile(path.join(targetRoot, ".devgod/ACTIVE"), "utf8");
-    const brief = await readFile(
-      path.join(targetRoot, ".devgod/work/briefs/brief-issue-42-ship-operator-report.md"),
-      "utf8"
-    );
+    const run = await store.getRun(result.runId!);
+    assert.ok(run);
+    assert.equal(run.actor, "github:reporter");
+    assert.equal(run.title, "Ship operator report");
+    assert.match(run.request, /GitHub issue from acme\/devgod/);
+    assert.match(run.request, /Source URL: https:\/\/github\.com\/acme\/devgod\/issues\/42/);
 
-    assert.equal(active, "task_id=issue-42-ship-operator-report\nworkflow=devgod\nstate=active\n");
-    assert.match(brief, /GitHub issue from acme\/devgod/);
-    assert.match(brief, /Source URL: https:\/\/github\.com\/acme\/devgod\/issues\/42/);
-    assert.match(brief, /canonical workflow state must remain in \.devgod\/work/);
+    const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(projectContext);
+
+    const workflowDocuments = await store.listWorkflowDocuments({
+      projectId: projectContext.project.id,
+      runId: result.runId
+    });
+    assert.equal(workflowDocuments.length, 1);
+    assert.equal(workflowDocuments[0]?.kind, "brief");
+    assert.match(workflowDocuments[0]?.body ?? "", /canonical workflow state must remain in runtime records/);
+    assert.equal(workflowDocuments[0]?.metadata.source, "github_dispatch");
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeRunId, result.runId);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

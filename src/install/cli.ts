@@ -676,15 +676,7 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     }
   }
 
-  const scaffoldFiles = [
-    ".devgod/work/README.md",
-    ".devgod/work/briefs/README.md",
-    ".devgod/work/plans/README.md",
-    ".devgod/work/reviews/README.md",
-    ".devgod/work/tasks/README.md",
-    ".devgod/work/release/README.md",
-    ".devgod/memory/README.md"
-  ];
+  const scaffoldFiles = [".devgod/memory/README.md"];
 
   for (const relativePath of scaffoldFiles) {
     const sourcePath = path.join(sourceRoot, relativePath);

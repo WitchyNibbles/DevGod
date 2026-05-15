@@ -57,6 +57,7 @@ import type {
   ApprovalRecord,
   HandoffInput,
   IntakeRequestInput,
+  ProjectRuntimeStateRecord,
   RecoveryApplyResult,
   RecoveryInspectionReport,
   ProjectRecord,
@@ -828,7 +829,12 @@ export interface WorkflowProofResult {
 
 interface ExecuteSeedWorkflowProofCommandOptions extends ExecuteWorkflowProofCommandOptions {
   cwd?: string | undefined;
-  resolveActiveTaskId?: (() => Promise<string | undefined>) | undefined;
+  getProjectContext: (params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+  saveProjectRuntimeState: (state: ProjectRuntimeStateRecord) => Promise<void>;
   intakeRequest: (input: IntakeRequestInput) => Promise<RunRecord>;
   createTaskGraph: (runId: string, taskPackets: TaskPacketInput[]) => Promise<readonly unknown[]>;
   claimTask: (runId: string, taskId: string, actor: string) => Promise<unknown>;
@@ -844,6 +850,13 @@ export interface SeedWorkflowProofResult extends WorkflowProofResult {
 
 interface ExecuteAdvanceActiveTaskCommandOptions extends ExecuteWorkflowProofCommandOptions {
   cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  getProjectContext: (params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+  saveProjectRuntimeState: (state: ProjectRuntimeStateRecord) => Promise<void>;
 }
 
 export interface AdvanceActiveTaskCommandResult {
@@ -1204,6 +1217,25 @@ async function resolveActiveTaskIdFromFile(cwd = process.cwd()): Promise<string 
   } catch {
     return undefined;
   }
+}
+
+function buildDefaultTaskQueue(): TaskQueue {
+  return {
+    project_status: "idle",
+    current_task_id: null,
+    tasks: []
+  };
+}
+
+function buildDefaultProductState(): Record<string, unknown> {
+  return {
+    status: "idle",
+    items: []
+  };
+}
+
+function parseTaskQueueRecord(candidate: TaskQueue | Record<string, unknown> | undefined): TaskQueue {
+  return parseTaskQueueContent(JSON.stringify(candidate ?? buildDefaultTaskQueue()));
 }
 
 function collectCommandFlagValues(args: readonly string[], flag: string): string[] {
@@ -2527,7 +2559,6 @@ export async function executeSeedWorkflowProofCommandFromArgs(
   options: ExecuteSeedWorkflowProofCommandOptions
 ): Promise<SeedWorkflowProofResult> {
   const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
   const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
   const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
 
@@ -2535,13 +2566,20 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     throw new Error("seed-workflow-proof requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags");
   }
 
+  const projectContext = await options.getProjectContext({
+    workspaceSlug,
+    projectSlug
+  });
+  if (!projectContext) {
+    throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
+  }
+
   const explicitTaskId = resolveCommandFlag(args, "--task-id");
-  const resolvedTaskId =
-    explicitTaskId ??
-    (options.resolveActiveTaskId ? await options.resolveActiveTaskId() : await resolveActiveTaskIdFromFile(cwd));
+  const projectRuntimeState = await options.getProjectRuntimeState(projectContext.project.id);
+  const resolvedTaskId = explicitTaskId ?? projectRuntimeState?.activeTaskId;
 
   if (!resolvedTaskId) {
-    throw new Error("seed-workflow-proof requires --task-id or an active .devgod/ACTIVE task_id");
+    throw new Error("seed-workflow-proof requires --task-id or an active runtime task");
   }
 
   const run = await options.intakeRequest({
@@ -2596,6 +2634,19 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     }
   );
 
+  await options.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: resolvedTaskId,
+    taskQueue: projectRuntimeState?.taskQueue ?? buildDefaultTaskQueue(),
+    productState: projectRuntimeState?.productState ?? buildDefaultProductState(),
+    lastVerifiedRunId: proof.runId,
+    metadata: projectRuntimeState?.metadata ?? {},
+    createdAt: projectRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
   return {
     mode: "local_workflow_proof_seed",
     workspaceSlug,
@@ -2628,29 +2679,42 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
   args: readonly string[],
   options: ExecuteAdvanceActiveTaskCommandOptions
 ): Promise<{ format: "json" | "text"; result: AdvanceActiveTaskCommandResult }> {
-  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
   const explicitTaskId = resolveCommandFlag(args, "--task-id");
-  const activeTaskId = await resolveActiveTaskIdFromFile(cwd);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("advance-active-task requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags");
+  }
+
+  const projectContext = await options.getProjectContext({
+    workspaceSlug,
+    projectSlug
+  });
+  if (!projectContext) {
+    throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
+  }
+
+  const projectRuntimeState = await options.getProjectRuntimeState(projectContext.project.id);
+  const activeTaskId = projectRuntimeState?.activeTaskId;
 
   if (!activeTaskId) {
-    throw new Error("advance-active-task requires an active .devgod/ACTIVE task_id");
+    throw new Error("advance-active-task requires an active runtime task");
   }
   if (explicitTaskId && explicitTaskId !== activeTaskId) {
     throw new Error(
-      `advance-active-task task mismatch: active .devgod/ACTIVE task_id is "${activeTaskId}", not "${explicitTaskId}"`
+      `advance-active-task task mismatch: active runtime task is "${activeTaskId}", not "${explicitTaskId}"`
     );
   }
 
   const format = resolveFormatFlag(args);
   const proof = await executeWorkflowProofCommandFromArgs([...args, "--task-id", activeTaskId], options);
-  const queuePath = path.join(cwd, ".devgod", "work", "task-queue.json");
-  const activePath = path.join(cwd, ".devgod", "ACTIVE");
-  const existingQueueContent = await readFile(queuePath, "utf8");
-  const queue = parseTaskQueueContent(existingQueueContent);
+  const queue = parseTaskQueueRecord(projectRuntimeState?.taskQueue);
 
   if (queue.current_task_id !== activeTaskId) {
     throw new Error(
-      `advance-active-task requires queue current_task_id "${queue.current_task_id ?? "none"}" to match active task "${activeTaskId}"`
+      `advance-active-task requires runtime queue current_task_id "${queue.current_task_id ?? "none"}" to match active task "${activeTaskId}"`
     );
   }
 
@@ -2670,16 +2734,18 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
     };
   }
 
-  const nextActiveContent = formatActiveWorkflowContent(result.nextTaskId);
-  const nextQueueContent = `${JSON.stringify(advanced.queue, null, 2)}\n`;
-
-  await writeFile(queuePath, nextQueueContent, "utf8");
-  try {
-    await writeFile(activePath, nextActiveContent, "utf8");
-  } catch (error) {
-    await writeFile(queuePath, existingQueueContent, "utf8");
-    throw error;
-  }
+  await options.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: proof.runId,
+    activeTaskId: result.nextTaskId ?? undefined,
+    taskQueue: advanced.queue,
+    productState: projectRuntimeState?.productState ?? buildDefaultProductState(),
+    lastVerifiedRunId: proof.runId,
+    metadata: projectRuntimeState?.metadata ?? {},
+    createdAt: projectRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
 
   return {
     format,
@@ -2854,6 +2920,15 @@ async function seedWorkflowProofCommand(args: readonly string[]) {
     const result = await executeSeedWorkflowProofCommandFromArgs(args, {
       cwd: process.cwd(),
       env: process.env,
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
       intakeRequest(input) {
         return service.intakeRequest(input);
       },
@@ -2891,6 +2966,15 @@ async function advanceActiveTaskCommand(args: readonly string[]) {
     const { format, result } = await executeAdvanceActiveTaskCommandFromArgs(args, {
       cwd: process.cwd(),
       env: process.env,
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
       findLatestRun(workspaceSlug, projectSlug) {
         return store.findLatestRun({ workspaceSlug, projectSlug });
       },
@@ -3046,19 +3130,29 @@ export async function executeGithubDispatchCommandFromArgs(args: readonly string
   if (!inputArg) {
     throw new Error("github-dispatch requires --input <github-event.json>");
   }
-  const targetRoot = path.resolve(resolveCommandFlag(args, "--target") ?? ".");
   const inputPath = path.isAbsolute(inputArg) ? inputArg : path.resolve(process.cwd(), inputArg);
   const taskId = resolveCommandFlag(args, "--task-id");
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? process.env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const workspaceName = resolveCommandFlag(args, "--workspace-name") ?? process.env.DEVGOD_WORKSPACE_NAME;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? process.env.DEVGOD_PROJECT_SLUG;
+  const projectName = resolveCommandFlag(args, "--project-name") ?? process.env.DEVGOD_PROJECT_NAME;
 
-  return dispatchGithubWorkItem({
-    sourceRoot: repoRoot,
-    targetRoot,
-    inputPath,
-    taskId,
-    dryRun: args.includes("--dry-run"),
-    force: args.includes("--force"),
-    forceActive: args.includes("--force-active")
-  });
+  if (!projectSlug) {
+    throw new Error("github-dispatch requires DEVGOD_PROJECT_SLUG or --project-slug");
+  }
+
+  return withClient(async (client) =>
+    dispatchGithubWorkItem({
+      store: createRuntimeStore(client),
+      workspaceSlug,
+      workspaceName,
+      projectSlug,
+      projectName,
+      inputPath,
+      taskId,
+      dryRun: args.includes("--dry-run")
+    })
+  );
 }
 
 async function githubDispatchCommand(args: readonly string[]) {

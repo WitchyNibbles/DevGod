@@ -1,7 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import type { WorkflowScaffoldSummary } from "../install/types.ts";
-import { scaffoldWorkflowArtifacts } from "../install/cli.ts";
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import type { TaskQueue } from "../devgod/task-queue.ts";
+import { normalizeIntakeRequest } from "../domain/contracts.ts";
+import type { ProjectRuntimeStateRecord, RunRecord } from "../domain/types.ts";
+import type { DevgodStore } from "../store/types.ts";
 
 export interface GithubDispatchResult {
   mode: "dry_run" | "applied";
@@ -11,19 +13,27 @@ export interface GithubDispatchResult {
   actor: string;
   title: string;
   url?: string | undefined;
-  briefPath?: string | undefined;
+  runId?: string | undefined;
+  workflowDocumentId?: string | undefined;
   nextSteps: string[];
-  scaffoldSummary?: WorkflowScaffoldSummary | undefined;
 }
 
 export interface GithubDispatchOptions {
-  sourceRoot: string;
-  targetRoot: string;
+  store: Pick<
+    DevgodStore,
+    | "ensureProjectContext"
+    | "createRun"
+    | "getProjectRuntimeState"
+    | "saveProjectRuntimeState"
+    | "saveWorkflowDocument"
+  >;
+  workspaceSlug: string;
+  projectSlug: string;
+  workspaceName?: string | undefined;
+  projectName?: string | undefined;
   inputPath: string;
   taskId?: string | undefined;
   dryRun?: boolean | undefined;
-  force?: boolean | undefined;
-  forceActive?: boolean | undefined;
 }
 
 interface GithubWorkItem {
@@ -34,6 +44,79 @@ interface GithubWorkItem {
   body: string;
   url?: string | undefined;
   number?: number | undefined;
+}
+
+function buildDefaultTaskQueue(): TaskQueue {
+  return {
+    project_status: "idle",
+    current_task_id: null,
+    tasks: []
+  };
+}
+
+function buildDefaultProductState(): Record<string, unknown> {
+  return {
+    status: "idle",
+    items: []
+  };
+}
+
+async function createRuntimeIntakeRun(
+  options: Pick<GithubDispatchOptions, "store" | "workspaceSlug" | "workspaceName" | "projectSlug" | "projectName">,
+  item: GithubWorkItem
+): Promise<RunRecord> {
+  const { workspace, project } = await options.store.ensureProjectContext({
+    workspaceSlug: options.workspaceSlug,
+    workspaceName: options.workspaceName,
+    projectSlug: options.projectSlug,
+    projectName: options.projectName
+  });
+  const now = new Date().toISOString();
+  const request = [
+    `GitHub ${item.trigger} from ${item.repository}`,
+    item.url ? `Source URL: ${item.url}` : undefined,
+    `Actor: ${item.actor}`,
+    "",
+    item.body || "No body supplied in the GitHub payload."
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+  const run: RunRecord = {
+    id: randomUUID(),
+    workspaceId: workspace.id,
+    projectId: project.id,
+    actor: `github:${item.actor}`,
+    title: item.title,
+    request,
+    summary: normalizeIntakeRequest({
+      workspaceSlug: options.workspaceSlug,
+      workspaceName: options.workspaceName,
+      projectSlug: options.projectSlug,
+      projectName: options.projectName,
+      actor: `github:${item.actor}`,
+      title: item.title,
+      request
+    }),
+    status: "intake",
+    createdAt: now,
+    updatedAt: now
+  };
+  await options.store.createRun(run);
+  const existingState = await options.store.getProjectRuntimeState(project.id);
+  const runtimeState: ProjectRuntimeStateRecord = {
+    projectId: project.id,
+    workspaceId: workspace.id,
+    activeRunId: run.id,
+    activeTaskId: existingState?.activeTaskId,
+    taskQueue: existingState?.taskQueue ?? buildDefaultTaskQueue(),
+    productState: existingState?.productState ?? buildDefaultProductState(),
+    lastVerifiedRunId: existingState?.lastVerifiedRunId,
+    metadata: existingState?.metadata ?? {},
+    createdAt: existingState?.createdAt ?? now,
+    updatedAt: now
+  };
+  await options.store.saveProjectRuntimeState(runtimeState);
+  return run;
 }
 
 export async function dispatchGithubWorkItem(
@@ -53,23 +136,34 @@ export async function dispatchGithubWorkItem(
       title: item.title,
       url: item.url,
       nextSteps: [
-        `Run devgod github-dispatch --target ${options.targetRoot} --input ${options.inputPath}`,
-        "Review the generated intake brief and task packet before implementation.",
-        "Keep GitHub-originated state advisory; canonical workflow state remains in .devgod/work."
+        `Run devgod github-dispatch --input ${options.inputPath} --workspace-slug ${options.workspaceSlug} --project-slug ${options.projectSlug}`,
+        "Review the runtime intake summary and clarify missing scope before implementation.",
+        "Treat GitHub payload data as advisory intake context only; canonical workflow state lives in the runtime store."
       ]
     };
   }
 
-  const scaffoldSummary = await scaffoldWorkflowArtifacts({
-    sourceRoot: options.sourceRoot,
-    targetRoot: options.targetRoot,
-    taskId,
-    ...(options.force === undefined ? {} : { force: options.force }),
-    ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive })
+  const run = await createRuntimeIntakeRun(options, item);
+  const workflowDocumentId = randomUUID();
+  await options.store.saveWorkflowDocument({
+    id: workflowDocumentId,
+    workspaceId: run.workspaceId,
+    projectId: run.projectId,
+    runId: run.id,
+    kind: "brief",
+    title: `GitHub intake: ${item.title}`,
+    body: buildGithubDispatchBrief(taskId, item),
+    metadata: {
+      source: "github_dispatch",
+      trigger: item.trigger,
+      repository: item.repository,
+      actor: item.actor,
+      url: item.url,
+      suggestedTaskId: taskId
+    },
+    createdAt: run.createdAt,
+    updatedAt: run.createdAt
   });
-
-  const briefPath = path.join(options.targetRoot, `.devgod/work/briefs/brief-${taskId}.md`);
-  await writeFile(briefPath, buildGithubDispatchBrief(taskId, item), "utf8");
 
   return {
     mode: "applied",
@@ -79,12 +173,12 @@ export async function dispatchGithubWorkItem(
     actor: item.actor,
     title: item.title,
     url: item.url,
-    briefPath,
-    scaffoldSummary,
+    runId: run.id,
+    workflowDocumentId,
     nextSteps: [
-      `Review ${briefPath} and confirm scope.`,
-      `Fill or refine .devgod/work/tasks/task-${taskId}.md before specialist execution.`,
-      "Treat GitHub payload data as intake context only; keep runtime authority in devgod artifacts."
+      `Review runtime run ${run.id} and confirm scope.`,
+      `Use the suggested task id "${taskId}" when you decompose the work into runtime task packets.`,
+      "Treat GitHub payload data as intake context only; keep workflow authority in runtime records."
     ]
   };
 }
@@ -203,7 +297,7 @@ function buildGithubDispatchBrief(taskId: string, item: GithubWorkItem): string 
     "## Constraints",
     "",
     "- GitHub payload is advisory intake context only",
-    "- canonical workflow state must remain in .devgod/work",
+    "- canonical workflow state must remain in runtime records",
     "",
     "## Risks",
     "",
@@ -217,8 +311,8 @@ function buildGithubDispatchBrief(taskId: string, item: GithubWorkItem): string 
     "",
     "## Success Criteria",
     "",
-    "- the request is grounded in canonical devgod artifacts",
-    "- downstream implementation can proceed from repo-local workflow state",
+    "- the request is grounded in canonical runtime workflow records",
+    "- downstream implementation can proceed from backend-owned workflow state",
     "",
     "## Non-goals",
     "",
@@ -231,7 +325,7 @@ function buildGithubDispatchBrief(taskId: string, item: GithubWorkItem): string 
     "## Trust boundaries",
     "",
     "- GitHub event data is intake context",
-    "- devgod artifacts remain canonical",
+    "- runtime workflow records remain canonical",
     "",
     "## Stop Go",
     "",

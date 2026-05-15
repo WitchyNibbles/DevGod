@@ -5,6 +5,7 @@ import type {
   MemoryEntryRecord,
   MarkdownArtifactRecord,
   PlanArtifact,
+  ProjectRuntimeStateRecord,
   ProjectRecord,
   ReviewRecord,
   RuntimeMigrationJournalRecord,
@@ -13,6 +14,7 @@ import type {
   RunRecord,
   SearchMemoryResult,
   TaskRecord,
+  WorkflowDocumentRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
 
@@ -76,6 +78,15 @@ export interface DevgodStore {
   getProjectRuntimeRegistration(projectId: string): Promise<RuntimeProjectRegistrationRecord | undefined>;
   saveRuntimeMigrationJournal(journal: RuntimeMigrationJournalRecord): Promise<void>;
   listRuntimeMigrationJournals(projectId: string): Promise<RuntimeMigrationJournalRecord[]>;
+  saveProjectRuntimeState(state: ProjectRuntimeStateRecord): Promise<void>;
+  getProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStateRecord | undefined>;
+  saveWorkflowDocument(document: WorkflowDocumentRecord): Promise<void>;
+  listWorkflowDocuments(params: {
+    projectId: string;
+    runId?: string | undefined;
+    taskId?: string | undefined;
+    kind?: WorkflowDocumentRecord["kind"] | undefined;
+  }): Promise<WorkflowDocumentRecord[]>;
   createRun(run: RunRecord): Promise<void>;
   getRun(runId: string): Promise<RunRecord | undefined>;
   findLatestRun(params: { workspaceSlug: string; projectSlug: string }): Promise<RunRecord | undefined>;

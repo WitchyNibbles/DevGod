@@ -12,7 +12,8 @@ import {
   type SearchMemoryMetadata,
   type SearchMemoryResult,
   type TaskPacketInput,
-  type TaskRecord
+  type TaskRecord,
+  type WorkflowDocumentRecord
 } from "../domain/types.ts";
 import {
   canReviewRecordSatisfyGate,
@@ -190,8 +191,8 @@ export function compareMemorySearchResults(
     return right.score - left.score;
   }
 
-  const leftSourceRank = left.authority.source === "shared_backend_memory" ? 1 : 0;
-  const rightSourceRank = right.authority.source === "shared_backend_memory" ? 1 : 0;
+  const leftSourceRank = left.authority.source === "shared_backend_memory" || left.authority.source === "runtime_document" ? 1 : 0;
+  const rightSourceRank = right.authority.source === "shared_backend_memory" || right.authority.source === "runtime_document" ? 1 : 0;
   if (leftSourceRank !== rightSourceRank) {
     return rightSourceRank - leftSourceRank;
   }
@@ -343,6 +344,68 @@ export function buildArtifactSearchResult(
       artifactKind: artifact.kind as ArtifactKind,
       runId: artifact.runId,
       createdAt: artifact.createdAt
+    },
+    metadata: buildSearchMemoryMetadata(normalizedMetadata, freshness.staleAfterDays),
+    conflict: {
+      detected: false,
+      relatedIds: []
+    }
+  };
+}
+
+export function buildWorkflowDocumentSearchResult(
+  document: Pick<WorkflowDocumentRecord, "id" | "title" | "body" | "kind" | "metadata" | "createdAt" | "runId" | "taskId">,
+  query: string,
+  projectSlug: string,
+  now: string = new Date().toISOString()
+): SearchMemoryResult {
+  const normalizedMetadata = normalizeRetrievalMetadata({
+    authorityLevel: "operational_context",
+    ...document.metadata
+  });
+  const freshness = buildSearchMemoryFreshness(
+    document.createdAt,
+    now,
+    normalizedMetadata.staleAfterDays ?? SEARCH_MEMORY_STALE_AFTER_DAYS
+  );
+
+  return {
+    id: document.id,
+    title: document.title,
+    content: document.body,
+    scope: "project",
+    projectSlug,
+    score:
+      scoreSearchableResult(
+        {
+          title: document.title,
+          content: document.body,
+          scope: "project"
+        },
+        query,
+        true
+      ) + freshnessScoreAdjustment(freshness.status),
+    authority: {
+      source: "runtime_document",
+      precedence: "runtime_context",
+      scope: "project",
+      authorityLevel: normalizedMetadata.authorityLevel ?? "operational_context",
+      allowedRoles: [...normalizedMetadata.retrievalRoles]
+    },
+    freshness,
+    citation: {
+      kind: "workflow_document",
+      documentId: document.id,
+      label: document.title,
+      canonicalRef: `workflow://document/${document.kind}/${document.id}`,
+      runId: document.runId,
+      taskId: document.taskId
+    },
+    provenance: {
+      artifactKind: "workflow_document",
+      runId: document.runId,
+      taskId: document.taskId,
+      createdAt: document.createdAt
     },
     metadata: buildSearchMemoryMetadata(normalizedMetadata, freshness.staleAfterDays),
     conflict: {
