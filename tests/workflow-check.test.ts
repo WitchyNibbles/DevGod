@@ -91,12 +91,14 @@ async function writeLiveTaskPacket(
     qualityGates?: string[];
     verificationCommand?: string;
     omitSections?: string[];
+    reasoningMode?: "dual" | "strict";
   }
 ): Promise<void> {
   const completionStandard = options?.completionStandard ?? "artifact_complete";
   const qualityGates = options?.qualityGates ?? ["product_acceptance"];
   const verificationCommand = options?.verificationCommand ?? "bash scripts/check-devgod-workflow-live.sh";
   const omitSections = new Set(options?.omitSections ?? []);
+  const reasoningMode = options?.reasoningMode;
 
   const sections: Array<[string, string[]]> = [
     ["## Task ID", [`\`${taskId}\``]],
@@ -113,6 +115,29 @@ async function writeLiveTaskPacket(
     ["## Assumptions", []],
     ["### Approved assumptions", ["- live checks should be stricter than artifact checks"]],
     ["### Blocked assumptions", ["- none"]],
+    ["## Reasoning quality", []],
+    ["### Claim", ["- the live workflow proof should reflect real task authority"]],
+    ["### Facts", ["- workflow checker and live proof wrapper are available"]],
+    ["### Assumptions", ["- the authoritative runtime proof is present"]],
+    ["### Hypotheses and alternatives", ["- missing proof should fail closed", "- summary-only reviews must stay insufficient"]],
+    ["### Evidence refs", ["- `scripts/check-devgod-workflow.sh`", "- `scripts/check-devgod-workflow-live.sh`"]],
+    ["### Counter-evidence", ["- none"]],
+    ["### Confidence", ["- `medium`"]],
+    ["### Open questions", ["- none"]],
+    ["### Verification plan", [`- ${verificationCommand}`]],
+    ["### Research and debug budgets", ["- researchSteps=1 debugSteps=1 reviewPasses=1 toolRetries=1"]],
+    ...(reasoningMode
+      ? ([
+          ["## Reasoning policy", []],
+          ["### Mode", [`\`${reasoningMode}\``]],
+          ["### Requirements", ["- strict reasoning metadata is present"]],
+          ["### Max attempts", ["- 3"]],
+          ["## Reasoning attempts", []],
+          ["### Attempt records", ["- attempt-1 trace ref and evidence present"]],
+          ["### Verification records", ["- verification-1 critic review passed"]],
+          ["### Verdict", ["- supported verdict recorded"]]
+        ] as Array<[string, string[]]>)
+      : []),
     ["## Acceptance criteria", ["- live workflow validation passes only with strong proof"]],
     ["## Verification steps", [`- ${verificationCommand}`]],
     ["## Required reviews", ["- reviewer", "- qa_engineer", "- security_reviewer"]],
@@ -204,6 +229,10 @@ async function writeWorkflowReview(
       "## Quality gate evidence",
       "",
       "- quality gates were checked explicitly",
+      "",
+      "## Reasoning quality findings",
+      "",
+      "No reasoning-quality findings.",
       "",
       "## Findings",
       "",
@@ -405,6 +434,62 @@ test("check-devgod-workflow-live rejects unsupported quality gates", async () =>
       }),
       /unsupported quality gate in .*task-DG-LIVE-BAD-GATE\.md: workflow_happy_path_required/
     );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects strict reasoning tasks without attempt records", async () => {
+  const taskId = "DG-LIVE-STRICT-MISSING";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-strict-missing-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningMode: "strict",
+      omitSections: ["### Attempt records"]
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /missing heading ### Attempt records/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live accepts strict reasoning tasks with attempt records and verdict", async () => {
+  const taskId = "DG-LIVE-STRICT-PASS";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-strict-pass-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningMode: "strict"
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+      cwd: targetRoot
+    });
   } finally {
     if (stubRoot) {
       await rm(stubRoot, { recursive: true, force: true });

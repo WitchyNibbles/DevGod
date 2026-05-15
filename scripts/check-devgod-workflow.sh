@@ -314,6 +314,9 @@ require_heading "## Quality gates" "$task_template"
 require_heading "## Acceptance criteria" "$task_template"
 require_heading "## Verification steps" "$task_template"
 require_heading "## Required reviews" "$task_template"
+require_heading "## Reasoning quality" "$task_template"
+require_heading "## Reasoning policy" "$task_template"
+require_heading "## Reasoning attempts" "$task_template"
 require_grep '`reviewer`' "$task_template"
 require_grep '`qa_engineer`' "$task_template"
 require_grep '`security_reviewer`' "$task_template"
@@ -328,6 +331,7 @@ require_section_equals "## Review state" "pending | passed | blocked | waived" "
 require_section_equals "## Severity" "low | medium | high | critical" "$review_template"
 require_heading "## Specialist execution evidence" "$review_template"
 require_heading "## Quality gate evidence" "$review_template"
+require_heading "## Reasoning quality findings" "$review_template"
 require_heading "## Verification evidence" "$review_template"
 require_section_equals "## Waiver authority" "none | manager | security_exception" "$review_template"
 require_section_equals "## Decision" "approved | blocked | waived" "$review_template"
@@ -371,6 +375,7 @@ if [[ "$live_mode" -eq 1 ]]; then
     "## Completion standard" \
     "## Required specialist roles" \
     "## Quality gates" \
+    "## Reasoning quality" \
     "## Goal" \
     "## Inputs" \
     "## Dependencies" \
@@ -391,6 +396,45 @@ if [[ "$live_mode" -eq 1 ]]; then
 
   require_heading "### Approved assumptions" "$task_file"
   require_heading "### Blocked assumptions" "$task_file"
+  require_heading "### Claim" "$task_file"
+  require_heading "### Facts" "$task_file"
+  require_heading "### Assumptions" "$task_file"
+  require_heading "### Hypotheses and alternatives" "$task_file"
+  require_heading "### Evidence refs" "$task_file"
+  require_heading "### Counter-evidence" "$task_file"
+  require_heading "### Confidence" "$task_file"
+  require_heading "### Open questions" "$task_file"
+  require_heading "### Verification plan" "$task_file"
+  require_heading "### Research and debug budgets" "$task_file"
+
+  reasoning_mode="legacy"
+  if grep -Fq "## Reasoning policy" "$task_file"; then
+    reasoning_mode_raw="$(extract_section_value "### Mode" "$task_file")"
+    if [[ -n "$reasoning_mode_raw" ]]; then
+      reasoning_mode="$(normalize_value "$reasoning_mode_raw")"
+      require_allowed_value "$reasoning_mode" "$task_file" "legacy" "dual" "strict"
+    fi
+  fi
+
+  if [[ "$reasoning_mode" != "legacy" ]]; then
+    require_heading "## Reasoning policy" "$task_file"
+    require_heading "### Mode" "$task_file"
+    require_heading "### Requirements" "$task_file"
+    require_heading "### Max attempts" "$task_file"
+    require_heading "## Reasoning attempts" "$task_file"
+    require_heading "### Attempt records" "$task_file"
+    require_heading "### Verification records" "$task_file"
+    require_heading "### Verdict" "$task_file"
+    require_nonempty_section_block "### Mode" "$task_file"
+    require_nonempty_section_block "### Requirements" "$task_file"
+    require_nonempty_section_block "### Max attempts" "$task_file"
+  fi
+
+  if [[ "$reasoning_mode" == "strict" ]]; then
+    require_nonempty_section_block "### Attempt records" "$task_file"
+    require_nonempty_section_block "### Verification records" "$task_file"
+    require_nonempty_section_block "### Verdict" "$task_file"
+  fi
 
   for heading in \
     "## Required specialist roles" \
@@ -409,6 +453,19 @@ if [[ "$live_mode" -eq 1 ]]; then
     "## Anti-patterns to avoid" \
     "## Rollback notes" \
     "## Handoff format"; do
+    require_nonempty_section_block "$heading" "$task_file"
+  done
+
+  for heading in \
+    "### Claim" \
+    "### Facts" \
+    "### Assumptions" \
+    "### Hypotheses and alternatives" \
+    "### Evidence refs" \
+    "### Counter-evidence" \
+    "### Confidence" \
+    "### Verification plan" \
+    "### Research and debug budgets"; do
     require_nonempty_section_block "$heading" "$task_file"
   done
 

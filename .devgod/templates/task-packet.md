@@ -49,6 +49,77 @@ List the task-type gates that apply, for example:
 
 ### Blocked assumptions
 
+## Reasoning quality
+
+### Claim
+
+### Facts
+
+### Assumptions
+
+### Hypotheses and alternatives
+
+### Evidence refs
+
+### Counter-evidence
+
+### Confidence
+
+### Open questions
+
+### Verification plan
+
+### Research and debug budgets
+
+## Reasoning policy
+
+### Mode
+
+`legacy | dual | strict`
+
+### Requirements
+
+State whether this task requires explicit reasoning blocks, attempts, trace refs, verifications, critic verification, and a final verdict.
+
+### Max attempts
+
+Record the bounded attempt budget when dual or strict mode is used.
+
+## Reasoning attempts
+
+### Attempt records
+
+List each bounded reasoning attempt with:
+
+- id
+- label
+- hypothesis
+- alternatives
+- evidence refs
+- verification refs
+- trace ref
+- outcome
+- summary
+
+### Verification records
+
+List each verification record with:
+
+- id
+- kind
+- ref
+- status
+- summary
+
+### Verdict
+
+Record the current verdict and why:
+
+- status: `supported | insufficient_evidence | contradicted | budget_exhausted | needs_review`
+- summary
+- supporting attempt ids
+- blocking issues
+
 ## Behavior to preserve
 
 Required for refactors, migrations, command rewrites, and other behavior-preserving changes.

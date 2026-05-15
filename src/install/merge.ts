@@ -265,6 +265,7 @@ export function mergePackageJson(
   scripts["devgod:mcp"] = `${devgodEntry} mcp`;
   scripts["devgod:ui"] = `${devgodEntry} serve-ui`;
   scripts["devgod:scaffold-workflow"] = `${devgodEntry} scaffold-workflow --target .`;
+  scripts["devgod:upgrade-reasoning-workflow"] = `${devgodEntry} upgrade-reasoning-workflow --target .`;
   scripts["devgod:seed-happy-path-fixture"] = `${devgodEntry} seed-happy-path-fixture --target .`;
   scripts["devgod:check:happy-path"] = "bash scripts/check-devgod-happy-path.sh";
   scripts["devgod:check-workflow"] = "bash scripts/check-devgod-workflow.sh";

@@ -35,6 +35,7 @@ const installCommands = new Set([
   "upgrade",
   "verify",
   "scaffold-workflow",
+  "upgrade-reasoning-workflow",
   "seed-happy-path-fixture"
 ]);
 
@@ -63,7 +64,7 @@ function printUsage(): void {
       "  mcp | serve-ui",
       "",
       "Install commands:",
-      "  init | upgrade | verify | scaffold-workflow | seed-happy-path-fixture",
+      "  init | upgrade | verify | scaffold-workflow | upgrade-reasoning-workflow | seed-happy-path-fixture",
       ""
     ].join("\n")
   );

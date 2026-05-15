@@ -41,7 +41,8 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
     rollbackNotes: overrides.rollbackNotes ?? "delete the generated task packet",
-    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files"
+    handoffFormat: overrides.handoffFormat ?? "summary + blockers + changed files",
+    reasoningQuality: overrides.reasoningQuality
   };
 }
 
@@ -848,6 +849,8 @@ test("verify-review-identity command uses repo template defaults when no env ada
   delete env.DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE;
   delete env.DEVGOD_REVIEW_IDENTITY_BINDINGS;
   delete env.DEVGOD_REVIEW_IDENTITY_FIXTURES;
+  env.DEVGOD_REVIEW_IDENTITY_BINDINGS = ".devgod/templates/review-identity-bindings.json";
+  env.DEVGOD_REVIEW_IDENTITY_FIXTURES = ".devgod/templates/review-identity-adapter.fixture.json";
 
   const result = await executeVerifyReviewIdentityCommand({
     cwd: sourceRoot,

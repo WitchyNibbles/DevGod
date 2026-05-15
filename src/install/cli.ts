@@ -89,11 +89,20 @@ interface ParsedHappyPathFixtureCommand {
   forceActive: boolean;
 }
 
+interface ParsedUpgradeReasoningWorkflowCommand {
+  command: "upgrade-reasoning-workflow";
+  targetArg: string;
+  taskId: string;
+  mode: "dual" | "strict";
+  force: boolean;
+}
+
 type ParsedCliArgs =
   | ParsedInstallCommand
   | ParsedVerifyCommand
   | ParsedScaffoldCommand
-  | ParsedHappyPathFixtureCommand;
+  | ParsedHappyPathFixtureCommand
+  | ParsedUpgradeReasoningWorkflowCommand;
 
 const installManifestRelativePath = ".devgod/install-manifest.json";
 const installManifestVersion = 1;
@@ -148,7 +157,8 @@ function usage(): never {
       "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-gitnexus] --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]"
+      "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts upgrade-reasoning-workflow --target <path> --task-id <task-id> [--mode dual|strict] [--force]"
   );
 }
 
@@ -947,7 +957,10 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   };
 }
 
-function parseTaskId(args: string[], command: "scaffold-workflow" | "seed-happy-path-fixture"): string {
+function parseTaskId(
+  args: string[],
+  command: "scaffold-workflow" | "seed-happy-path-fixture" | "upgrade-reasoning-workflow"
+): string {
   const taskIdIndex = args.indexOf("--task-id");
 
   if (taskIdIndex === -1) {
@@ -1012,6 +1025,31 @@ function parseWorkflowMutationCommand(
   };
 }
 
+function parseUpgradeReasoningWorkflowCommand(
+  args: string[]
+): ParsedUpgradeReasoningWorkflowCommand {
+  if (args.includes("--apply") || args.includes("--dry-run") || args.includes("--force-active")) {
+    throw new Error("upgrade-reasoning-workflow does not support --apply, --dry-run, or --force-active.");
+  }
+
+  const modeIndex = args.indexOf("--mode");
+  const modeRaw = modeIndex === -1 ? "dual" : args[modeIndex + 1];
+  if (!modeRaw || modeRaw.startsWith("-")) {
+    throw new Error("Mode must follow --mode and cannot start with '-'.");
+  }
+  if (modeRaw !== "dual" && modeRaw !== "strict") {
+    throw new Error("upgrade-reasoning-workflow mode must be dual or strict.");
+  }
+
+  return {
+    command: "upgrade-reasoning-workflow",
+    targetArg: resolveCliTarget(args, new Set(["--task-id", "--mode", "--force"])),
+    taskId: parseTaskId(args, "upgrade-reasoning-workflow"),
+    mode: modeRaw,
+    force: args.includes("--force")
+  };
+}
+
 export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   const command = rawArgs[0];
 
@@ -1041,6 +1079,10 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
 
   if (command === "seed-happy-path-fixture") {
     return parseWorkflowMutationCommand("seed-happy-path-fixture", rawArgs.slice(1));
+  }
+
+  if (command === "upgrade-reasoning-workflow") {
+    return parseUpgradeReasoningWorkflowCommand(rawArgs.slice(1));
   }
 
   if (rawArgs.includes("--apply")) {
@@ -1570,6 +1612,32 @@ function printHappyPathFixtureSummary(targetRoot: string, summary: WorkflowScaff
   }
 }
 
+function printUpgradeReasoningWorkflowSummary(targetRoot: string, summary: WorkflowScaffoldSummary): void {
+  console.log(`devgod upgrade-reasoning-workflow for ${targetRoot}`);
+  console.log(`task_id: ${summary.taskId}`);
+  console.log(`created: ${summary.created.length}`);
+  console.log(`updated: ${summary.updated.length}`);
+
+  if (summary.created.length > 0) {
+    console.log("Created:");
+    for (const filePath of summary.created) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  if (summary.updated.length > 0) {
+    console.log("Updated:");
+    for (const filePath of summary.updated) {
+      console.log(`- ${filePath}`);
+    }
+  }
+
+  console.log("Next steps:");
+  for (const [index, step] of summary.nextSteps.entries()) {
+    console.log(`${index + 1}. ${step}`);
+  }
+}
+
 function replaceTemplateTaskId(templateContent: string, taskId: string): string {
   return templateContent.replaceAll("<task-id>", taskId);
 }
@@ -1585,6 +1653,83 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
   return replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
     .replace("`artifact_complete | specialist_verified`", "`artifact_complete`");
+}
+
+function extractMarkdownSection(content: string, heading: string): string | undefined {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(new RegExp(`${escaped}\\n\\n([\\s\\S]*?)(?=\\n## |$)`));
+  return match?.[1]?.trim();
+}
+
+function appendReasoningHardeningSections(
+  content: string,
+  mode: "dual" | "strict"
+): string {
+  if (content.includes("## Reasoning policy")) {
+    return content;
+  }
+
+  const claim = extractMarkdownSection(content, "### Claim") ?? "- backfilled from legacy task packet";
+  const evidenceRefs = extractMarkdownSection(content, "### Evidence refs") ?? "- none recorded yet";
+  const verificationPlan =
+    extractMarkdownSection(content, "### Verification plan") ??
+    extractMarkdownSection(content, "## Verification steps") ??
+    "- add verification evidence";
+  const counterEvidence =
+    extractMarkdownSection(content, "### Counter-evidence") ?? "- none recorded yet";
+
+  const block = [
+    "",
+    "## Reasoning policy",
+    "",
+    "### Mode",
+    "",
+    `\`${mode}\``,
+    "",
+    "### Requirements",
+    "",
+    mode === "strict"
+      ? "- require explicit reasoning block, attempt records, trace refs, verification records, critic verification, and a supported verdict before completion"
+      : "- keep legacy-compatible routing while requiring explicit attempts, verification records, and a verdict for upgraded tasks",
+    "",
+    "### Max attempts",
+    "",
+    "- 3",
+    "",
+    "## Reasoning attempts",
+    "",
+    "### Attempt records",
+    "",
+    "- id: `attempt-1`",
+    "- label: legacy reasoning upgrade backfill",
+    `- hypothesis: ${claim.replace(/\n+/g, " ")}`,
+    "- alternatives: add explicit competing hypotheses before final review",
+    `- evidence refs: ${evidenceRefs.replace(/\n+/g, " ")}`,
+    "- verification refs: verification-1",
+    "- trace ref: add runtime or artifact trace ref",
+    mode === "strict" ? "- outcome: inconclusive" : "- outcome: supported",
+    "- summary: backfilled from legacy reasoning-quality sections during workflow upgrade",
+    "",
+    "### Verification records",
+    "",
+    "- id: `verification-1`",
+    "- kind: `critic_review`",
+    "- ref: add reviewer or critic evidence ref",
+    mode === "strict" ? "- status: `pending`" : "- status: `passed`",
+    `- summary: seeded from existing verification guidance: ${verificationPlan.replace(/\n+/g, " ")}`,
+    "",
+    "### Verdict",
+    "",
+    mode === "strict"
+      ? "- status: `needs_review`"
+      : "- status: `supported`",
+    "- summary: upgraded from legacy semantics; verify attempt, trace, and critic evidence before relying on this verdict",
+    "- supporting attempt ids: `attempt-1`",
+    `- blocking issues: ${counterEvidence.replace(/\n+/g, " ")}`,
+    ""
+  ].join("\n");
+
+  return `${content.trimEnd()}\n${block}`;
 }
 
 function buildReviewFromTemplate(
@@ -2012,6 +2157,56 @@ export async function seedHappyPathFixtureArtifacts(
   };
 }
 
+export async function upgradeReasoningWorkflowArtifacts(options: {
+  sourceRoot: string;
+  targetRoot: string;
+  taskId: string;
+  mode: "dual" | "strict";
+  force?: boolean | undefined;
+}): Promise<WorkflowScaffoldSummary> {
+  const targetRoot = path.resolve(options.targetRoot);
+  const taskRelativePath = `.devgod/work/tasks/task-${options.taskId}.md`;
+  const inspection = await inspectManagedTarget(targetRoot, taskRelativePath);
+  if (inspection.invalidReason) {
+    throw new Error(`refusing to upgrade ${taskRelativePath}: ${inspection.invalidReason}`);
+  }
+  if (!inspection.exists || !inspection.content) {
+    throw new Error(`missing task artifact: ${taskRelativePath}`);
+  }
+
+  const nextContent = `${appendReasoningHardeningSections(inspection.content, options.mode).trimEnd()}\n`;
+  if (nextContent === inspection.content && !options.force) {
+    return {
+      taskId: options.taskId,
+      created: [],
+      updated: [],
+      nextSteps: [
+        "Task already contains reasoning hardening sections.",
+        `If you want to rewrite the task packet in ${options.mode} mode anyway, rerun with --force.`,
+        `Run bash scripts/check-devgod-workflow.sh --task-id ${options.taskId} after updating the content.`
+      ]
+    };
+  }
+
+  const { created, updated } = await writeWorkflowArtifactSet(targetRoot, [
+    {
+      absolutePath: inspection.absolutePath,
+      content: nextContent
+    }
+  ]);
+
+  return {
+    taskId: options.taskId,
+    created,
+    updated,
+    nextSteps: [
+      `Fill the backfilled reasoning attempt, verification, and verdict sections with real evidence for ${options.taskId}.`,
+      `If this task should hard-block on reasoning quality, keep mode \`${options.mode}\` and add passed critic verification plus a supported verdict.`,
+      `Run bash scripts/check-devgod-workflow.sh --task-id ${options.taskId} after the upgraded packet is complete.`
+    ]
+  };
+}
+
 async function main() {
   const parsedArgs = parseCliArgs(process.argv.slice(2));
 
@@ -2039,6 +2234,18 @@ async function main() {
       forceActive: parsedArgs.forceActive
     });
     printHappyPathFixtureSummary(targetRoot, summary);
+    return;
+  }
+
+  if (parsedArgs.command === "upgrade-reasoning-workflow") {
+    const summary = await upgradeReasoningWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId: parsedArgs.taskId,
+      mode: parsedArgs.mode,
+      force: parsedArgs.force
+    });
+    printUpgradeReasoningWorkflowSummary(targetRoot, summary);
     return;
   }
 
