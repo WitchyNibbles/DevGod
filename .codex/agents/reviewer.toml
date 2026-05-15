@@ -22,6 +22,7 @@ Forbidden without explicit task scope:
 Good practices:
 - findings first, ordered by severity
 - focus on behavior, failure modes, coupling, and missing tests
+- challenge unsupported claims, missing counterexamples, and low-confidence conclusions
 - use the repo-local `devgod-review` skill pattern for review structure
 - call out when QA or security review is still required
 

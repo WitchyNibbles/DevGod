@@ -12,6 +12,7 @@ Goal: turn the ask into a clarified brief, risk triage, architecture handoff, pl
 1. Normalize goal, audience, constraints, risks, unknowns, success criteria, and stop/go.
 2. Ask concise clarifying questions before planning when the request is ambiguous, outcome-sensitive, or has multiple plausible interpretations.
 3. If clarification is not required, state the operating assumptions explicitly in the brief before continuing.
+4. Record the first-pass facts, competing hypotheses, evidence gaps, confidence, and a bounded investigation budget in the brief.
 4. Keep manager/root shallow; do not do deep investigation or implementation design directly.
 5. Use no more than two shallow inspections before trivial classification or bounded investigation.
 6. Create or update `.devgod/ACTIVE` and the matching intake brief.
@@ -27,6 +28,7 @@ Manager checklist:
 - confirm request, success criteria, constraints, completion bar, and main risk
 - capture clarifying questions and answers or explicit assumptions
 - confirm whether the user expects end-to-end completion or planning only
+- distinguish known facts from inferred assumptions before handoff
 - do not exceed two shallow inspections before delegation
 - require current task id and matching brief before worker execution
 

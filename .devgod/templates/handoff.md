@@ -26,6 +26,10 @@ List at least one concrete runtime, command, or artifact reference proving the d
 
 List evidence that the declared quality gates were actually checked.
 
+## Reasoning quality summary
+
+List the current claim, evidence refs, rejected or alternate hypotheses, confidence, and any remaining uncertainty.
+
 ## Risks and edge cases
 
 ## Rollback notes

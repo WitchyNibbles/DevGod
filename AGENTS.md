@@ -41,6 +41,9 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - after at most two shallow inspections, either stay on the trivial fast path or delegate bounded investigation
 - create or update `.devgod/ACTIVE` and the matching brief before moving past intake
 - use bounded investigation packets when evidence is needed: owner role, question, read scope, forbidden write scope, evidence required, max output, stop condition
+- require a reasoning-quality pass on substantive work: separate facts, assumptions, and guesses; generate plausible alternatives; note counter-evidence; record confidence and remaining uncertainty
+- when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial
+- use explicit bounded budgets for research, debugging, review, and tool retries so skepticism stays finite
 - evidence first, then `solution_architect`, then `planner`, then explicit task packets, then specialist execution
 - ambiguous or user-flow-heavy asks should involve `product_strategist` before or alongside architecture
 - manager/root may do only trivial mechanical edits outside explicit specialist ownership
@@ -127,6 +130,7 @@ Ask the user before:
 
 - unresolved `CRITICAL` or `HIGH` security findings block completion
 - missing required review, specialist evidence, quality-gate evidence, acceptance criteria, or verification evidence blocks completion
+- weak reasoning evidence, unresolved contradictions, or exhausted budgets must be recorded explicitly as warnings or blockers instead of being hidden behind confident prose
 - `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof
 - `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is required before reporting active substantive work complete
 - markdown review files are evidence summaries, not reviewer authority

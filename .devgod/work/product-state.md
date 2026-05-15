@@ -29,6 +29,8 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 | Persisted runtime loop execution history | done | `src/core/service.ts`, `src/admin/report.ts`, `src/admin.ts`, `src/admin/runtime-surface.ts`, `tests/service.test.ts`, `tests/admin.test.ts` |
 | Runtime-approved task advancement into queue state | done | `src/admin.ts`, `src/devgod/task-queue.ts`, `tests/admin.test.ts`, `tests/autopilot-status.test.ts` |
 | Verification harness compatibility under restricted/sandboxed execution | done | `src/install/cli.ts`, `tests/install.test.ts`, `tests/workflow-check.test.ts`, `tests/workflow-scaffold.test.ts`, `tests/orchestration-benchmark.test.ts`, `tests/orchestration-eval.test.ts`, `tests/ui-server.test.ts` |
+| Reasoning-quality skepticism layer across prompts, workflow artifacts, and runtime reporting | done | `src/core/reasoning-quality.ts`, `src/core/service.ts`, `src/admin/report.ts`, `src/admin/ops.ts`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/report-command.test.ts`, `tests/control-layer-contract.test.ts` |
+| Reasoning-quality hardening with strict lifecycle enforcement and legacy upgrade tooling | done | `src/domain/types.ts`, `src/domain/contracts.ts`, `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `scripts/check-devgod-workflow.sh`, `tests/install.test.ts`, `tests/workflow-check.test.ts` |
 
 ## Current Milestone
 
@@ -39,10 +41,12 @@ Autonomy loop rollout
 - Baseline autopilot control-layer scaffolding
 - Runtime execution-plan authority surfaced to CLI, runtime helpers, MCP, and installed scripts
 - Local runtime proof bootstrap restored live workflow validation for package-maintainer work
+- Reasoning-quality skepticism and evidence discipline standardized across prompts, workflow artifacts, runtime routing, and reporting
+- Reasoning-quality hardening added strict/dual/legacy lifecycle enforcement, migration tooling, and completion blocking on insufficient evidence
 
 ## Current Task
 
-No active implementation slice remains in the current queue. The runtime-task-advance slice was completed through the runtime-gated advancement command, which left `.devgod/ACTIVE` idle and `task-queue.json` with no remaining current task.
+The queue remains idle, and the active maintenance slice `2026-05-15-reasoning-quality-hardening` is fully verified. This task upgraded reasoning quality from advisory-only semantics into a strict/dual/legacy lifecycle with structured attempts, verification records, verdicts, migration tooling, and strict runtime blocking while preserving authenticated approval authority.
 
 ## Next Task
 
@@ -54,6 +58,23 @@ None queued. The current control-layer backlog for this autonomy milestone is co
 
 ## Verification Summary
 
+- `npm run verify:review-identity` passed on 2026-05-15 after adding a repo-owned local review-identity adapter, live bindings, live fixtures, and explicit backend selection.
+- `npm run doctor` passed on 2026-05-15 with review identity reported as live-trust ready and no advisories.
+- `npm run status` reported adapterConfigured=true, selectedBackend=`devgod_local_seed`, and liveTrustReady=true on 2026-05-15.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-devgod-local-review-identity-setup` passed on 2026-05-15.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-devgod-local-review-identity-setup` passed on 2026-05-15 after seeding authoritative runtime proof for the task.
+- `npm run setup:local` passed on 2026-05-15 after aligning the source-repo `.env` to the updated runtime/Qdrant/review settings and replacing the blocked default local password.
+- `npm run doctor` passed with host-backed runtime access on 2026-05-15 for the local docker setup path.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-devgod-upgrade-configure` passed on 2026-05-15.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-devgod-upgrade-configure` passed on 2026-05-15 after seeding authoritative runtime proof for the task.
+- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-reasoning-quality-layer`.
+- `npm test` passed on 2026-05-15 for `2026-05-15-reasoning-quality-layer`, including reasoning-quality coverage for debugging, planning, code review, schema investigation, and weak-evidence paths.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-layer` passed on 2026-05-15.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-layer` passed on 2026-05-15 after seeding authoritative runtime proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8`.
+- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-reasoning-quality-hardening`.
+- `npm test` passed on 2026-05-15 for `2026-05-15-reasoning-quality-hardening`, including strict routing, strict terminal blocking, legacy upgrade tooling, and dual-mode workflow checks.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15 after seeding authoritative runtime proof run `bc242568-80c2-4de6-8768-7a25597306e8`.
 - `node --experimental-strip-types --test tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/admin.test.ts` passed.
 - `npm test` passed.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-loop-surface` passed.
@@ -78,6 +99,10 @@ None queued. The current control-layer backlog for this autonomy milestone is co
 
 ## Review Summary
 
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-local-review-identity-setup`, and authoritative local proof run `42fe51d6-4a67-4363-858d-633196eb7c62` approved the task on 2026-05-15.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-upgrade-configure`, and an authoritative local proof run `9edb1449-4718-4e4e-8db8-24434910928a` approved the task on 2026-05-15.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-layer`, and authoritative local proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8` approved the task on 2026-05-15.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-hardening`, and authoritative local proof run `bc242568-80c2-4de6-8768-7a25597306e8` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-13-runtime-loop-surface`, `2026-05-13-runtime-proof-seed`, `2026-05-13-runtime-directive-executor`, `2026-05-14-runtime-loop-history`, `2026-05-14-verification-harness-compat`, and `2026-05-14-runtime-task-advance`. The original control-layer gap around runtime-approved queue advancement is now closed.
 
 ## Active Verification Blocker
@@ -90,4 +115,4 @@ Resolved. The restricted-environment harness issues were fixed and the previousl
 
 ## Last Updated
 
-2026-05-14
+2026-05-15

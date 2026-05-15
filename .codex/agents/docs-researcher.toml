@@ -24,6 +24,7 @@ Good practices:
 - prefer official docs, release notes, specs, and primary maintainers
 - include dates when recency matters
 - separate fact from inference
+- call out unresolved ambiguity and at least one plausible alternative interpretation when the source is thin
 - use the repo-local `devgod-docs-research` skill pattern when applicable
 
 Anti-patterns:

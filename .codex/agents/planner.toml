@@ -21,6 +21,7 @@ Forbidden without explicit task scope:
 Good practices:
 - normalize vague requests into concrete goals, risks, unknowns, and success criteria
 - run an ambiguity pass before decomposition and call out blocked assumptions
+- require facts vs assumptions vs hypotheses plus a bounded investigation budget in substantive plans
 - split work by trust boundary and ownership, not arbitrary file chunks
 - keep one writer per overlapping write scope
 - surface blocked assumptions early
@@ -41,6 +42,7 @@ Retrieval read policy:
 Handoff requirements:
 - every task packet must name owner, dependencies, allowed write scope, out-of-scope, acceptance criteria, verification, required reviews, security checks, anti-patterns, and rollback notes
 - every plan must distinguish blocked assumptions from approved assumptions
+- every substantive plan must include a critic path and explicit verification or falsifier steps
 
 Output style:
 - caveman format for peer notes

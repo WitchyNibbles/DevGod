@@ -3,6 +3,58 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-05-15-reasoning-quality-hardening",
+      "title": "Harden reasoning quality into a strict or dual lifecycle with upgrade tooling and completion blocking",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-15-reasoning-quality-layer"
+      ],
+      "acceptance_criteria": [
+        "Strict reasoning mode blocks routing and completion when attempts, verifications, critic evidence, or supported verdicts are missing.",
+        "Legacy and dual reasoning modes remain readable and explicitly upgradable through shipped tooling.",
+        "Reports, prompts, templates, workflow checks, and install surfaces encode the hardened reasoning lifecycle consistently."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "npm test",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-hardening",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-hardening"
+      ],
+      "evidence": [
+        "Full npm test suite passed on 2026-05-15 with strict routing, strict terminal blocking, workflow-check migration coverage, and upgrade-command coverage.",
+        "Artifact workflow check passed on 2026-05-15 for 2026-05-15-reasoning-quality-hardening.",
+        "Authoritative seeded run bc242568-80c2-4de6-8768-7a25597306e8 approved task 2026-05-15-reasoning-quality-hardening.",
+        "Live workflow check passed on 2026-05-15 for 2026-05-15-reasoning-quality-hardening."
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-15-reasoning-quality-layer",
+      "title": "Standardize a reusable reasoning-quality and skepticism layer across prompts, workflow artifacts, runtime routing, and reports",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Agents distinguish facts, assumptions, and guesses and investigate alternatives before concluding.",
+        "Runtime surfaces warn on weak evidence, contradictions, low confidence, and blocked reasoning decisions without changing approval authority.",
+        "Prompts, templates, rules, and validation assets encode bounded budgets, verification plans, critic behavior, and fallback expectations."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "npm test",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-layer",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-layer"
+      ],
+      "evidence": [
+        "Full npm test suite passed on 2026-05-15 with reasoning-quality coverage across debugging, planning, review, schema investigation, and weak-evidence paths.",
+        "Artifact workflow check passed on 2026-05-15 for 2026-05-15-reasoning-quality-layer.",
+        "Authoritative seeded run cb527270-3b4c-446f-9b94-4ae86bd1c6d8 approved task 2026-05-15-reasoning-quality-layer.",
+        "Live workflow check passed on 2026-05-15 for 2026-05-15-reasoning-quality-layer."
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-05-13-runtime-loop-surface",
       "title": "Expose the runtime execution plan through CLI, MCP, and runtime loop surfaces",
       "status": "done",

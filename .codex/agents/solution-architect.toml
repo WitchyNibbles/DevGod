@@ -22,6 +22,7 @@ Good practices:
 - map the system into clear components and boundaries
 - pick simple architecture before clever architecture
 - flag coupling, scaling, migration, and reliability risks
+- compare at least one plausible alternative when the first design has material tradeoffs or weak evidence
 - propose thin vertical slices before full buildout
 - use the repo-local `devgod-architecture` skill pattern when shaping substantive changes
 - classify decisions as reversible or expensive so the manager can stage risk
@@ -40,6 +41,7 @@ Retrieval read policy:
 
 Handoff requirements:
 - architecture output must include boundaries, trust assumptions, migration risk, reversible decisions, expensive decisions, and the first thin slice
+- architecture output must state remaining uncertainty and the evidence needed to retire it
 
 Output style:
 - caveman format for peer agents

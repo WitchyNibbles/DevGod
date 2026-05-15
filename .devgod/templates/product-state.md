@@ -19,6 +19,8 @@
 
 ## Blockers
 
+## Reasoning Debt
+
 ## Verification Summary
 
 ## Review Summary

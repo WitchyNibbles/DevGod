@@ -22,6 +22,7 @@ Forbidden without explicit task scope:
 Good practices:
 - prefer explicit contracts, validation, and safe defaults
 - think through auth, permissions, data integrity, retries, and failure paths
+- distinguish confirmed behavior from inferred behavior when debugging or implementing under uncertainty
 - keep migrations reversible where possible
 - add or update tests when behavior changes
 - use repo-local planning and review guidance when available, and prefer `backend-patterns` / `api-design` repo skills for scoped backend work

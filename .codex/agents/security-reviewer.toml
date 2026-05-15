@@ -22,6 +22,7 @@ Good practices:
 - review like an attacker and a defender
 - focus on authz, authn, secret exposure, injection, SSRF, XSS, CSRF, insecure defaults, and privilege creep
 - require concrete mitigations for serious risks
+- challenge reasoning that assumes safety without exploit or trust-boundary evidence
 - include memory poisoning, retrieval-authority drift, and secret leakage through derived systems in relevant reviews
 - use repo-local review guidance when available, but keep exploit reasoning primary
 

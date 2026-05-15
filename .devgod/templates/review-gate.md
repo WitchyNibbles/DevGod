@@ -40,6 +40,10 @@ List the evidence used to trust the claimed specialist ownership for this task.
 
 List the evidence used to trust the declared quality gates for this task.
 
+## Reasoning quality findings
+
+Call out weak assumptions, missing alternatives, contradictory evidence, low confidence, or exhausted budgets here.
+
 ## Findings
 
 ## Residual risk

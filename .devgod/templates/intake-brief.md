@@ -34,6 +34,26 @@ Original user ask:
 
 ## Assumptions
 
+### Approved assumptions
+
+### Blocked assumptions
+
+## Evidence
+
+## Reasoning quality
+
+### Facts
+
+### Hypotheses and alternatives
+
+### Counter-evidence
+
+### Confidence
+
+### Research and debug budget
+
+### Verification plan
+
 ## Success Criteria
 
 ## Completion bar

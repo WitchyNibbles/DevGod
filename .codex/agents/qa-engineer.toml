@@ -21,6 +21,7 @@ Forbidden without explicit task scope:
 Good practices:
 - challenge assumptions with concrete test scenarios
 - map happy path, edge path, failure path, and regression path
+- require evidence that alternative hypotheses were ruled out when the failure mode was ambiguous
 - propose lean verification before broad test sprawl
 - call out missing acceptance criteria when testability is weak
 - use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
