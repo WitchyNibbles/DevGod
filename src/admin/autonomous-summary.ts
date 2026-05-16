@@ -1,7 +1,9 @@
 import { collectAutonomousExecutionBlockers } from "../runtime/autonomous-execution.ts";
 import type {
+  AutonomousExecutionState,
   AutonomousExecutionSnapshot,
   CheckpointRecord,
+  ContinuationAction,
   CoverageGapRecord,
   ProgressProofRecord,
   RunExecutionPlan,
@@ -9,6 +11,7 @@ import type {
 } from "../domain/types.ts";
 
 export type AutonomousResumeStatus = "not_configured" | "ready" | "blocked";
+export type AutonomousResumeExecutionMode = "none" | "runtime_executable" | "operator_required";
 export type AutonomousResumeSource =
   | "none"
   | "checkpoint"
@@ -24,8 +27,16 @@ export interface AutonomousResumeGuidance {
   nextTarget?: string | undefined;
   nextActions: string[];
   blockers: string[];
+  executionMode: AutonomousResumeExecutionMode;
+  executionSummary: string;
   checkpointId?: string | undefined;
   progressProofId?: string | undefined;
+}
+
+export interface ContinueAnalysisDirectiveClassification {
+  executionMode: Exclude<AutonomousResumeExecutionMode, "none">;
+  summary: string;
+  action?: ContinuationAction | undefined;
 }
 
 export interface AutonomousOperatorSummary {
@@ -65,7 +76,9 @@ export function buildAutonomousOperatorSummary(input: {
         source: "none",
         summary: "autonomous execution is not configured for this run",
         nextActions: [],
-        blockers: []
+        blockers: [],
+        executionMode: "none",
+        executionSummary: "no autonomous continuation target is active"
       }
     };
   }
@@ -95,6 +108,7 @@ export function buildAutonomousOperatorSummary(input: {
     resume: buildResumeGuidance({
       blockers,
       blockingGaps,
+      state,
       latestProgressProof,
       latestCheckpoint,
       executionPlan: input.executionPlan
@@ -105,6 +119,7 @@ export function buildAutonomousOperatorSummary(input: {
 function buildResumeGuidance(input: {
   blockers: string[];
   blockingGaps: readonly CoverageGapRecord[];
+  state: AutonomousExecutionState;
   latestProgressProof?: ProgressProofRecord | undefined;
   latestCheckpoint?: CheckpointRecord | undefined;
   executionPlan?: RunExecutionPlan | undefined;
@@ -114,6 +129,13 @@ function buildResumeGuidance(input: {
   const gapTarget = input.blockingGaps[0]?.targetId;
   const checkpointActions = input.latestCheckpoint?.nextActions ?? [];
   const gapActions = input.blockingGaps[0]?.suggestedNextActions ?? [];
+  const continueAnalysisClassification =
+    input.executionPlan?.directive.kind === "continue_analysis"
+      ? classifyContinueAnalysisDirective({
+          directive: input.executionPlan.directive,
+          state: input.state
+        })
+      : undefined;
 
   if (input.blockers.length > 0) {
     const nextActions =
@@ -130,6 +152,9 @@ function buildResumeGuidance(input: {
       nextTarget: gapTarget ?? proofTarget ?? checkpointTarget,
       nextActions,
       blockers: [...input.blockers],
+      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionSummary:
+        continueAnalysisClassification?.summary ?? "autonomous blockers remain before continuation can proceed",
       checkpointId: input.latestCheckpoint?.checkpointId,
       progressProofId: input.latestProgressProof?.proofId
     };
@@ -146,6 +171,9 @@ function buildResumeGuidance(input: {
       nextTarget: proofTarget ?? checkpointTarget,
       nextActions: checkpointActions.length > 0 ? [...checkpointActions] : deriveExecutionPlanActions(input.executionPlan),
       blockers: [],
+      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionSummary:
+        continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest checkpoint",
       checkpointId: input.latestCheckpoint.checkpointId,
       progressProofId: input.latestProgressProof?.proofId
     };
@@ -165,6 +193,9 @@ function buildResumeGuidance(input: {
           ? deriveProofActions(input.latestProgressProof)
           : deriveExecutionPlanActions(input.executionPlan),
       blockers: [],
+      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionSummary:
+        continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest progress proof",
       checkpointId: undefined,
       progressProofId: input.latestProgressProof.proofId
     };
@@ -180,7 +211,134 @@ function buildResumeGuidance(input: {
       "autonomous execution has no checkpoint or progress proof to derive resume guidance from",
     nextTarget: checkpointTarget ?? proofTarget ?? gapTarget,
     nextActions: planActions,
-    blockers: []
+    blockers: [],
+    executionMode: continueAnalysisClassification?.executionMode ?? "none",
+    executionSummary:
+      continueAnalysisClassification?.summary ??
+      (planActions.length > 0 ? "autonomous continuation is derived from the current execution plan" : "no autonomous continuation target is active")
+  };
+}
+
+export function classifyContinueAnalysisDirective(input: {
+  directive: Extract<RunExecutionPlan["directive"], { kind: "continue_analysis" }>;
+  state?: AutonomousExecutionState | undefined;
+}): ContinueAnalysisDirectiveClassification {
+  const action = input.directive.actions[0];
+  if (!action) {
+    return {
+      executionMode: "operator_required",
+      summary: `operator input is required for autonomous target ${input.directive.targetId}: no typed continuation action was derived`
+    };
+  }
+
+  if (action.kind === "run_workflow_proof") {
+    return {
+      executionMode: "runtime_executable",
+      summary: `runtime can execute workflow proof for task ${action.taskId}`,
+      action
+    };
+  }
+
+  if (action.kind === "resolve_blocking_gap" && action.targetId.startsWith("task:")) {
+    return {
+      executionMode: "runtime_executable",
+      summary: `runtime can resolve blocking gap ${action.gapId} through task-target workflow proof`,
+      action
+    };
+  }
+
+  if (action.kind === "resolve_blocking_gap") {
+    return {
+      executionMode: "operator_required",
+      summary: `operator input is required for advisory continuation target ${action.targetId} while resolving blocking gap ${action.gapId}`,
+      action
+    };
+  }
+
+  if (action.kind === "resume_target") {
+    if (action.targetId.startsWith("task:")) {
+      return {
+        executionMode: "runtime_executable",
+        summary: `runtime can resume task-target continuation ${action.targetId}`,
+        action
+      };
+    }
+
+    if (action.targetId === "review:authenticated") {
+      return {
+        executionMode: "runtime_executable",
+        summary: "runtime can normalize the authenticated-review continuation target",
+        action
+      };
+    }
+
+    if (action.source === "progress_proof" && action.targetId.startsWith("proof:")) {
+      return classifyPersistedResumeTarget({
+        sourceLabel: "progress proof",
+        targetId: action.targetId,
+        sourceId: action.sourceId,
+        matchesSource:
+          action.sourceId?.trim() && input.state
+            ? input.state.progressProofs.some(
+                (proof) => proof.proofId === action.sourceId && proof.nextTarget.trim() === action.targetId
+              )
+            : false
+      });
+    }
+
+    if (action.source === "checkpoint" && action.targetId.startsWith("checkpoint:")) {
+      return classifyPersistedResumeTarget({
+        sourceLabel: "checkpoint",
+        targetId: action.targetId,
+        sourceId: action.sourceId,
+        matchesSource:
+          action.sourceId?.trim() && input.state
+            ? input.state.checkpoints.some(
+                (checkpoint) =>
+                  checkpoint.checkpointId === action.sourceId &&
+                  checkpoint.activeTargets.some((target) => target.trim() === action.targetId)
+              )
+            : false
+      });
+    }
+
+    return {
+      executionMode: "operator_required",
+      summary: `operator input is required for advisory continuation target ${action.targetId} from ${action.source}${action.sourceId ? ` (${action.sourceId})` : ""}`,
+      action
+    };
+  }
+
+  return {
+    executionMode: "operator_required",
+    summary: `operator input is required for autonomous target ${input.directive.targetId}`,
+    action
+  };
+}
+
+function classifyPersistedResumeTarget(input: {
+  sourceLabel: string;
+  targetId: string;
+  sourceId?: string | undefined;
+  matchesSource: boolean;
+}): ContinueAnalysisDirectiveClassification {
+  if (!input.sourceId?.trim()) {
+    return {
+      executionMode: "operator_required",
+      summary: `operator input is required for ${input.targetId}: the originating ${input.sourceLabel} id is missing`
+    };
+  }
+
+  if (!input.matchesSource) {
+    return {
+      executionMode: "operator_required",
+      summary: `operator input is required for ${input.targetId}: the originating ${input.sourceLabel} ${input.sourceId} is stale or no longer matches`
+    };
+  }
+
+  return {
+    executionMode: "runtime_executable",
+    summary: `runtime can normalize self-referential ${input.sourceLabel} target ${input.targetId}`
   };
 }
 
@@ -253,5 +411,11 @@ function latestProgressProofRecord(records: readonly ProgressProofRecord[]): Pro
 }
 
 function latestCheckpointRecord(records: readonly CheckpointRecord[]): CheckpointRecord | undefined {
-  return [...records].sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  return [...records].sort((left, right) => {
+    const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+    if (createdAtOrder !== 0) {
+      return createdAtOrder;
+    }
+    return right.checkpointId.localeCompare(left.checkpointId);
+  })[0];
 }

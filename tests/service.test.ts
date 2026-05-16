@@ -2911,6 +2911,7 @@ test("getExecutionPlan returns continue_analysis when autonomous blockers still 
   if (plan.directive.kind === "continue_analysis") {
     assert.equal(plan.directive.source, "blocking_gap");
     assert.equal(plan.directive.targetId, "task:runtime-proof");
+    assert.deepEqual(plan.directive.actions, [{ kind: "run_workflow_proof", taskId: "runtime-proof" }]);
     assert.deepEqual(plan.directive.nextActions, ["run workflow-proof after authenticated reviews"]);
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("blocking gaps remain open")));
   }
@@ -2958,6 +2959,14 @@ test("selectAutonomousNextTarget falls back to the latest progress proof when no
 
   assert.equal(target?.source, "progress_proof");
   assert.equal(target?.targetId, "proof:target");
+  assert.deepEqual(target?.actions, [
+    {
+      kind: "resume_target",
+      targetId: "proof:target",
+      source: "progress_proof",
+      sourceId: "proof-3"
+    }
+  ]);
   assert.deepEqual(target?.nextActions, ["proof guidance wins before checkpoint fallback"]);
 });
 
@@ -3003,6 +3012,14 @@ test("selectAutonomousNextTarget falls back to the latest checkpoint when no blo
 
   assert.equal(target?.source, "checkpoint");
   assert.equal(target?.targetId, "checkpoint:target");
+  assert.deepEqual(target?.actions, [
+    {
+      kind: "resume_target",
+      targetId: "checkpoint:target",
+      source: "checkpoint",
+      sourceId: "cp-2"
+    }
+  ]);
   assert.deepEqual(target?.nextActions, ["resume the checkpoint target"]);
 });
 

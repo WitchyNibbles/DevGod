@@ -79,6 +79,12 @@ export interface ExecuteReviewRecommendationResult {
   evidence: string[];
 }
 
+export interface ExecuteContinuationActionResult {
+  executed: boolean;
+  taskId?: string | undefined;
+  evidence: string[];
+}
+
 export interface DirectiveExecutionStep {
   directiveKind: RunExecutionPlan["directive"]["kind"];
   outcome: "executed" | "unsupported" | "blocked" | "complete";
@@ -97,6 +103,11 @@ export interface ExecuteDirectiveStepOptions {
     runId: string;
     directive: Extract<RunExecutionPlan["directive"], { kind: "dispatch_reviews" }>;
   }) => Promise<ExecuteReviewRecommendationResult>;
+  executeContinuationAction?: (input: {
+    runId: string;
+    directive: Extract<RunExecutionPlan["directive"], { kind: "continue_analysis" }>;
+    action: Extract<RunExecutionPlan["directive"], { kind: "continue_analysis" }>["actions"][number];
+  }) => Promise<ExecuteContinuationActionResult>;
 }
 
 export interface DirectiveExecutionResult {
@@ -1063,6 +1074,7 @@ export class DevgodCoreService {
             kind: "continue_analysis",
             targetId: autonomousNextTarget.targetId,
             source: autonomousNextTarget.source,
+            actions: autonomousNextTarget.actions,
             nextActions: autonomousNextTarget.nextActions,
             blockers: autonomousExecutionBlockers,
             rationale: [
@@ -1126,6 +1138,7 @@ export class DevgodCoreService {
           kind: "continue_analysis",
           targetId: autonomousNextTarget.targetId,
           source: autonomousNextTarget.source,
+          actions: autonomousNextTarget.actions,
           nextActions: autonomousNextTarget.nextActions,
           blockers: autonomousExecutionBlockers,
           rationale: [
@@ -1279,15 +1292,50 @@ export class DevgodCoreService {
             : ["run has no executable next step"]
       });
     } else if (initialPlan.directive.kind === "continue_analysis") {
-      steps.push({
-        directiveKind: "continue_analysis",
-        outcome: "unsupported",
-        nextDirectiveKind: finalPlan.directive.kind,
-        evidence: [
-          `next target remains ${initialPlan.directive.targetId}`,
-          ...initialPlan.directive.nextActions
-        ]
-      });
+      const executeContinuationAction = options.executeContinuationAction;
+      const nextAction = initialPlan.directive.actions[0];
+      if (!executeContinuationAction || !nextAction) {
+        steps.push({
+          directiveKind: "continue_analysis",
+          outcome: "unsupported",
+          nextDirectiveKind: finalPlan.directive.kind,
+          evidence: [
+            `next target remains ${initialPlan.directive.targetId}`,
+            ...initialPlan.directive.actions.map((action) => `action:${action.kind}`),
+            ...initialPlan.directive.nextActions
+          ]
+        });
+      } else {
+        const result = await executeContinuationAction({
+          runId,
+          directive: initialPlan.directive,
+          action: nextAction
+        });
+        if (!result.executed) {
+          steps.push({
+            directiveKind: "continue_analysis",
+            outcome: "unsupported",
+            taskId: result.taskId ?? initialPlan.directive.targetId,
+            nextDirectiveKind: finalPlan.directive.kind,
+            evidence:
+              result.evidence.length > 0
+                ? [...result.evidence]
+                : ["continuation executor declined to apply the next typed autonomous action"]
+          });
+        } else {
+          finalPlan = await this.getExecutionPlan(runId, { staleAfterHours });
+          steps.push({
+            directiveKind: "continue_analysis",
+            outcome: "executed",
+            taskId: result.taskId ?? initialPlan.directive.targetId,
+            nextDirectiveKind: finalPlan.directive.kind,
+            evidence: [
+              ...result.evidence,
+              `re-evaluated runtime plan and reached ${finalPlan.directive.kind}`
+            ]
+          });
+        }
+      }
     } else if (initialPlan.directive.kind === "apply_recovery") {
       steps.push({
         directiveKind: "apply_recovery",

@@ -66,6 +66,40 @@ export function buildOperatorDashboardReport(input: {
     }
   }
 
+  if (input.status.daemon.continuation?.state === "blocked") {
+    alerts.push(`daemon continuation blocked: ${input.status.daemon.continuation.summary}`);
+    if (input.status.daemon.continuation.nextActions.length > 0) {
+      nextActions.push(
+        ...input.status.daemon.continuation.nextActions.map(
+          (action) => `operator intervention required for daemon continuation: ${action}`
+        )
+      );
+    } else {
+      nextActions.push(`operator intervention required for daemon continuation: ${input.status.daemon.continuation.summary}`);
+    }
+  }
+
+  if (input.status.daemon.supervisor) {
+    alerts.push(
+      `daemon supervisor ${input.status.daemon.supervisor.state}: ${input.status.daemon.supervisor.reason}`
+    );
+    if (input.status.daemon.supervisor.missingReviewRoles.length > 0) {
+      alerts.push(
+        `daemon supervisor missing review actors: ${input.status.daemon.supervisor.missingReviewRoles.join(", ")}`
+      );
+    }
+    if (input.status.daemon.supervisor.nextActions.length > 0) {
+      nextActions.push(...input.status.daemon.supervisor.nextActions.map((action) => `supervisor follow-up: ${action}`));
+    }
+    if (input.status.daemon.supervisor.history.length > 0) {
+      alerts.push(
+        `daemon supervisor history: ${input.status.daemon.supervisor.history
+          .map((entry) => `${entry.activeRunId ?? "unknown-run"}:${entry.state}/${entry.actionCount}`)
+          .join(", ")}`
+      );
+    }
+  }
+
   switch (input.executionPlan.directive.kind) {
     case "dispatch_owner":
       nextActions.push(
@@ -85,11 +119,16 @@ export function buildOperatorDashboardReport(input: {
       }
       break;
     case "continue_analysis":
-      nextActions.push(
-        input.executionPlan.directive.nextActions[0] ?? `continue ${input.executionPlan.directive.targetId}`
-      );
-      for (const action of input.executionPlan.directive.nextActions.slice(1)) {
-        nextActions.push(action);
+      if (input.status.autonomous.resume.executionMode === "operator_required") {
+        alerts.push(`autonomous continuation requires operator input: ${input.status.autonomous.resume.executionSummary}`);
+        nextActions.push(`operator intervention required: ${input.status.autonomous.resume.executionSummary}`);
+      } else {
+        nextActions.push(
+          input.executionPlan.directive.nextActions[0] ?? `continue ${input.executionPlan.directive.targetId}`
+        );
+        for (const action of input.executionPlan.directive.nextActions.slice(1)) {
+          nextActions.push(action);
+        }
       }
       for (const blocker of input.executionPlan.directive.blockers) {
         alerts.push(`autonomous blocker: ${blocker}`);
@@ -160,6 +199,29 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   }
   if (report.status.gitNexus.indexedAt) {
     lines.push(`gitnexus-indexed-at: ${report.status.gitNexus.indexedAt}`);
+  }
+  if (report.status.daemon.continuation) {
+    lines.push(
+      `daemon-continuation: ${report.status.daemon.continuation.state} ${report.status.daemon.continuation.executionMode} ${report.status.daemon.continuation.targetId ?? "unknown-target"}`
+    );
+  }
+  if (report.status.daemon.supervisor) {
+    lines.push(
+      `daemon-supervisor: ${report.status.daemon.supervisor.state}${report.status.daemon.supervisor.blockerKind ? ` ${report.status.daemon.supervisor.blockerKind}` : ""} ${report.status.daemon.supervisor.reason}`
+    );
+    if (report.status.daemon.supervisor.history.length > 0) {
+      lines.push(
+        `daemon-supervisor-history-view: ${report.status.daemon.supervisor.historyView.scope}${report.status.daemon.supervisor.historyView.runId ? `:${report.status.daemon.supervisor.historyView.runId}` : ""} returned=${report.status.daemon.supervisor.historyView.returnedCount} filtered=${report.status.daemon.supervisor.historyView.filteredCount} retained=${report.status.daemon.supervisor.historyView.retainedCount} truncated=${report.status.daemon.supervisor.historyView.truncated ? "yes" : "no"}`
+      );
+      lines.push(
+        `daemon-supervisor-history: ${report.status.daemon.supervisor.history
+          .map(
+            (entry) =>
+              `${entry.recordedAt}:${entry.activeRunId ?? "unknown-run"}:${entry.state}:${entry.actionCount}`
+          )
+          .join(", ")}`
+      );
+    }
   }
 
   if (report.alerts.length > 0) {

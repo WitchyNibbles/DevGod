@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   createReviewActionContextResolver,
   type AuthenticatedPrincipal,
@@ -246,6 +249,9 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
     getRoutingReport(runId) {
       return service.recommendRouting(runId);
     },
@@ -296,7 +302,7 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
 });
 
 test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint, and resume summaries", async () => {
-  const { service, store } = createService();
+  const { service, store, registerReviewContext } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -318,6 +324,44 @@ test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint
       ]
     })
   ]);
+  registerReviewContext({ actor: "reviewer-actor", actorRole: "reviewer", waiverAuthority: "none" });
+  registerReviewContext({
+    actor: "security-actor",
+    actorRole: "security_reviewer",
+    waiverAuthority: "none"
+  });
+  registerReviewContext({ actor: "qa-actor", actorRole: "qa_engineer", waiverAuthority: "none" });
+  await service.claimTask(run.id, "rewrite", "backend_engineer");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "backend_engineer",
+    ownerRole: "backend_engineer",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["backend handoff recorded"],
+    qualityGateEvidence: ["autonomous continuation evidence recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",
     phase: "final_verification",
@@ -389,6 +433,9 @@ test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
     getRoutingReport(runId) {
       return service.recommendRouting(runId);
     },
@@ -418,4 +465,474 @@ test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint
   assert.match(markdown, /latest checkpoint: cp-autonomous/);
   assert.match(markdown, /latest proof: proof-autonomous/);
   assert.match(markdown, /resume: blocked\/blocking_gap/);
+});
+
+test("executeReportCommandFromArgs marks advisory continuation targets as operator-required", async () => {
+  const { service, store, registerReviewContext } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Advisory continuation report",
+    request: "Show when autonomous continuation needs operator input."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"],
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  registerReviewContext({ actor: "reviewer-actor", actorRole: "reviewer", waiverAuthority: "none" });
+  registerReviewContext({
+    actor: "security-actor",
+    actorRole: "security_reviewer",
+    waiverAuthority: "none"
+  });
+  registerReviewContext({ actor: "qa-actor", actorRole: "qa_engineer", waiverAuthority: "none" });
+  await service.claimTask(run.id, "rewrite", "backend_engineer");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "backend_engineer",
+    ownerRole: "backend_engineer",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["backend handoff recorded"],
+    qualityGateEvidence: ["autonomous continuation evidence recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:core-loop",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 3,
+      callsitesAnalyzed: 3,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-15T11:00:00.000Z"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-advisory",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/admin.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "artifact:resume",
+    whyNext: "This remains advisory-only.",
+    createdAt: "2026-05-15T11:03:00.000Z"
+  });
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.autonomous.resume.executionMode, "operator_required");
+  assert.match(
+    result.report.autonomous.resume.executionSummary,
+    /operator input is required for advisory continuation target artifact:resume/
+  );
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /resume execution: operator_required/);
+});
+
+test("executeReportCommandFromArgs surfaces blocked daemon continuation state in json and markdown", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-daemon-continuation-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon continuation report",
+    request: "Expose daemon continuation blockers through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"]
+    })
+  ]);
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "continuation-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          directiveKind: "continue_analysis",
+          executionMode: "operator_required",
+          targetId: "artifact:resume",
+          source: "progress_proof",
+          sourceId: "proof-1",
+          actionKind: "resume_target",
+          summary: "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
+          nextActions: ["consult operator evidence before resuming the artifact target"],
+          blockers: ["blocking gaps remain open"],
+          updatedAt: "2026-05-16T10:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "operator-handoff.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          blockerKind: "operator_required_continuation",
+          reason: "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: null,
+          cycle: 1,
+          directiveKind: "continue_analysis",
+          nextActions: ["consult operator evidence before resuming the artifact target"],
+          detailFiles: {
+            continuationStatus: ".devgod/work/daemon/continuation-status.json"
+          },
+          updatedAt: "2026-05-16T10:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.daemon.continuation?.state, "blocked");
+    assert.equal(result.report.status.daemon.continuation?.targetId, "artifact:resume");
+    assert.equal(
+      result.report.status.daemon.continuation?.summary,
+      "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)"
+    );
+    assert.equal(result.report.status.daemon.handoff?.state, "blocked");
+    assert.equal(result.report.status.daemon.handoff?.blockerKind, "operator_required_continuation");
+    assert.equal(result.report.status.daemon.handoff?.activeRunId, run.id);
+    assert.equal(result.report.status.daemon.handoff?.directiveKind, "continue_analysis");
+    assert.deepEqual(result.report.status.daemon.handoff?.nextActions, [
+      "consult operator evidence before resuming the artifact target"
+    ]);
+
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /daemon continuation: blocked operator_required artifact:resume/);
+    assert.match(markdown, /daemon continuation summary: operator input is required for advisory continuation target artifact:resume/);
+    assert.match(markdown, /daemon handoff: blocked operator_required_continuation operator input is required for advisory continuation target artifact:resume/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeReportCommandFromArgs surfaces daemon supervisor state in json and markdown", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-daemon-supervisor-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon supervisor report",
+    request: "Expose daemon supervisor decisions through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"]
+    })
+  ]);
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor",
+          supervisorCycles: 1,
+          nextActions: [
+            "provide --review-actor security_reviewer=<actor>",
+            "provide --review-actor qa_engineer=<actor>"
+          ],
+          missingReviewRoles: ["security_reviewer", "qa_engineer"],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_review_action",
+              taskId: "rewrite",
+              reviewRole: "security_reviewer",
+              filePath: ".devgod/review-actions/security.json",
+              summary: "queued trusted security review action via security-actor"
+            }
+          ],
+          updatedAt: "2026-05-16T12:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-history.jsonl"),
+      `${JSON.stringify(
+        {
+          recordedAt: "2026-05-16T11:30:00.000Z",
+          state: "completed",
+          reason: "previous supervisor run completed after enqueuing trusted review actions",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor-previous",
+          supervisorCycles: 2,
+          nextActions: [],
+          missingReviewRoles: [],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_review_action",
+              taskId: "rewrite",
+              reviewRole: "security_reviewer",
+              filePath: ".devgod/review-actions/security.json",
+              summary: "queued trusted security review action via security-actor"
+            }
+          ]
+        }
+      )}\n${JSON.stringify(
+        {
+          recordedAt: "2026-05-16T12:00:00.000Z",
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor",
+          supervisorCycles: 1,
+          nextActions: [
+            "provide --review-actor security_reviewer=<actor>",
+            "provide --review-actor qa_engineer=<actor>"
+          ],
+          missingReviewRoles: ["security_reviewer", "qa_engineer"],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_review_action",
+              taskId: "rewrite",
+              reviewRole: "security_reviewer",
+              filePath: ".devgod/review-actions/security.json",
+              summary: "queued trusted security review action via security-actor"
+            }
+          ]
+        }
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.daemon.supervisor?.state, "blocked");
+    assert.equal(result.report.status.daemon.supervisor?.blockerKind, "missing_review_actor_bindings");
+    assert.deepEqual(result.report.status.daemon.supervisor?.missingReviewRoles, [
+      "security_reviewer",
+      "qa_engineer"
+    ]);
+    assert.deepEqual(result.report.status.daemon.supervisor?.nextActions, [
+      "provide --review-actor security_reviewer=<actor>",
+      "provide --review-actor qa_engineer=<actor>"
+    ]);
+    assert.deepEqual(result.report.status.daemon.supervisor?.actions, [
+      {
+        cycle: 1,
+        action: "enqueue_review_action",
+        targetId: undefined,
+        taskId: "rewrite",
+        reviewRole: "security_reviewer",
+        filePath: ".devgod/review-actions/security.json",
+        summary: "queued trusted security review action via security-actor"
+      }
+    ]);
+    assert.deepEqual(result.report.status.daemon.supervisor?.history, [
+      {
+        recordedAt: "2026-05-16T11:30:00.000Z",
+        state: "completed",
+        activeRunId: run.id,
+        activeTaskId: "rewrite",
+        blockerKind: undefined,
+        reason: "previous supervisor run completed after enqueuing trusted review actions",
+        supervisorCycles: 2,
+        actionCount: 1
+      },
+      {
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        activeRunId: run.id,
+        activeTaskId: "rewrite",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+        supervisorCycles: 1,
+        actionCount: 1
+      }
+    ]);
+    assert.deepEqual(result.report.status.daemon.supervisor?.historyView, {
+      scope: "run",
+      runId: run.id,
+      limit: 5,
+      retainedCount: 2,
+      filteredCount: 2,
+      returnedCount: 2,
+      truncated: false
+    });
+
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(
+      markdown,
+      /daemon supervisor: blocked missing_review_actor_bindings supervisor is missing review actor bindings for: security_reviewer, qa_engineer/
+    );
+    assert.match(markdown, /daemon supervisor actions: enqueue_review_action:rewrite:security_reviewer/);
+    assert.match(markdown, /daemon supervisor missing review roles: security_reviewer; qa_engineer/);
+    assert.match(
+      markdown,
+      /daemon supervisor next actions: provide --review-actor security_reviewer=<actor>; provide --review-actor qa_engineer=<actor>/
+    );
+    assert.match(
+      markdown,
+      new RegExp(`daemon supervisor history view: scope=run run=${run.id} returned=2 filtered=2 retained=2 truncated=no`)
+    );
+    assert.match(
+      markdown,
+      new RegExp(`daemon supervisor history: 2026-05-16T11:30:00.000Z:${run.id}:completed:1; 2026-05-16T12:00:00.000Z:${run.id}:blocked:1`)
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

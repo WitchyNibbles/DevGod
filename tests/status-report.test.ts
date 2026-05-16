@@ -419,6 +419,459 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
   }
 });
 
+test("executeStatusCommandFromArgs marks advisory continuation as operator-required when an execution plan is available", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Advisory continuation",
+    request: "Show when status should stop at operator-required continuation."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-15T10:00:00.000Z"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/admin.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "artifact:resume",
+    whyNext: "This remains advisory-only.",
+    createdAt: "2026-05-15T10:05:00.000Z"
+  });
+
+  const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+    env: process.env,
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan() {
+      return Promise.resolve({
+        mode: "runtime_authoritative",
+        runId: run.id,
+        runStatus: "approved",
+        autonomousExecution: undefined,
+        directive: {
+          kind: "continue_analysis",
+          targetId: "artifact:resume",
+          source: "progress_proof",
+          actions: [
+            {
+              kind: "resume_target",
+              targetId: "artifact:resume",
+              source: "progress_proof",
+              sourceId: "proof-1"
+            }
+          ],
+          nextActions: ["This remains advisory-only."],
+          blockers: [],
+          rationale: ["operator evidence is still required"]
+        }
+      });
+    },
+    inspectGitNexus: async () => gitNexusObservation()
+  });
+
+  assert.equal(report.autonomous.resume.executionMode, "operator_required");
+  assert.match(
+    report.autonomous.resume.executionSummary,
+    /operator input is required for advisory continuation target artifact:resume/
+  );
+});
+
+test("executeStatusCommandFromArgs exposes daemon continuation status when local daemon state is blocked", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-daemon-continuation-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon continuation visibility",
+    request: "Surface the daemon continuation blocker through status."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  const otherRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon supervisor visibility other run",
+    request: "Keep a second run around to verify filtered history views."
+  });
+  await service.createTaskGraph(otherRun.id, [taskPacket({ taskId: "stabilize" })]);
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "continuation-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          directiveKind: "continue_analysis",
+          executionMode: "operator_required",
+          targetId: "artifact:resume",
+          source: "progress_proof",
+          sourceId: "proof-1",
+          actionKind: "resume_target",
+          summary: "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
+          nextActions: ["consult operator evidence before resuming the artifact target"],
+          blockers: ["blocking gaps remain open"],
+          updatedAt: "2026-05-16T10:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "operator-handoff.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          blockerKind: "operator_required_continuation",
+          reason: "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: null,
+          cycle: 1,
+          directiveKind: "continue_analysis",
+          nextActions: ["consult operator evidence before resuming the artifact target"],
+          detailFiles: {
+            continuationStatus: ".devgod/work/daemon/continuation-status.json"
+          },
+          updatedAt: "2026-05-16T10:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      inspectGitNexus: async () => gitNexusObservation()
+    });
+
+    assert.equal(report.daemon.continuation?.state, "blocked");
+    assert.equal(report.daemon.continuation?.executionMode, "operator_required");
+    assert.equal(report.daemon.continuation?.targetId, "artifact:resume");
+    assert.equal(report.daemon.continuation?.source, "progress_proof");
+    assert.equal(report.daemon.continuation?.sourceId, "proof-1");
+    assert.equal(report.daemon.continuation?.actionKind, "resume_target");
+    assert.deepEqual(report.daemon.continuation?.nextActions, [
+      "consult operator evidence before resuming the artifact target"
+    ]);
+    assert.deepEqual(report.daemon.continuation?.blockers, ["blocking gaps remain open"]);
+    assert.equal(report.daemon.handoff?.state, "blocked");
+    assert.equal(report.daemon.handoff?.blockerKind, "operator_required_continuation");
+    assert.equal(
+      report.daemon.handoff?.reason,
+      "operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)"
+    );
+    assert.equal(report.daemon.handoff?.activeRunId, run.id);
+    assert.equal(report.daemon.handoff?.activeTaskId, "rewrite");
+    assert.equal(report.daemon.handoff?.directiveKind, "continue_analysis");
+    assert.deepEqual(report.daemon.handoff?.nextActions, [
+      "consult operator evidence before resuming the artifact target"
+    ]);
+    assert.equal(
+      report.daemon.handoff?.detailFiles.continuationStatus,
+      ".devgod/work/daemon/continuation-status.json"
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeStatusCommandFromArgs exposes daemon supervisor state with action history and missing review actors", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-daemon-supervisor-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon supervisor visibility",
+    request: "Surface the supervisor blocker through status."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  const otherRun = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon supervisor visibility other run",
+    request: "Keep a second run around to verify filtered history views."
+  });
+  await service.createTaskGraph(otherRun.id, [taskPacket({ taskId: "stabilize" })]);
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor",
+          supervisorCycles: 1,
+          nextActions: [
+            "provide --review-actor security_reviewer=<actor>",
+            "provide --review-actor qa_engineer=<actor>"
+          ],
+          missingReviewRoles: ["security_reviewer", "qa_engineer"],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_operator_continuation",
+              targetId: "artifact:resume",
+              filePath: ".devgod/operator-actions/action-1.json",
+              summary: "queued trusted continuation follow-up"
+            }
+          ],
+          updatedAt: "2026-05-16T12:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-history.jsonl"),
+      `${JSON.stringify(
+        {
+          recordedAt: "2026-05-16T11:30:00.000Z",
+          state: "completed",
+          reason: "previous supervisor run completed after enqueuing trusted review actions",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor-previous",
+          supervisorCycles: 2,
+          nextActions: [],
+          missingReviewRoles: [],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_review_action",
+              taskId: "rewrite",
+              reviewRole: "security_reviewer",
+              filePath: ".devgod/review-actions/security.json",
+              summary: "queued trusted security review action via security-actor"
+            }
+          ]
+        }
+      )}\n${JSON.stringify(
+        {
+          recordedAt: "2026-05-16T11:45:00.000Z",
+          state: "completed",
+          reason: "other run completed after a clean supervisor pass",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: otherRun.id,
+          activeTaskId: "stabilize",
+          sessionId: "session-supervisor-other",
+          supervisorCycles: 1,
+          nextActions: [],
+          missingReviewRoles: [],
+          actions: []
+        }
+      )}\n${JSON.stringify(
+        {
+          recordedAt: "2026-05-16T12:00:00.000Z",
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: run.id,
+          activeTaskId: "rewrite",
+          sessionId: "session-supervisor",
+          supervisorCycles: 1,
+          nextActions: [
+            "provide --review-actor security_reviewer=<actor>",
+            "provide --review-actor qa_engineer=<actor>"
+          ],
+          missingReviewRoles: ["security_reviewer", "qa_engineer"],
+          actions: [
+            {
+              cycle: 1,
+              action: "enqueue_operator_continuation",
+              targetId: "artifact:resume",
+              filePath: ".devgod/operator-actions/action-1.json",
+              summary: "queued trusted continuation follow-up"
+            }
+          ]
+        }
+      )}\n`,
+      "utf8"
+    );
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      inspectGitNexus: async () => gitNexusObservation()
+    });
+
+    assert.equal(report.daemon.supervisor?.state, "blocked");
+    assert.equal(report.daemon.supervisor?.blockerKind, "missing_review_actor_bindings");
+    assert.equal(
+      report.daemon.supervisor?.reason,
+      "supervisor is missing review actor bindings for: security_reviewer, qa_engineer"
+    );
+    assert.equal(report.daemon.supervisor?.activeRunId, run.id);
+    assert.equal(report.daemon.supervisor?.activeTaskId, "rewrite");
+    assert.equal(report.daemon.supervisor?.sessionId, "session-supervisor");
+    assert.equal(report.daemon.supervisor?.supervisorCycles, 1);
+    assert.deepEqual(report.daemon.supervisor?.missingReviewRoles, ["security_reviewer", "qa_engineer"]);
+    assert.deepEqual(report.daemon.supervisor?.nextActions, [
+      "provide --review-actor security_reviewer=<actor>",
+      "provide --review-actor qa_engineer=<actor>"
+    ]);
+    assert.deepEqual(report.daemon.supervisor?.actions, [
+      {
+        cycle: 1,
+        action: "enqueue_operator_continuation",
+        targetId: "artifact:resume",
+        taskId: undefined,
+        reviewRole: undefined,
+        filePath: ".devgod/operator-actions/action-1.json",
+        summary: "queued trusted continuation follow-up"
+      }
+    ]);
+    assert.deepEqual(report.daemon.supervisor?.history, [
+      {
+        recordedAt: "2026-05-16T11:30:00.000Z",
+        state: "completed",
+        activeRunId: run.id,
+        activeTaskId: "rewrite",
+        blockerKind: undefined,
+        reason: "previous supervisor run completed after enqueuing trusted review actions",
+        supervisorCycles: 2,
+        actionCount: 1
+      },
+      {
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        activeRunId: run.id,
+        activeTaskId: "rewrite",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+        supervisorCycles: 1,
+        actionCount: 1
+      }
+    ]);
+    assert.deepEqual(report.daemon.supervisor?.historyView, {
+      scope: "run",
+      runId: run.id,
+      limit: 5,
+      retainedCount: 3,
+      filteredCount: 2,
+      returnedCount: 2,
+      truncated: false
+    });
+
+    const allRunsReport = await executeStatusCommandFromArgs(
+      [
+        "--run-id",
+        run.id,
+        "--daemon-supervisor-history-scope",
+        "all",
+        "--daemon-supervisor-history-limit",
+        "1"
+      ],
+      {
+        cwd: directory,
+        env: process.env,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        inspectGitNexus: async () => gitNexusObservation()
+      }
+    );
+    assert.deepEqual(allRunsReport.daemon.supervisor?.history, [
+      {
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        activeRunId: run.id,
+        activeTaskId: "rewrite",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: security_reviewer, qa_engineer",
+        supervisorCycles: 1,
+        actionCount: 1
+      }
+    ]);
+    assert.deepEqual(allRunsReport.daemon.supervisor?.historyView, {
+      scope: "all",
+      runId: undefined,
+      limit: 1,
+      retainedCount: 3,
+      filteredCount: 3,
+      returnedCount: 1,
+      truncated: true
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeStatusCommandFromArgs reports multi-backend review adapters and requires selection", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-command-multi-backend-"));
   const service = new DevgodCoreService(new MemoryStore());

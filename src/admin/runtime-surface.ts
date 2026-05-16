@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   executeCheckpointCommandFromArgs,
   executeCoverageCommandFromArgs,
+  createSupportedContinuationExecutor,
   createLiveLoopReviewCommandExecutor,
   createQueuedLoopReviewExecutor,
   executeGapsCommandFromArgs,
@@ -19,6 +20,7 @@ import {
 } from "../admin.ts";
 import { DevgodCoreService } from "../core/service.ts";
 import type {
+  CoverageGapRecord,
   RecoveryInspectionReport,
   RetrievalRole,
   RoutingRecommendationReport,
@@ -47,11 +49,16 @@ interface RuntimeSurfaceService {
       authorityLabel?: import("../domain/types.ts").CheckpointRecord["authorityLabel"] | undefined;
     }
   ) => Promise<unknown>) | undefined;
+  recordProgressProof?: ((
+    runId: string,
+    proof: import("../domain/types.ts").ProgressProofRecord
+  ) => Promise<unknown>) | undefined;
   applyRecovery(
     runId: string,
     actionIds: readonly string[],
     options: { staleAfterHours: number }
   ): Promise<import("../domain/types.ts").RecoveryApplyResult>;
+  upsertCoverageGaps?: ((runId: string, gaps: CoverageGapRecord[]) => Promise<unknown>) | undefined;
   executeDirectiveStep?: ((
     runId: string,
     input: import("../core/service.ts").ExecuteDirectiveStepOptions
@@ -135,6 +142,9 @@ export async function getStatusSurface(args: readonly string[], options: Runtime
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
       }
     })
   );
@@ -301,11 +311,34 @@ export async function getLoopSurface(args: readonly string[], options: RuntimeSu
                 })
               )
             : undefined;
+        const executeContinuationAction = createSupportedContinuationExecutor({
+          env,
+          getStatusSnapshot(runId) {
+            return service.getStatus(runId);
+          },
+          getReviews(runId, taskId) {
+            return store.getReviews(runId, taskId);
+          },
+          getApprovals(runId, taskId) {
+            return store.getApprovals(runId, taskId);
+          },
+          upsertCoverageGaps: service.upsertCoverageGaps
+            ? (runId, gaps) => service.upsertCoverageGaps!(runId, gaps)
+            : undefined,
+          recordProgressProof: service.recordProgressProof
+            ? (runId, proof) => service.recordProgressProof!(runId, proof)
+            : undefined,
+          checkpointRun: service.checkpointRun
+            ? (runId, checkpoint, checkpointOptions) =>
+                service.checkpointRun!(runId, checkpoint, checkpointOptions)
+            : undefined
+        });
 
         return service.executeDirectiveStep(runId, {
           staleAfterHours: input.staleAfterHours,
           ownerActor: input.ownerActor,
-          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
+          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {}),
+          executeContinuationAction
         });
       }
     })
@@ -322,6 +355,9 @@ export async function getReportSurface(args: readonly string[], options: Runtime
       },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
       },
       getRoutingReport(runId) {
         return service.recommendRouting(runId);

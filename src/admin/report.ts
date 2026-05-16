@@ -2,6 +2,7 @@ import type {
   ApprovalRecord,
   HandoffRecord,
   ReasoningWorkflowMode,
+  RunExecutionPlan,
   ReviewRecord,
   RoutingRecommendationReport,
   SearchMemoryResult,
@@ -109,6 +110,7 @@ export interface RunEvidenceReport {
 
 export function buildRunEvidenceReport(input: {
   snapshot: RunStatusSnapshot;
+  executionPlan?: RunExecutionPlan | undefined;
   status: OperatorStatusReport;
   routing: RoutingRecommendationReport;
   recovery: RecoveryInspectionReport;
@@ -185,7 +187,8 @@ export function buildRunEvidenceReport(input: {
       : undefined,
     tasks,
     autonomous: buildAutonomousOperatorSummary({
-      snapshot: input.snapshot
+      snapshot: input.snapshot,
+      executionPlan: input.executionPlan
     }),
     reasoningQuality: {
       authorityLabel: "derived_only",
@@ -296,6 +299,61 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     lines.push(
       `- resume: ${report.autonomous.resume.status}/${report.autonomous.resume.source} ${report.autonomous.resume.summary}`
     );
+    lines.push(
+      `- resume execution: ${report.autonomous.resume.executionMode} ${report.autonomous.resume.executionSummary}`
+    );
+  }
+  if (report.status.daemon.continuation) {
+    lines.push(
+      `- daemon continuation: ${report.status.daemon.continuation.state} ${report.status.daemon.continuation.executionMode} ${report.status.daemon.continuation.targetId ?? "unknown-target"}`
+    );
+    lines.push(`- daemon continuation summary: ${report.status.daemon.continuation.summary}`);
+    if (report.status.daemon.continuation.nextActions.length > 0) {
+      lines.push(`- daemon continuation next actions: ${report.status.daemon.continuation.nextActions.join("; ")}`);
+    }
+  }
+  if (report.status.daemon.handoff) {
+    lines.push(
+      `- daemon handoff: ${report.status.daemon.handoff.state} ${report.status.daemon.handoff.blockerKind} ${report.status.daemon.handoff.reason}`
+    );
+    if (report.status.daemon.handoff.nextActions.length > 0) {
+      lines.push(`- daemon handoff next actions: ${report.status.daemon.handoff.nextActions.join("; ")}`);
+    }
+  }
+  if (report.status.daemon.supervisor) {
+    lines.push(
+      `- daemon supervisor: ${report.status.daemon.supervisor.state}${report.status.daemon.supervisor.blockerKind ? ` ${report.status.daemon.supervisor.blockerKind}` : ""} ${report.status.daemon.supervisor.reason}`
+    );
+    if (report.status.daemon.supervisor.actions.length > 0) {
+      lines.push(
+        `- daemon supervisor actions: ${report.status.daemon.supervisor.actions
+          .map((action) =>
+            action.action === "enqueue_review_action"
+              ? `${action.action}:${action.taskId ?? "unknown"}:${action.reviewRole ?? "unknown"}`
+              : `${action.action}:${action.targetId ?? "unknown"}`
+          )
+          .join("; ")}`
+      );
+    }
+    if (report.status.daemon.supervisor.missingReviewRoles.length > 0) {
+      lines.push(`- daemon supervisor missing review roles: ${report.status.daemon.supervisor.missingReviewRoles.join("; ")}`);
+    }
+    if (report.status.daemon.supervisor.nextActions.length > 0) {
+      lines.push(`- daemon supervisor next actions: ${report.status.daemon.supervisor.nextActions.join("; ")}`);
+    }
+    if (report.status.daemon.supervisor.history.length > 0) {
+      lines.push(
+        `- daemon supervisor history view: scope=${report.status.daemon.supervisor.historyView.scope}${report.status.daemon.supervisor.historyView.runId ? ` run=${report.status.daemon.supervisor.historyView.runId}` : ""} returned=${report.status.daemon.supervisor.historyView.returnedCount} filtered=${report.status.daemon.supervisor.historyView.filteredCount} retained=${report.status.daemon.supervisor.historyView.retainedCount} truncated=${report.status.daemon.supervisor.historyView.truncated ? "yes" : "no"}`
+      );
+      lines.push(
+        `- daemon supervisor history: ${report.status.daemon.supervisor.history
+          .map(
+            (entry) =>
+              `${entry.recordedAt}:${entry.activeRunId ?? "unknown-run"}:${entry.state}:${entry.actionCount}`
+          )
+          .join("; ")}`
+      );
+    }
   }
   lines.push("");
 

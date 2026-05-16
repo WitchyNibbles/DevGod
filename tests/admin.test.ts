@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TaskQueue } from "../src/devgod/task-queue.ts";
 import {
+  executeDaemonCommandFromArgs,
   executeAdvanceActiveTaskCommandFromArgs,
   executeCheckpointCommandFromArgs,
   executeCoverageCommandFromArgs,
@@ -16,6 +17,8 @@ import {
   executeRecordReviewCommandFromArgs,
   executeResumeCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
+  executeSupervisorCommandFromArgs,
+  executeSupervisorHistoryCommandFromArgs,
   executeVerifyReviewIdentityCommand,
   executeWorkflowProofCommandFromArgs
 } from "../src/admin.ts";
@@ -107,6 +110,7 @@ async function createApprovedRuntimeTask(options: {
   taskId: string;
   title: string;
   request: string;
+  qualityGates?: TaskPacketInput["qualityGates"];
 }): Promise<{ runId: string }> {
   const run = await options.service.intakeRequest({
     workspaceSlug: "team",
@@ -116,7 +120,12 @@ async function createApprovedRuntimeTask(options: {
     request: options.request
   });
 
-  await options.service.createTaskGraph(run.id, [taskPacket({ taskId: options.taskId })]);
+  await options.service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: options.taskId,
+      ...(options.qualityGates ? { qualityGates: options.qualityGates } : {})
+    })
+  ]);
   await options.service.claimTask(run.id, options.taskId, "planner");
   await options.service.submitHandoff(run.id, options.taskId, {
     actor: "planner",
@@ -156,7 +165,15 @@ async function createApprovedRuntimeTask(options: {
 async function seedAutonomousState(
   service: DevgodCoreService,
   runId: string,
-  options: { includeCheckpoint?: boolean; includeClosedGap?: boolean } = {}
+  options: {
+    includeCheckpoint?: boolean;
+    includeClosedGap?: boolean;
+    gapTargetId?: string;
+    gapNextActions?: string[];
+    progressNextTarget?: string;
+    progressWhyNext?: string;
+    checkpointTarget?: string;
+  } = {}
 ) {
   await service.configureAutonomousExecution(runId, {
     profile: "legacy_rewrite",
@@ -191,14 +208,14 @@ async function seedAutonomousState(
   await service.upsertCoverageGaps(runId, [
     {
       id: "gap:admin-open",
-      targetId: "task:runtime-proof",
+      targetId: options.gapTargetId ?? "task:runtime-proof",
       kind: "missing_validation",
       severity: "high",
       description: "Runtime proof is still pending.",
       blocking: true,
       evidenceRefs: ["src/admin.ts:1"],
       createdBy: "qa_engineer",
-      suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+      suggestedNextActions: options.gapNextActions ?? ["run workflow-proof after authenticated reviews"],
       status: "open"
     },
     ...(options.includeClosedGap
@@ -226,18 +243,18 @@ async function seedAutonomousState(
     evidenceRefs: ["src/admin.ts:1"],
     coverageDelta: { validated: 1 },
     blockingGapDelta: { closed: 0, opened: 1 },
-    nextTarget: "review:authenticated",
-    whyNext: "Runtime proof remains the next autonomous target.",
+    nextTarget: options.progressNextTarget ?? "review:authenticated",
+    whyNext: options.progressWhyNext ?? "Runtime proof remains the next autonomous target.",
     createdAt: "2026-05-15T12:03:00.000Z"
   });
   if (options.includeCheckpoint) {
     await service.checkpointRun(runId, {
       checkpointId: "cp-admin",
       phase: "final_verification",
-      activeTargets: ["review:authenticated"],
+      activeTargets: [options.checkpointTarget ?? options.progressNextTarget ?? "review:authenticated"],
       recentEvidenceRefs: ["src/admin.ts:1"],
       openGaps: ["gap:admin-open"],
-      nextActions: ["run workflow-proof after authenticated reviews"],
+      nextActions: options.gapNextActions ?? ["run workflow-proof after authenticated reviews"],
       compressedContextRef: "memory://cp-admin",
       createdAt: "2026-05-15T12:04:00.000Z"
     });
@@ -1292,6 +1309,9 @@ test("executeReportCommandFromArgs exposes persisted loop history without writin
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
     getRoutingReport(runId) {
       return service.recommendRouting(runId);
     },
@@ -1480,6 +1500,2671 @@ test("executeRecordReviewCommand rejects shipped template bindings for live revi
     ),
     /live reviewed bindings file/
   );
+});
+
+test("executeDaemonCommandFromArgs runs an owner turn and persists the Codex session id", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Implement owner slice",
+    request: "Finish the current implementation slice."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/core"] })]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-owner-"));
+  try {
+    let capturedPrompt = "";
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn(input) {
+          capturedPrompt = input.prompt;
+          return {
+            sessionId: "thread-owner-1",
+            finalMessage: "{\"summary\":\"owner slice worked\",\"status\":\"needs_followup\",\"blockers\":[]}",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "max_cycles_reached");
+    assert.equal(result.result.sessionId, "thread-owner-1");
+    assert.equal(result.result.cycles.length, 1);
+    assert.equal(result.result.cycles[0]?.action, "run_codex_owner");
+    assert.match(capturedPrompt, /Active task: task-owner/);
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    assert.equal(
+      (runtimeState?.metadata.devgodDaemon as { sessionId?: string } | undefined)?.sessionId,
+      "thread-owner-1"
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs advances the final approved task to completion", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-final",
+    title: "Ship final task",
+    request: "Complete the last workflow task."
+  });
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-final",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-final",
+      tasks: [
+        {
+          id: "task-final",
+          title: "task-final",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-complete-"));
+  try {
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.cycles.length, 1);
+    assert.equal(result.result.cycles[0]?.action, "complete");
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    assert.equal(runtimeState?.activeTaskId, undefined);
+    assert.equal(runtimeState?.taskQueue.current_task_id, null);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs executes typed workflow-proof continuation before closing the queue", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Ship workflow proof task",
+    request: "Close the autonomous workflow-proof gap.",
+    qualityGates: [
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: true,
+    gapTargetId: "task:task-proof",
+    gapNextActions: ["run workflow-proof after authenticated reviews"],
+    progressNextTarget: "task:task-proof",
+    progressWhyNext: "Run workflow-proof for the approved task.",
+    checkpointTarget: "task:task-proof"
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  const preDaemonStatus = await service.getStatus(runId);
+  assert.ok(preDaemonStatus.tasks[0]?.packet.qualityGates.includes("coverage_ledger_required"));
+  assert.equal(preDaemonStatus.autonomousExecution?.coverageSummary.blockingGapCount, 1);
+  const preDaemonPlan = await service.getExecutionPlan(runId);
+  assert.equal(preDaemonPlan.directive.kind, "continue_analysis");
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-proof-"));
+  try {
+    let codexTurnCalled = false;
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "2", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        upsertCoverageGaps(candidateRunId, gaps) {
+          return service.upsertCoverageGaps(candidateRunId, gaps);
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          codexTurnCalled = true;
+          return {
+            sessionId: "should-not-run",
+            finalMessage: "unexpected codex turn",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.cycles.length, 2);
+    assert.equal(result.result.cycles[0]?.action, "run_workflow_proof");
+    assert.equal(result.result.cycles[1]?.action, "complete");
+    assert.equal(codexTurnCalled, false);
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    assert.equal(runtimeState?.activeTaskId, undefined);
+    const snapshot = await service.getStatus(runId);
+    const openGap = snapshot.autonomousExecution?.state.gaps.find((gap) => gap.id === "gap:admin-open");
+    assert.equal(openGap?.status, "closed");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs blocks advisory-only continuation targets before launching a Codex turn", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Advisory-only continuation",
+    request: "Block advisory continuation before launching Codex.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: false,
+    gapTargetId: "artifact:resume",
+    gapNextActions: ["consult operator evidence before resuming the artifact target"],
+    progressNextTarget: "artifact:resume",
+    progressWhyNext: "This remains advisory-only."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const preDaemonPlan = await service.getExecutionPlan(runId);
+  assert.equal(preDaemonPlan.directive.kind, "continue_analysis");
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-advisory-"));
+  try {
+    let codexTurnCalled = false;
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          codexTurnCalled = true;
+          return {
+            sessionId: "should-not-run",
+            finalMessage: "unexpected codex turn",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.match(result.result.reason, /operator input is required for advisory continuation target artifact:resume/);
+    assert.equal(result.result.cycles[0]?.action, "blocked");
+    assert.equal(codexTurnCalled, false);
+    const continuationStatus = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "continuation-status.json"), "utf8")
+    ) as {
+      state: string;
+      directiveKind: string;
+      executionMode: string;
+      targetId: string;
+      source: string;
+      sourceId?: string | undefined;
+      summary: string;
+      nextActions: string[];
+      blockers: string[];
+    };
+    assert.equal(continuationStatus.state, "blocked");
+    assert.equal(continuationStatus.directiveKind, "continue_analysis");
+    assert.equal(continuationStatus.executionMode, "operator_required");
+    assert.equal(continuationStatus.targetId, "artifact:resume");
+    assert.equal(continuationStatus.source, "blocking_gap");
+    assert.equal(continuationStatus.summary, result.result.reason);
+    assert.deepEqual(continuationStatus.nextActions, ["consult operator evidence before resuming the artifact target"]);
+    assert.ok(
+      continuationStatus.blockers.some((blocker) => blocker.includes("blocking gaps remain open")),
+      "expected blocked continuation status to retain autonomous blockers"
+    );
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      state: string;
+      blockerKind: string;
+      reason: string;
+      workspaceSlug: string;
+      projectSlug: string;
+      activeRunId: string;
+      activeTaskId: string;
+      sessionId: string | null;
+      cycle: number;
+      directiveKind: string;
+      nextActions: string[];
+      detailFiles: {
+        continuationStatus?: string | undefined;
+        reviewQueueStatus?: string | undefined;
+      };
+    };
+    assert.equal(operatorHandoff.state, "blocked");
+    assert.equal(operatorHandoff.blockerKind, "operator_required_continuation");
+    assert.equal(operatorHandoff.reason, result.result.reason);
+    assert.equal(operatorHandoff.workspaceSlug, "team");
+    assert.equal(operatorHandoff.projectSlug, "devgod");
+    assert.equal(operatorHandoff.activeRunId, runId);
+    assert.equal(operatorHandoff.activeTaskId, "task-proof");
+    assert.equal(operatorHandoff.sessionId, null);
+    assert.equal(operatorHandoff.cycle, 1);
+    assert.equal(operatorHandoff.directiveKind, "continue_analysis");
+    assert.deepEqual(operatorHandoff.nextActions, ["consult operator evidence before resuming the artifact target"]);
+    assert.equal(
+      operatorHandoff.detailFiles.continuationStatus,
+      ".devgod/work/daemon/continuation-status.json"
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs consumes matching operator continuation actions and launches a Codex analysis turn", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Operator continuation follow-up",
+    request: "Consume a trusted operator action and continue with Codex analysis.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: false,
+    gapTargetId: "artifact:resume",
+    gapNextActions: ["consult operator evidence before resuming the artifact target"],
+    progressNextTarget: "artifact:resume",
+    progressWhyNext: "This remains advisory-only."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-operator-action-"));
+  const operatorActionDir = path.join(daemonCwd, ".devgod", "operator-actions");
+  await mkdir(operatorActionDir, { recursive: true });
+  try {
+    await writeFile(
+      path.join(operatorActionDir, "resume.json"),
+      `${JSON.stringify(
+        {
+          runId,
+          taskId: "task-proof",
+          blockerKind: "operator_required_continuation",
+          action: {
+            kind: "continue_with_analysis",
+            targetId: "artifact:resume",
+            source: "blocking_gap",
+            operatorNotes: "Use the operator-supplied artifact evidence before continuing."
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    let codexPrompt: string | undefined;
+    const result = await executeDaemonCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json",
+        "--operator-action-dir",
+        operatorActionDir
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn(input) {
+          codexPrompt = input.prompt;
+          return {
+            sessionId: "session-operator",
+            finalMessage: "operator-guided continuation executed",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "max_cycles_reached");
+    assert.equal(result.result.cycles[0]?.action, "run_codex_analysis");
+    assert.match(result.result.cycles[0]?.summary ?? "", /operator-guided continuation executed/);
+    assert.ok(codexPrompt, "expected a Codex analysis prompt");
+    assert.match(codexPrompt, /Autonomous target: artifact:resume/);
+    assert.match(codexPrompt, /Operator notes: Use the operator-supplied artifact evidence before continuing\./);
+    const remainingQueueFiles = await readdir(operatorActionDir);
+    assert.deepEqual(remainingQueueFiles, []);
+    const processedOperatorAction = await readFile(
+      path.join(daemonCwd, ".devgod", "work", "daemon", "processed-operator-actions", "resume.json"),
+      "utf8"
+    );
+    assert.match(processedOperatorAction, /continue_with_analysis/);
+    await assert.rejects(
+      readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "continuation-status.json"), "utf8"),
+      /ENOENT/
+    );
+    await assert.rejects(
+      readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8"),
+      /ENOENT/
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs clears stale continuation status once runtime continuation succeeds", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Ship workflow proof task",
+    request: "Clear stale continuation status after runtime continuation succeeds.",
+    qualityGates: [
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: true,
+    gapTargetId: "task:task-proof",
+    gapNextActions: ["run workflow-proof after authenticated reviews"],
+    progressNextTarget: "task:task-proof",
+    progressWhyNext: "Run workflow-proof for the approved task.",
+    checkpointTarget: "task:task-proof"
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-continuation-clear-"));
+  try {
+    await mkdir(path.join(daemonCwd, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(daemonCwd, ".devgod", "work", "daemon", "continuation-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          directiveKind: "continue_analysis",
+          executionMode: "operator_required",
+          targetId: "artifact:resume",
+          source: "blocking_gap",
+          summary: "stale blocked continuation",
+          nextActions: ["consult operator evidence"],
+          blockers: ["blocking gaps remain open"],
+          updatedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "2", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        upsertCoverageGaps(candidateRunId, gaps) {
+          return service.upsertCoverageGaps(candidateRunId, gaps);
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    await assert.rejects(
+      readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "continuation-status.json"), "utf8"),
+      /ENOENT/
+    );
+    await assert.rejects(
+      readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8"),
+      /ENOENT/
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs quarantines invalid queued operator continuation actions", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Invalid operator continuation input",
+    request: "Quarantine malformed operator continuation files.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: false,
+    gapTargetId: "artifact:resume",
+    gapNextActions: ["consult operator evidence before resuming the artifact target"],
+    progressNextTarget: "artifact:resume",
+    progressWhyNext: "This remains advisory-only."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-operator-action-invalid-"));
+  const operatorActionDir = path.join(daemonCwd, ".devgod", "operator-actions");
+  await mkdir(operatorActionDir, { recursive: true });
+  try {
+    await writeFile(
+      path.join(operatorActionDir, "invalid.json"),
+      `${JSON.stringify(
+        {
+          runId,
+          taskId: "task-proof",
+          blockerKind: "operator_required_continuation",
+          action: {
+            kind: "continue_with_analysis",
+            targetId: "artifact:resume"
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    let codexTurnCalled = false;
+    const result = await executeDaemonCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json",
+        "--operator-action-dir",
+        operatorActionDir
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          codexTurnCalled = true;
+          return {
+            sessionId: "should-not-run",
+            finalMessage: "unexpected codex turn",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.match(result.result.reason, /operator input is required for advisory continuation target artifact:resume/);
+    assert.equal(codexTurnCalled, false);
+    const remainingQueueFiles = await readdir(operatorActionDir);
+    assert.deepEqual(remainingQueueFiles, []);
+    const failedDir = path.join(daemonCwd, ".devgod", "work", "daemon", "failed-operator-actions");
+    const archivedInvalid = await readFile(path.join(failedDir, "invalid.json"), "utf8");
+    assert.match(archivedInvalid, /artifact:resume/);
+    const archivedError = JSON.parse(
+      await readFile(path.join(failedDir, "invalid.json.error.json"), "utf8")
+    ) as {
+      file: string;
+      error: string;
+      archivedAt: string;
+    };
+    assert.equal(archivedError.file, "invalid.json");
+    assert.match(archivedError.error, /operator action action\.operatorNotes is required/);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs synthesizes operator continuation actions and reruns the daemon", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor continuation follow-up",
+    request: "Supervisor should read a blocked handoff and synthesize a trusted continuation action.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: false,
+    gapTargetId: "artifact:resume",
+    gapNextActions: ["consult operator evidence before resuming the artifact target"],
+    progressNextTarget: "artifact:resume",
+    progressWhyNext: "This remains advisory-only."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-"));
+  try {
+    let codexPrompt: string | undefined;
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn(input) {
+          codexPrompt = input.prompt;
+          return {
+            sessionId: "session-supervisor",
+            finalMessage: "supervisor-guided continuation executed",
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "max_cycles_reached");
+    assert.equal(result.result.daemonRuns.length, 2);
+    assert.equal(result.result.daemonRuns[0]?.status, "blocked");
+    assert.equal(result.result.daemonRuns[1]?.status, "max_cycles_reached");
+    assert.equal(result.result.actions.length, 1);
+    assert.equal(result.result.actions[0]?.action, "enqueue_operator_continuation");
+    assert.equal(result.result.actions[0]?.targetId, "artifact:resume");
+    assert.ok(codexPrompt, "expected supervisor to trigger a daemon Codex turn");
+    assert.match(codexPrompt, /Operator notes: Local supervisor authorized advisory continuation for artifact:resume\./);
+    assert.match(codexPrompt, /consult operator evidence before resuming the artifact target/);
+    const operatorActionQueueDir = path.join(daemonCwd, ".devgod", "operator-actions");
+    const remainingQueueFiles = await readdir(operatorActionQueueDir);
+    assert.deepEqual(remainingQueueFiles, []);
+    const processedOperatorDir = path.join(
+      daemonCwd,
+      ".devgod",
+      "work",
+      "daemon",
+      "processed-operator-actions"
+    );
+    const processedFiles = await readdir(processedOperatorDir);
+    assert.equal(processedFiles.length, 1);
+    const processedOperatorAction = await readFile(path.join(processedOperatorDir, processedFiles[0]!), "utf8");
+    assert.match(processedOperatorAction, /continue_with_analysis/);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs synthesizes trusted review actions and reruns the daemon", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Supervisor review follow-up",
+    request: "Supervisor should synthesize trusted review actions from a review-queue handoff."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-review-queue-"));
+  try {
+    const executedRoles: string[] = [];
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "2",
+        "--format",
+        "json",
+        "--review-actor",
+        "security_reviewer=security-actor",
+        "--review-actor",
+        "qa_engineer=qa-actor"
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            ...input,
+            async executeReviewRecommendation({ directive }) {
+              const command = input.reviewCommands.find((candidate) =>
+                directive.recommendations.some(
+                  (recommendation) =>
+                    recommendation.taskId === candidate.taskId &&
+                    recommendation.targetReviewRole === candidate.review.reviewerRole
+                )
+              );
+              assert.ok(command, "expected a matching supervisor-generated review command");
+              executedRoles.push(command.review.reviewerRole);
+              await service.recordReview(candidateRunId, command.taskId, command.actor, command.review);
+              return {
+                executed: true,
+                taskId: command.taskId,
+                actor: command.actor,
+                reviewRole: command.review.reviewerRole,
+                evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+              };
+            }
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.daemonRuns.length, 2);
+    assert.equal(result.result.daemonRuns[0]?.status, "blocked");
+    assert.equal(result.result.daemonRuns[1]?.status, "completed");
+    assert.deepEqual([...executedRoles].sort(), ["qa_engineer", "security_reviewer"]);
+    assert.equal(result.result.actions.length, 2);
+    assert.deepEqual(
+      result.result.actions.map((action) => action.action),
+      ["enqueue_review_action", "enqueue_review_action"]
+    );
+    assert.deepEqual(
+      result.result.actions.map((action) => action.reviewRole).sort(),
+      ["qa_engineer", "security_reviewer"]
+    );
+    const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
+    const remainingQueueFiles = await readdir(reviewQueueDir);
+    assert.deepEqual(remainingQueueFiles, []);
+    const processedReviewDir = path.join(daemonCwd, ".devgod", "work", "daemon", "processed-review-actions");
+    const processedFiles = await readdir(processedReviewDir);
+    assert.equal(processedFiles.length, 2);
+    const processedSecurity = await readFile(
+      path.join(processedReviewDir, processedFiles.find((file) => file.includes("security_reviewer"))!),
+      "utf8"
+    );
+    const processedQa = await readFile(
+      path.join(processedReviewDir, processedFiles.find((file) => file.includes("qa_engineer"))!),
+      "utf8"
+    );
+    assert.match(processedSecurity, /security-actor/);
+    assert.match(processedQa, /qa-actor/);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs appends supervisor history across repeated runs", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Supervisor history trail",
+    request: "Persist supervisor history across separate runs."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-history-"));
+  try {
+    const baseOptions: Parameters<typeof executeSupervisorCommandFromArgs>[1] = {
+      cwd: directory,
+      env: process.env,
+      getProjectContext(params: { workspaceSlug: string; projectSlug: string }) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId: string) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state: Parameters<typeof store.saveProjectRuntimeState>[0]) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(candidateRunId: string) {
+        return service.getStatus(candidateRunId);
+      },
+      getExecutionPlan(candidateRunId: string, staleAfterHours: number) {
+        return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+      },
+      applyRecovery(candidateRunId: string, actionIds: readonly string[], staleAfterHours: number) {
+        return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+      },
+      async executeDirectiveStep(candidateRunId, input) {
+        return service.executeDirectiveStep(candidateRunId, {
+          ...input,
+          async executeReviewRecommendation({ directive }) {
+            const command = input.reviewCommands.find((candidate) =>
+              directive.recommendations.some(
+                (recommendation) =>
+                  recommendation.taskId === candidate.taskId &&
+                  recommendation.targetReviewRole === candidate.review.reviewerRole
+              )
+            );
+            assert.ok(command, "expected a matching supervisor-generated review command");
+            await service.recordReview(candidateRunId, command.taskId, command.actor, command.review);
+            return {
+              executed: true,
+              taskId: command.taskId,
+              actor: command.actor,
+              reviewRole: command.review.reviewerRole,
+              evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+            };
+          }
+        });
+      },
+      getReviews(candidateRunId: string, taskId: string) {
+        return store.getReviews(candidateRunId, taskId);
+      },
+      getApprovals(candidateRunId: string, taskId: string) {
+        return store.getApprovals(candidateRunId, taskId);
+      }
+    };
+
+    const blocked = await executeSupervisorCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-supervisor-cycles", "1", "--max-cycles", "1", "--format", "json"],
+      baseOptions
+    );
+    assert.equal(blocked.result.status, "blocked");
+    assert.match(blocked.result.reason, /missing review actor bindings/);
+
+    const completed = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "2",
+        "--format",
+        "json",
+        "--review-actor",
+        "security_reviewer=security-actor",
+        "--review-actor",
+        "qa_engineer=qa-actor"
+      ],
+      baseOptions
+    );
+    assert.equal(completed.result.status, "completed");
+
+    const historyLines = (
+      await readFile(path.join(directory, ".devgod", "work", "daemon", "supervisor-history.jsonl"), "utf8")
+    )
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as {
+        state: string;
+        blockerKind?: string;
+        reason: string;
+        actions: { action: string }[];
+      });
+    assert.equal(historyLines.length, 2);
+    assert.equal(historyLines[0]?.state, "blocked");
+    assert.equal(historyLines[0]?.blockerKind, "missing_review_actor_bindings");
+    assert.equal(historyLines[1]?.state, "completed");
+    assert.equal(historyLines[1]?.actions.length, 2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs trims supervisor history to the configured retention limit", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Trim supervisor history",
+    request: "Keep supervisor history bounded."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared review-blocked task for retention testing.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["verified supervisor retention flow"],
+    executionEvidence: ["task packet written"],
+    qualityGateEvidence: ["reviews remain pending"],
+    contextRefs: ["brief://plan"]
+  });
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-history-retention-"));
+  try {
+    const baseOptions: Parameters<typeof executeSupervisorCommandFromArgs>[1] = {
+      cwd: directory,
+      env: process.env,
+      getProjectContext(params: { workspaceSlug: string; projectSlug: string }) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId: string) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state: Parameters<typeof store.saveProjectRuntimeState>[0]) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(candidateRunId: string) {
+        return service.getStatus(candidateRunId);
+      },
+      getExecutionPlan(candidateRunId: string, staleAfterHours: number) {
+        return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+      },
+      applyRecovery(candidateRunId: string, actionIds: readonly string[], staleAfterHours: number) {
+        return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+      },
+      async executeDirectiveStep(candidateRunId, input) {
+        return service.executeDirectiveStep(candidateRunId, {
+          ...input,
+          async executeReviewRecommendation({ directive }) {
+            const command = input.reviewCommands.find((candidate) =>
+              directive.recommendations.some(
+                (recommendation) =>
+                  recommendation.taskId === candidate.taskId &&
+                  recommendation.targetReviewRole === candidate.review.reviewerRole
+              )
+            );
+            assert.ok(command, "expected a matching supervisor-generated review command");
+            await service.recordReview(candidateRunId, command.taskId, command.actor, command.review);
+            return {
+              executed: true,
+              taskId: command.taskId,
+              actor: command.actor,
+              reviewRole: command.review.reviewerRole,
+              evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+            };
+          }
+        });
+      },
+      getReviews(candidateRunId: string, taskId: string) {
+        return store.getReviews(candidateRunId, taskId);
+      },
+      getApprovals(candidateRunId: string, taskId: string) {
+        return store.getApprovals(candidateRunId, taskId);
+      }
+    };
+
+    for (const index of [1, 2, 3]) {
+      const result = await executeSupervisorCommandFromArgs(
+        [
+          "--workspace-slug",
+          "team",
+          "--project-slug",
+          "devgod",
+          "--max-supervisor-cycles",
+          "1",
+          "--max-cycles",
+          "1",
+          "--format",
+          "json",
+          "--supervisor-history-retention",
+          "2"
+        ],
+        baseOptions
+      );
+      assert.equal(result.result.status, "blocked", `expected blocked supervisor result for cycle ${index}`);
+    }
+
+    const historyLines = (
+      await readFile(path.join(directory, ".devgod", "work", "daemon", "supervisor-history.jsonl"), "utf8")
+    )
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { state: string; blockerKind?: string; activeRunId?: string | null });
+    assert.equal(historyLines.length, 2);
+    assert.deepEqual(
+      historyLines.map((line) => ({
+        state: line.state,
+        blockerKind: line.blockerKind,
+        activeRunId: line.activeRunId
+      })),
+      [
+        {
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          activeRunId: run.id
+        },
+        {
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          activeRunId: run.id
+        }
+      ]
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorHistoryCommandFromArgs reads persisted supervisor history directly", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-history-command-"));
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-status.json"),
+      `${JSON.stringify(
+        {
+          state: "blocked",
+          blockerKind: "missing_review_actor_bindings",
+          reason: "supervisor is missing review actor bindings for: qa_engineer",
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          activeRunId: "run-1",
+          activeTaskId: "rewrite",
+          sessionId: "session-1",
+          supervisorCycles: 3,
+          nextActions: ["provide --review-actor qa_engineer=<actor>"],
+          missingReviewRoles: ["qa_engineer"],
+          actions: [],
+          updatedAt: "2026-05-16T12:30:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "daemon", "supervisor-history.jsonl"),
+      `${JSON.stringify({
+        recordedAt: "2026-05-16T11:00:00.000Z",
+        state: "completed",
+        reason: "run 1 completed once before blocking again",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        activeRunId: "run-1",
+        activeTaskId: "rewrite",
+        sessionId: "session-0",
+        supervisorCycles: 1,
+        nextActions: [],
+        missingReviewRoles: [],
+        actions: []
+      })}\n${JSON.stringify({
+        recordedAt: "2026-05-16T11:30:00.000Z",
+        state: "completed",
+        reason: "run 2 completed cleanly",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        activeRunId: "run-2",
+        activeTaskId: "stabilize",
+        sessionId: "session-2",
+        supervisorCycles: 2,
+        nextActions: [],
+        missingReviewRoles: [],
+        actions: [{ cycle: 1, action: "enqueue_review_action", taskId: "stabilize", reviewRole: "reviewer", filePath: ".devgod/review-actions/reviewer.json", summary: "queued reviewer" }]
+      })}\n${JSON.stringify({
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: qa_engineer",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        activeRunId: "run-1",
+        activeTaskId: "rewrite",
+        sessionId: "session-1",
+        supervisorCycles: 3,
+        nextActions: ["provide --review-actor qa_engineer=<actor>"],
+        missingReviewRoles: ["qa_engineer"],
+        actions: []
+      })}\n`,
+      "utf8"
+    );
+
+    const runScoped = await executeSupervisorHistoryCommandFromArgs(
+      ["--run-id", "run-1", "--format", "json"],
+      { cwd: directory }
+    );
+    assert.equal(runScoped.format, "json");
+    assert.deepEqual(runScoped.result.entries, [
+      {
+        recordedAt: "2026-05-16T11:00:00.000Z",
+        state: "completed",
+        activeRunId: "run-1",
+        activeTaskId: "rewrite",
+        blockerKind: undefined,
+        reason: "run 1 completed once before blocking again",
+        supervisorCycles: 1,
+        actionCount: 0
+      },
+      {
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        activeRunId: "run-1",
+        activeTaskId: "rewrite",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: qa_engineer",
+        supervisorCycles: 3,
+        actionCount: 0
+      }
+    ]);
+    assert.deepEqual(runScoped.result.latestStatus, {
+      state: "blocked",
+      blockerKind: "missing_review_actor_bindings",
+      reason: "supervisor is missing review actor bindings for: qa_engineer",
+      activeRunId: "run-1",
+      activeTaskId: "rewrite",
+      sessionId: "session-1",
+      supervisorCycles: 3,
+      updatedAt: "2026-05-16T12:30:00.000Z"
+    });
+    assert.equal(runScoped.result.scope, "run");
+    assert.equal(runScoped.result.runId, "run-1");
+    assert.equal(runScoped.result.retainedCount, 3);
+    assert.equal(runScoped.result.filteredCount, 2);
+    assert.equal(runScoped.result.returnedCount, 2);
+    assert.equal(runScoped.result.truncated, false);
+
+    const allRuns = await executeSupervisorHistoryCommandFromArgs(
+      ["--format", "json", "--daemon-supervisor-history-scope", "all", "--daemon-supervisor-history-limit", "1"],
+      { cwd: directory }
+    );
+    assert.equal(allRuns.result.scope, "all");
+    assert.equal(allRuns.result.runId, undefined);
+    assert.equal(allRuns.result.retainedCount, 3);
+    assert.equal(allRuns.result.filteredCount, 3);
+    assert.equal(allRuns.result.returnedCount, 1);
+    assert.equal(allRuns.result.truncated, true);
+    assert.deepEqual(allRuns.result.entries, [
+      {
+        recordedAt: "2026-05-16T12:00:00.000Z",
+        state: "blocked",
+        activeRunId: "run-1",
+        activeTaskId: "rewrite",
+        blockerKind: "missing_review_actor_bindings",
+        reason: "supervisor is missing review actor bindings for: qa_engineer",
+        supervisorCycles: 3,
+        actionCount: 0
+      }
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs consumes queued review actions and archives processed files", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-"));
+  const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
+  await mkdir(reviewQueueDir, { recursive: true });
+  try {
+    await writeFile(
+      path.join(reviewQueueDir, "security.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "security-actor",
+          review: {
+            reviewerRole: "security_reviewer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(reviewQueueDir, "qa.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "qa-actor",
+          review: {
+            reviewerRole: "qa_engineer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const executedRoles: string[] = [];
+    const result = await executeDaemonCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-cycles",
+        "2",
+        "--format",
+        "json",
+        "--review-input-dir",
+        reviewQueueDir
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          return service.executeDirectiveStep(runId, {
+            ...input,
+            async executeReviewRecommendation({ directive }) {
+              const command = input.reviewCommands.find((candidate) =>
+                directive.recommendations.some(
+                  (recommendation) =>
+                    recommendation.taskId === candidate.taskId &&
+                    recommendation.targetReviewRole === candidate.review.reviewerRole
+                )
+              );
+              assert.ok(command, "expected a matching queued review command");
+              executedRoles.push(command.review.reviewerRole);
+              await service.recordReview(runId, command.taskId, command.actor, command.review);
+              return {
+                executed: true,
+                taskId: command.taskId,
+                actor: command.actor,
+                reviewRole: command.review.reviewerRole,
+                evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+              };
+            }
+          });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.deepEqual([...executedRoles].sort(), ["qa_engineer", "security_reviewer"]);
+    assert.equal(
+      result.result.cycles.filter((cycle) => cycle.action === "record_review").length,
+      2
+    );
+    const remainingQueueFiles = await readdir(reviewQueueDir);
+    assert.deepEqual(remainingQueueFiles, []);
+    const processedDir = path.join(daemonCwd, ".devgod", "work", "daemon", "processed-review-actions");
+    const processedSecurity = await readFile(path.join(processedDir, "security.json"), "utf8");
+    const processedQa = await readFile(path.join(processedDir, "qa.json"), "utf8");
+    assert.match(processedSecurity, /security_reviewer/);
+    assert.match(processedQa, /qa_engineer/);
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    assert.equal(runtimeState?.activeTaskId, undefined);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs quarantines invalid queued review actions and writes failed queue status", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "github",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "github",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Queued reviews pending",
+    request: "Apply queued authenticated reviews."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      ownerRole: "planner",
+      qualityGates: ["release_readiness_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared plan task awaiting reviews.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["runtime task prepared"],
+    executionEvidence: ["task packet exists"],
+    qualityGateEvidence: ["review queue required"],
+    contextRefs: ["brief://plan"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-invalid-"));
+  const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
+  await mkdir(reviewQueueDir, { recursive: true });
+  try {
+    await writeFile(
+      path.join(reviewQueueDir, "invalid.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "security-actor",
+          review: {
+            reviewerRole: "not-a-gate-role",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeDaemonCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json",
+        "--review-input-dir",
+        reviewQueueDir
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          return service.executeDirectiveStep(runId, {
+            ...input,
+            async executeReviewRecommendation() {
+              assert.fail("invalid queued review actions should not reach live execution");
+            }
+          });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    const remainingQueueFiles = await readdir(reviewQueueDir);
+    assert.deepEqual(remainingQueueFiles, []);
+
+    const failedDir = path.join(daemonCwd, ".devgod", "work", "daemon", "failed-review-actions");
+    const archivedReview = await readFile(path.join(failedDir, "invalid.json"), "utf8");
+    const archivedError = JSON.parse(
+      await readFile(path.join(failedDir, "invalid.json.error.json"), "utf8")
+    ) as {
+      file: string;
+      error: string;
+      archivedAt: string;
+    };
+    assert.match(archivedReview, /not-a-gate-role/);
+    assert.equal(archivedError.file, "invalid.json");
+    assert.match(archivedError.error, /review\.reviewerRole/);
+    assert.match(archivedError.archivedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    const queueStatus = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "review-queue-status.json"), "utf8")
+    ) as {
+      state: string;
+      reason: string;
+      failedFiles: { file: string; error: string }[];
+      expectedReviewTargets: string[];
+    };
+    assert.equal(queueStatus.state, "failed");
+    assert.match(queueStatus.reason, /no usable review action files were found/);
+    assert.deepEqual(queueStatus.expectedReviewTargets.sort(), ["plan:qa_engineer", "plan:security_reviewer"]);
+    assert.deepEqual(queueStatus.failedFiles.map((entry) => entry.file), ["invalid.json"]);
+    assert.match(queueStatus.failedFiles[0]?.error ?? "", /review\.reviewerRole/);
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      state: string;
+      blockerKind: string;
+      reason: string;
+      directiveKind: string;
+      nextActions: string[];
+      detailFiles: {
+        reviewQueueStatus?: string | undefined;
+      };
+    };
+    assert.equal(operatorHandoff.state, "blocked");
+    assert.equal(operatorHandoff.blockerKind, "review_queue");
+    assert.equal(operatorHandoff.reason, "required authenticated reviews block the active run");
+    assert.equal(operatorHandoff.directiveKind, "dispatch_reviews");
+    assert.deepEqual(operatorHandoff.nextActions, []);
+    assert.equal(operatorHandoff.detailFiles.reviewQueueStatus, ".devgod/work/daemon/review-queue-status.json");
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "plan");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs archives stale queued review actions that no longer match runtime targets", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "github",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "github",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Queued reviews pending",
+    request: "Apply queued authenticated reviews."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared plan task awaiting reviews.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["runtime task prepared"],
+    executionEvidence: ["task packet exists"],
+    qualityGateEvidence: ["review queue required"],
+    contextRefs: ["brief://plan"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-stale-"));
+  const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
+  await mkdir(reviewQueueDir, { recursive: true });
+  try {
+    await writeFile(
+      path.join(reviewQueueDir, "reviewer.json"),
+      `${JSON.stringify(
+        {
+          runId: run.id,
+          taskId: "plan",
+          actor: "reviewer-actor",
+          review: {
+            reviewerRole: "reviewer",
+            state: "passed",
+            severity: "low",
+            findings: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeDaemonCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json",
+        "--review-input-dir",
+        reviewQueueDir
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          return service.executeDirectiveStep(runId, {
+            ...input,
+            async executeReviewRecommendation({ directive }) {
+              const command = input.reviewCommands.find((candidate) =>
+                directive.recommendations.some(
+                  (recommendation) =>
+                    recommendation.taskId === candidate.taskId &&
+                    recommendation.targetReviewRole === candidate.review.reviewerRole
+                )
+              );
+              if (!command) {
+                return {
+                  executed: false,
+                  evidence: ["no matching trusted review input was supplied for the remaining review directives"]
+                };
+              }
+              assert.fail("stale queued review action should not reach live execution");
+            }
+          });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    const remainingQueueFiles = await readdir(reviewQueueDir);
+    assert.deepEqual(remainingQueueFiles, []);
+
+    const staleDir = path.join(daemonCwd, ".devgod", "work", "daemon", "stale-review-actions");
+    const archivedReview = await readFile(path.join(staleDir, "reviewer.json"), "utf8");
+    const archivedReason = JSON.parse(
+      await readFile(path.join(staleDir, "reviewer.json.reason.json"), "utf8")
+    ) as {
+      file: string;
+      reason: string;
+      expectedReviewTargets: string[];
+      archivedAt: string;
+    };
+    assert.match(archivedReview, /"reviewerRole": "reviewer"/);
+    assert.equal(archivedReason.file, "reviewer.json");
+    assert.match(archivedReason.reason, /no longer matched the active runtime review directives/);
+    assert.deepEqual(archivedReason.expectedReviewTargets.sort(), ["plan:qa_engineer", "plan:security_reviewer"]);
+    assert.match(archivedReason.archivedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    const queueStatus = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "review-queue-status.json"), "utf8")
+    ) as {
+      state: string;
+      reason: string;
+      staleFiles: { file: string; reason: string }[];
+      expectedReviewTargets: string[];
+    };
+    assert.equal(queueStatus.state, "blocked");
+    assert.match(queueStatus.reason, /queued review actions did not match the pending runtime review directives/);
+    assert.deepEqual(queueStatus.expectedReviewTargets.sort(), ["plan:qa_engineer", "plan:security_reviewer"]);
+    assert.deepEqual(queueStatus.staleFiles.map((entry) => entry.file), ["reviewer.json"]);
+    assert.match(queueStatus.staleFiles[0]?.reason ?? "", /no longer matched the active runtime review directives/);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "plan");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
 });
 
 test("executeRecordReviewCommandFromArgs loads --input relative to cwd and resolves a live binding file", async () => {

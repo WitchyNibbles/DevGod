@@ -1,6 +1,6 @@
 import type { FreshnessGateDecision } from "../runtime/freshness-gate.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
-import type { RunStatusSnapshot, TaskStatus } from "../domain/types.ts";
+import type { RunExecutionPlan, RunStatusSnapshot, TaskStatus } from "../domain/types.ts";
 import type { GitNexusStatusObservation } from "./gitnexus.ts";
 import { buildAutonomousOperatorSummary, type AutonomousOperatorSummary } from "./autonomous-summary.ts";
 
@@ -18,6 +18,110 @@ export interface ReviewIdentityStatusObservation {
   bindingsUseShippedTemplate: boolean;
   liveTrustReady: boolean;
   notes: string[];
+}
+
+export interface DaemonContinuationStatusObservation {
+  authorityLabel: "derived_only";
+  state: "blocked" | "invalid";
+  directiveKind: "continue_analysis";
+  executionMode: "operator_required" | "unknown";
+  targetId?: string | undefined;
+  source?: "blocking_gap" | "progress_proof" | "checkpoint" | undefined;
+  sourceId?: string | undefined;
+  actionKind?: "resolve_blocking_gap" | "run_workflow_proof" | "resume_target" | undefined;
+  summary: string;
+  nextActions: string[];
+  blockers: string[];
+  updatedAt?: string | undefined;
+}
+
+export interface DaemonOperatorHandoffObservation {
+  authorityLabel: "derived_only";
+  state: "blocked" | "invalid";
+  blockerKind:
+    | "bootstrapping"
+    | "missing_active_runtime"
+    | "review_queue"
+    | "review_execution_unsupported"
+    | "operator_required_continuation"
+    | "workflow_proof_failure"
+    | "runtime_blocked"
+    | "recovery_required"
+    | "runtime_task_missing"
+    | "active_task_mismatch"
+    | "unknown";
+  reason: string;
+  workspaceSlug?: string | undefined;
+  projectSlug?: string | undefined;
+  activeRunId?: string | null | undefined;
+  activeTaskId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  cycle?: number | undefined;
+  directiveKind?: RunExecutionPlan["directive"]["kind"] | undefined;
+  nextActions: string[];
+  detailFiles: {
+    continuationStatus?: string | undefined;
+    reviewQueueStatus?: string | undefined;
+  };
+  updatedAt?: string | undefined;
+}
+
+export interface DaemonSupervisorStatusObservation {
+  authorityLabel: "derived_only";
+  state: "completed" | "blocked" | "max_cycles_reached" | "invalid";
+  blockerKind?:
+    | "missing_review_actor_bindings"
+    | "handoff_missing"
+    | "unsupported_handoff"
+    | "continuation_derivation_failed"
+    | "review_derivation_failed"
+    | "unknown"
+    | undefined;
+  reason: string;
+  workspaceSlug?: string | undefined;
+  projectSlug?: string | undefined;
+  activeRunId?: string | null | undefined;
+  activeTaskId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  supervisorCycles?: number | undefined;
+  nextActions: string[];
+  missingReviewRoles: string[];
+  actions: Array<{
+    cycle: number;
+    action: "enqueue_operator_continuation" | "enqueue_review_action";
+    targetId?: string | undefined;
+    taskId?: string | undefined;
+    reviewRole?: string | undefined;
+    filePath: string;
+    summary: string;
+  }>;
+  history: Array<{
+    recordedAt: string;
+    state: "completed" | "blocked" | "max_cycles_reached";
+    activeRunId?: string | null | undefined;
+    activeTaskId?: string | null | undefined;
+    blockerKind?:
+      | "missing_review_actor_bindings"
+      | "handoff_missing"
+      | "unsupported_handoff"
+      | "continuation_derivation_failed"
+      | "review_derivation_failed"
+      | "unknown"
+      | undefined;
+    reason: string;
+    supervisorCycles?: number | undefined;
+    actionCount: number;
+  }>;
+  historyView: {
+    scope: "run" | "all";
+    runId?: string | undefined;
+    limit: number;
+    retainedCount: number;
+    filteredCount: number;
+    returnedCount: number;
+    truncated: boolean;
+  };
+  updatedAt?: string | undefined;
 }
 
 export interface OperatorStatusReport {
@@ -44,6 +148,12 @@ export interface OperatorStatusReport {
     freshness: FreshnessGateDecision;
   };
   autonomous: AutonomousOperatorSummary;
+  daemon: {
+    authorityLabel: "derived_only";
+    continuation?: DaemonContinuationStatusObservation | undefined;
+    handoff?: DaemonOperatorHandoffObservation | undefined;
+    supervisor?: DaemonSupervisorStatusObservation | undefined;
+  };
   reviewIdentity: ReviewIdentityStatusObservation;
   gitNexus: GitNexusStatusObservation;
 }
@@ -72,6 +182,10 @@ function countTaskBuckets(byStatus: Record<TaskStatus, string[]>): Record<TaskSt
 
 export function buildOperatorStatusReport(input: {
   snapshot: RunStatusSnapshot;
+  executionPlan?: RunExecutionPlan | undefined;
+  daemonContinuation?: DaemonContinuationStatusObservation | undefined;
+  daemonHandoff?: DaemonOperatorHandoffObservation | undefined;
+  daemonSupervisor?: DaemonSupervisorStatusObservation | undefined;
   reviewIdentity: ReviewIdentityStatusObservation;
   gitNexus: GitNexusStatusObservation;
   now?: string | undefined;
@@ -115,8 +229,15 @@ export function buildOperatorStatusReport(input: {
       freshness
     },
     autonomous: buildAutonomousOperatorSummary({
-      snapshot: input.snapshot
+      snapshot: input.snapshot,
+      executionPlan: input.executionPlan
     }),
+    daemon: {
+      authorityLabel: "derived_only",
+      continuation: input.daemonContinuation,
+      handoff: input.daemonHandoff,
+      supervisor: input.daemonSupervisor
+    },
     reviewIdentity: input.reviewIdentity,
     gitNexus: input.gitNexus
   };

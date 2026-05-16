@@ -118,6 +118,11 @@ export const executionDirectiveKinds = [
   "continue_analysis",
   "blocked"
 ] as const;
+export const continuationActionKinds = [
+  "resolve_blocking_gap",
+  "run_workflow_proof",
+  "resume_target"
+] as const;
 export const recoveryIssueKinds = [
   "stalled_task",
   "stale_review_block",
@@ -642,6 +647,13 @@ export interface AutonomousExecutionSnapshot {
 
 export interface ProjectRuntimeMetadata extends Record<string, unknown> {
   autonomousExecution?: AutonomousExecutionState | undefined;
+  devgodDaemon?: {
+    sessionId?: string | undefined;
+    lastRunId?: string | undefined;
+    lastTaskId?: string | undefined;
+    lastDirectiveKind?: string | undefined;
+    updatedAt: string;
+  } | undefined;
 }
 
 export interface ProjectRuntimeStateRecord {
@@ -881,10 +893,34 @@ export interface ApplyRecoveryExecutionDirective extends BaseExecutionDirective 
   actions: RecoveryAction[];
 }
 
+export interface ResolveBlockingGapContinuationAction {
+  kind: "resolve_blocking_gap";
+  gapId: string;
+  targetId: string;
+}
+
+export interface RunWorkflowProofContinuationAction {
+  kind: "run_workflow_proof";
+  taskId: string;
+}
+
+export interface ResumeTargetContinuationAction {
+  kind: "resume_target";
+  targetId: string;
+  source: "blocking_gap" | "progress_proof" | "checkpoint";
+  sourceId?: string | undefined;
+}
+
+export type ContinuationAction =
+  | ResolveBlockingGapContinuationAction
+  | RunWorkflowProofContinuationAction
+  | ResumeTargetContinuationAction;
+
 export interface ContinueAnalysisExecutionDirective extends BaseExecutionDirective {
   kind: "continue_analysis";
   targetId: string;
   source: "blocking_gap" | "progress_proof" | "checkpoint";
+  actions: ContinuationAction[];
   nextActions: string[];
   blockers: string[];
 }

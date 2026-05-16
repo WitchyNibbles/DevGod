@@ -2,6 +2,7 @@ import type {
   AnalysisPhase,
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
+  ContinuationAction,
   CoverageGapRecord,
   CoverageManifestRecord,
   CoverageSummary,
@@ -14,6 +15,7 @@ export interface AutonomousNextTarget {
   targetId: string;
   source: "blocking_gap" | "progress_proof" | "checkpoint";
   rationale: string[];
+  actions: ContinuationAction[];
   nextActions: string[];
 }
 
@@ -243,6 +245,21 @@ export function mergeCoverageGaps(
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function extractWorkflowProofTaskId(targetId: string, nextActions: readonly string[]): string | undefined {
+  const normalizedTargetId = targetId.trim();
+  if (!normalizedTargetId.startsWith("task:")) {
+    return undefined;
+  }
+
+  const joinedActions = nextActions.join(" ").trim();
+  if (!/\bworkflow-proof\b/i.test(joinedActions)) {
+    return undefined;
+  }
+
+  const taskId = normalizedTargetId.slice("task:".length).trim();
+  return taskId.length > 0 ? taskId : undefined;
+}
+
 export function selectAutonomousNextTarget(
   state: AutonomousExecutionState
 ): AutonomousNextTarget | undefined {
@@ -257,6 +274,15 @@ export function selectAutonomousNextTarget(
     })[0];
 
   if (blockingGap) {
+    const nextActions =
+      blockingGap.suggestedNextActions.length > 0
+        ? [...blockingGap.suggestedNextActions]
+        : [`resolve ${blockingGap.id}`];
+    const workflowProofTaskId = extractWorkflowProofTaskId(blockingGap.targetId, nextActions);
+    const actions: ContinuationAction[] = workflowProofTaskId
+      ? [{ kind: "run_workflow_proof", taskId: workflowProofTaskId }]
+      : [{ kind: "resolve_blocking_gap", gapId: blockingGap.id, targetId: blockingGap.targetId }];
+
     return {
       targetId: blockingGap.targetId,
       source: "blocking_gap",
@@ -264,10 +290,8 @@ export function selectAutonomousNextTarget(
         `blocking gap ${blockingGap.id} remains open`,
         blockingGap.description
       ],
-      nextActions:
-        blockingGap.suggestedNextActions.length > 0
-          ? [...blockingGap.suggestedNextActions]
-          : [`resolve ${blockingGap.id}`]
+      actions,
+      nextActions
     };
   }
 
@@ -279,35 +303,67 @@ export function selectAutonomousNextTarget(
     return right.createdAt.localeCompare(left.createdAt);
   })[0];
   if (latestProgressProof?.nextTarget.trim()) {
+    const progressProofTarget = latestProgressProof.nextTarget.trim();
+    const nextActions = latestProgressProof.whyNext?.trim()
+      ? [latestProgressProof.whyNext.trim()]
+      : [`continue at ${progressProofTarget}`];
+    const workflowProofTaskId = extractWorkflowProofTaskId(progressProofTarget, nextActions);
+    const actions: ContinuationAction[] = workflowProofTaskId
+      ? [{ kind: "run_workflow_proof", taskId: workflowProofTaskId }]
+      : [
+          {
+            kind: "resume_target",
+            targetId: progressProofTarget,
+            source: "progress_proof",
+            sourceId: latestProgressProof.proofId
+          }
+        ];
+
     return {
-      targetId: latestProgressProof.nextTarget.trim(),
+      targetId: progressProofTarget,
       source: "progress_proof",
       rationale: [
         `latest progress proof ${latestProgressProof.proofId} selected the next target`,
         ...(latestProgressProof.whyNext ? [latestProgressProof.whyNext] : [])
       ],
-      nextActions:
-        latestProgressProof.whyNext?.trim()
-          ? [latestProgressProof.whyNext.trim()]
-          : [`continue at ${latestProgressProof.nextTarget.trim()}`]
+      actions,
+      nextActions
     };
   }
 
-  const latestCheckpoint = [...state.checkpoints].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt)
-  )[0];
+  const latestCheckpoint = [...state.checkpoints].sort((left, right) => {
+    const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+    if (createdAtOrder !== 0) {
+      return createdAtOrder;
+    }
+    return right.checkpointId.localeCompare(left.checkpointId);
+  })[0];
   const checkpointTarget = latestCheckpoint?.activeTargets[0]?.trim();
   if (latestCheckpoint && checkpointTarget) {
+    const nextActions =
+      latestCheckpoint.nextActions.length > 0
+        ? [...latestCheckpoint.nextActions]
+        : [`resume at ${checkpointTarget}`];
+    const workflowProofTaskId = extractWorkflowProofTaskId(checkpointTarget, nextActions);
+    const actions: ContinuationAction[] = workflowProofTaskId
+      ? [{ kind: "run_workflow_proof", taskId: workflowProofTaskId }]
+      : [
+          {
+            kind: "resume_target",
+            targetId: checkpointTarget,
+            source: "checkpoint",
+            sourceId: latestCheckpoint.checkpointId
+          }
+        ];
+
     return {
       targetId: checkpointTarget,
       source: "checkpoint",
       rationale: [
         `latest checkpoint ${latestCheckpoint.checkpointId} still lists an active target`
       ],
-      nextActions:
-        latestCheckpoint.nextActions.length > 0
-          ? [...latestCheckpoint.nextActions]
-          : [`resume at ${checkpointTarget}`]
+      actions,
+      nextActions
     };
   }
 
