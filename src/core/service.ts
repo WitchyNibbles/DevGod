@@ -24,7 +24,8 @@ import {
   createAutonomousExecutionState,
   mergeCoverageGaps,
   mergeCoverageItems,
-  runRequiresAutonomousExecution
+  runRequiresAutonomousExecution,
+  selectAutonomousNextTarget
 } from "../runtime/autonomous-execution.ts";
 import { annotateConflictSignals, isProvenancedSearchResult } from "./search-memory-results.ts";
 import type {
@@ -407,11 +408,15 @@ export class DevgodCoreService {
 
   async checkpointRun(
     runId: string,
-    checkpoint: Omit<CheckpointRecord, "runId">
+    checkpoint: Omit<CheckpointRecord, "runId" | "authorityLabel">,
+    options: {
+      authorityLabel?: CheckpointRecord["authorityLabel"] | undefined;
+    } = {}
   ): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
     const fullCheckpoint: CheckpointRecord = {
       ...checkpoint,
+      authorityLabel: options.authorityLabel ?? "runtime_authoritative",
       runId
     };
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
@@ -425,7 +430,10 @@ export class DevgodCoreService {
         phase: checkpoint.phase,
         checkpoints,
         lastCheckpointId: checkpoint.checkpointId,
-        lastSuccessfulCheckpointId: checkpoint.checkpointId
+        lastSuccessfulCheckpointId:
+          fullCheckpoint.authorityLabel === "runtime_authoritative"
+            ? checkpoint.checkpointId
+            : base.lastSuccessfulCheckpointId
       };
     });
 
@@ -438,7 +446,10 @@ export class DevgodCoreService {
       title: `checkpoint ${checkpoint.checkpointId}`,
       body: JSON.stringify(fullCheckpoint, null, 2),
       metadata: {
-        source: "runtime_autonomous_execution"
+        source:
+          fullCheckpoint.authorityLabel === "runtime_authoritative"
+            ? "runtime_autonomous_execution"
+            : "operator_checkpoint_import"
       },
       createdAt: checkpoint.createdAt,
       updatedAt: nextState.updatedAt
@@ -949,6 +960,9 @@ export class DevgodCoreService {
     const autonomousExecutionBlockers = autonomousExecution
       ? collectAutonomousExecutionBlockers(autonomousExecution.state, snapshot.tasks)
       : [];
+    const autonomousNextTarget = autonomousExecution
+      ? selectAutonomousNextTarget(autonomousExecution.state)
+      : undefined;
 
     const safeRecoveryActions = recovery.actions.filter((action) => action.safeToApply);
     if (safeRecoveryActions.length > 0) {
@@ -1039,6 +1053,27 @@ export class DevgodCoreService {
       const reasoningWarnings = reasoningAssessments.flatMap(({ taskId, assessment }) =>
         assessment.warnings.map((warning) => `${taskId}: ${warning.message}`)
       );
+      if (autonomousExecutionBlockers.length > 0 && autonomousNextTarget) {
+        return {
+          mode: "runtime_authoritative",
+          runId,
+          runStatus: snapshot.run.status,
+          autonomousExecution,
+          directive: {
+            kind: "continue_analysis",
+            targetId: autonomousNextTarget.targetId,
+            source: autonomousNextTarget.source,
+            nextActions: autonomousNextTarget.nextActions,
+            blockers: autonomousExecutionBlockers,
+            rationale: [
+              "all tasks are terminal, but autonomous continuation still has an actionable next target",
+              ...autonomousExecutionBlockers.map((blocker) => `autonomous-execution: ${blocker}`),
+              ...autonomousNextTarget.rationale
+            ]
+          }
+        };
+      }
+
       if (autonomousExecutionBlockers.length > 0) {
         return {
           mode: "runtime_authoritative",
@@ -1073,6 +1108,29 @@ export class DevgodCoreService {
                   )
                 ]
               : [])
+          ]
+        }
+      };
+    }
+
+    if (
+      autonomousNextTarget &&
+      snapshot.tasks.every((task) => task.status !== "in_progress")
+    ) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        autonomousExecution,
+        directive: {
+          kind: "continue_analysis",
+          targetId: autonomousNextTarget.targetId,
+          source: autonomousNextTarget.source,
+          nextActions: autonomousNextTarget.nextActions,
+          blockers: autonomousExecutionBlockers,
+          rationale: [
+            "no ready task is available, but autonomous continuation can still advance from persisted runtime evidence",
+            ...autonomousNextTarget.rationale
           ]
         }
       };
@@ -1219,6 +1277,16 @@ export class DevgodCoreService {
           initialPlan.directive.blockers.length > 0
             ? [...initialPlan.directive.blockers]
             : ["run has no executable next step"]
+      });
+    } else if (initialPlan.directive.kind === "continue_analysis") {
+      steps.push({
+        directiveKind: "continue_analysis",
+        outcome: "unsupported",
+        nextDirectiveKind: finalPlan.directive.kind,
+        evidence: [
+          `next target remains ${initialPlan.directive.targetId}`,
+          ...initialPlan.directive.nextActions
+        ]
       });
     } else if (initialPlan.directive.kind === "apply_recovery") {
       steps.push({

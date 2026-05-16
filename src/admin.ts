@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -20,6 +20,10 @@ import {
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
 import {
+  buildAutonomousOperatorSummary,
+  type AutonomousOperatorSummary
+} from "./admin/autonomous-summary.ts";
+import {
   buildPlanningContextReport,
   formatPlanningContextReportMarkdown,
   type PlanningContextRetrievalState
@@ -37,6 +41,7 @@ import { buildObsidianTargetPath } from "./docs-export/targets.ts";
 import { RuntimeWorklogProvider, type WorklogProvider } from "./docs-export/worklog-provider.ts";
 import { advanceTaskQueue, parseTaskQueueContent, type TaskQueue } from "./devgod/task-queue.ts";
 import { effectiveRequiredReviews, isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
+import { analysisPhases } from "./domain/types.ts";
 import {
   createReviewActionContextResolver,
   createReviewPrincipalAdapter,
@@ -55,9 +60,13 @@ import { evaluateReviewDecision } from "./core/policy.ts";
 import type { ResolveReviewActionContext } from "./core/review-context.ts";
 import type {
   ApprovalRecord,
+  CheckpointRecord,
+  CoverageGapRecord,
+  CoverageItemRecord,
   HandoffInput,
   IntakeRequestInput,
   ProjectRuntimeStateRecord,
+  ProgressProofRecord,
   RecoveryApplyResult,
   RecoveryInspectionReport,
   ProjectRecord,
@@ -84,6 +93,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 type EnvShape = NodeJS.ProcessEnv;
 type PostgresStoreClient = ConstructorParameters<typeof PostgresStore>[0];
+const MAX_CHECKPOINT_STRING_LENGTH = 512;
+const MAX_CHECKPOINT_ARRAY_ITEMS = 32;
+const MAX_CHECKPOINT_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const MAX_CHECKPOINT_INPUT_BYTES = 64 * 1024;
 type IndexRepoMarkdownStore = Parameters<typeof indexRepoMarkdown>[0]["store"];
 type RetrievalFreshnessStore = Pick<
   DevgodStoreContract,
@@ -1762,6 +1775,435 @@ export async function executeStatusCommandFromArgs(
   });
 }
 
+export interface AutonomousCoverageCommandReport {
+  authorityLabel: "runtime_authoritative";
+  runId: string;
+  autonomous: AutonomousOperatorSummary;
+  items: CoverageItemRecord[];
+}
+
+export interface AutonomousGapsCommandReport {
+  authorityLabel: "runtime_authoritative";
+  runId: string;
+  autonomous: AutonomousOperatorSummary;
+  gaps: CoverageGapRecord[];
+}
+
+export interface AutonomousCheckpointCommandReport {
+  authorityLabel: "runtime_authoritative";
+  runId: string;
+  autonomous: AutonomousOperatorSummary;
+  checkpoints: CheckpointRecord[];
+  latestCheckpoint?: CheckpointRecord | undefined;
+  latestProgressProof?: ProgressProofRecord | undefined;
+  updatedCheckpointId?: string | undefined;
+}
+
+export interface AutonomousResumeCommandReport {
+  authorityLabel: "runtime_authoritative";
+  runId: string;
+  autonomous: AutonomousOperatorSummary;
+  executionPlan: RunExecutionPlan;
+}
+
+export interface ExecuteCoverageCommandOptions {
+  env?: EnvShape | undefined;
+  findLatestRun?: (workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>;
+  getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
+}
+
+export interface ExecuteGapsCommandOptions extends ExecuteCoverageCommandOptions {}
+
+export interface ExecuteCheckpointCommandOptions extends ExecuteCoverageCommandOptions {
+  cwd?: string | undefined;
+  checkpointRun?: (
+    runId: string,
+    checkpoint: Omit<CheckpointRecord, "runId" | "authorityLabel">,
+    options?: {
+      authorityLabel?: CheckpointRecord["authorityLabel"] | undefined;
+    }
+  ) => Promise<unknown>;
+}
+
+export interface ExecuteResumeCommandOptions {
+  env?: EnvShape | undefined;
+  findLatestRun?: (workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>;
+  getResumeSnapshot: (runId: string) => Promise<import("./domain/types.ts").RunResumeSnapshot>;
+}
+
+function buildCoverageCommandReport(snapshot: RunStatusSnapshot): AutonomousCoverageCommandReport {
+  return {
+    authorityLabel: "runtime_authoritative",
+    runId: snapshot.run.id,
+    autonomous: buildAutonomousOperatorSummary({ snapshot }),
+    items: snapshot.autonomousExecution ? [...snapshot.autonomousExecution.state.coverageItems] : []
+  };
+}
+
+function buildGapsCommandReport(snapshot: RunStatusSnapshot, gaps: CoverageGapRecord[]): AutonomousGapsCommandReport {
+  return {
+    authorityLabel: "runtime_authoritative",
+    runId: snapshot.run.id,
+    autonomous: buildAutonomousOperatorSummary({ snapshot }),
+    gaps
+  };
+}
+
+function buildCheckpointCommandReport(input: {
+  snapshot: RunStatusSnapshot;
+  updatedCheckpointId?: string | undefined;
+}): AutonomousCheckpointCommandReport {
+  const autonomous = buildAutonomousOperatorSummary({ snapshot: input.snapshot });
+  return {
+    authorityLabel: "runtime_authoritative",
+    runId: input.snapshot.run.id,
+    autonomous,
+    checkpoints: input.snapshot.autonomousExecution ? [...input.snapshot.autonomousExecution.state.checkpoints] : [],
+    latestCheckpoint: autonomous.latestCheckpoint,
+    latestProgressProof: autonomous.latestProgressProof,
+    updatedCheckpointId: input.updatedCheckpointId
+  };
+}
+
+function buildResumeCommandReport(
+  snapshot: import("./domain/types.ts").RunResumeSnapshot
+): AutonomousResumeCommandReport {
+  return {
+    authorityLabel: "runtime_authoritative",
+    runId: snapshot.run.id,
+    autonomous: buildAutonomousOperatorSummary({
+      snapshot,
+      executionPlan: snapshot.executionPlan
+    }),
+    executionPlan: snapshot.executionPlan
+  };
+}
+
+function formatCoverageCommandReport(report: AutonomousCoverageCommandReport): string {
+  const lines = [
+    `Run ${report.runId}`,
+    `configured: ${report.autonomous.configured ? "yes" : "no"}`,
+    `resume: ${report.autonomous.resume.summary}`
+  ];
+
+  if (!report.autonomous.configured) {
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push(`profile: ${report.autonomous.profile}`);
+  lines.push(`phase: ${report.autonomous.phase}`);
+  lines.push(`items: ${report.items.length}`);
+  if (report.autonomous.coverageSummary) {
+    lines.push(
+      `coverage: critical=${report.autonomous.coverageSummary.criticalItemCoverage} validation=${report.autonomous.coverageSummary.criticalItemValidation} callsites=${report.autonomous.coverageSummary.callsiteCoverage} runtime-traces=${report.autonomous.coverageSummary.runtimeTraceCoverage}`
+    );
+    lines.push(
+      `gaps: open=${report.autonomous.coverageSummary.openGapCount} blocking=${report.autonomous.coverageSummary.blockingGapCount}`
+    );
+  }
+  if (report.autonomous.blockers.length > 0) {
+    for (const blocker of report.autonomous.blockers) {
+      lines.push(`blocked: ${blocker}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatGapsCommandReport(report: AutonomousGapsCommandReport): string {
+  const lines = [
+    `Run ${report.runId}`,
+    `configured: ${report.autonomous.configured ? "yes" : "no"}`,
+    `gaps: ${report.gaps.length}`
+  ];
+  if (report.gaps.length === 0) {
+    lines.push(`resume: ${report.autonomous.resume.summary}`);
+    return `${lines.join("\n")}\n`;
+  }
+  for (const gap of report.gaps) {
+    lines.push(
+      `${gap.id} severity=${gap.severity} blocking=${gap.blocking ? "yes" : "no"} target=${gap.targetId}: ${gap.description}`
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatCheckpointCommandReport(report: AutonomousCheckpointCommandReport): string {
+  const lines = [
+    `Run ${report.runId}`,
+    `configured: ${report.autonomous.configured ? "yes" : "no"}`,
+    `checkpoints: ${report.checkpoints.length}`
+  ];
+  if (report.updatedCheckpointId) {
+    lines.push(`updated-checkpoint: ${report.updatedCheckpointId}`);
+  }
+  if (report.latestCheckpoint) {
+    lines.push(
+      `latest-checkpoint: ${report.latestCheckpoint.checkpointId} authority=${report.latestCheckpoint.authorityLabel}`
+    );
+    if (report.latestCheckpoint.activeTargets.length > 0) {
+      lines.push(`active-targets: ${report.latestCheckpoint.activeTargets.join(", ")}`);
+    }
+    if (report.latestCheckpoint.nextActions.length > 0) {
+      lines.push(`next-actions: ${report.latestCheckpoint.nextActions.join("; ")}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatResumeCommandReport(report: AutonomousResumeCommandReport): string {
+  const lines = [
+    `Run ${report.runId}`,
+    `directive: ${report.executionPlan.directive.kind}`,
+    `resume: ${report.autonomous.resume.status}/${report.autonomous.resume.source} ${report.autonomous.resume.summary}`
+  ];
+  if (report.autonomous.resume.nextTarget) {
+    lines.push(`next-target: ${report.autonomous.resume.nextTarget}`);
+  }
+  if (report.autonomous.resume.nextActions.length > 0) {
+    lines.push(`next-actions: ${report.autonomous.resume.nextActions.join("; ")}`);
+  }
+  if (report.autonomous.resume.blockers.length > 0) {
+    for (const blocker of report.autonomous.resume.blockers) {
+      lines.push(`blocked: ${blocker}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function readCheckpointInput(
+  inputArg: string,
+  cwd: string
+): Promise<Omit<CheckpointRecord, "runId" | "authorityLabel">> {
+  const inputPath = path.isAbsolute(inputArg) ? inputArg : path.resolve(cwd, inputArg);
+  await validateCheckpointInputPath(inputPath, cwd);
+  const fileStats = await stat(inputPath);
+  if (fileStats.size > MAX_CHECKPOINT_INPUT_BYTES) {
+    throw new Error(
+      `checkpoint input from ${inputPath} exceeds the maximum size of ${MAX_CHECKPOINT_INPUT_BYTES} bytes`
+    );
+  }
+  const content = await readFile(inputPath, "utf8");
+  const parsed = JSON.parse(content) as unknown;
+  return parseCheckpointInput(parsed, inputPath);
+}
+
+function parseCheckpointInput(
+  input: unknown,
+  sourceLabel: string
+): Omit<CheckpointRecord, "runId" | "authorityLabel"> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`checkpoint input from ${sourceLabel} must be a JSON object`);
+  }
+
+  const record = input as Record<string, unknown>;
+  const checkpointId = readRequiredStringField(record, "checkpointId", sourceLabel);
+  const phase = readRequiredStringField(record, "phase", sourceLabel);
+  validateCheckpointString(checkpointId, "checkpointId");
+  if (!analysisPhases.includes(phase as (typeof analysisPhases)[number])) {
+    throw new Error(`checkpoint input from ${sourceLabel} has invalid phase: ${phase}`);
+  }
+
+  const activeTargets = readRequiredStringArrayField(record, "activeTargets", sourceLabel);
+  const recentEvidenceRefs = readRequiredStringArrayField(record, "recentEvidenceRefs", sourceLabel);
+  const openGaps = readRequiredStringArrayField(record, "openGaps", sourceLabel);
+  const nextActions = readRequiredStringArrayField(record, "nextActions", sourceLabel);
+  const compressedContextRef = readOptionalStringField(record, "compressedContextRef");
+  const createdAt = readRequiredStringField(record, "createdAt", sourceLabel);
+
+  validateCheckpointStringArray(activeTargets, "activeTargets");
+  validateCheckpointStringArray(recentEvidenceRefs, "recentEvidenceRefs");
+  validateCheckpointStringArray(openGaps, "openGaps");
+  validateCheckpointStringArray(nextActions, "nextActions");
+  validateCheckpointTimestamp(createdAt, sourceLabel);
+  if (compressedContextRef) {
+    validateCompressedContextRef(compressedContextRef);
+  }
+
+  return {
+    checkpointId,
+    phase: phase as CheckpointRecord["phase"],
+    activeTargets,
+    recentEvidenceRefs,
+    openGaps,
+    nextActions,
+    compressedContextRef,
+    createdAt
+  };
+}
+
+async function validateCheckpointInputPath(inputPath: string, cwd: string): Promise<void> {
+  const [resolvedInputPath, resolvedCwd] = await Promise.all([realpath(inputPath), realpath(cwd)]);
+  const relativePath = path.relative(resolvedCwd, resolvedInputPath);
+  if (
+    relativePath.length === 0 ||
+    (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+  ) {
+    return;
+  }
+  throw new Error(`checkpoint input path must stay within ${resolvedCwd}`);
+}
+
+function readRequiredStringField(
+  record: Record<string, unknown>,
+  field: string,
+  sourceLabel: string
+): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`checkpoint input from ${sourceLabel} is missing required string field ${field}`);
+  }
+  return value.trim();
+}
+
+function readOptionalStringField(
+  record: Record<string, unknown>,
+  field: string
+): string | undefined {
+  const value = record[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`checkpoint input has invalid optional string field ${field}`);
+  }
+  return value.trim();
+}
+
+function readRequiredStringArrayField(
+  record: Record<string, unknown>,
+  field: string,
+  sourceLabel: string
+): string[] {
+  const value = record[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+    throw new Error(`checkpoint input from ${sourceLabel} is missing required string[] field ${field}`);
+  }
+  return value.map((entry) => entry.trim());
+}
+
+function validateCheckpointString(value: string, field: string): void {
+  if (value.length > MAX_CHECKPOINT_STRING_LENGTH) {
+    throw new Error(`checkpoint input has ${field} longer than ${MAX_CHECKPOINT_STRING_LENGTH} characters`);
+  }
+  if (/[\r\n\t]/.test(value)) {
+    throw new Error(`checkpoint input has invalid control characters in ${field}`);
+  }
+}
+
+function validateCheckpointStringArray(values: readonly string[], field: string): void {
+  if (values.length > MAX_CHECKPOINT_ARRAY_ITEMS) {
+    throw new Error(`checkpoint input has too many ${field} entries`);
+  }
+  for (const value of values) {
+    validateCheckpointString(value, `${field}[]`);
+  }
+}
+
+function validateCheckpointTimestamp(value: string, sourceLabel: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    throw new Error(`checkpoint input from ${sourceLabel} has invalid createdAt timestamp`);
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`checkpoint input from ${sourceLabel} has invalid createdAt timestamp`);
+  }
+  if (parsed > Date.now() + MAX_CHECKPOINT_FUTURE_SKEW_MS) {
+    throw new Error(`checkpoint input from ${sourceLabel} has createdAt too far in the future`);
+  }
+}
+
+function validateCompressedContextRef(value: string): void {
+  validateCheckpointString(value, "compressedContextRef");
+  if (!value.startsWith("memory://")) {
+    throw new Error("checkpoint input has invalid compressedContextRef scheme");
+  }
+}
+
+export async function executeCoverageCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteCoverageCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const format = resolveFormatFlag(args);
+  const snapshot = await options.getStatusSnapshot(runId);
+  return {
+    format,
+    report: buildCoverageCommandReport(snapshot)
+  };
+}
+
+export async function executeGapsCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteGapsCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const format = resolveFormatFlag(args);
+  const snapshot = await options.getStatusSnapshot(runId);
+  const allGaps = snapshot.autonomousExecution?.state.gaps ?? [];
+  const includeClosed = args.includes("--all");
+  const blockingOnly = args.includes("--blocking-only");
+  const gaps = allGaps.filter((gap) => (includeClosed ? true : gap.status === "open")).filter((gap) =>
+    blockingOnly ? gap.blocking && (includeClosed ? true : gap.status === "open") : true
+  );
+  return {
+    format,
+    report: buildGapsCommandReport(snapshot, gaps)
+  };
+}
+
+export async function executeCheckpointCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteCheckpointCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const format = resolveFormatFlag(args);
+  const inputArg = resolveCommandFlag(args, "--input");
+  let updatedCheckpointId: string | undefined;
+  if (inputArg) {
+    if (!options.checkpointRun) {
+      throw new Error("checkpoint mutation is not available for this command surface");
+    }
+    const checkpoint = await readCheckpointInput(inputArg, options.cwd ?? process.cwd());
+    await options.checkpointRun(runId, checkpoint, {
+      authorityLabel: "operator_import"
+    });
+    updatedCheckpointId = checkpoint.checkpointId;
+  }
+  const snapshot = await options.getStatusSnapshot(runId);
+  return {
+    format,
+    report: buildCheckpointCommandReport({
+      snapshot,
+      updatedCheckpointId
+    })
+  };
+}
+
+export async function executeResumeCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteResumeCommandOptions
+) {
+  const runId = await resolveRunIdForCommand(args, {
+    env: options.env,
+    findLatestRun: options.findLatestRun
+  });
+  const format = resolveFormatFlag(args);
+  const snapshot = await options.getResumeSnapshot(runId);
+  return {
+    format,
+    report: buildResumeCommandReport(snapshot)
+  };
+}
+
 async function runtimePathExists(candidatePath: string): Promise<boolean> {
   try {
     await access(candidatePath);
@@ -2115,6 +2557,102 @@ async function statusCommand(args: readonly string[]) {
   });
 }
 
+async function coverageCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const { format, report } = await executeCoverageCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      }
+    });
+
+    if (format === "text") {
+      process.stdout.write(formatCoverageCommandReport(report));
+      return;
+    }
+
+    console.log(JSON.stringify(report));
+  });
+}
+
+async function gapsCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const { format, report } = await executeGapsCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      }
+    });
+
+    if (format === "text") {
+      process.stdout.write(formatGapsCommandReport(report));
+      return;
+    }
+
+    console.log(JSON.stringify(report));
+  });
+}
+
+async function checkpointCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const { format, report } = await executeCheckpointCommandFromArgs(args, {
+      cwd: process.cwd(),
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      checkpointRun(runId, checkpoint, checkpointOptions) {
+        return service.checkpointRun(runId, checkpoint, checkpointOptions);
+      }
+    });
+
+    if (format === "text") {
+      process.stdout.write(formatCheckpointCommandReport(report));
+      return;
+    }
+
+    console.log(JSON.stringify(report));
+  });
+}
+
+async function resumeCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const service = new DevgodCoreService(store);
+    const { format, report } = await executeResumeCommandFromArgs(args, {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getResumeSnapshot(runId) {
+        return service.resumeRun(runId);
+      }
+    });
+
+    if (format === "text") {
+      process.stdout.write(formatResumeCommandReport(report));
+      return;
+    }
+
+    console.log(JSON.stringify(report));
+  });
+}
+
 export async function executeOpsCommandFromArgs(
   args: readonly string[],
   options: ExecuteOpsCommandOptions
@@ -2281,6 +2819,11 @@ function formatLoopCommandResult(result: LoopCommandResult): string {
   } else if (result.finalPlan.directive.kind === "apply_recovery") {
     for (const action of result.finalPlan.directive.actions) {
       lines.push(`next: recover ${action.id}`);
+    }
+  } else if (result.finalPlan.directive.kind === "continue_analysis") {
+    lines.push(`next: continue ${result.finalPlan.directive.targetId}`);
+    if (result.finalPlan.directive.nextActions.length > 0) {
+      lines.push(`guidance: ${result.finalPlan.directive.nextActions.join("; ")}`);
     }
   } else if (result.finalPlan.directive.kind === "blocked") {
     for (const blocker of result.finalPlan.directive.blockers) {
@@ -3536,6 +4079,26 @@ async function main() {
 
   if (command === "status") {
     await statusCommand(args);
+    return;
+  }
+
+  if (command === "coverage") {
+    await coverageCommand(args);
+    return;
+  }
+
+  if (command === "gaps") {
+    await gapsCommand(args);
+    return;
+  }
+
+  if (command === "checkpoint") {
+    await checkpointCommand(args);
+    return;
+  }
+
+  if (command === "resume") {
+    await resumeCommand(args);
     return;
   }
 

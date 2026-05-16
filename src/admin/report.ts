@@ -11,6 +11,7 @@ import type {
 import type { OperatorStatusReport } from "./status.ts";
 import { assessPlanReasoning, assessTaskPacketReasoning } from "../core/reasoning-quality.ts";
 import type { ReasoningQualityAssessment } from "../core/reasoning-quality.ts";
+import { buildAutonomousOperatorSummary, type AutonomousOperatorSummary } from "./autonomous-summary.ts";
 
 type TimelineAuthority = "runtime_authoritative" | "derived_only";
 
@@ -81,6 +82,7 @@ export interface RunEvidenceReport {
     acceptanceCriteria: string[];
   } | undefined;
   tasks: RunEvidenceTaskReport[];
+  autonomous: AutonomousOperatorSummary;
   reasoningQuality: {
     authorityLabel: "derived_only";
     status: "pass" | "warn";
@@ -182,6 +184,9 @@ export function buildRunEvidenceReport(input: {
         }
       : undefined,
     tasks,
+    autonomous: buildAutonomousOperatorSummary({
+      snapshot: input.snapshot
+    }),
     reasoningQuality: {
       authorityLabel: "derived_only",
       status: reasoningWarnings.length > 0 ? "warn" : "pass",
@@ -248,6 +253,48 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   for (const task of report.tasks) {
     lines.push(
       `- \`${task.taskId}\` ${task.status} owner=${task.ownerRole} handoffs=${task.handoffCount} reviews=${task.reviewCount} approvals=${task.approvalCount} reasoning=${task.reasoningQuality.status}/${task.reasoningMode}${task.reasoningVerdictStatus ? ` verdict=${task.reasoningVerdictStatus}` : ""}`
+    );
+  }
+  lines.push("");
+
+  lines.push(`## Autonomous Execution`);
+  lines.push("");
+  if (!report.autonomous.configured) {
+    lines.push(`- configured: no`);
+    lines.push(`- resume: ${report.autonomous.resume.summary}`);
+  } else {
+    lines.push(`- configured: yes`);
+    lines.push(`- profile: ${report.autonomous.profile}`);
+    lines.push(`- phase: ${report.autonomous.phase}`);
+    lines.push(
+      `- readiness: ${report.autonomous.phaseReadiness?.status ?? "unknown"}`
+    );
+    if ((report.autonomous.phaseReadiness?.reasons.length ?? 0) > 0) {
+      lines.push(`- readiness reasons: ${report.autonomous.phaseReadiness?.reasons.join("; ")}`);
+    }
+    if (report.autonomous.coverageSummary) {
+      lines.push(
+        `- coverage: critical=${report.autonomous.coverageSummary.criticalItemCoverage} validation=${report.autonomous.coverageSummary.criticalItemValidation} callsites=${report.autonomous.coverageSummary.callsiteCoverage} runtime-traces=${report.autonomous.coverageSummary.runtimeTraceCoverage}`
+      );
+      lines.push(
+        `- gaps: open=${report.autonomous.coverageSummary.openGapCount} blocking=${report.autonomous.coverageSummary.blockingGapCount}`
+      );
+    }
+    if (report.autonomous.latestProgressProof) {
+      lines.push(
+        `- latest proof: ${report.autonomous.latestProgressProof.proofId} next=${report.autonomous.latestProgressProof.nextTarget}`
+      );
+    }
+    if (report.autonomous.latestCheckpoint) {
+      lines.push(
+        `- latest checkpoint: ${report.autonomous.latestCheckpoint.checkpointId} authority=${report.autonomous.latestCheckpoint.authorityLabel} targets=${report.autonomous.latestCheckpoint.activeTargets.join(", ") || "none"}`
+      );
+    }
+    if (report.autonomous.blockers.length > 0) {
+      lines.push(`- blockers: ${report.autonomous.blockers.join("; ")}`);
+    }
+    lines.push(
+      `- resume: ${report.autonomous.resume.status}/${report.autonomous.resume.source} ${report.autonomous.resume.summary}`
     );
   }
   lines.push("");

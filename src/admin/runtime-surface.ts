@@ -2,14 +2,18 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  executeCheckpointCommandFromArgs,
+  executeCoverageCommandFromArgs,
   createLiveLoopReviewCommandExecutor,
   createQueuedLoopReviewExecutor,
+  executeGapsCommandFromArgs,
   executeLoopCommandFromArgs,
   createPlanContextEmbedQuery,
   createRuntimeStore,
   executeDoctorCommandFromArgs,
   executeOpsCommandFromArgs,
   executePlanContextCommandFromArgs,
+  executeResumeCommandFromArgs,
   executeReportCommandFromArgs,
   executeStatusCommandFromArgs
 } from "../admin.ts";
@@ -31,10 +35,18 @@ const repoRoot = path.resolve(moduleDir, "../..");
 
 interface RuntimeSurfaceService {
   getStatus(runId: string): Promise<RunStatusSnapshot>;
+  resumeRun?: ((runId: string) => Promise<import("../domain/types.ts").RunResumeSnapshot>) | undefined;
   getExecutionPlan(
     runId: string,
     options?: { staleAfterHours?: number | undefined }
   ): Promise<RunExecutionPlan>;
+  checkpointRun?: ((
+    runId: string,
+    checkpoint: Omit<import("../domain/types.ts").CheckpointRecord, "runId" | "authorityLabel">,
+    options?: {
+      authorityLabel?: import("../domain/types.ts").CheckpointRecord["authorityLabel"] | undefined;
+    }
+  ) => Promise<unknown>) | undefined;
   applyRecovery(
     runId: string,
     actionIds: readonly string[],
@@ -144,6 +156,72 @@ export async function getRuntimeHealthSurface(args: readonly string[], options: 
       },
       getProjectRuntimeRegistration(projectId) {
         return store.getProjectRuntimeRegistration(projectId);
+      }
+    })
+  );
+}
+
+export async function getCoverageSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env }) =>
+    executeCoverageCommandFromArgs(args, {
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      }
+    })
+  );
+}
+
+export async function getGapsSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env }) =>
+    executeGapsCommandFromArgs(args, {
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      }
+    })
+  );
+}
+
+export async function getCheckpointSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env, cwd }) =>
+    executeCheckpointCommandFromArgs(args, {
+      cwd,
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      checkpointRun(runId, checkpoint, checkpointOptions) {
+        if (!service.checkpointRun) {
+          throw new Error("runtime surface does not support checkpoint mutation");
+        }
+        return service.checkpointRun(runId, checkpoint, checkpointOptions);
+      }
+    })
+  );
+}
+
+export async function getResumeSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  return withRuntime(options, async ({ store, service, env }) =>
+    executeResumeCommandFromArgs(args, {
+      env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getResumeSnapshot(runId) {
+        if (!service.resumeRun) {
+          throw new Error("runtime surface does not support resume snapshots");
+        }
+        return service.resumeRun(runId);
       }
     })
   );

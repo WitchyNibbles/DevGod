@@ -294,3 +294,128 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   assert.match(markdown, /reasoning-quality: pass/);
   assert.match(markdown, /approval_recorded task=`plan`/);
 });
+
+test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint, and resume summaries", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Autonomous follow-through",
+    request: "Do not stop at shallow summaries."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"],
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:core-loop",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 3,
+      callsitesAnalyzed: 3,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-15T11:00:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:checkpoint-proof",
+      targetId: "task:rewrite",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Checkpoint follow-through still needs live workflow proof.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "reviewer",
+      suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+      status: "open"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-autonomous",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/admin.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 0, opened: 1 },
+    nextTarget: "review:authenticated",
+    whyNext: "Authenticated workflow proof is still blocking completion.",
+    createdAt: "2026-05-15T11:03:00.000Z"
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-autonomous",
+    phase: "final_verification",
+    activeTargets: ["review:authenticated"],
+    recentEvidenceRefs: ["src/admin.ts:1"],
+    openGaps: ["gap:checkpoint-proof"],
+    nextActions: ["run workflow-proof after authenticated reviews"],
+    compressedContextRef: "memory://cp-autonomous",
+    createdAt: "2026-05-15T11:04:00.000Z"
+  });
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.autonomous.configured, true);
+  assert.equal(result.report.autonomous.latestCheckpoint?.checkpointId, "cp-autonomous");
+  assert.equal(result.report.autonomous.latestProgressProof?.proofId, "proof-autonomous");
+  assert.equal(result.report.autonomous.blockingGaps[0]?.id, "gap:checkpoint-proof");
+  assert.equal(result.report.autonomous.resume.status, "blocked");
+  assert.equal(result.report.autonomous.resume.source, "blocking_gap");
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /## Autonomous Execution/);
+  assert.match(markdown, /latest checkpoint: cp-autonomous/);
+  assert.match(markdown, /latest proof: proof-autonomous/);
+  assert.match(markdown, /resume: blocked\/blocking_gap/);
+});

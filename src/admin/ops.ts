@@ -84,6 +84,17 @@ export function buildOperatorDashboardReport(input: {
         nextActions.push(`recover ${action.id}`);
       }
       break;
+    case "continue_analysis":
+      nextActions.push(
+        input.executionPlan.directive.nextActions[0] ?? `continue ${input.executionPlan.directive.targetId}`
+      );
+      for (const action of input.executionPlan.directive.nextActions.slice(1)) {
+        nextActions.push(action);
+      }
+      for (const blocker of input.executionPlan.directive.blockers) {
+        alerts.push(`autonomous blocker: ${blocker}`);
+      }
+      break;
     case "blocked":
       alerts.push(...input.executionPlan.directive.blockers.map((blocker) => `execution blocked: ${blocker}`));
       break;

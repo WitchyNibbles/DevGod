@@ -250,6 +250,10 @@ export function mergePackageJson(
   scripts["devgod:bootstrap"] = `${devgodEntry} bootstrap-project`;
   scripts["devgod:verify:setup"] = `${devgodEntry} verify-setup`;
   scripts["devgod:status"] = `${devgodEntry} status`;
+  scripts["devgod:coverage"] = `${devgodEntry} coverage --format text`;
+  scripts["devgod:gaps"] = `${devgodEntry} gaps --format text`;
+  scripts["devgod:checkpoint"] = `${devgodEntry} checkpoint --format text`;
+  scripts["devgod:resume"] = `${devgodEntry} resume --format text`;
   scripts["devgod:seed-workflow-proof"] = `${devgodEntry} seed-workflow-proof`;
   scripts["devgod:ops"] = `${devgodEntry} ops --format text`;
   scripts["devgod:loop"] = `${devgodEntry} loop --format text`;

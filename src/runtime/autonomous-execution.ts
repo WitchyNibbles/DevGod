@@ -10,6 +10,13 @@ import type {
   TaskRecord
 } from "../domain/types.ts";
 
+export interface AutonomousNextTarget {
+  targetId: string;
+  source: "blocking_gap" | "progress_proof" | "checkpoint";
+  rationale: string[];
+  nextActions: string[];
+}
+
 const fullyAnalyzedStates = new Set(["fully_analyzed", "validated", "migrated", "deprecated"]);
 const validatedStates = new Set(["validated", "migrated", "deprecated"]);
 const tracedStates = new Set(["validated", "migrated"]);
@@ -19,6 +26,12 @@ const autonomousQualityGates = new Set([
   "checkpoint_resume_required",
   "memory_compaction_required"
 ]);
+const gapSeverityWeight = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1
+} as const;
 
 function roundMetric(value: number): number {
   return Number(value.toFixed(4));
@@ -228,4 +241,75 @@ export function mergeCoverageGaps(
     byId.set(gap.id, gap);
   }
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function selectAutonomousNextTarget(
+  state: AutonomousExecutionState
+): AutonomousNextTarget | undefined {
+  const blockingGap = [...state.gaps]
+    .filter((gap) => gap.status === "open" && gap.blocking)
+    .sort((left, right) => {
+      const severityOrder = gapSeverityWeight[right.severity] - gapSeverityWeight[left.severity];
+      if (severityOrder !== 0) {
+        return severityOrder;
+      }
+      return left.id.localeCompare(right.id);
+    })[0];
+
+  if (blockingGap) {
+    return {
+      targetId: blockingGap.targetId,
+      source: "blocking_gap",
+      rationale: [
+        `blocking gap ${blockingGap.id} remains open`,
+        blockingGap.description
+      ],
+      nextActions:
+        blockingGap.suggestedNextActions.length > 0
+          ? [...blockingGap.suggestedNextActions]
+          : [`resolve ${blockingGap.id}`]
+    };
+  }
+
+  const latestProgressProof = [...state.progressProofs].sort((left, right) => {
+    const cycleOrder = right.cycle - left.cycle;
+    if (cycleOrder !== 0) {
+      return cycleOrder;
+    }
+    return right.createdAt.localeCompare(left.createdAt);
+  })[0];
+  if (latestProgressProof?.nextTarget.trim()) {
+    return {
+      targetId: latestProgressProof.nextTarget.trim(),
+      source: "progress_proof",
+      rationale: [
+        `latest progress proof ${latestProgressProof.proofId} selected the next target`,
+        ...(latestProgressProof.whyNext ? [latestProgressProof.whyNext] : [])
+      ],
+      nextActions:
+        latestProgressProof.whyNext?.trim()
+          ? [latestProgressProof.whyNext.trim()]
+          : [`continue at ${latestProgressProof.nextTarget.trim()}`]
+    };
+  }
+
+  const latestCheckpoint = [...state.checkpoints].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  )[0];
+  const checkpointTarget = latestCheckpoint?.activeTargets[0]?.trim();
+  if (latestCheckpoint && checkpointTarget) {
+    return {
+      targetId: checkpointTarget,
+      source: "checkpoint",
+      rationale: [
+        `latest checkpoint ${latestCheckpoint.checkpointId} still lists an active target`
+      ],
+      nextActions:
+        latestCheckpoint.nextActions.length > 0
+          ? [...latestCheckpoint.nextActions]
+          : [`resume at ${checkpointTarget}`]
+    };
+  }
+
+  return undefined;
 }

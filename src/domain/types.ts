@@ -115,6 +115,7 @@ export const executionDirectiveKinds = [
   "dispatch_owner",
   "dispatch_reviews",
   "apply_recovery",
+  "continue_analysis",
   "blocked"
 ] as const;
 export const recoveryIssueKinds = [
@@ -581,6 +582,7 @@ export interface ProgressProofRecord {
 export interface CheckpointRecord {
   runId: string;
   checkpointId: string;
+  authorityLabel: "runtime_authoritative" | "operator_import";
   phase: AnalysisPhase;
   activeTargets: string[];
   recentEvidenceRefs: string[];
@@ -879,6 +881,14 @@ export interface ApplyRecoveryExecutionDirective extends BaseExecutionDirective 
   actions: RecoveryAction[];
 }
 
+export interface ContinueAnalysisExecutionDirective extends BaseExecutionDirective {
+  kind: "continue_analysis";
+  targetId: string;
+  source: "blocking_gap" | "progress_proof" | "checkpoint";
+  nextActions: string[];
+  blockers: string[];
+}
+
 export interface BlockedExecutionDirective extends BaseExecutionDirective {
   kind: "blocked";
   blockers: string[];
@@ -889,6 +899,7 @@ export type RunExecutionDirective =
   | DispatchOwnerExecutionDirective
   | DispatchReviewsExecutionDirective
   | ApplyRecoveryExecutionDirective
+  | ContinueAnalysisExecutionDirective
   | BlockedExecutionDirective;
 
 export interface RunExecutionPlan {

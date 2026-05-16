@@ -7,10 +7,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TaskQueue } from "../src/devgod/task-queue.ts";
 import {
   executeAdvanceActiveTaskCommandFromArgs,
+  executeCheckpointCommandFromArgs,
+  executeCoverageCommandFromArgs,
+  executeGapsCommandFromArgs,
   executeIndexRepoMarkdownCommand,
   executeReportCommandFromArgs,
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs,
+  executeResumeCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
   executeVerifyReviewIdentityCommand,
   executeWorkflowProofCommandFromArgs
@@ -147,6 +151,97 @@ async function createApprovedRuntimeTask(options: {
   });
 
   return { runId: run.id };
+}
+
+async function seedAutonomousState(
+  service: DevgodCoreService,
+  runId: string,
+  options: { includeCheckpoint?: boolean; includeClosedGap?: boolean } = {}
+) {
+  await service.configureAutonomousExecution(runId, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(runId, [
+    {
+      id: "service:admin-runtime",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/admin.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      verificationRefs: ["tests/admin.test.ts"],
+      lastUpdatedAt: "2026-05-15T12:00:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(runId, [
+    {
+      id: "gap:admin-open",
+      targetId: "task:runtime-proof",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Runtime proof is still pending.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+      status: "open"
+    },
+    ...(options.includeClosedGap
+      ? [
+          {
+            id: "gap:admin-closed",
+            targetId: "task:old-gap",
+            kind: "missing_inventory" as const,
+            severity: "low" as const,
+            description: "Old inventory gap already closed.",
+            blocking: false,
+            evidenceRefs: ["src/admin.ts:1"],
+            createdBy: "reviewer",
+            suggestedNextActions: [],
+            status: "closed" as const
+          }
+        ]
+      : [])
+  ]);
+  await service.recordProgressProof(runId, {
+    cycle: 1,
+    proofId: "proof-admin",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/admin.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 0, opened: 1 },
+    nextTarget: "review:authenticated",
+    whyNext: "Runtime proof remains the next autonomous target.",
+    createdAt: "2026-05-15T12:03:00.000Z"
+  });
+  if (options.includeCheckpoint) {
+    await service.checkpointRun(runId, {
+      checkpointId: "cp-admin",
+      phase: "final_verification",
+      activeTargets: ["review:authenticated"],
+      recentEvidenceRefs: ["src/admin.ts:1"],
+      openGaps: ["gap:admin-open"],
+      nextActions: ["run workflow-proof after authenticated reviews"],
+      compressedContextRef: "memory://cp-admin",
+      createdAt: "2026-05-15T12:04:00.000Z"
+    });
+  }
 }
 
 test("verify-review-identity command validates adapter, bindings, and fixtures", async () => {
@@ -864,6 +959,302 @@ test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the l
   assert.equal(result.runId, approvedRun.id);
   assert.equal(result.taskId, "carry-task");
   assert.equal(result.taskStatus, "approved");
+});
+
+test("autonomous admin commands expose coverage, gap, checkpoint, and resume surfaces", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: { bindings: [] },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Autonomous admin surfaces",
+    request: "Expose coverage, gaps, checkpoint, and resume."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      ownerRole: "backend_engineer",
+      requiredSpecialistRoles: ["backend_engineer"],
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await seedAutonomousState(service, run.id, { includeCheckpoint: true, includeClosedGap: true });
+
+  const coverage = await executeCoverageCommandFromArgs(["--run-id", run.id], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    }
+  });
+  assert.equal(coverage.report.items.length, 1);
+  assert.equal(coverage.report.autonomous.coverageSummary?.criticalItemCoverage, 1);
+
+  const gaps = await executeGapsCommandFromArgs(["--run-id", run.id, "--blocking-only"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    }
+  });
+  assert.deepEqual(gaps.report.gaps.map((gap) => gap.id), ["gap:admin-open"]);
+
+  const resume = await executeResumeCommandFromArgs(["--run-id", run.id], {
+    getResumeSnapshot(runId) {
+      return service.resumeRun(runId);
+    }
+  });
+  assert.equal(resume.report.executionPlan.directive.kind, "dispatch_owner");
+  assert.equal(resume.report.autonomous.latestCheckpoint?.checkpointId, "cp-admin");
+  assert.equal(resume.report.autonomous.resume.source, "blocking_gap");
+});
+
+test("executeGapsCommandFromArgs keeps closed blocking gaps when --all and --blocking-only are combined", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Gap filtering",
+    request: "Preserve closed blocking gaps when explicitly requested."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:blocking-open",
+      targetId: "task:open",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Open blocking gap.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["resolve open gap"],
+      status: "open"
+    },
+    {
+      id: "gap:blocking-closed",
+      targetId: "task:closed",
+      kind: "missing_inventory",
+      severity: "medium",
+      description: "Closed blocking gap retained for history.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "reviewer",
+      suggestedNextActions: [],
+      status: "closed"
+    }
+  ]);
+
+  const result = await executeGapsCommandFromArgs(["--run-id", run.id, "--all", "--blocking-only"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    }
+  });
+
+  assert.deepEqual(result.report.gaps.map((gap) => gap.id), ["gap:blocking-closed", "gap:blocking-open"]);
+});
+
+test("executeCheckpointCommandFromArgs validates and records checkpoint input", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint surface",
+    request: "Persist a resumable checkpoint."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await seedAutonomousState(service, run.id, { includeCheckpoint: false });
+
+  try {
+    const checkpointPath = path.join(directory, "checkpoint.json");
+    await writeFile(
+      checkpointPath,
+      JSON.stringify(
+        {
+          checkpointId: "cp-new",
+          phase: "final_verification",
+          activeTargets: ["review:authenticated"],
+          recentEvidenceRefs: ["src/admin.ts:1"],
+          openGaps: ["gap:admin-open"],
+          nextActions: ["run workflow-proof after authenticated reviews"],
+          compressedContextRef: "memory://cp-new",
+          createdAt: "2026-05-15T12:05:00.000Z"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = await executeCheckpointCommandFromArgs(
+      ["--run-id", run.id, "--input", checkpointPath],
+      {
+        cwd: directory,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        }
+      }
+    );
+
+    assert.equal(result.report.updatedCheckpointId, "cp-new");
+    assert.equal(result.report.checkpoints.at(-1)?.checkpointId, "cp-new");
+    assert.equal(result.report.checkpoints.at(-1)?.authorityLabel, "operator_import");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeCheckpointCommandFromArgs rejects poisoned future checkpoints and invalid context schemes", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-invalid-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint validation",
+    request: "Reject poisoned checkpoint payloads."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  await seedAutonomousState(service, run.id, { includeCheckpoint: false });
+
+  try {
+    const invalidPath = path.join(directory, "checkpoint-invalid.json");
+    await writeFile(
+      invalidPath,
+      JSON.stringify(
+        {
+          checkpointId: "cp-poison",
+          phase: "final_verification",
+          activeTargets: ["review:authenticated"],
+          recentEvidenceRefs: ["src/admin.ts:1"],
+          openGaps: ["gap:admin-open"],
+          nextActions: ["mislead operator"],
+          compressedContextRef: "http://example.invalid/poison",
+          createdAt: "2099-01-01T00:00:00.000Z"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeCheckpointCommandFromArgs(["--run-id", run.id, "--input", invalidPath], {
+        cwd: directory,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        }
+      }),
+      /createdAt too far in the future|invalid compressedContextRef scheme/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeCheckpointCommandFromArgs rejects checkpoint input outside the working tree", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-cwd-"));
+  const outsideDirectory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-outside-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint path guard",
+    request: "Reject checkpoint imports outside the active working tree."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  await seedAutonomousState(service, run.id, { includeCheckpoint: false });
+
+  try {
+    const outsidePath = path.join(outsideDirectory, "checkpoint-outside.json");
+    await writeFile(
+      outsidePath,
+      JSON.stringify(
+        {
+          checkpointId: "cp-outside",
+          phase: "final_verification",
+          activeTargets: ["review:authenticated"],
+          recentEvidenceRefs: ["src/admin.ts:1"],
+          openGaps: ["gap:admin-open"],
+          nextActions: ["do not import me"],
+          compressedContextRef: "memory://cp-outside",
+          createdAt: "2026-05-15T12:05:00.000Z"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeCheckpointCommandFromArgs(["--run-id", run.id, "--input", outsidePath], {
+        cwd: directory,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        }
+      }),
+      /checkpoint input path must stay within/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(outsideDirectory, { recursive: true, force: true });
+  }
 });
 
 test("executeReportCommandFromArgs exposes persisted loop history without writing new entries", async () => {

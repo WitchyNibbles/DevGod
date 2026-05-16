@@ -175,9 +175,130 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
   ]);
   assert.equal(report.orchestration.freshness.status, "stale");
   assert.deepEqual(report.orchestration.nextTaskIds, []);
+  assert.equal(report.autonomous.configured, false);
+  assert.equal(report.autonomous.resume.status, "not_configured");
   assert.equal(report.reviewIdentity.liveTrustReady, false);
   assert.equal(report.gitNexus.state, "unconfigured");
   assert.deepEqual(report.reviewIdentity.notes, ["adapter module not configured"]);
+});
+
+test("buildOperatorStatusReport exposes autonomous coverage and resume guidance from runtime state", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Deep rewrite",
+    request: "Show what coverage is complete and where resume starts."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-15T10:00:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:resume-proof",
+      targetId: "task:runtime-proof",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Authenticated runtime review proof is still pending.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["resolve the blocking runtime proof gap"],
+      status: "open"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 2,
+    proofId: "proof-2",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/admin.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 0, opened: 1 },
+    nextTarget: "review:authenticated",
+    whyNext: "Authenticated review proof is the remaining continuation target.",
+    createdAt: "2026-05-15T10:05:00.000Z"
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-2",
+    phase: "final_verification",
+    activeTargets: ["review:authenticated"],
+    recentEvidenceRefs: ["src/admin.ts:1"],
+    openGaps: ["gap:resume-proof"],
+    nextActions: ["stale checkpoint action"],
+    compressedContextRef: "memory://cp-2",
+    createdAt: "2026-05-15T10:06:00.000Z"
+  });
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-15T10:07:00.000Z"
+  });
+
+  assert.equal(report.autonomous.configured, true);
+  assert.equal(report.autonomous.profile, "legacy_rewrite");
+  assert.equal(report.autonomous.coverageSummary?.criticalItemCoverage, 1);
+  assert.equal(report.autonomous.blockers[0], "blocking gaps remain open: 1");
+  assert.equal(report.autonomous.latestProgressProof?.proofId, "proof-2");
+  assert.equal(report.autonomous.latestCheckpoint?.checkpointId, "cp-2");
+  assert.equal(report.autonomous.resume.status, "blocked");
+  assert.equal(report.autonomous.resume.source, "blocking_gap");
+  assert.equal(report.autonomous.resume.nextTarget, "task:runtime-proof");
+  assert.deepEqual(report.autonomous.resume.nextActions, ["resolve the blocking runtime proof gap"]);
 });
 
 test("executeStatusCommandFromArgs parses flags and reports env-derived review identity posture", async () => {

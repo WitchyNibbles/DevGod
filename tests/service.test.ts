@@ -7,6 +7,7 @@ import {
   type ReviewIdentityBindings
 } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
+import { selectAutonomousNextTarget } from "../src/runtime/autonomous-execution.ts";
 import type {
   MemoryEntryRecord,
   ReasoningQualityBlock,
@@ -2783,6 +2784,226 @@ test("getExecutionPlan blocks terminal tasks when autonomous execution evidence 
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("progress proof")));
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("checkpoint")));
   }
+});
+
+test("getExecutionPlan returns continue_analysis when autonomous blockers still have an actionable next target", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Autonomous continuation",
+    request: "Keep moving while autonomous work remains."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous continuation evidence recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:autonomous-proof",
+      targetId: "task:runtime-proof",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Runtime proof still needs to run.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+      status: "open"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 0, opened: 1 },
+    nextTarget: "review:authenticated",
+    whyNext: "Runtime proof is the next autonomous target.",
+    createdAt: new Date().toISOString()
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-1",
+    phase: "final_verification",
+    activeTargets: ["review:authenticated"],
+    recentEvidenceRefs: ["src/core/service.ts:1"],
+    openGaps: ["gap:autonomous-proof"],
+    nextActions: ["stale checkpoint action"],
+    compressedContextRef: "memory://cp-1",
+    createdAt: new Date().toISOString()
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "continue_analysis");
+  if (plan.directive.kind === "continue_analysis") {
+    assert.equal(plan.directive.source, "blocking_gap");
+    assert.equal(plan.directive.targetId, "task:runtime-proof");
+    assert.deepEqual(plan.directive.nextActions, ["run workflow-proof after authenticated reviews"]);
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("blocking gaps remain open")));
+  }
+});
+
+test("selectAutonomousNextTarget falls back to the latest progress proof when no blocking gap remains", () => {
+  const target = selectAutonomousNextTarget({
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "validation",
+    coverageItems: [],
+    gaps: [],
+    checkpoints: [
+      {
+        runId: "run-1",
+        checkpointId: "cp-1",
+        authorityLabel: "runtime_authoritative",
+        phase: "validation",
+        activeTargets: ["checkpoint:target"],
+        recentEvidenceRefs: ["src/core/service.ts:1"],
+        openGaps: [],
+        nextActions: ["resume from checkpoint"],
+        compressedContextRef: "memory://cp-1",
+        createdAt: "2026-05-15T12:00:00.000Z"
+      }
+    ],
+    progressProofs: [
+      {
+        cycle: 3,
+        proofId: "proof-3",
+        phaseBefore: "validation",
+        phaseAfter: "final_verification",
+        evidenceRefs: ["src/core/service.ts:1"],
+        coverageDelta: { validated: 1 },
+        blockingGapDelta: { closed: 1, opened: 0 },
+        nextTarget: "proof:target",
+        whyNext: "proof guidance wins before checkpoint fallback",
+        createdAt: "2026-05-15T12:05:00.000Z"
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-15T12:05:00.000Z"
+  });
+
+  assert.equal(target?.source, "progress_proof");
+  assert.equal(target?.targetId, "proof:target");
+  assert.deepEqual(target?.nextActions, ["proof guidance wins before checkpoint fallback"]);
+});
+
+test("selectAutonomousNextTarget falls back to the latest checkpoint when no blocking gap or proof target remains", () => {
+  const target = selectAutonomousNextTarget({
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "validation",
+    coverageItems: [],
+    gaps: [],
+    checkpoints: [
+      {
+        runId: "run-1",
+        checkpointId: "cp-2",
+        authorityLabel: "runtime_authoritative",
+        phase: "validation",
+        activeTargets: ["checkpoint:target"],
+        recentEvidenceRefs: ["src/core/service.ts:1"],
+        openGaps: [],
+        nextActions: ["resume the checkpoint target"],
+        compressedContextRef: "memory://cp-2",
+        createdAt: "2026-05-15T12:06:00.000Z"
+      }
+    ],
+    progressProofs: [
+      {
+        cycle: 3,
+        proofId: "proof-3",
+        phaseBefore: "validation",
+        phaseAfter: "validation",
+        evidenceRefs: ["src/core/service.ts:1"],
+        coverageDelta: { validated: 0 },
+        blockingGapDelta: { closed: 0, opened: 0 },
+        nextTarget: "   ",
+        whyNext: undefined,
+        createdAt: "2026-05-15T12:05:00.000Z"
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-15T12:06:00.000Z"
+  });
+
+  assert.equal(target?.source, "checkpoint");
+  assert.equal(target?.targetId, "checkpoint:target");
+  assert.deepEqual(target?.nextActions, ["resume the checkpoint target"]);
 });
 
 test("getExecutionPlan returns complete once autonomous execution evidence satisfies the gates", async () => {

@@ -174,6 +174,22 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.match(merged.scripts["devgod:doctor"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor/);
   assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
   assert.equal(
+    merged.scripts["devgod:coverage"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts coverage --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:gaps"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts gaps --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:checkpoint"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts checkpoint --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:resume"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts resume --format text"
+  );
+  assert.equal(
     merged.scripts["devgod:seed-workflow-proof"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-workflow-proof"
   );
@@ -1410,6 +1426,22 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(
     targetPackageJson.scripts["devgod:status"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts status/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:coverage"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts coverage --format text/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:gaps"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts gaps --format text/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:checkpoint"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts checkpoint --format text/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:resume"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts resume --format text/
   );
   assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],

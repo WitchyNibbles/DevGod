@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getLoopSurface, getPlanContextSurface } from "../src/admin/runtime-surface.ts";
-import type { RunExecutionPlan } from "../src/domain/types.ts";
+import {
+  getCheckpointSurface,
+  getCoverageSurface,
+  getGapsSurface,
+  getLoopSurface,
+  getPlanContextSurface,
+  getResumeSurface
+} from "../src/admin/runtime-surface.ts";
+import type { CoverageItemCategory, RunExecutionPlan, RunStatusSnapshot } from "../src/domain/types.ts";
 
 test("getPlanContextSurface wires query embedding through the runtime surface", async () => {
   let capturedInput:
@@ -334,5 +341,235 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
   assert.deepEqual(
     calls.map((entry) => entry.method),
     ["getExecutionPlan", "applyRecovery", "getExecutionPlan", "executeDirectiveStep"]
+  );
+});
+
+test("autonomous runtime surfaces wire coverage, gaps, checkpoint, and resume through the runtime service", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+
+  const runtimeSnapshot: RunStatusSnapshot = {
+    run: {
+      id: "run-1",
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      actor: "ceo",
+      title: "Autonomous flow",
+      request: "Keep going",
+      summary: {
+        goal: "Keep going",
+        audience: [],
+        constraints: [],
+        risks: [],
+        unknowns: [],
+        successCriteria: [],
+        outOfScope: [],
+        trustBoundaries: [],
+        destructiveActions: [],
+        externalIntegrations: [],
+        stopGo: "go"
+      },
+      status: "ready" as const,
+      createdAt: "2026-05-15T00:00:00.000Z",
+      updatedAt: "2026-05-15T00:00:00.000Z"
+    },
+    tasks: [],
+    activeLocks: [],
+    blockers: [],
+    nextTaskIds: [],
+    autonomousExecution: {
+      state: {
+        enabled: true,
+        profile: "legacy_rewrite" as const,
+        phase: "final_verification" as const,
+        manifest: {
+          runId: "run-1",
+          profile: "legacy_rewrite" as const,
+          requiredCategories: ["services", "tests"] as CoverageItemCategory[],
+          thresholds: {
+            criticalItemCoverage: 0.8,
+            criticalItemValidation: 0.6,
+            callsiteCoverage: 0.85,
+            runtimeTraceCoverage: 0.75
+          }
+        },
+        coverageItems: [
+          {
+            id: "service:runtime",
+            category: "services" as const,
+            state: "validated" as const,
+            criticality: "critical" as const,
+            sources: ["src/admin.ts:1"],
+            evidenceRefs: ["src/admin.ts:1"],
+            verificationRefs: ["tests/runtime-surface.test.ts"],
+            callsiteCount: 1,
+            callsitesAnalyzed: 1,
+            runtimeTraced: true,
+            lastUpdatedAt: "2026-05-15T00:00:00.000Z"
+          }
+        ],
+        gaps: [
+          {
+            id: "gap:runtime",
+            targetId: "task:proof",
+            kind: "missing_validation" as const,
+            severity: "high" as const,
+            description: "Proof still missing.",
+            blocking: true,
+            evidenceRefs: ["src/admin.ts:1"],
+            createdBy: "qa_engineer",
+            suggestedNextActions: ["run workflow-proof"],
+            status: "open" as const
+          }
+        ],
+        checkpoints: [
+          {
+            runId: "run-1",
+            checkpointId: "cp-1",
+            authorityLabel: "runtime_authoritative",
+            phase: "final_verification" as const,
+            activeTargets: ["review:authenticated"],
+            recentEvidenceRefs: ["src/admin.ts:1"],
+            openGaps: ["gap:runtime"],
+            nextActions: ["run workflow-proof"],
+            compressedContextRef: "memory://cp-1",
+            createdAt: "2026-05-15T00:02:00.000Z"
+          }
+        ],
+        progressProofs: [
+          {
+            cycle: 1,
+            proofId: "proof-1",
+            phaseBefore: "validation" as const,
+            phaseAfter: "final_verification" as const,
+            evidenceRefs: ["src/admin.ts:1"],
+            coverageDelta: { validated: 1 },
+            blockingGapDelta: { closed: 0, opened: 1 },
+            nextTarget: "review:authenticated",
+            whyNext: "Proof is still pending.",
+            createdAt: "2026-05-15T00:01:00.000Z"
+          }
+        ],
+        pendingInvestigations: [],
+        executionEpoch: 1,
+        updatedAt: "2026-05-15T00:02:00.000Z"
+      },
+      coverageSummary: {
+        totalItems: 1,
+        discoveredItems: 0,
+        partiallyAnalyzedItems: 0,
+        fullyAnalyzedItems: 0,
+        validatedItems: 1,
+        migratedItems: 0,
+        blockedItems: 0,
+        criticalItemCoverage: 1,
+        criticalItemValidation: 1,
+        callsiteCoverage: 1,
+        runtimeTraceCoverage: 1,
+        openGapCount: 1,
+        blockingGapCount: 1
+      },
+      phaseReadiness: {
+        phase: "final_verification" as const,
+        status: "blocked" as const,
+        reasons: ["blocking gaps remain open: 1"]
+      },
+      blockingGaps: []
+    }
+  };
+
+  const runtimePlan: RunExecutionPlan = {
+    mode: "runtime_authoritative",
+    runId: "run-1",
+    runStatus: "ready",
+    directive: {
+      kind: "dispatch_owner",
+      recommendation: {
+        taskId: "rewrite",
+        taskStatus: "ready",
+        recommendation: "owner_dispatch",
+        authorityLabel: "derived_only",
+        targetRole: "backend_engineer",
+        rationale: ["ready for continuation"],
+        blockers: [],
+        allowedWriteScope: ["src/admin.ts"],
+        retrievalGuidance: [],
+        approvalCheckpoints: []
+      },
+      rationale: ["ready for continuation"]
+    },
+    autonomousExecution: runtimeSnapshot.autonomousExecution
+  };
+
+  const dependencies = {
+    async loadDotEnv() {},
+    async withClient<T>(callback: (client: never) => Promise<T>): Promise<T> {
+      return callback({ kind: "client" } as never);
+    },
+    createStore() {
+      return {
+        async findLatestRun() {
+          return { id: "run-1" };
+        }
+      } as never;
+    },
+    createService() {
+      return {
+        async getStatus(runId: string) {
+          calls.push({ method: "getStatus", args: [runId] });
+          return runtimeSnapshot;
+        },
+        async getExecutionPlan() {
+          assert.fail("getExecutionPlan should not be called by these surfaces");
+        },
+        async applyRecovery() {
+          assert.fail("applyRecovery should not be called by these surfaces");
+        },
+        async recommendRouting() {
+          assert.fail("recommendRouting should not be called by these surfaces");
+        },
+        async inspectRecovery() {
+          assert.fail("inspectRecovery should not be called by these surfaces");
+        },
+        async searchMemory() {
+          assert.fail("searchMemory should not be called by these surfaces");
+          return [];
+        },
+        async checkpointRun(runId: string, checkpoint: { checkpointId: string }) {
+          calls.push({ method: "checkpointRun", args: [runId, checkpoint.checkpointId] });
+          return { ok: true };
+        },
+        async resumeRun(runId: string) {
+          calls.push({ method: "resumeRun", args: [runId] });
+          return {
+            ...runtimeSnapshot,
+            executionPlan: runtimePlan
+          };
+        }
+      };
+    }
+  };
+
+  const coverage = await getCoverageSurface(["--run-id", "run-1", "--format", "json"], {
+    dependencies
+  });
+  const gaps = await getGapsSurface(["--run-id", "run-1", "--blocking-only", "--format", "json"], {
+    dependencies
+  });
+  const checkpoint = await getCheckpointSurface(["--run-id", "run-1", "--format", "json"], {
+    dependencies
+  });
+  const resume = await getResumeSurface(["--run-id", "run-1", "--format", "json"], {
+    dependencies
+  });
+
+  assert.equal(coverage.report.autonomous.configured, true);
+  assert.equal(coverage.report.items.length, 1);
+  assert.deepEqual(gaps.report.gaps.map((gap) => gap.id), ["gap:runtime"]);
+  assert.equal(checkpoint.report.latestCheckpoint?.checkpointId, "cp-1");
+  assert.equal(resume.report.executionPlan.directive.kind, "dispatch_owner");
+  assert.equal(resume.report.autonomous.resume.source, "blocking_gap");
+  assert.deepEqual(
+    calls.map((entry) => entry.method),
+    ["getStatus", "getStatus", "getStatus", "resumeRun"]
   );
 });

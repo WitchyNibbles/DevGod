@@ -1,11 +1,73 @@
 {
-  "project_status": "in_progress",
-  "current_task_id": "2026-05-15-autonomous-execution-redesign",
+  "project_status": "done",
+  "current_task_id": "2026-05-15-autonomous-next-target-directives",
   "tasks": [
+    {
+      "id": "2026-05-15-autonomous-next-target-directives",
+      "title": "Select and harden runtime-backed autonomous continuation directives",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-15-autonomous-execution-surface-expansion"
+      ],
+      "acceptance_criteria": [
+        "Autonomous runs with actionable remaining work receive runtime-selected continuation directives instead of generic blocked output.",
+        "The chosen target and rationale are grounded in persisted gaps, proofs, checkpoints, or other autonomous runtime evidence.",
+        "Packaged devgod entrypoints and installed scripts expose the new autonomous continuation surfaces.",
+        "Checkpoint import preserves explicit operator provenance and rejects out-of-tree payload reads.",
+        "Non-autonomous routing and completion behavior remain unchanged."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/admin.test.ts tests/install.test.ts tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/report-command.test.ts tests/status-report.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-autonomous-next-target-directives",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-next-target-directives"
+      ],
+      "evidence": [
+        "`src/core/service.ts` now emits `continue_analysis` when autonomous work remains actionable and preserves loop-history evidence for unsupported continuation execution.",
+        "`src/admin/devgod.ts`, `src/install/merge.ts`, and `src/admin/ops.ts` now expose continuation guidance through the packaged wrapper, installed scripts, and ops dashboard.",
+        "`src/admin.ts` now constrains checkpoint imports to the active working tree, applies a bounded input size, and records explicit `operator_import` provenance.",
+        "Focused verification passed on 2026-05-15: npm run typecheck and node --experimental-strip-types --test tests/admin.test.ts tests/install.test.ts tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/report-command.test.ts tests/status-report.test.ts.",
+        "Artifact workflow check passed for 2026-05-15-autonomous-next-target-directives on 2026-05-15.",
+        "Authoritative seeded run 5fe2a260-81d0-402c-8d13-c074dd769383 approved task 2026-05-15-autonomous-next-target-directives with authenticated required reviews."
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-15-autonomous-execution-surface-expansion",
+      "title": "Expand autonomous coverage, gap, checkpoint, and resume reporting surfaces",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-15-autonomous-execution-redesign"
+      ],
+      "acceptance_criteria": [
+        "Shipped admin, status, or report surfaces expose autonomous coverage state, outstanding gaps, and completion blockers from persisted runtime evidence.",
+        "Checkpoint and resume guidance surfaces derive the next continuation action from stored proofs, blockers, or gap records instead of narrative-only summaries.",
+        "Regression coverage proves non-autonomous flows still behave as before while autonomous flows fail closed with explicit gap output when required artifacts are missing."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/status-report.test.ts",
+        "node --experimental-strip-types --test tests/report-command.test.ts",
+        "node --experimental-strip-types --test tests/admin.test.ts",
+        "node --experimental-strip-types --test tests/runtime-surface.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-autonomous-execution-surface-expansion",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-execution-surface-expansion"
+      ],
+      "evidence": [
+        "Admin CLI now exposes runtime-backed `coverage`, `gaps`, `checkpoint`, and `resume` surfaces through src/admin.ts and src/admin/runtime-surface.ts.",
+        "Shared autonomous summary logic now keeps status, report, and command output aligned in src/admin/autonomous-summary.ts.",
+        "Focused verification passed on 2026-05-15: npm run typecheck and node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts tests/runtime-surface.test.ts tests/admin.test.ts.",
+        "Artifact workflow check passed for 2026-05-15-autonomous-execution-surface-expansion on 2026-05-15.",
+        "Authoritative seeded run 34dd0b76-8f70-4d9d-a6ef-0b9ce66a4e4e approved task 2026-05-15-autonomous-execution-surface-expansion and live workflow proof passed."
+      ],
+      "blocker": null
+    },
     {
       "id": "2026-05-15-autonomous-execution-redesign",
       "title": "Implement the first autonomous execution schema and workflow-enforcement slice",
-      "status": "in_progress",
+      "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
@@ -23,7 +85,8 @@
         "Typed autonomous-execution schema, runtime helpers, and completion blocking now exist in src/domain/types.ts, src/runtime/autonomous-execution.ts, and src/core/service.ts.",
         "Workflow templates, checks, and scaffold/install verification paths now enforce coverage/progress/checkpoint artifacts without breaking starter flows.",
         "Manager-written reviewer, QA, and security summaries now cite runtime-verified proof for authoritative run 4e634017-e28e-4a29-8f9d-e0fa3366ae7b.",
-        "An isolated local PG18 + pgvector runtime now backs the source repo and restored live workflow-proof seeding, setup verification, and workflow-proof approval for this task."
+        "An isolated local PG18 + pgvector runtime now backs the source repo and restored live workflow-proof seeding, setup verification, and workflow-proof approval for this task.",
+        "Repo-local queue state was rolled forward into 2026-05-15-autonomous-execution-surface-expansion as the next product slice."
       ],
       "blocker": null
     },

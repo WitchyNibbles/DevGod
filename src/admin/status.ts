@@ -2,6 +2,7 @@ import type { FreshnessGateDecision } from "../runtime/freshness-gate.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 import type { RunStatusSnapshot, TaskStatus } from "../domain/types.ts";
 import type { GitNexusStatusObservation } from "./gitnexus.ts";
+import { buildAutonomousOperatorSummary, type AutonomousOperatorSummary } from "./autonomous-summary.ts";
 
 type StatusAuthorityLabel = "runtime_authoritative" | "derived_only";
 
@@ -42,6 +43,7 @@ export interface OperatorStatusReport {
     nextTaskIds: string[];
     freshness: FreshnessGateDecision;
   };
+  autonomous: AutonomousOperatorSummary;
   reviewIdentity: ReviewIdentityStatusObservation;
   gitNexus: GitNexusStatusObservation;
 }
@@ -112,6 +114,9 @@ export function buildOperatorStatusReport(input: {
       nextTaskIds: [...input.snapshot.nextTaskIds],
       freshness
     },
+    autonomous: buildAutonomousOperatorSummary({
+      snapshot: input.snapshot
+    }),
     reviewIdentity: input.reviewIdentity,
     gitNexus: input.gitNexus
   };
