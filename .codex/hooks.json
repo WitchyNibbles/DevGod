@@ -1,0 +1,80 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/scripts/devgod-session-start.sh\"",
+            "statusMessage": "Loading devgod runtime context",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/plugins/devgod/scripts/user-prompt-submit.mjs\"",
+            "statusMessage": "Checking devgod prompt routing",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/plugins/devgod/scripts/pre-tool-use.mjs\"",
+            "statusMessage": "Checking devgod tool policy",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/plugins/devgod/scripts/permission-request.mjs\"",
+            "statusMessage": "Checking devgod approval policy",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/plugins/devgod/scripts/post-tool-use.mjs\"",
+            "statusMessage": "Reviewing devgod tool output",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/plugins/devgod/scripts/stop.mjs\"",
+            "statusMessage": "Checking devgod completion policy",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

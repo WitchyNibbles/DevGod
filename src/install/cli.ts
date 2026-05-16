@@ -657,7 +657,7 @@ async function readInstallManifest(targetRoot: string): Promise<InstallManifest 
 async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   const manifest: InstallFile[] = [];
 
-  const recursiveRoots = [".devgod/rules", ".devgod/templates", ".githooks"];
+  const recursiveRoots = [".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
 
   for (const relativeRoot of recursiveRoots) {
     const sourcePath = path.join(sourceRoot, relativeRoot);
@@ -718,6 +718,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
 
   manifest.push(
     {
+      source: path.join(sourceRoot, ".codex/hooks.json"),
+      target: ".codex/hooks.json",
+      overwriteManaged: true
+    },
+    {
       source: path.join(sourceRoot, ".env.example"),
       target: ".env.devgod.example",
       overwriteManaged: true
@@ -750,6 +755,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     {
       source: path.join(sourceRoot, "scripts/check-devgod-commit-msg.sh"),
       target: "scripts/check-devgod-commit-msg.sh",
+      overwriteManaged: true
+    },
+    {
+      source: path.join(sourceRoot, "scripts/devgod-session-start.sh"),
+      target: "scripts/devgod-session-start.sh",
       overwriteManaged: true
     }
   );

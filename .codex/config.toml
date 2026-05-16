@@ -1,8 +1,8 @@
 model = "gpt-5.4"
 model_reasoning_effort = "high"
 model_verbosity = "low"
-approval_policy = "on-request"
-sandbox_mode = "workspace-write"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 project_doc_fallback_filenames = [".agents.md", "AGENTS.md"]
 project_doc_max_bytes = 32768
 
@@ -10,6 +10,8 @@ project_doc_max_bytes = 32768
 multi_agent = true
 personality = true
 enable_request_compression = true
+goals = true
+plugin_hooks = true
 
 [agents]
 max_threads = 8

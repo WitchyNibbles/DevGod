@@ -1,0 +1,7 @@
+{
+  "name": "devgod",
+  "version": "0.1.0",
+  "description": "Devgod workflow plugin with runtime-backed hooks for long-running autonomous delivery.",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json"
+}

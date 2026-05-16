@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { parse as parseToml } from "@iarna/toml";
 import {
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
@@ -112,16 +113,56 @@ test("mergeAgentsMd appends and is idempotent", () => {
 test("mergeCodexConfig preserves existing values and adds missing devgod defaults", () => {
   const merged = mergeCodexConfig(
     `model = "custom-model"\n\n[features]\npersonality = false\n`,
-    `model = "gpt-5.4"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\n\n[agents]\nmax_threads = 8\n`
+    `model = "gpt-5.4"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\nplugin_hooks = true\n\n[agents]\nmax_threads = 8\n`
   );
+  const parsed = parseToml(merged) as {
+    model?: string;
+    approval_policy?: string;
+    sandbox_mode?: string;
+    project_doc_fallback_filenames?: string[];
+    suppress_unstable_features_warning?: boolean;
+    features?: Record<string, unknown>;
+    agents?: Record<string, unknown>;
+  };
 
-  assert.match(merged, /model = "custom-model"/);
-  assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"AGENTS\.md"/);
-  assert.match(merged, /project_doc_fallback_filenames = \[[^\]]*"\.agents\.md"/);
-  assert.match(merged, /project_doc_fallback_filenames = \[\s*"\.agents\.md", "AGENTS\.md"\s*\]/);
-  assert.match(merged, /multi_agent = true/);
-  assert.match(merged, /enable_request_compression = true/);
-  assert.match(merged, /max_threads = 8/);
+  assert.equal(parsed.model, "custom-model");
+  assert.equal(parsed.approval_policy, "never");
+  assert.equal(parsed.sandbox_mode, "danger-full-access");
+  assert.deepEqual(parsed.project_doc_fallback_filenames, [".agents.md", "AGENTS.md"]);
+  assert.equal(parsed.suppress_unstable_features_warning, true);
+  assert.equal(parsed.features?.multi_agent, true);
+  assert.equal(parsed.features?.plugin_hooks, true);
+  assert.equal(parsed.features?.enable_request_compression, true);
+  assert.equal(parsed.features?.personality, false);
+  assert.equal(parsed.agents?.max_threads, 8);
+});
+
+test("mergeCodexConfig preserves explicit unstable-warning preferences", () => {
+  const merged = mergeCodexConfig(
+    'model = "custom-model"\nsuppress_unstable_features_warning = false\n',
+    `model = "gpt-5.4"\n\n[features]\nplugin_hooks = true\n`
+  );
+  const parsed = parseToml(merged) as {
+    suppress_unstable_features_warning?: boolean;
+    features?: Record<string, unknown>;
+  };
+
+  assert.equal(parsed.suppress_unstable_features_warning, false);
+  assert.equal(parsed.features?.plugin_hooks, true);
+});
+
+test("mergeCodexConfig enforces devgod full-access defaults", () => {
+  const merged = mergeCodexConfig(
+    'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
+    'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n'
+  );
+  const parsed = parseToml(merged) as {
+    approval_policy?: string;
+    sandbox_mode?: string;
+  };
+
+  assert.equal(parsed.approval_policy, "never");
+  assert.equal(parsed.sandbox_mode, "danger-full-access");
 });
 
 test("mergeCodexConfig preserves existing comments when no semantic change is needed", () => {
@@ -192,6 +233,22 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(
     merged.scripts["devgod:seed-workflow-proof"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-workflow-proof"
+  );
+  assert.equal(
+    merged.scripts["devgod:advance-active-task"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts advance-active-task --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:daemon"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts daemon --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:supervisor"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts supervisor --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:supervisor-history"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts supervisor-history --format text"
   );
   assert.equal(
     merged.scripts["devgod:loop"],
@@ -709,6 +766,8 @@ test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP con
     assert.equal(packageJson.devDependencies.gitnexus, "1.6.3");
     assert.equal(packageJson.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
     assert.equal(packageJson.scripts["devgod:gitnexus:status"], "gitnexus status");
+    assert.match(codexConfig, /approval_policy = "never"/);
+    assert.match(codexConfig, /sandbox_mode = "danger-full-access"/);
     assert.match(codexConfig, /\[mcp_servers\.gitnexus\]/);
     assert.match(codexConfig, /"--no-install"/);
     assert.match(gitignore, /\.gitnexus\//);
@@ -1442,6 +1501,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(
     targetPackageJson.scripts["devgod:resume"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts resume --format text/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:supervisor-history"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts supervisor-history --format text/
   );
   assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],
@@ -2218,6 +2281,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   for (const expectedPath of [
     ".githooks/commit-msg",
     ".githooks/pre-commit",
+    ".codex/hooks.json",
     ".devgod/rules/role-retrieval-policy.md",
     ".devgod/templates/product-state.md",
     ".devgod/templates/task-queue.json",
@@ -2228,8 +2292,19 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     "scripts/check-devgod-workflow.sh",
     "scripts/check-devgod-workflow-live.sh",
     "scripts/check-quality.sh",
+    "scripts/devgod-session-start.sh",
     "scripts/verify-devgod-workflow-check.sh",
     "scripts/verify-release-overlay.sh",
+    "plugins/devgod/.codex-plugin/plugin.json",
+    "plugins/devgod/hooks/hooks.json",
+    "plugins/devgod/scripts/hook-utils.mjs",
+    "plugins/devgod/scripts/hook-policy.mjs",
+    "plugins/devgod/scripts/pre-tool-use.mjs",
+    "plugins/devgod/scripts/permission-request.mjs",
+    "plugins/devgod/scripts/post-tool-use.mjs",
+    "plugins/devgod/scripts/session-start.mjs",
+    "plugins/devgod/scripts/stop.mjs",
+    "plugins/devgod/scripts/user-prompt-submit.mjs",
     "src/admin.ts",
     "src/devgod/autopilot-status.ts",
     "src/devgod/task-queue.ts",

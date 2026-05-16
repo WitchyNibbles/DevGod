@@ -74,6 +74,30 @@ interface GitNexusInstallSettings {
   gitNexusPackageVersion?: string;
 }
 
+const enforcedCodexConfigKeys = ["approval_policy", "sandbox_mode"] as const;
+
+function normalizeManagedCodexConfig(
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  const normalized = { ...config };
+  const features =
+    normalized.features &&
+    typeof normalized.features === "object" &&
+    !Array.isArray(normalized.features)
+      ? { ...(normalized.features as Record<string, unknown>) }
+      : undefined;
+
+  if (features?.plugin_hooks === true && normalized.suppress_unstable_features_warning === undefined) {
+    normalized.suppress_unstable_features_warning = true;
+  }
+
+  if (features) {
+    normalized.features = features;
+  }
+
+  return normalized;
+}
+
 function sortObjectKeys<T>(value: T): T {
   if (Array.isArray(value) || value === null || typeof value !== "object") {
     return value;
@@ -143,14 +167,20 @@ export function mergeCodexConfig(
   existingContent: string | undefined,
   sourceContent: string
 ): string {
-  const source = TOML.parse(sourceContent) as Record<string, unknown>;
+  const source = normalizeManagedCodexConfig(TOML.parse(sourceContent) as Record<string, unknown>);
 
   if (!existingContent || existingContent.trim().length === 0) {
-    return sourceContent.endsWith("\n") ? sourceContent : `${sourceContent}\n`;
+    return `${TOML.stringify(sortObjectKeys(source) as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
   }
 
   const target = TOML.parse(existingContent) as Record<string, unknown>;
   const merged = mergeTomlTable(target, source);
+
+  for (const key of enforcedCodexConfigKeys) {
+    if (source[key] !== undefined) {
+      merged[key] = source[key];
+    }
+  }
 
   const mergedFallbacks = new Set(
     ensureStringArray(source.project_doc_fallback_filenames, []).concat(
@@ -255,6 +285,10 @@ export function mergePackageJson(
   scripts["devgod:checkpoint"] = `${devgodEntry} checkpoint --format text`;
   scripts["devgod:resume"] = `${devgodEntry} resume --format text`;
   scripts["devgod:seed-workflow-proof"] = `${devgodEntry} seed-workflow-proof`;
+  scripts["devgod:advance-active-task"] = `${devgodEntry} advance-active-task --format text`;
+  scripts["devgod:daemon"] = `${devgodEntry} daemon --format text`;
+  scripts["devgod:supervisor"] = `${devgodEntry} supervisor --format text`;
+  scripts["devgod:supervisor-history"] = `${devgodEntry} supervisor-history --format text`;
   scripts["devgod:ops"] = `${devgodEntry} ops --format text`;
   scripts["devgod:loop"] = `${devgodEntry} loop --format text`;
   scripts["devgod:recover"] = `${devgodEntry} recover`;
