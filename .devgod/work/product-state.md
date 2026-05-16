@@ -51,7 +51,7 @@ Autonomous execution hardening
 
 ## Current Task
 
-`2026-05-15-autonomous-next-target-directives` is complete through authoritative run `5fe2a260-81d0-402c-8d13-c074dd769383`. The repo-local active marker remains on that task for workflow-contract continuity, but there is no remaining queued product slice for the current project goal.
+`2026-05-15-autonomous-next-target-directives` is complete through authoritative run `5fe2a260-81d0-402c-8d13-c074dd769383`. The repo-local active marker has been cleared because there is no remaining queued product slice for the current project goal.
 
 ## Next Task
 
