@@ -247,10 +247,15 @@ export function advanceTaskQueue(queue: TaskQueue, taskId: string): AdvanceTaskQ
     selectedNextTask === null
       ? null
       : activatedTasks.find((task) => task.id === selectedNextTask.id) ?? null;
+  const projectStatus =
+    nextTask === null && activatedTasks.every((task) => task.status === "done")
+      ? "done"
+      : baseQueue.project_status;
 
   return {
     queue: {
       ...baseQueue,
+      project_status: projectStatus,
       current_task_id: nextTask?.id ?? null,
       tasks: activatedTasks
     },

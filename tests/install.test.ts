@@ -239,6 +239,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts advance-active-task --format text"
   );
   assert.equal(
+    merged.scripts["devgod:sync-runtime-exports"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts sync-runtime-exports --format text"
+  );
+  assert.equal(
     merged.scripts["devgod:daemon"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts daemon --format text"
   );

@@ -885,11 +885,29 @@ interface ExecuteAdvanceActiveTaskCommandOptions extends ExecuteWorkflowProofCom
   saveProjectRuntimeState: (state: ProjectRuntimeStateRecord) => Promise<void>;
 }
 
+interface ExecuteSyncRuntimeExportsCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  getProjectContext: (params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+}
+
 export interface AdvanceActiveTaskCommandResult {
   mode: "dry_run" | "applied";
   taskId: string;
   nextTaskId: string | null;
   proof: WorkflowProofResult;
+  queue: TaskQueue;
+}
+
+export interface SyncRuntimeExportsCommandResult {
+  mode: "runtime_export_sync";
+  workspaceSlug: string;
+  projectSlug: string;
+  activeTaskId: string | null;
   queue: TaskQueue;
 }
 
@@ -4924,7 +4942,7 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     }
   );
 
-  await options.saveProjectRuntimeState({
+  const nextRuntimeState: ProjectRuntimeStateRecord = {
     projectId: projectContext.project.id,
     workspaceId: projectContext.workspace.id,
     activeRunId: run.id,
@@ -4935,7 +4953,9 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     metadata: projectRuntimeState?.metadata ?? {},
     createdAt: projectRuntimeState?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString()
-  });
+  };
+  await options.saveProjectRuntimeState(nextRuntimeState);
+  await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
 
   return {
     mode: "local_workflow_proof_seed",
@@ -4945,14 +4965,51 @@ export async function executeSeedWorkflowProofCommandFromArgs(
   };
 }
 
-function formatActiveWorkflowContent(taskId: string | null): string {
+function normalizeWorkflowExportState(queue: TaskQueue, taskId: string | null): "active" | "idle" | "complete" {
+  if (taskId) {
+    return "active";
+  }
+
+  const projectStatus = queue.project_status.trim().toLowerCase();
+  if (projectStatus === "complete" || projectStatus === "completed" || projectStatus === "done") {
+    return "complete";
+  }
+
+  return "idle";
+}
+
+function formatActiveWorkflowContent(taskId: string | null, queue: TaskQueue): string {
   const lines = [];
   if (taskId) {
     lines.push(`task_id=${taskId}`);
   }
   lines.push("workflow=devgod");
-  lines.push(`state=${taskId ? "active" : "idle"}`);
+  lines.push(`state=${normalizeWorkflowExportState(queue, taskId)}`);
   return `${lines.join("\n")}\n`;
+}
+
+async function syncRuntimeWorkflowExports(
+  cwd: string | undefined,
+  runtimeState: {
+    activeTaskId?: string | null | undefined;
+    taskQueue: ProjectRuntimeStateRecord["taskQueue"];
+  }
+): Promise<void> {
+  if (!cwd) {
+    return;
+  }
+
+  const queue = parseTaskQueueRecord(runtimeState.taskQueue);
+  const activeTaskId =
+    runtimeState.activeTaskId && runtimeState.activeTaskId.trim().length > 0
+      ? runtimeState.activeTaskId.trim()
+      : queue.current_task_id;
+  const devgodRoot = path.join(path.resolve(cwd), ".devgod");
+  const workRoot = path.join(devgodRoot, "work");
+
+  await mkdir(workRoot, { recursive: true });
+  await writeFile(path.join(workRoot, "task-queue.json"), `${JSON.stringify(queue, null, 2)}\n`, "utf8");
+  await writeFile(path.join(devgodRoot, "ACTIVE"), formatActiveWorkflowContent(activeTaskId ?? null, queue), "utf8");
 }
 
 function formatAdvanceActiveTaskCommandResult(result: AdvanceActiveTaskCommandResult): string {
@@ -4963,6 +5020,57 @@ function formatAdvanceActiveTaskCommandResult(result: AdvanceActiveTaskCommandRe
     `next-task: ${result.nextTaskId ?? "none"}`,
     `queue-current-task: ${result.queue.current_task_id ?? "none"}`
   ].join("\n");
+}
+
+function formatSyncRuntimeExportsCommandResult(result: SyncRuntimeExportsCommandResult): string {
+  return [
+    `mode: ${result.mode}`,
+    `workspace: ${result.workspaceSlug}`,
+    `project: ${result.projectSlug}`,
+    `active-task: ${result.activeTaskId ?? "none"}`,
+    `queue-current-task: ${result.queue.current_task_id ?? "none"}`,
+    `project-status: ${result.queue.project_status}`
+  ].join("\n");
+}
+
+export async function executeSyncRuntimeExportsCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteSyncRuntimeExportsCommandOptions
+): Promise<{ format: "json" | "text"; result: SyncRuntimeExportsCommandResult }> {
+  const env = options.env ?? process.env;
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("sync-runtime-exports requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags");
+  }
+
+  const projectContext = await options.getProjectContext({
+    workspaceSlug,
+    projectSlug
+  });
+  if (!projectContext) {
+    throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
+  }
+
+  const runtimeState = await options.getProjectRuntimeState(projectContext.project.id);
+  const queue = parseTaskQueueRecord(runtimeState?.taskQueue);
+  const activeTaskId = runtimeState?.activeTaskId ?? null;
+  await syncRuntimeWorkflowExports(options.cwd, {
+    activeTaskId,
+    taskQueue: queue
+  });
+
+  return {
+    format: resolveFormatFlag(args),
+    result: {
+      mode: "runtime_export_sync",
+      workspaceSlug,
+      projectSlug,
+      activeTaskId,
+      queue
+    }
+  };
 }
 
 export async function executeAdvanceActiveTaskCommandFromArgs(
@@ -5024,7 +5132,7 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
     };
   }
 
-  await options.saveProjectRuntimeState({
+  const nextRuntimeState: ProjectRuntimeStateRecord = {
     projectId: projectContext.project.id,
     workspaceId: projectContext.workspace.id,
     activeRunId: proof.runId,
@@ -5035,7 +5143,9 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
     metadata: projectRuntimeState?.metadata ?? {},
     createdAt: projectRuntimeState?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString()
-  });
+  };
+  await options.saveProjectRuntimeState(nextRuntimeState);
+  await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
 
   return {
     format,
@@ -6797,6 +6907,29 @@ async function advanceActiveTaskCommand(args: readonly string[]) {
   });
 }
 
+async function syncRuntimeExportsCommand(args: readonly string[]) {
+  await withClient(async (client) => {
+    const store = new PostgresStore(client);
+    const { format, result } = await executeSyncRuntimeExportsCommandFromArgs(args, {
+      cwd: process.cwd(),
+      env: process.env,
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      }
+    });
+
+    if (format === "text") {
+      process.stdout.write(`${formatSyncRuntimeExportsCommandResult(result)}\n`);
+      return;
+    }
+
+    console.log(JSON.stringify(result));
+  });
+}
+
 async function daemonCommand(args: readonly string[]) {
   await withClient(async (client) => {
     const store = new PostgresStore(client);
@@ -7565,6 +7698,11 @@ async function main() {
 
   if (command === "advance-active-task") {
     await advanceActiveTaskCommand(args);
+    return;
+  }
+
+  if (command === "sync-runtime-exports") {
+    await syncRuntimeExportsCommand(args);
     return;
   }
 

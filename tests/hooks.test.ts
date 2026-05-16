@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // @ts-expect-error internal hook policy module is a runtime .mjs helper without TypeScript declarations
 import { evaluatePreToolUse, evaluateStop } from "../plugins/devgod/scripts/hook-policy.mjs";
+// @ts-expect-error internal hook utility module is a runtime .mjs helper without TypeScript declarations
+import { readActiveTaskContext } from "../plugins/devgod/scripts/hook-utils.mjs";
 
 test("pre-tool-use hook denies apply_patch edits outside the active task scope", () => {
   const parsed = evaluatePreToolUse(
@@ -41,4 +46,91 @@ test("stop hook continues when an active devgod task remains and no real blocker
   assert.ok(parsed);
   assert.equal(parsed.decision, "block");
   assert.match(parsed.reason, /active devgod task task-hook-2 remains in progress/i);
+});
+
+test("hook context prefers queue state over stale ACTIVE export when the queue is complete", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-context-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=packet-rw-008-geospatial-dueon-sgp\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "complete",
+          current_task_id: null,
+          tasks: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+    const parsed = evaluateStop(
+      {
+        last_assistant_message: "Implemented the fix and tests."
+      },
+      context
+    );
+
+    assert.equal(context.activeTaskId, undefined);
+    assert.equal(context.queueCurrentTaskId, null);
+    assert.equal(parsed, undefined);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("hook context loads write scope from the queue-selected task instead of stale ACTIVE", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-scope-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-authoritative",
+          tasks: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-authoritative.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`",
+        "- `tests`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-authoritative");
+    assert.equal(context.queueCurrentTaskId, "task-authoritative");
+    assert.deepEqual(context.allowedWriteScope, ["src/runtime", "tests"]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
 });

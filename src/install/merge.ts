@@ -286,6 +286,7 @@ export function mergePackageJson(
   scripts["devgod:resume"] = `${devgodEntry} resume --format text`;
   scripts["devgod:seed-workflow-proof"] = `${devgodEntry} seed-workflow-proof`;
   scripts["devgod:advance-active-task"] = `${devgodEntry} advance-active-task --format text`;
+  scripts["devgod:sync-runtime-exports"] = `${devgodEntry} sync-runtime-exports --format text`;
   scripts["devgod:daemon"] = `${devgodEntry} daemon --format text`;
   scripts["devgod:supervisor"] = `${devgodEntry} supervisor --format text`;
   scripts["devgod:supervisor-history"] = `${devgodEntry} supervisor-history --format text`;

@@ -17,6 +17,7 @@ import {
   executeRecordReviewCommandFromArgs,
   executeResumeCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
+  executeSyncRuntimeExportsCommandFromArgs,
   executeSupervisorCommandFromArgs,
   executeSupervisorHistoryCommandFromArgs,
   executeVerifyReviewIdentityCommand,
@@ -507,6 +508,7 @@ test("executeAdvanceActiveTaskCommandFromArgs previews and applies runtime-gated
   });
   const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
   assert.ok(projectContext);
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-advance-export-"));
   await store.saveProjectRuntimeState({
     projectId: projectContext.project.id,
     workspaceId: projectContext.workspace.id,
@@ -547,74 +549,89 @@ test("executeAdvanceActiveTaskCommandFromArgs previews and applies runtime-gated
     updatedAt: new Date().toISOString()
   });
 
-  const preview = await executeAdvanceActiveTaskCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod", "--run-id", runId], {
-      env: process.env,
-      getProjectContext(params) {
-        return store.getProjectContext(params);
-      },
-      getProjectRuntimeState(projectId) {
-        return store.getProjectRuntimeState(projectId);
-      },
-      saveProjectRuntimeState(state) {
-        return store.saveProjectRuntimeState(state);
-      },
-      getStatusSnapshot(candidateRunId) {
-        return service.getStatus(candidateRunId);
-      },
-      getReviews(candidateRunId, taskId) {
-        return store.getReviews(candidateRunId, taskId);
-      },
-      getApprovals(candidateRunId, taskId) {
-        return store.getApprovals(candidateRunId, taskId);
+  try {
+    const preview = await executeAdvanceActiveTaskCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod", "--run-id", runId], {
+        cwd: exportCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      });
+
+    assert.equal(preview.format, "json");
+    assert.equal(preview.result.mode, "dry_run");
+    assert.equal(preview.result.taskId, "task-001");
+    assert.equal(preview.result.nextTaskId, "task-002");
+
+    const previewState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal((previewState?.taskQueue as { current_task_id?: string }).current_task_id, "task-001");
+
+    const applied = await executeAdvanceActiveTaskCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--run-id", runId, "--apply"],
+      {
+        cwd: exportCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
       }
-    });
+    );
 
-  assert.equal(preview.format, "json");
-  assert.equal(preview.result.mode, "dry_run");
-  assert.equal(preview.result.taskId, "task-001");
-  assert.equal(preview.result.nextTaskId, "task-002");
+    assert.equal(applied.format, "json");
+    assert.equal(applied.result.mode, "applied");
+    assert.equal(applied.result.taskId, "task-001");
+    assert.equal(applied.result.nextTaskId, "task-002");
 
-  const previewState = await store.getProjectRuntimeState(projectContext.project.id);
-  assert.equal((previewState?.taskQueue as { current_task_id?: string }).current_task_id, "task-001");
+    const appliedState = await store.getProjectRuntimeState(projectContext.project.id);
+    const appliedQueue = appliedState?.taskQueue as
+      | { current_task_id?: string | null; tasks?: Array<{ id: string; status: string }> }
+      | undefined;
+    assert.equal(appliedState?.activeTaskId, "task-002");
+    assert.equal(appliedQueue?.current_task_id, "task-002");
+    assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-001")?.status, "done");
+    assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-002")?.status, "in_progress");
 
-  const applied = await executeAdvanceActiveTaskCommandFromArgs(
-    ["--workspace-slug", "team", "--project-slug", "devgod", "--run-id", runId, "--apply"],
-    {
-      env: process.env,
-      getProjectContext(params) {
-        return store.getProjectContext(params);
-      },
-      getProjectRuntimeState(projectId) {
-        return store.getProjectRuntimeState(projectId);
-      },
-      saveProjectRuntimeState(state) {
-        return store.saveProjectRuntimeState(state);
-      },
-      getStatusSnapshot(candidateRunId) {
-        return service.getStatus(candidateRunId);
-      },
-      getReviews(candidateRunId, taskId) {
-        return store.getReviews(candidateRunId, taskId);
-      },
-      getApprovals(candidateRunId, taskId) {
-        return store.getApprovals(candidateRunId, taskId);
-      }
-    }
-  );
-
-  assert.equal(applied.format, "json");
-  assert.equal(applied.result.mode, "applied");
-  assert.equal(applied.result.taskId, "task-001");
-  assert.equal(applied.result.nextTaskId, "task-002");
-
-  const appliedState = await store.getProjectRuntimeState(projectContext.project.id);
-  const appliedQueue = appliedState?.taskQueue as
-    | { current_task_id?: string | null; tasks?: Array<{ id: string; status: string }> }
-    | undefined;
-  assert.equal(appliedState?.activeTaskId, "task-002");
-  assert.equal(appliedQueue?.current_task_id, "task-002");
-  assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-001")?.status, "done");
-  assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-002")?.status, "in_progress");
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    const exportedQueue = JSON.parse(
+      await readFile(path.join(exportCwd, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { current_task_id?: string | null; tasks?: Array<{ id: string; status: string }> };
+    assert.equal(exportedActive, "task_id=task-002\nworkflow=devgod\nstate=active\n");
+    assert.equal(exportedQueue.current_task_id, "task-002");
+    assert.equal(exportedQueue.tasks?.find((task) => task.id === "task-001")?.status, "done");
+    assert.equal(exportedQueue.tasks?.find((task) => task.id === "task-002")?.status, "in_progress");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
 });
 
 test("executeAdvanceActiveTaskCommandFromArgs refuses queue mutation when runtime proof is missing", async () => {
@@ -734,6 +751,7 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     workspaceSlug: "team",
     projectSlug: "devgod"
   });
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-seed-export-"));
   await store.saveProjectRuntimeState({
     projectId: projectContext.project.id,
     workspaceId: projectContext.workspace.id,
@@ -751,65 +769,78 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     updatedAt: new Date().toISOString()
   });
 
-  const result = await executeSeedWorkflowProofCommandFromArgs(
-      ["--workspace-slug", "team", "--project-slug", "devgod"],
-      {
-        getProjectContext(params) {
-          return store.getProjectContext(params);
-        },
-        getProjectRuntimeState(projectId) {
-          return store.getProjectRuntimeState(projectId);
-        },
-        saveProjectRuntimeState(state) {
-          return store.saveProjectRuntimeState(state);
-        },
-        intakeRequest(input) {
-          return service.intakeRequest(input);
-        },
-        createTaskGraph(runId, taskPackets) {
-          return service.createTaskGraph(runId, taskPackets);
-        },
-        claimTask(runId, taskId, actor) {
-          return service.claimTask(runId, taskId, actor);
-        },
-        submitHandoff(runId, taskId, handoff) {
-          return service.submitHandoff(runId, taskId, handoff);
-        },
-        recordReview(runId, taskId, actor, review) {
-          return service.recordReview(runId, taskId, actor, review);
-        },
-        getStatusSnapshot(runId) {
-          return service.getStatus(runId);
-        },
-        getReviews(runId, taskId) {
-          return store.getReviews(runId, taskId);
-        },
-        getApprovals(runId, taskId) {
-          return store.getApprovals(runId, taskId);
+  try {
+    const result = await executeSeedWorkflowProofCommandFromArgs(
+        ["--workspace-slug", "team", "--project-slug", "devgod"],
+        {
+          cwd: exportCwd,
+          getProjectContext(params) {
+            return store.getProjectContext(params);
+          },
+          getProjectRuntimeState(projectId) {
+            return store.getProjectRuntimeState(projectId);
+          },
+          saveProjectRuntimeState(state) {
+            return store.saveProjectRuntimeState(state);
+          },
+          intakeRequest(input) {
+            return service.intakeRequest(input);
+          },
+          createTaskGraph(runId, taskPackets) {
+            return service.createTaskGraph(runId, taskPackets);
+          },
+          claimTask(runId, taskId, actor) {
+            return service.claimTask(runId, taskId, actor);
+          },
+          submitHandoff(runId, taskId, handoff) {
+            return service.submitHandoff(runId, taskId, handoff);
+          },
+          recordReview(runId, taskId, actor, review) {
+            return service.recordReview(runId, taskId, actor, review);
+          },
+          getStatusSnapshot(runId) {
+            return service.getStatus(runId);
+          },
+          getReviews(runId, taskId) {
+            return store.getReviews(runId, taskId);
+          },
+          getApprovals(runId, taskId) {
+            return store.getApprovals(runId, taskId);
+          }
         }
-      }
-    );
+      );
 
-  assert.equal(result.mode, "local_workflow_proof_seed");
-  assert.equal(result.workspaceSlug, "team");
-  assert.equal(result.projectSlug, "devgod");
-  assert.equal(result.taskId, "active-proof-task");
-  assert.equal(result.taskStatus, "approved");
-  assert.equal(result.reviewDecision, "approved");
-  assert.equal(result.latestApproval.decision, "approved");
-  assert.equal(result.latestApproval.identityAssurance, "authenticated");
+    assert.equal(result.mode, "local_workflow_proof_seed");
+    assert.equal(result.workspaceSlug, "team");
+    assert.equal(result.projectSlug, "devgod");
+    assert.equal(result.taskId, "active-proof-task");
+    assert.equal(result.taskStatus, "approved");
+    assert.equal(result.reviewDecision, "approved");
+    assert.equal(result.latestApproval.decision, "approved");
+    assert.equal(result.latestApproval.identityAssurance, "authenticated");
 
-  const latestRun = await store.findLatestRun({ workspaceSlug: "team", projectSlug: "devgod" });
-  assert.equal(latestRun?.id, result.runId);
-  const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
-  assert.equal(runtimeState?.activeTaskId, "active-proof-task");
-  assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
-  const queue = runtimeState?.taskQueue as
-    | { current_task_id?: string | null; project_status?: string; tasks?: Array<{ id: string; status: string }> }
-    | undefined;
-  assert.equal(queue?.project_status, "in_progress");
-  assert.equal(queue?.current_task_id, "active-proof-task");
-  assert.equal(queue?.tasks?.find((task) => task.id === "active-proof-task")?.status, "in_progress");
+    const latestRun = await store.findLatestRun({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.equal(latestRun?.id, result.runId);
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "active-proof-task");
+    assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
+    const queue = runtimeState?.taskQueue as
+      | { current_task_id?: string | null; project_status?: string; tasks?: Array<{ id: string; status: string }> }
+      | undefined;
+    assert.equal(queue?.project_status, "in_progress");
+    assert.equal(queue?.current_task_id, "active-proof-task");
+    assert.equal(queue?.tasks?.find((task) => task.id === "active-proof-task")?.status, "in_progress");
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    const exportedQueue = JSON.parse(
+      await readFile(path.join(exportCwd, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { current_task_id?: string | null; project_status?: string };
+    assert.equal(exportedActive, "task_id=active-proof-task\nworkflow=devgod\nstate=active\n");
+    assert.equal(exportedQueue.project_status, "in_progress");
+    assert.equal(exportedQueue.current_task_id, "active-proof-task");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
 });
 
 test("executeSeedWorkflowProofCommandFromArgs requires a task id when no active workflow exists", async () => {
@@ -869,6 +900,94 @@ test("executeSeedWorkflowProofCommandFromArgs requires a task id when no active 
       }),
       /requires --task-id or an active runtime task/
     );
+});
+
+test("executeSyncRuntimeExportsCommandFromArgs rewrites stale local workflow exports from runtime state", async () => {
+  const store = new MemoryStore();
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: "run-123",
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "complete",
+      current_task_id: null,
+      tasks: [
+        {
+          id: "task-finished",
+          title: "Finished task",
+          status: "done",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "complete", items: [] },
+    lastVerifiedRunId: "run-123",
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-sync-export-"));
+  try {
+    await mkdir(path.join(exportCwd, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(exportCwd, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(exportCwd, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-stale",
+          tasks: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+
+    const synced = await executeSyncRuntimeExportsCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod"],
+      {
+        cwd: exportCwd,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        }
+      }
+    );
+
+    assert.equal(synced.format, "json");
+    assert.equal(synced.result.mode, "runtime_export_sync");
+    assert.equal(synced.result.activeTaskId, null);
+    assert.equal(synced.result.queue.project_status, "complete");
+    assert.equal(synced.result.queue.current_task_id, null);
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    const exportedQueue = JSON.parse(
+      await readFile(path.join(exportCwd, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { current_task_id?: string | null; project_status?: string };
+    assert.equal(exportedActive, "workflow=devgod\nstate=complete\n");
+    assert.equal(exportedQueue.project_status, "complete");
+    assert.equal(exportedQueue.current_task_id, null);
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
 });
 
 test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the latest run containing the task", async () => {
@@ -1713,6 +1832,13 @@ test("executeDaemonCommandFromArgs advances the final approved task to completio
     const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
     assert.equal(runtimeState?.activeTaskId, undefined);
     assert.equal(runtimeState?.taskQueue.current_task_id, null);
+    const exportedActive = await readFile(path.join(daemonCwd, ".devgod", "ACTIVE"), "utf8");
+    const exportedQueue = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { current_task_id?: string | null; project_status?: string };
+    assert.equal(exportedActive, "workflow=devgod\nstate=complete\n");
+    assert.equal(exportedQueue.current_task_id, null);
+    assert.equal(exportedQueue.project_status, "done");
   } finally {
     await rm(daemonCwd, { recursive: true, force: true });
   }

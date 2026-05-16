@@ -64,15 +64,22 @@ async function readTextIfExists(filePath) {
   }
 }
 
-export async function readActiveTaskContext() {
-  const activePath = path.join(repoRoot, ".devgod", "ACTIVE");
+export async function readActiveTaskContext(options = {}) {
+  const resolvedRepoRoot =
+    options && typeof options.repoRoot === "string" && options.repoRoot.trim().length > 0
+      ? path.resolve(options.repoRoot)
+      : repoRoot;
+  const activePath = path.join(resolvedRepoRoot, ".devgod", "ACTIVE");
   const activeContent = await readTextIfExists(activePath);
   const context = {
-    repoRoot,
+    repoRoot: resolvedRepoRoot,
     activeTaskId: undefined,
     allowedWriteScope: [],
     queueCurrentTaskId: undefined
   };
+  let activeFileTaskId;
+  let activeFileState;
+  let queueHasAuthoritativePointer = false;
 
   if (activeContent) {
     for (const rawLine of activeContent.split(/\r?\n/)) {
@@ -80,23 +87,48 @@ export async function readActiveTaskContext() {
       if (line.startsWith("task_id=")) {
         const taskId = line.slice("task_id=".length).trim();
         if (taskId) {
-          context.activeTaskId = taskId;
+          activeFileTaskId = taskId;
+        }
+      }
+      if (line.startsWith("state=")) {
+        const state = line.slice("state=".length).trim();
+        if (state) {
+          activeFileState = state;
         }
       }
     }
   }
 
-  const queueContent = await readTextIfExists(path.join(repoRoot, ".devgod", "work", "task-queue.json"));
+  const queueContent = await readTextIfExists(
+    path.join(resolvedRepoRoot, ".devgod", "work", "task-queue.json")
+  );
   if (queueContent) {
     try {
       const parsed = JSON.parse(queueContent);
-      const currentTaskId = parsed?.current_task_id;
-      if (typeof currentTaskId === "string" && currentTaskId.trim().length > 0) {
-        context.queueCurrentTaskId = currentTaskId.trim();
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        Object.prototype.hasOwnProperty.call(parsed, "current_task_id")
+      ) {
+        queueHasAuthoritativePointer = true;
+        const currentTaskId = parsed.current_task_id;
+        if (typeof currentTaskId === "string" && currentTaskId.trim().length > 0) {
+          context.queueCurrentTaskId = currentTaskId.trim();
+        } else if (currentTaskId === null) {
+          context.queueCurrentTaskId = null;
+        }
       }
     } catch {
       // ignore invalid queue exports inside hook context
     }
+  }
+
+  if (queueHasAuthoritativePointer) {
+    context.activeTaskId =
+      typeof context.queueCurrentTaskId === "string" ? context.queueCurrentTaskId : undefined;
+  } else if (activeFileTaskId && activeFileState !== "complete" && activeFileState !== "done") {
+    context.activeTaskId = activeFileTaskId;
   }
 
   if (!context.activeTaskId) {
@@ -104,7 +136,7 @@ export async function readActiveTaskContext() {
   }
 
   const taskMarkdown = await readTextIfExists(
-    path.join(repoRoot, ".devgod", "work", "tasks", `task-${context.activeTaskId}.md`)
+    path.join(resolvedRepoRoot, ".devgod", "work", "tasks", `task-${context.activeTaskId}.md`)
   );
   if (!taskMarkdown) {
     return context;
