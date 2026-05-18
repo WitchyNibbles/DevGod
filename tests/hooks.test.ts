@@ -82,6 +82,30 @@ test("stop hook allows explicit task-state blockers to end the loop", () => {
   assert.equal(parsed, undefined);
 });
 
+test("stop hook allows explicit completion summaries when only external runtime closure remains", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: [
+        "No blocker remains. The scoped task is complete.",
+        "",
+        "There is nothing left to execute within the active task scope.",
+        "The remaining step is external workflow/runtime closure for this completed task."
+      ].join("\n")
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-4b",
+      allowedWriteScope: [
+        "/home/gii/apps/lexer/GII2/lexia/core/senders/jump_api.py",
+        "/home/gii/apps/lexer/GII2/lexia/tests/test_jump_api.py"
+      ],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
 test("stop hook still blocks vague blocker summaries without a concrete devgod cause", () => {
   const parsed = evaluateStop(
     {
@@ -90,6 +114,24 @@ test("stop hook still blocks vague blocker summaries without a concrete devgod c
     {
       repoRoot: "/tmp/devgod-hook-test",
       activeTaskId: "task-hook-5",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /state the real blocker explicitly/i);
+});
+
+test("stop hook still blocks completion summaries without an external closure cause", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "The scoped task is complete and I'm stopping here."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-5b",
       allowedWriteScope: ["src/core"],
       queueCurrentTaskId: undefined
     }

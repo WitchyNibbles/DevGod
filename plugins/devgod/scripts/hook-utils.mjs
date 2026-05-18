@@ -59,6 +59,18 @@ const explicitDevgodBlockerCausePatterns = [
   /\bwrite scope locked\b/i,
   /\bout of scope\b/i
 ];
+const completionMessagePatterns = [
+  /\bno blocker remains\b/i,
+  /\bscoped task is complete\b/i,
+  /\bnothing left to execute within the active task scope\b/i,
+  /\bnothing left to execute within the task scope\b/i
+];
+const externalClosureCausePatterns = [
+  /\bexternal workflow\/runtime closure\b/i,
+  /\bexternal runtime\/workflow closure\b/i,
+  /\bexternal workflow closure\b/i,
+  /\bexternal runtime closure\b/i
+];
 
 export async function readHookPayload() {
   let content = "";
@@ -415,6 +427,16 @@ export function shouldHoldStop(lastAssistantMessage) {
   }
 
   if (blockerMessagePatterns.some((pattern) => pattern.test(lastAssistantMessage))) {
+    return false;
+  }
+
+  const hasExplicitCompletionMessage = completionMessagePatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+  const hasExternalClosureCause = externalClosureCausePatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+  if (hasExplicitCompletionMessage && hasExternalClosureCause) {
     return false;
   }
 
