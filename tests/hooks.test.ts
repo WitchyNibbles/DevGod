@@ -228,3 +228,35 @@ test("hook context loads write scope from the queue-selected task instead of sta
     await rm(repoRoot, { recursive: true, force: true });
   }
 });
+
+test("hook context splits combined allowed write scope bullets into individual entries", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-scope-combined-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-combined\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-combined.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`, `tests`, and `src/admin.ts`.",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-combined");
+    assert.deepEqual(context.allowedWriteScope, ["src/runtime", "tests", "src/admin.ts"]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});

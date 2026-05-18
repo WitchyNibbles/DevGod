@@ -295,7 +295,7 @@ export async function readActiveTaskContext(options = {}) {
     return context;
   }
 
-  context.allowedWriteScope = parseMarkdownListSection(taskMarkdown, "## Allowed write scope");
+  context.allowedWriteScope = parseAllowedWriteScopeSection(taskMarkdown);
   return context;
 }
 
@@ -327,6 +327,15 @@ function parseMarkdownListSection(markdown, heading) {
   }
 
   return values;
+}
+
+function parseAllowedWriteScopeSection(markdown) {
+  return parseMarkdownListSection(markdown, "## Allowed write scope").flatMap((value) =>
+    value
+      .split(/\s*,\s*|\s*;\s*|\s+\band\b\s+/i)
+      .map((entry) => entry.trim().replace(/^and\s+/i, "").replace(/[.:;]+$/g, ""))
+      .filter(Boolean)
+  );
 }
 
 function normalizePath(value) {

@@ -377,6 +377,25 @@ test("check-devgod-workflow rejects task ids with path separators or spaces", as
   );
 });
 
+test("check-devgod-workflow accepts a complete ACTIVE export when an explicit task id is provided", async () => {
+  const taskId = "DG-COMPLETE-EXPORT";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-complete-export-");
+
+  try {
+    await writeLiveTaskPacket(targetRoot, taskId);
+    await writeWorkflowReview(targetRoot, taskId, "reviewer");
+    await writeWorkflowReview(targetRoot, taskId, "qa_engineer");
+    await writeWorkflowReview(targetRoot, taskId, "security_reviewer");
+    await writeFile(join(targetRoot, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+
+    await execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot, "--task-id", taskId], {
+      cwd: repoRoot
+    });
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-workflow-live accepts CRLF active files", async () => {
   const targetRoot = await mkdtemp(join(tmpdir(), "devgod-crlf-workflow-"));
   const taskId = "DG-CRLF";

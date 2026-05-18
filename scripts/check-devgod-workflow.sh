@@ -278,19 +278,54 @@ fi
 
 mapfile -t active_lines < "$active_file"
 active_lines=("${active_lines[@]%$'\r'}")
-[[ "${#active_lines[@]}" -eq 3 ]] || fail "unexpected .devgod/ACTIVE content"
+declare -A active_fields=()
+for line in "${active_lines[@]}"; do
+  [[ -n "$line" ]] || continue
+  [[ "$line" == *=* ]] || fail "unexpected .devgod/ACTIVE content"
+  key="${line%%=*}"
+  value="${line#*=}"
+  case "$key" in
+    task_id|workflow|state)
+      ;;
+    *)
+      fail "unexpected key ${key} in .devgod/ACTIVE"
+      ;;
+  esac
+  [[ -z "${active_fields[$key]+x}" ]] || fail "duplicate ${key} in .devgod/ACTIVE"
+  active_fields["$key"]="$value"
+done
 
-[[ "${active_lines[0]}" == task_id=* ]] || fail "missing task_id in .devgod/ACTIVE"
-[[ "${active_lines[1]}" == "workflow=devgod" ]] || fail "workflow must be devgod in .devgod/ACTIVE"
-[[ "${active_lines[2]}" == "state=active" ]] || fail "state must be active in .devgod/ACTIVE"
+[[ "${active_fields[workflow]-}" == "devgod" ]] || fail "workflow must be devgod in .devgod/ACTIVE"
 
-task_id="${active_lines[0]#task_id=}"
-task_id="${task_id%$'\r'}"
-[[ -n "$task_id" ]] || fail "task_id must not be empty in .devgod/ACTIVE"
-validate_task_id "$task_id"
+active_state="${active_fields[state]-}"
+[[ -n "$active_state" ]] || fail "missing state in .devgod/ACTIVE"
+case "$active_state" in
+  active|idle|complete)
+    ;;
+  *)
+    fail "state must be active, idle, or complete in .devgod/ACTIVE"
+    ;;
+esac
 
-if [[ -n "$requested_task_id" && "$requested_task_id" != "$task_id" ]]; then
-  fail "requested task id ${requested_task_id} does not match active task ${task_id}"
+exported_task_id="${active_fields[task_id]-}"
+if [[ -n "$exported_task_id" ]]; then
+  validate_task_id "$exported_task_id"
+fi
+
+if [[ "$active_state" == "active" ]]; then
+  [[ -n "$exported_task_id" ]] || fail "missing task_id in .devgod/ACTIVE"
+  task_id="$exported_task_id"
+  if [[ -n "$requested_task_id" && "$requested_task_id" != "$task_id" ]]; then
+    fail "requested task id ${requested_task_id} does not match active task ${task_id}"
+  fi
+else
+  if [[ -n "$requested_task_id" ]]; then
+    task_id="$requested_task_id"
+  elif [[ -n "$exported_task_id" ]]; then
+    task_id="$exported_task_id"
+  else
+    fail "non-active .devgod/ACTIVE requires --task-id"
+  fi
 fi
 
 require_contract_equals "workflow" "devgod" "$agents_file"
