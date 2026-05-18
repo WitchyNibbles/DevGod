@@ -2994,6 +2994,27 @@ test("executeSupervisorCommandFromArgs synthesizes trusted review actions and re
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-review-queue-"));
   try {
+    await mkdir(path.join(daemonCwd, ".devgod"), { recursive: true });
+    await writeFile(
+      path.join(daemonCwd, ".devgod", "review-identity-bindings.json"),
+      `${JSON.stringify(
+        {
+          bindings: [
+            {
+              principal: { provider: "github", subject: "security-user" },
+              actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+            },
+            {
+              principal: { provider: "github", subject: "qa-user" },
+              actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
     const executedRoles: string[] = [];
     const result = await executeSupervisorCommandFromArgs(
       [
@@ -3014,7 +3035,10 @@ test("executeSupervisorCommandFromArgs synthesizes trusted review actions and re
       ],
       {
         cwd: daemonCwd,
-        env: process.env,
+        env: {
+          ...process.env,
+          DEVGOD_REVIEW_IDENTITY_BINDINGS: ".devgod/review-identity-bindings.json"
+        },
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -3096,6 +3120,195 @@ test("executeSupervisorCommandFromArgs synthesizes trusted review actions and re
     );
     assert.match(processedSecurity, /security-actor/);
     assert.match(processedQa, /qa-actor/);
+    assert.match(processedSecurity, /"authContext"/);
+    assert.match(processedSecurity, /"provider": "github"/);
+    assert.match(processedSecurity, /"subject": "security-user"/);
+    assert.match(processedQa, /"authContext"/);
+    assert.match(processedQa, /"subject": "qa-user"/);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs omits authContext for placeholder review bindings", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Supervisor placeholder review bindings",
+    request: "Supervisor should not synthesize verified authContext from placeholder review bindings."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["review pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "plan",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-placeholder-bindings-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  try {
+    await mkdir(path.join(daemonCwd, ".devgod"), { recursive: true });
+    await writeFile(
+      path.join(daemonCwd, ".devgod", "review-identity-bindings.json"),
+      await readFile(path.join(sourceRoot, ".devgod", "templates", "review-identity-bindings.json"), "utf8"),
+      "utf8"
+    );
+
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "2",
+        "--format",
+        "json",
+        "--review-actor",
+        "security_reviewer=security-actor",
+        "--review-actor",
+        "qa_engineer=qa-actor"
+      ],
+      {
+        cwd: daemonCwd,
+        env: {
+          ...process.env,
+          DEVGOD_REVIEW_IDENTITY_BINDINGS: ".devgod/review-identity-bindings.json"
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            ...input,
+            async executeReviewRecommendation({ directive }) {
+              const command = input.reviewCommands.find((candidate) =>
+                directive.recommendations.some(
+                  (recommendation) =>
+                    recommendation.taskId === candidate.taskId &&
+                    recommendation.targetReviewRole === candidate.review.reviewerRole
+                )
+              );
+              assert.ok(command, "expected a matching supervisor-generated review command");
+              await service.recordReview(candidateRunId, command.taskId, command.actor, command.review);
+              return {
+                executed: true,
+                taskId: command.taskId,
+                actor: command.actor,
+                reviewRole: command.review.reviewerRole,
+                evidence: [`recorded ${command.review.reviewerRole} for ${command.taskId}`]
+              };
+            }
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    const processedReviewDir = path.join(daemonCwd, ".devgod", "work", "daemon", "processed-review-actions");
+    const processedFiles = await readdir(processedReviewDir);
+    assert.equal(processedFiles.length, 2);
+    for (const file of processedFiles) {
+      const content = await readFile(path.join(processedReviewDir, file), "utf8");
+      assert.doesNotMatch(content, /"authContext"/);
+    }
   } finally {
     await rm(daemonCwd, { recursive: true, force: true });
   }

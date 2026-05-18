@@ -5476,6 +5476,57 @@ function parseExpectedReviewTarget(target: string): {
   };
 }
 
+async function resolveSupervisorReviewAuthContext(input: {
+  cwd: string;
+  env: EnvShape;
+  actor: string;
+}): Promise<{ provider: string; subject: string; verified: true } | undefined> {
+  let bindingsPath: string;
+  try {
+    bindingsPath = await resolveRequiredReviewIdentityFilePath({
+      envVarName: "DEVGOD_REVIEW_IDENTITY_BINDINGS",
+      envVarValue: input.env.DEVGOD_REVIEW_IDENTITY_BINDINGS,
+      liveRelativePath: ".devgod/review-identity-bindings.json",
+      cwd: input.cwd
+    });
+  } catch {
+    return undefined;
+  }
+
+  if (isRepoTemplateReviewIdentityPath(bindingsPath)) {
+    return undefined;
+  }
+
+  if (await bindingsUsePlaceholderContent(bindingsPath)) {
+    return undefined;
+  }
+
+  const bindings = await loadReviewIdentityBindings(bindingsPath);
+  const matches = bindings.bindings
+    .filter((binding) => binding.actors.some((actorBinding) => actorBinding.actor === input.actor))
+    .map((binding) => ({
+      provider: binding.principal.provider,
+      subject: binding.principal.subject
+    }))
+    .filter(
+      (binding, index, all) =>
+        all.findIndex(
+          (candidate) =>
+            candidate.provider === binding.provider && candidate.subject === binding.subject
+        ) === index
+    );
+
+  if (matches.length !== 1) {
+    return undefined;
+  }
+
+  return {
+    provider: matches[0]!.provider,
+    subject: matches[0]!.subject,
+    verified: true
+  };
+}
+
 async function writeSupervisorReviewAction(input: {
   cwd: string;
   reviewInputDir: string;
@@ -5483,6 +5534,7 @@ async function writeSupervisorReviewAction(input: {
   taskId: string;
   reviewRole: ReviewRecord["reviewerRole"];
   actor: string;
+  authContext?: { provider: string; subject: string; verified: true } | undefined;
   cycle: number;
   nowValue: string;
 }): Promise<string> {
@@ -5505,6 +5557,7 @@ async function writeSupervisorReviewAction(input: {
           severity: "low",
           findings: []
         },
+        ...(input.authContext ? { authContext: input.authContext } : {}),
         supervisor: {
           kind: "local_supervisor",
           generatedAt: input.nowValue
@@ -6503,6 +6556,11 @@ export async function executeSupervisorCommandFromArgs(
       const nowValue = now().toISOString();
       for (const target of pendingTargets) {
         const actor = reviewActorBindings[target.parsed.reviewRole]!;
+        const authContext = await resolveSupervisorReviewAuthContext({
+          cwd,
+          env,
+          actor
+        });
         const filePath = await writeSupervisorReviewAction({
           cwd,
           reviewInputDir: reviewQueueStatus.reviewInputDir,
@@ -6510,6 +6568,7 @@ export async function executeSupervisorCommandFromArgs(
           taskId: target.parsed.taskId,
           reviewRole: target.parsed.reviewRole,
           actor,
+          authContext,
           cycle,
           nowValue
         });
