@@ -48,6 +48,58 @@ test("stop hook continues when an active devgod task remains and no real blocker
   assert.match(parsed.reason, /active devgod task task-hook-2 remains in progress/i);
 });
 
+test("stop hook allows explicit write-scope blockers to end the loop", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message:
+        "I can't continue because apply_patch target AGENTS.md is outside the active devgod task write scope and managed control-layer edits are blocked outside explicit task scope."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-3",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("stop hook allows explicit task-state blockers to end the loop", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message:
+        "I cannot continue because the queue state says current_task_id is null while .devgod/ACTIVE still points at task-hook-4, so this devgod task state mismatch needs repair before I can proceed."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-4",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: "task-hook-4"
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("stop hook still blocks vague blocker summaries without a concrete devgod cause", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "I'm blocked and stopping here."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-5",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /state the real blocker explicitly/i);
+});
+
 test("hook context prefers queue state over stale ACTIVE export when the queue is complete", async () => {
   const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-context-"));
 

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const adminCommands = new Set([
   "migrate",
@@ -131,7 +131,10 @@ function main(argv: readonly string[]): void {
 const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
 const modulePath = fileURLToPath(import.meta.url);
 
-if (entryPath === modulePath) {
+if (
+  process.env.DEVGOD_FORCE_CLI_ENTRYPOINT === pathToFileURL(modulePath).href ||
+  entryPath === modulePath
+) {
   try {
     main(process.argv.slice(2));
   } catch (error: unknown) {
