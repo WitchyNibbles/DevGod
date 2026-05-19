@@ -37,7 +37,7 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 
 ## Current Milestone
 
-Autonomous execution hardening
+README presentation polish
 
 ## Completed Milestones
 
@@ -51,18 +51,26 @@ Autonomous execution hardening
 
 ## Current Task
 
-`2026-05-15-autonomous-next-target-directives` is complete through authoritative run `5fe2a260-81d0-402c-8d13-c074dd769383`. The repo-local active marker has been cleared because there is no remaining queued product slice for the current project goal.
+`2026-05-19-readme-prettify` is complete. The README now uses a more visual landing-page style with badges, emojis, collapsible sections, and a Mermaid flow graphic while preserving the current package explanation.
 
 ## Next Task
 
-None for the currently declared product goal. Broader exhaustive-execution expansion such as trace registries, richer directive families, or scoring heuristics is now roadmap work rather than a blocker for this project closeout.
+None for the current README slice.
 
 ## Blockers
 
-- None at the package-maintainer workflow layer.
+- None at the package-maintainer workflow layer for this slice.
 
 ## Verification Summary
 
+- `git diff --check -- README.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-readme-prettify.md .devgod/work/plans/plan-2026-05-19-readme-prettify.md .devgod/work/tasks/task-2026-05-19-readme-prettify.md .devgod/work/reviews/review-2026-05-19-readme-prettify-reviewer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-qa_engineer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-readme-prettify` passed on 2026-05-19.
+- `git diff --check -- README.md docs/current-state.md docs/global-setup.md docs/autonomous-execution-redesign.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-docs-refresh.md .devgod/work/plans/plan-2026-05-19-docs-refresh.md .devgod/work/tasks/task-2026-05-19-docs-refresh.md .devgod/work/reviews/review-2026-05-19-docs-refresh-reviewer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-qa_engineer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-docs-refresh` passed on 2026-05-19.
+- `npm run typecheck` passed on 2026-05-19 for `2026-05-19-daemon-stagnation-hardening`.
+- `node --experimental-strip-types --test tests/admin.test.ts` passed on 2026-05-19, including the new scope-blocked and consecutive-no-progress daemon regressions.
+- `node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-19 with unchanged reporting behavior.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-daemon-stagnation-hardening` passed on 2026-05-19.
 - `npm run verify:review-identity` passed on 2026-05-15 after adding a repo-owned local review-identity adapter, live bindings, live fixtures, and explicit backend selection.
 - `npm run doctor` passed on 2026-05-15 with review identity reported as live-trust ready and no advisories.
 - `npm run status` reported adapterConfigured=true, selectedBackend=`devgod_local_seed`, and liveTrustReady=true on 2026-05-15.
@@ -126,6 +134,8 @@ None for the currently declared product goal. Broader exhaustive-execution expan
 
 ## Review Summary
 
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-readme-prettify`.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-docs-refresh`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-local-review-identity-setup`, and authoritative local proof run `42fe51d6-4a67-4363-858d-633196eb7c62` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-upgrade-configure`, and an authoritative local proof run `9edb1449-4718-4e4e-8db8-24434910928a` approved the task on 2026-05-15.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-layer`, and authoritative local proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8` approved the task on 2026-05-15.
@@ -145,4 +155,4 @@ Resolved. The restricted-environment harness issues were fixed and the previousl
 
 ## Last Updated
 
-2026-05-15
+2026-05-19

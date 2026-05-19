@@ -1,65 +1,108 @@
 # Global Setup Notes
 
-This repo ships the reusable local-control layer for `devgod` plus the first shared-core runtime
-foundation.
+This repo is the package source of truth for `devgod`.
+It is not the same thing as an installed consuming repo, and the commands are different.
 
-If you later want global behavior across all repositories, use the official Codex instruction chain:
+## Keep the boundary straight
 
-- global guidance in `~/.codex/AGENTS.md`
-- optional custom agents in `~/.codex/agents/`
+### Source repo
 
-Recommended path:
+This repository owns the reusable package:
 
-1. keep this repo as the source of truth
-2. run the shared backend and test the workflow on one or two real projects
-3. only then promote the stable local-control pieces into your home-level Codex config
+- `src/` runtime, installer, MCP, UI, exports, and storage
+- `scripts/` setup and verification helpers
+- `.agents/` reusable skills
+- `.codex/` reusable agent profiles and config
+- `.devgod/rules/` and `.devgod/templates/`
 
-Package here:
+Typical package-maintainer commands here:
 
-- reusable skills and agent profiles
-- installer merge logic
-- starter `.devgod/rules/`, `.devgod/templates/`, and `.devgod/work/` scaffolding
-- setup scripts and the shared-core runtime
+```bash
+npm run devgod -- help
+npm run setup:local
+npm run doctor
+npm run status
+npm run ops
+```
 
-Keep local to each consuming repo:
+### Consuming repo
 
-- live `.devgod/work/` tasks, reviews, and releases
-- reviewed `.devgod/memory/` entries
-- repo-specific `AGENTS.md` overlays
-- repo-local `.env.devgod` values and Docker/runtime state
+A repo that installs devgod gets a local overlay and local workflow state.
 
-Useful runtime operator commands inside a consuming repo:
+Typical consuming-repo commands there:
 
-- `npm run devgod:setup:local` for the loopback-only local Postgres and Qdrant bootstrap wrapper
-- `npm run devgod:doctor` for runtime registration, data-root, and Qdrant health even before the repo has any run history
-- `npm run devgod:verify:setup` for the blocking runtime setup proof after bootstrap
-- `npm run devgod:setup:git-guard` to activate the repo-local hook path that blocks managed control-layer files in normal product commits
-- `npm run devgod:verify:git-guard` to confirm the hook path, hook files, and install manifest are wired correctly
-- `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for a synthetic install-proof fixture
-- `npm run devgod:status -- --run-id <run-id>` for one authority-labeled status report
-- `npm run devgod:ops -- --run-id latest --format text` for the operator dashboard
-- `npm run devgod:recover -- --run-id <run-id>` for advisory recovery inspection or `--apply-safe` to repair safe cases
-- `npm run devgod:export-docs -- summarize what we worked on today` for an Obsidian work note when `DEVGOD_OBSIDIAN_*` is configured
-- `npm run devgod:health` for database reachability
-- `npm run devgod:verify:review-identity` to replay reviewed adapter fixtures
+```bash
+npm run devgod:setup:git-guard
+npm run devgod:verify:git-guard
+npm run devgod:setup:local
+npm run devgod:doctor
+npm run devgod:verify:setup
+npm run devgod:status
+npm run devgod:ops
+```
 
-The synthetic fixture command does not write `.devgod/ACTIVE` and does not create authoritative review summaries. Use it only for install-proof checks, never for live workflow completion.
+Keep repo-specific live state in the consuming repo:
 
-For review identity, consuming repos can keep multiple named backends in one reviewed adapter module via `reviewIdentityAdapters` and select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`. `devgod:doctor`, `devgod:status`, and `devgod:ops` surface that selection state so operators can detect ambiguous multi-backend configs before trusting live reviews.
+- `.devgod/work/`
+- `.devgod/memory/`
+- `.env.devgod`
+- runtime registration and review identity wiring
 
-Optional GitNexus setup:
+## Recommended rollout path
 
-- install `devgod` with `init --apply --with-gitnexus` or rerun `upgrade --apply --with-gitnexus` for an existing repo
-- run `npm install`, then `npm run devgod:gitnexus:analyze`
-- the installer writes a project-local GitNexus MCP entry that uses `npx --no-install gitnexus mcp`
-- treat GitNexus as advisory evidence only; `devgod:status` and `devgod:ops` surface its readiness and freshness without granting it workflow authority
-- avoid letting GitNexus rewrite managed control-layer files by default; the shipped analyze script uses `--skip-agents-md`
+1. Keep this repo as the package source of truth.
+2. Install it into one or two real repos first.
+3. Prove the local runtime, review identity, and git guard path there.
+4. Only after that, promote any stable behavior into global Codex config.
 
-To make Codex configure a repo completely, keep the `devgod-setup` skill, `.env.example`, Docker
-Compose file, and setup scripts together so the agent has one repeatable bootstrap path.
+If you want home-level Codex behavior later, use:
 
-Why:
+- `~/.codex/AGENTS.md`
+- `~/.codex/agents/`
 
-- global rules are powerful
-- bad global instructions create confusion everywhere
-- project-scoped durable memory stays cleaner than a giant shared memory blob
+Do not start by pushing experimental package guidance into global config.
+
+## Runtime notes for consuming repos
+
+After install, a target repo can use the shipped local bootstrap path:
+
+- `npm run devgod:setup:local`
+- `npm run devgod:doctor`
+- `npm run devgod:verify:setup`
+
+That path is the intended "make the repo operational" route when you want the packaged runtime flow.
+
+Useful extra commands in consuming repos:
+
+- `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for synthetic install-proof only
+- `npm run devgod:recover -- --run-id <run-id>` for recovery inspection
+- `npm run devgod:export-docs -- "summarize what we worked on today"` for Obsidian-style export
+- `npm run devgod:verify:review-identity` to replay local adapter fixtures
+
+The happy-path fixture command is not live workflow proof.
+It does not make `.devgod/ACTIVE` authoritative and it does not replace authenticated review evidence.
+
+## Review identity
+
+Consuming repos can define multiple named review backends in one reviewed adapter module through `reviewIdentityAdapters` and then select one with `DEVGOD_REVIEW_IDENTITY_BACKEND`.
+
+The operator commands surface that selection so the repo can detect ambiguous or incomplete review trust before relying on recorded approvals.
+
+## Optional GitNexus
+
+GitNexus is supported as advisory evidence, not workflow authority.
+
+Typical path:
+
+1. install or upgrade devgod with `--with-gitnexus`
+2. run `npm install`
+3. run `npm run devgod:gitnexus:analyze`
+
+The shipped config uses `npx --no-install gitnexus mcp`.
+The analyzer intentionally avoids rewriting managed `AGENTS.md` content by default.
+
+## Why the split matters
+
+- global instructions are high blast-radius
+- repo-local workflow state should stay reviewable and project-specific
+- shared package assets should stay reusable instead of absorbing each project's live history

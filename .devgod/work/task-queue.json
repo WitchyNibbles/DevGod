@@ -3,6 +3,112 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-05-19-readme-prettify",
+      "title": "Prettify README with badges, emojis, and graphics",
+      "status": "done",
+      "class": "documentation",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "README feels more visually polished and expressive.",
+        "README still explains devgod accurately.",
+        "The README-only user-facing scope is preserved."
+      ],
+      "verification": [
+        "git diff --check -- README.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-readme-prettify.md .devgod/work/plans/plan-2026-05-19-readme-prettify.md .devgod/work/tasks/task-2026-05-19-readme-prettify.md .devgod/work/reviews/review-2026-05-19-readme-prettify-reviewer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-qa_engineer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-readme-prettify"
+      ],
+      "evidence": [
+        ".devgod/work/briefs/brief-2026-05-19-readme-prettify.md",
+        ".devgod/work/plans/plan-2026-05-19-readme-prettify.md",
+        ".devgod/work/tasks/task-2026-05-19-readme-prettify.md",
+        ".devgod/work/reviews/review-2026-05-19-readme-prettify-reviewer.md",
+        ".devgod/work/reviews/review-2026-05-19-readme-prettify-qa_engineer.md",
+        ".devgod/work/reviews/review-2026-05-19-readme-prettify-security_reviewer.md",
+        "README.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-19-docs-refresh",
+      "title": "Refresh README and package docs for the current devgod surface",
+      "status": "done",
+      "class": "documentation",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "README explains what devgod is today, what its mission is, and how to think about it quickly.",
+        "Supporting docs separate source-repo package behavior from consuming-repo install behavior.",
+        "Roadmap material is labeled clearly enough that readers do not mistake it for fully shipped behavior."
+      ],
+      "verification": [
+        "git diff --check -- README.md docs/current-state.md docs/global-setup.md docs/autonomous-execution-redesign.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-docs-refresh.md .devgod/work/plans/plan-2026-05-19-docs-refresh.md .devgod/work/tasks/task-2026-05-19-docs-refresh.md .devgod/work/reviews/review-2026-05-19-docs-refresh-reviewer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-qa_engineer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-docs-refresh"
+      ],
+      "evidence": [
+        ".devgod/work/briefs/brief-2026-05-19-docs-refresh.md",
+        ".devgod/work/plans/plan-2026-05-19-docs-refresh.md",
+        ".devgod/work/tasks/task-2026-05-19-docs-refresh.md",
+        ".devgod/work/reviews/review-2026-05-19-docs-refresh-reviewer.md",
+        ".devgod/work/reviews/review-2026-05-19-docs-refresh-qa_engineer.md",
+        ".devgod/work/reviews/review-2026-05-19-docs-refresh-security_reviewer.md",
+        "README.md",
+        "docs/current-state.md",
+        "docs/global-setup.md",
+        "docs/autonomous-execution-redesign.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-19-daemon-stagnation-hardening",
+      "title": "Harden daemon stagnation handling and scope-block escalation",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Repeated no-progress owner turns stop with an explicit blocker before the daemon burns the normal cycle budget.",
+        "Scope or out-of-scope blocker text is surfaced in the daemon handoff instead of triggering another blind retry.",
+        "Focused regression coverage protects valid owner, review, and continuation flows."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/report-command.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-daemon-stagnation-hardening"
+      ],
+      "evidence": [
+        ".devgod/work/briefs/brief-2026-05-19-daemon-stagnation-hardening.md",
+        ".devgod/work/plans/plan-2026-05-19-daemon-stagnation-hardening.md",
+        ".devgod/work/tasks/task-2026-05-19-daemon-stagnation-hardening.md",
+        ".devgod/work/reviews/review-2026-05-19-daemon-stagnation-hardening-reviewer.md",
+        ".devgod/work/reviews/review-2026-05-19-daemon-stagnation-hardening-qa_engineer.md",
+        ".devgod/work/reviews/review-2026-05-19-daemon-stagnation-hardening-security_reviewer.md",
+        "Focused verification passed on 2026-05-19: npm run typecheck; node --experimental-strip-types --test tests/admin.test.ts; node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts; bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-daemon-stagnation-hardening."
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-18-scope-export-hardening",
+      "title": "Harden task write-scope parsing and workflow export validation",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Hook context splits combined allowed-write-scope bullets into individual scope entries instead of treating the full sentence as one literal prefix.",
+        "Workflow artifact checks accept complete or idle .devgod/ACTIVE exports when an explicit --task-id is being validated, without weakening active-task validation.",
+        "Focused regression coverage protects both the hook scope parser and workflow check behavior."
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/hooks.test.ts tests/workflow-check.test.ts tests/admin.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-18-scope-export-hardening"
+      ],
+      "evidence": [
+        "Commit `195e377` (`fix: harden devgod scope exports`) was pushed to `main` on 2026-05-18.",
+        "Focused package verification passed on 2026-05-18: `npm run typecheck`, `node --experimental-strip-types --test tests/hooks.test.ts tests/workflow-check.test.ts tests/admin.test.ts`, and `bash scripts/check-devgod-workflow.sh --task-id 2026-05-18-scope-export-hardening`.",
+        "Sibling installs `jump_refactored`, `GII`, and `GII2` were upgraded from the shared package and `node --experimental-strip-types src/install/cli.ts verify --target <repo>` passed for each.",
+        "`jump_refactored` now resolves active-task allowed write scope to explicit paths and `bash scripts/check-devgod-workflow.sh --repo-root ../jump_refactored --task-id packet-rw-124-legal-network-directory-search-breadth` passed."
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-05-15-autonomous-next-target-directives",
       "title": "Select and harden runtime-backed autonomous continuation directives",
       "status": "done",

@@ -1,5 +1,7 @@
 # DevGod Autonomous Execution Redesign
 
+> Status on `2026-05-19`: this is a redesign and roadmap document, not a claim that every subsystem below is fully shipped today. Implemented slices already exist around runtime execution plans, queue advancement, daemon/supervisor/loop surfaces, workflow-proof seeding, and operator reporting. The exhaustive coverage-ledger model and the full 15-part redesign described here remain partially implemented.
+
 ## Purpose
 
 This document redesigns DevGod from a workflow/persona overlay into a strict autonomous execution and audit system.
