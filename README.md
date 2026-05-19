@@ -42,6 +42,8 @@ As of `2026-05-19`, this repo is the source-of-truth package for a manager-led w
 - MCP server and hosted operator UI
 - Obsidian-oriented docs export
 
+This package is still an `opt-in overlay` with `production-oriented package checks`, not a blanket production certification for every consuming repo.
+
 ## 🎯 Mission
 
 Devgod's mission is to make AI coding work less hand-wavy.
@@ -182,6 +184,18 @@ Important:
 
 - installed repos get the `devgod:*` script names
 - this source repo uses shorter package-maintainer names like `setup:local`, `doctor`, and `status`
+
+## 🛡️ Release Posture
+
+Devgod ships a careful `repo-local release posture`.
+
+Use the package checks here as evidence about the package itself:
+
+- `npm run verify:release-overlay`
+- `npm run verify:migrations:live`
+
+Do not treat those checks alone as `any claim that a consuming repo is fit for production use`.
+That still depends on the target repo, its runtime wiring, its review identity setup, and its own operational decisions.
 
 ## 🧰 Command Families
 
