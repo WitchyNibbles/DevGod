@@ -289,6 +289,31 @@ function createService(store: MemoryStore = new MemoryStore()) {
   };
 }
 
+async function seedHealthyRuntimeRegistration(
+  store: MemoryStore,
+  repoPath: string = process.cwd()
+): Promise<void> {
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    repoPath
+  });
+  await store.saveProjectRuntimeRegistration({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath,
+    runtimeProfile: "managed",
+    dataRoot: `${repoPath}/.devgod/runtime/data`,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: `${repoPath}/.devgod/install-manifest.json`,
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
 test("claimTask blocks overlapping write scopes", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -2290,6 +2315,7 @@ test("getExecutionPlan returns review dispatch for missing required reviews", as
 
 test("executeDirectiveStep claims the owner-dispatch task, persists history, and re-evaluates the next directive", async () => {
   const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -2328,6 +2354,7 @@ test("executeDirectiveStep claims the owner-dispatch task, persists history, and
 
 test("executeDirectiveStep persists one history entry per supported review step", async () => {
   const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -2404,6 +2431,7 @@ test("executeDirectiveStep persists one history entry per supported review step"
 
 test("executeDirectiveStep fails closed on unsupported review dispatch and still records the stop reason", async () => {
   const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -2453,6 +2481,7 @@ test("executeDirectiveStep fails closed on unsupported review dispatch and still
 
 test("executeDirectiveStep persists complete and blocked terminations without changing task state", async () => {
   const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
   const completeRun = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -2527,6 +2556,26 @@ test("executeDirectiveStep persists complete and blocked terminations without ch
 
   const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
   assert.equal(memoryEntries.size, 2);
+});
+
+test("executeDirectiveStep rejects direct low-level execution without runtime registration", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+
+  await assert.rejects(
+    service.executeDirectiveStep(run.id, {
+      ownerActor: "planner"
+    }),
+    /directive execution requires runtime registration/
+  );
 });
 
 test("getExecutionPlan returns safe recovery actions before more routing", async () => {

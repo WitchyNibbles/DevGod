@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildOperatorStatusReport } from "../src/admin/status.ts";
-import { executeDoctorCommandFromArgs, executeStatusCommandFromArgs } from "../src/admin.ts";
+import { executeDoctorCommandFromArgs, executeDoctorRepairCommandFromArgs, executeStatusCommandFromArgs } from "../src/admin.ts";
+import { createReviewActionContextResolver } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
 import type { RuntimeProjectRegistrationRecord, TaskPacketInput } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
@@ -1207,6 +1208,505 @@ test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review
     assert.deepEqual(report.advisories, ["review identity bindings file missing"]);
     assert.match(report.checks.repoPath.summary, /repo path mismatch/);
     assert.match(report.checks.reviewIdentity.summary, /bindings file missing/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs repairs runtime registration drift with bootstrap repair only", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-bootstrap-"));
+  const store = new MemoryStore();
+  let bootstrapRepairCalls = 0;
+  let setupRepairCalls = 0;
+
+  try {
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      async getStatusSnapshot() {
+        assert.fail("repair should not require a run snapshot for bootstrapped projects");
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      }),
+      async runBootstrapRepair() {
+        bootstrapRepairCalls += 1;
+        await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+        await store.saveProjectRuntimeRegistration(
+          runtimeRegistration({
+            projectId: context.project.id,
+            workspaceId: context.workspace.id,
+            repoPath: directory,
+            dataRoot: path.join(directory, "runtime-root")
+          })
+        );
+      },
+      async runSetupRepair() {
+        setupRepairCalls += 1;
+      }
+    });
+
+    assert.equal(bootstrapRepairCalls, 1);
+    assert.equal(setupRepairCalls, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, true);
+    assert.equal(result.repair.status, "repaired");
+    assert.deepEqual(result.repair.stepsApplied, ["rerun bootstrap-project and verify-setup"]);
+    assert.equal(result.report?.checks.registration.ok, true);
+    assert.equal(result.report?.checks.repoPath.ok, true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs skips live-trust review identity remediation", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-review-identity-"));
+  const store = new MemoryStore();
+  let bootstrapRepairCalls = 0;
+  let setupRepairCalls = 0;
+
+  try {
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      async getStatusSnapshot() {
+        assert.fail("repair should not require a run snapshot for bootstrapped projects");
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: false,
+        adapterExists: false,
+        availableBackends: [],
+        bindingsPresent: false,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: false,
+        notes: ["review identity bindings file missing"]
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      }),
+      async runBootstrapRepair() {
+        bootstrapRepairCalls += 1;
+      },
+      async runSetupRepair() {
+        setupRepairCalls += 1;
+      }
+    });
+
+    assert.equal(bootstrapRepairCalls, 0);
+    assert.equal(setupRepairCalls, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, false);
+    assert.equal(result.repair.status, "skipped");
+    assert.match(result.repair.skippedReasons[0] ?? "", /review identity requires live operator remediation/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs replays setup for database connectivity failures", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-connectivity-"));
+  const store = new MemoryStore();
+  const context = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    repoPath: directory
+  });
+  await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+  await store.saveProjectRuntimeRegistration(
+    runtimeRegistration({
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      repoPath: directory,
+      dataRoot: path.join(directory, "runtime-root")
+    })
+  );
+
+  let attempts = 0;
+  let setupRepairCalls = 0;
+
+  try {
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:55432");
+        }
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      async getStatusSnapshot() {
+        assert.fail("repair should not require a run snapshot for bootstrapped projects");
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      }),
+      async runSetupRepair() {
+        setupRepairCalls += 1;
+      }
+    });
+
+    assert.equal(setupRepairCalls, 1);
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, true);
+    assert.equal(result.repair.status, "repaired");
+    assert.deepEqual(result.repair.stepsApplied, ["run local devgod setup script"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs applies safe runtime reconcile after runtime health passes", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-reconcile-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  let bootstrapRepairCalls = 0;
+  let setupRepairCalls = 0;
+
+  try {
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Repair runtime drift",
+      request: "Heal a uniquely determined runtime task drift."
+    });
+    await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+
+    const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(context);
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+    await store.saveProjectRuntimeState({
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      activeRunId: run.id,
+      activeTaskId: undefined,
+      taskQueue: {
+        project_status: "ready",
+        current_task_id: null,
+        tasks: []
+      },
+      productState: { status: "ready", items: [] },
+      lastVerifiedRunId: undefined,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      }),
+      async runBootstrapRepair() {
+        bootstrapRepairCalls += 1;
+      },
+      async runSetupRepair() {
+        setupRepairCalls += 1;
+      }
+    });
+
+    const runtimeState = await store.getProjectRuntimeState(context.project.id);
+    assert.equal(bootstrapRepairCalls, 0);
+    assert.equal(setupRepairCalls, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, true);
+    assert.equal(result.repair.status, "repaired");
+    assert.deepEqual(result.repair.stepsApplied, ["reconcile authoritative runtime task state"]);
+    assert.equal(runtimeState?.activeTaskId, "task-owner");
+    assert.equal((runtimeState?.taskQueue as { current_task_id?: string | null }).current_task_id, "task-owner");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs keeps execution blocked when semantic drift needs operator review", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-semantic-block-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  try {
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Approved runtime drift",
+      request: "Do not auto-clear a stale active task from a completed run."
+    });
+    await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+    await service.claimTask(run.id, "task-owner", "planner");
+    await service.submitHandoff(run.id, "task-owner", {
+      actor: "planner",
+      ownerRole: "planner",
+      completionStandard: "specialist_verified",
+      summary: "Prepared approved task.",
+      changedFiles: ["src/admin.ts"],
+      blockers: [],
+      verificationNotes: ["verified repair guardrails"],
+      executionEvidence: ["task packet written"],
+      qualityGateEvidence: ["tdd scenarios listed"],
+      contextRefs: ["brief://task-owner"]
+    });
+    await service.recordReview(run.id, "task-owner", "reviewer-actor", {
+      reviewerRole: "reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "task-owner", "security-actor", {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "task-owner", "qa-actor", {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+
+    const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(context);
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+    await store.saveProjectRuntimeState({
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      activeRunId: run.id,
+      activeTaskId: "task-stale",
+      taskQueue: {
+        project_status: "in_progress",
+        current_task_id: "task-stale",
+        tasks: []
+      },
+      productState: { status: "in_progress", items: [] },
+      lastVerifiedRunId: undefined,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      })
+    });
+
+    const runtimeState = await store.getProjectRuntimeState(context.project.id);
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, false);
+    assert.equal(result.repair.status, "skipped");
+    assert.match(
+      result.repair.skippedReasons.join(" | "),
+      /runtime reconcile requires operator review: cleared a stale active task from a completed runtime run/
+    );
+    assert.equal(runtimeState?.activeTaskId, "task-stale");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

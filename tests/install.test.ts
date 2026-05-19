@@ -213,6 +213,7 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   );
   assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\/devgod\.ts migrate/);
   assert.match(merged.scripts["devgod:doctor"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor/);
+  assert.match(merged.scripts["devgod:heal"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor --repair/);
   assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
   assert.equal(
     merged.scripts["devgod:coverage"],
@@ -237,6 +238,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(
     merged.scripts["devgod:advance-active-task"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts advance-active-task --format text"
+  );
+  assert.equal(
+    merged.scripts["devgod:reconcile"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts reconcile-runtime-state --apply --format text"
   );
   assert.equal(
     merged.scripts["devgod:sync-runtime-exports"],
@@ -1509,6 +1514,14 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(
     targetPackageJson.scripts["devgod:supervisor-history"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts supervisor-history --format text/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:heal"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts doctor --repair/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:reconcile"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts reconcile-runtime-state --apply --format text/
   );
   assert.match(
     targetPackageJson.scripts["devgod:verify:review-identity"],

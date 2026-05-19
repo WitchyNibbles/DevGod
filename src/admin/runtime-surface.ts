@@ -2,6 +2,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  buildRuntimeExecutionConnectionFailure,
+  isRuntimeExecutionPreflightConnectionError,
   executeCheckpointCommandFromArgs,
   executeCoverageCommandFromArgs,
   createSupportedContinuationExecutor,
@@ -92,6 +94,10 @@ export interface RuntimeSurfaceDependencies {
   createStore?: (client: RuntimeClient) => PostgresStore;
   createService?: (store: PostgresStore) => RuntimeSurfaceService;
   createPlanContextEmbedQuery?: typeof createPlanContextEmbedQuery;
+  inspectQdrant?: ((
+    registration: import("../domain/types.ts").RuntimeProjectRegistrationRecord
+  ) => Promise<{ ok: boolean; summary: string }>) | undefined;
+  inspectReviewIdentity?: (() => Promise<import("./status.ts").ReviewIdentityStatusObservation>) | undefined;
 }
 
 export interface RuntimeSurfaceOptions {
@@ -151,6 +157,7 @@ export async function getStatusSurface(args: readonly string[], options: Runtime
 }
 
 export async function getRuntimeHealthSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
+  const dependencies = options.dependencies ?? {};
   return withRuntime(options, async ({ store, service, env, cwd }) =>
     executeDoctorCommandFromArgs(args, {
       cwd,
@@ -166,7 +173,9 @@ export async function getRuntimeHealthSurface(args: readonly string[], options: 
       },
       getProjectRuntimeRegistration(projectId) {
         return store.getProjectRuntimeRegistration(projectId);
-      }
+      },
+      inspectQdrant: dependencies.inspectQdrant,
+      inspectReviewIdentity: dependencies.inspectReviewIdentity
     })
   );
 }
@@ -262,87 +271,103 @@ export async function getOpsSurface(args: readonly string[], options: RuntimeSur
 }
 
 export async function getLoopSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {
-  return withRuntime(options, async ({ store, service, env, cwd }) =>
-    executeLoopCommandFromArgs(args, {
-      cwd,
-      env,
-      findLatestRun(workspaceSlug, projectSlug) {
-        return store.findLatestRun({ workspaceSlug, projectSlug });
-      },
-      getStatusSnapshot(runId) {
-        return service.getStatus(runId);
-      },
-      getExecutionPlan(runId, staleAfterHours) {
-        return service.getExecutionPlan(runId, { staleAfterHours });
-      },
-      applyRecovery(runId, actionIds, staleAfterHours) {
-        return service.applyRecovery(runId, actionIds, { staleAfterHours });
-      },
-      async executeDirectiveStep(runId, input) {
-        if (!service.executeDirectiveStep) {
-          throw new Error("runtime surface does not support directive execution");
+  const dependencies = options.dependencies ?? {};
+  try {
+    return await withRuntime(options, async ({ store, service, env, cwd }) =>
+      executeLoopCommandFromArgs(args, {
+        cwd,
+        env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        findProjectContext(workspaceSlug, projectSlug) {
+          return store.getProjectContext({ workspaceSlug, projectSlug });
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        inspectQdrant: dependencies.inspectQdrant,
+        inspectReviewIdentity: dependencies.inspectReviewIdentity,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          if (!service.executeDirectiveStep) {
+            throw new Error("runtime surface does not support directive execution");
+          }
+          const reviewCommands = input.reviewCommands as readonly {
+            runId: string;
+            taskId: string;
+            actor: string;
+            review: import("../domain/types.ts").ReviewInput;
+          }[];
+
+          const executeReviewRecommendation =
+            reviewCommands.length > 0
+              ? createQueuedLoopReviewExecutor(
+                  runId,
+                  reviewCommands,
+                  await createLiveLoopReviewCommandExecutor({
+                    cwd,
+                    env,
+                    recordReview({ command, resolver }) {
+                      const reviewService = new DevgodCoreService(store, {
+                        resolveReviewActionContext: resolver
+                      });
+                      return reviewService.recordReview(
+                        command.runId,
+                        command.taskId,
+                        command.actor,
+                        command.review
+                      );
+                    }
+                  })
+                )
+              : undefined;
+          const executeContinuationAction = createSupportedContinuationExecutor({
+            env,
+            getStatusSnapshot(runId) {
+              return service.getStatus(runId);
+            },
+            getReviews(runId, taskId) {
+              return store.getReviews(runId, taskId);
+            },
+            getApprovals(runId, taskId) {
+              return store.getApprovals(runId, taskId);
+            },
+            upsertCoverageGaps: service.upsertCoverageGaps
+              ? (runId, gaps) => service.upsertCoverageGaps!(runId, gaps)
+              : undefined,
+            recordProgressProof: service.recordProgressProof
+              ? (runId, proof) => service.recordProgressProof!(runId, proof)
+              : undefined,
+            checkpointRun: service.checkpointRun
+              ? (runId, checkpoint, checkpointOptions) =>
+                  service.checkpointRun!(runId, checkpoint, checkpointOptions)
+              : undefined
+          });
+
+          return service.executeDirectiveStep(runId, {
+            staleAfterHours: input.staleAfterHours,
+            ownerActor: input.ownerActor,
+            ...(executeReviewRecommendation ? { executeReviewRecommendation } : {}),
+            executeContinuationAction
+          });
         }
-        const reviewCommands = input.reviewCommands as readonly {
-          runId: string;
-          taskId: string;
-          actor: string;
-          review: import("../domain/types.ts").ReviewInput;
-        }[];
-
-        const executeReviewRecommendation =
-          reviewCommands.length > 0
-            ? createQueuedLoopReviewExecutor(
-                runId,
-                reviewCommands,
-                await createLiveLoopReviewCommandExecutor({
-                  cwd,
-                  env,
-                  recordReview({ command, resolver }) {
-                    const reviewService = new DevgodCoreService(store, {
-                      resolveReviewActionContext: resolver
-                    });
-                    return reviewService.recordReview(
-                      command.runId,
-                      command.taskId,
-                      command.actor,
-                      command.review
-                    );
-                  }
-                })
-              )
-            : undefined;
-        const executeContinuationAction = createSupportedContinuationExecutor({
-          env,
-          getStatusSnapshot(runId) {
-            return service.getStatus(runId);
-          },
-          getReviews(runId, taskId) {
-            return store.getReviews(runId, taskId);
-          },
-          getApprovals(runId, taskId) {
-            return store.getApprovals(runId, taskId);
-          },
-          upsertCoverageGaps: service.upsertCoverageGaps
-            ? (runId, gaps) => service.upsertCoverageGaps!(runId, gaps)
-            : undefined,
-          recordProgressProof: service.recordProgressProof
-            ? (runId, proof) => service.recordProgressProof!(runId, proof)
-            : undefined,
-          checkpointRun: service.checkpointRun
-            ? (runId, checkpoint, checkpointOptions) =>
-                service.checkpointRun!(runId, checkpoint, checkpointOptions)
-            : undefined
-        });
-
-        return service.executeDirectiveStep(runId, {
-          staleAfterHours: input.staleAfterHours,
-          ownerActor: input.ownerActor,
-          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {}),
-          executeContinuationAction
-        });
-      }
-    })
-  );
+      })
+    );
+  } catch (error) {
+    if (isRuntimeExecutionPreflightConnectionError(error)) {
+      throw new Error(buildRuntimeExecutionConnectionFailure(error).reason);
+    }
+    throw error;
+  }
 }
 
 export async function getReportSurface(args: readonly string[], options: RuntimeSurfaceOptions = {}) {

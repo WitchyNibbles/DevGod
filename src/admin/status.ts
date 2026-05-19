@@ -40,11 +40,13 @@ export interface DaemonOperatorHandoffObservation {
   state: "blocked" | "invalid";
   blockerKind:
     | "bootstrapping"
+    | "runtime_preflight"
     | "missing_active_runtime"
     | "review_queue"
     | "review_execution_unsupported"
     | "operator_required_continuation"
     | "workflow_proof_failure"
+    | "scope_expansion_required"
     | "runtime_blocked"
     | "recovery_required"
     | "runtime_task_missing"
@@ -62,6 +64,7 @@ export interface DaemonOperatorHandoffObservation {
   detailFiles: {
     continuationStatus?: string | undefined;
     reviewQueueStatus?: string | undefined;
+    scopeExpansionRequest?: string | undefined;
   };
   updatedAt?: string | undefined;
 }
@@ -70,6 +73,7 @@ export interface DaemonSupervisorStatusObservation {
   authorityLabel: "derived_only";
   state: "completed" | "blocked" | "max_cycles_reached" | "invalid";
   blockerKind?:
+    | "runtime_preflight"
     | "missing_review_actor_bindings"
     | "handoff_missing"
     | "unsupported_handoff"
@@ -101,6 +105,7 @@ export interface DaemonSupervisorStatusObservation {
     activeRunId?: string | null | undefined;
     activeTaskId?: string | null | undefined;
     blockerKind?:
+      | "runtime_preflight"
       | "missing_review_actor_bindings"
       | "handoff_missing"
       | "unsupported_handoff"

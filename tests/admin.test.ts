@@ -12,6 +12,7 @@ import {
   executeCoverageCommandFromArgs,
   executeGapsCommandFromArgs,
   executeIndexRepoMarkdownCommand,
+  executeReconcileRuntimeStateCommandFromArgs,
   executeReportCommandFromArgs,
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs,
@@ -27,6 +28,90 @@ import { createReviewActionContextResolver } from "../src/core/review-context.ts
 import { DevgodCoreService } from "../src/core/service.ts";
 import type { TaskPacketInput, TrustedReviewActionContext } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
+
+async function seedHealthyRuntimeRegistration(
+  store: MemoryStore,
+  input: {
+    projectId: string;
+    workspaceId: string;
+    repoPath: string;
+  }
+): Promise<void> {
+  const dataRoot = path.join(input.repoPath, ".devgod", "runtime", "data");
+  await mkdir(dataRoot, { recursive: true });
+  await store.saveProjectRuntimeRegistration({
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    repoPath: input.repoPath,
+    runtimeProfile: "managed",
+    dataRoot,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: path.join(input.repoPath, ".devgod", "install-manifest.json"),
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function buildHealthyRuntimePreflightOptions(store: MemoryStore, cwd: string) {
+  return {
+    async getProjectRuntimeRegistration(projectId: string) {
+      const existing = await store.getProjectRuntimeRegistration(projectId);
+      if (existing?.repoPath === cwd) {
+        return existing;
+      }
+      const projectContext = await store.ensureProjectContext({
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        repoPath: cwd
+      });
+      if (!projectContext || projectContext.project.id !== projectId) {
+        return undefined;
+      }
+      const dataRoot = path.join(cwd, ".devgod", "runtime", "data");
+      await mkdir(dataRoot, { recursive: true });
+      const registration = {
+        projectId,
+        workspaceId: projectContext.workspace.id,
+        repoPath: cwd,
+        runtimeProfile: "managed",
+        dataRoot,
+        qdrantUrl: "http://127.0.0.1:6333",
+        qdrantCollection: "devgod-memory",
+        installManifestPath: path.join(cwd, ".devgod", "install-manifest.json"),
+        manifest: {},
+        provenance: { authority: "runtime_authoritative" },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await store.saveProjectRuntimeRegistration(registration);
+      return registration;
+    },
+    async inspectQdrant() {
+      return {
+        ok: true,
+        summary: "qdrant reachable"
+      };
+    },
+    async inspectReviewIdentity() {
+      return {
+        authorityLabel: "derived_only" as const,
+        adapterConfigured: true,
+        adapterExists: true,
+        adapterModulePath: path.join(cwd, "review-identity-adapter.ts"),
+        selectedBackend: "devgod_local_seed",
+        availableBackends: ["devgod_local_seed"],
+        bindingsPresent: true,
+        bindingsPath: path.join(cwd, ".devgod", "review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      };
+    }
+  };
+}
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
@@ -990,6 +1075,151 @@ test("executeSyncRuntimeExportsCommandFromArgs rewrites stale local workflow exp
   }
 });
 
+test("executeReconcileRuntimeStateCommandFromArgs activates the unique owner-dispatch target safely", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Reconcile active task",
+    request: "Align runtime state to the unique ready owner task."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-reconcile-owner-target-"));
+  try {
+    const reconciled = await executeReconcileRuntimeStateCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--apply", "--format", "json"],
+      {
+        cwd: exportCwd,
+        env: process.env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        }
+      }
+    );
+
+    assert.equal(reconciled.result.repairAction, "activate_owner_dispatch_target");
+    assert.equal(reconciled.result.activeTaskId, "task-owner");
+    assert.equal(reconciled.result.runtimeStateChanged, true);
+    assert.equal(reconciled.result.queue.current_task_id, "task-owner");
+    assert.equal(reconciled.result.queue.tasks[0]?.status, "pending");
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "task-owner");
+    assert.equal((runtimeState?.taskQueue as TaskQueue).current_task_id, "task-owner");
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    assert.equal(exportedActive, "task_id=task-owner\nworkflow=devgod\nstate=active\n");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeReconcileRuntimeStateCommandFromArgs aligns a stale active task to the authoritative in-progress task", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Reconcile in-progress task",
+    request: "Use the authoritative in-progress task when runtime state drifts."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+  await service.claimTask(run.id, "task-owner", "planner");
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-stale",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-stale",
+      tasks: []
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const reconciled = await executeReconcileRuntimeStateCommandFromArgs(
+    ["--workspace-slug", "team", "--project-slug", "devgod", "--apply", "--format", "json"],
+    {
+      env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      }
+    }
+  );
+
+  assert.equal(reconciled.result.repairAction, "sync_active_task_to_in_progress");
+  assert.equal(reconciled.result.activeTaskId, "task-owner");
+  assert.equal(reconciled.result.queue.current_task_id, "task-owner");
+  assert.equal(reconciled.result.queue.tasks[0]?.status, "in_progress");
+});
+
 test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the latest run containing the task", async () => {
   const store = new MemoryStore();
   const resolver = createReviewActionContextResolver({
@@ -1415,6 +1645,11 @@ test("executeReportCommandFromArgs exposes persisted loop history without writin
     title: "Ship loop history",
     request: "Persist bounded runtime loop execution evidence."
   });
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: run.projectId,
+    workspaceId: run.workspaceId,
+    repoPath: process.cwd()
+  });
 
   await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", ownerRole: "planner" })]);
   await service.executeDirectiveStep(run.id, {
@@ -1665,6 +1900,11 @@ test("executeDaemonCommandFromArgs runs an owner turn and persists the Codex ses
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-owner-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     let capturedPrompt = "";
     const result = await executeDaemonCommandFromArgs(
@@ -1672,6 +1912,7 @@ test("executeDaemonCommandFromArgs runs an owner turn and persists the Codex ses
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -1714,11 +1955,670 @@ test("executeDaemonCommandFromArgs runs an owner turn and persists the Codex ses
     assert.equal(result.result.cycles.length, 1);
     assert.equal(result.result.cycles[0]?.action, "run_codex_owner");
     assert.match(capturedPrompt, /Active task: task-owner/);
+    assert.match(
+      capturedPrompt,
+      /If a required edit falls outside the allowed write scope, stop immediately, name the exact blocked paths/
+    );
     const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
     assert.equal(
       (runtimeState?.metadata.devgodDaemon as { sessionId?: string } | undefined)?.sessionId,
       "thread-owner-1"
     );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs rejects externally forced skipRuntimePreflight", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Guard daemon preflight bypass",
+    request: "Reject daemon callers that try to force skipRuntimePreflight directly."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/core"] })]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const dataRoot = await mkdtemp(path.join(tmpdir(), "devgod-daemon-bypass-data-"));
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-bypass-"));
+
+  await store.saveProjectRuntimeRegistration({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: daemonCwd,
+    runtimeProfile: "managed",
+    dataRoot,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: path.join(daemonCwd, ".devgod", "install-manifest.json"),
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await assert.rejects(
+      executeDaemonCommandFromArgs(
+        ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
+        {
+          cwd: daemonCwd,
+          env: process.env,
+          ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+          skipRuntimePreflight: true,
+          getProjectContext(params) {
+            return store.getProjectContext(params);
+          },
+          getProjectRuntimeRegistration(projectId) {
+            return store.getProjectRuntimeRegistration(projectId);
+          },
+          getProjectRuntimeState(projectId) {
+            return store.getProjectRuntimeState(projectId);
+          },
+          saveProjectRuntimeState(state) {
+            return store.saveProjectRuntimeState(state);
+          },
+          getStatusSnapshot(runId) {
+            return service.getStatus(runId);
+          },
+          getExecutionPlan(runId, staleAfterHours) {
+            return service.getExecutionPlan(runId, { staleAfterHours });
+          },
+          applyRecovery(runId, actionIds, staleAfterHours) {
+            return service.applyRecovery(runId, actionIds, { staleAfterHours });
+          },
+          getReviews(runId, taskId) {
+            return store.getReviews(runId, taskId);
+          },
+          getApprovals(runId, taskId) {
+            return store.getApprovals(runId, taskId);
+          },
+          async inspectQdrant() {
+            return {
+              ok: true,
+              summary: "qdrant reachable"
+            };
+          },
+          async inspectReviewIdentity() {
+            return {
+              authorityLabel: "derived_only" as const,
+              adapterConfigured: true,
+              adapterExists: true,
+              adapterModulePath: path.join(daemonCwd, "review-identity-adapter.ts"),
+              selectedBackend: "devgod_local_seed",
+              availableBackends: ["devgod_local_seed"],
+              bindingsPresent: true,
+              bindingsPath: path.join(daemonCwd, ".devgod", "review-identity-bindings.json"),
+              bindingsUseShippedTemplate: false,
+              liveTrustReady: true,
+              notes: []
+            };
+          }
+        }
+      ),
+      /skipRuntimePreflight is reserved for internal runtime execution orchestration/
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs stops immediately on a scope-blocked no-progress owner turn", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Scope block reproduction",
+    request: "Reproduce a write-scope blocker without runtime progress."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "task-owner",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      allowedWriteScope: ["src/allowed.ts"]
+    })
+  ]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-scope-block-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "4", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn() {
+          return {
+            sessionId: "thread-scope-1",
+            finalMessage: JSON.stringify({
+              summary: "Need to edit apps/web/src/components/operator-portal.tsx, but that path is out of scope.",
+              status: "blocked",
+              blockers: ["required edit apps/web/src/components/operator-portal.tsx is outside the allowed write scope"],
+              scope_request: {
+                blocked_paths: ["apps/web/src/components/operator-portal.tsx"],
+                requested_write_scope: ["apps/web/src/components/operator-portal.tsx"],
+                reason: "the task requires a single UI edit outside the current packet scope"
+              }
+            }),
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.match(result.result.reason, /scope-blocked no-progress turn/);
+    assert.match(result.result.reason, /operator-portal\.tsx/);
+    assert.equal(result.result.cycles.length, 2);
+    assert.equal(result.result.cycles[0]?.action, "run_codex_owner");
+    assert.equal(result.result.cycles[1]?.action, "request_scope_expansion");
+
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      blockerKind: string;
+      reason: string;
+      nextActions: string[];
+      detailFiles?: { scopeExpansionRequest?: string };
+    };
+    assert.equal(operatorHandoff.blockerKind, "scope_expansion_required");
+    assert.match(operatorHandoff.reason, /operator-portal\.tsx/);
+    assert.deepEqual(operatorHandoff.nextActions, [
+      "widen the task packet allowed write scope to include the blocked paths or split them into a follow-on task",
+      "record the exact blocked paths in the blocker handoff before rerouting"
+    ]);
+    assert.equal(
+      operatorHandoff.detailFiles?.scopeExpansionRequest,
+      ".devgod/work/daemon/scope-expansion-request.json"
+    );
+
+    const scopeRequest = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "scope-expansion-request.json"), "utf8")
+    ) as {
+      blockedPaths: string[];
+      requestedWriteScope: string[];
+      reason: string;
+    };
+    assert.deepEqual(scopeRequest.blockedPaths, ["apps/web/src/components/operator-portal.tsx"]);
+    assert.deepEqual(scopeRequest.requestedWriteScope, ["apps/web/src/components/operator-portal.tsx"]);
+    assert.match(scopeRequest.reason, /minimum safe scope expansion|single UI edit|out of scope/i);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs reconciles a stale active task before launching the owner turn", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon reconcile before dispatch",
+    request: "Repair stale active task pointers before the owner worker runs."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "task-owner",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      allowedWriteScope: ["src/runtime"]
+    })
+  ]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-stale",
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: "task-stale",
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-reconcile-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  let promptSeen = "";
+  try {
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "2", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn(input) {
+          promptSeen = input.prompt;
+          return {
+            sessionId: "thread-reconcile-1",
+            finalMessage: JSON.stringify({
+              summary: "No runtime progress was made after inspecting the repaired task state.",
+              status: "blocked",
+              blockers: ["runtime state was unchanged after the repaired dispatch target ran"]
+            }),
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.cycles[0]?.action, "reconcile_runtime_state");
+    assert.equal(result.result.cycles[1]?.action, "run_codex_owner");
+    assert.match(promptSeen, /Active task: task-owner/);
+    assert.doesNotMatch(result.result.reason, /active-task pointer does not match/i);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "task-owner");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs blocks on runtime preflight before launching a Codex turn", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Runtime preflight guard",
+    request: "Refuse execution until runtime services are healthy."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/core"] })]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const dataRoot = await mkdtemp(path.join(tmpdir(), "devgod-daemon-preflight-data-"));
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-preflight-"));
+
+  await store.saveProjectRuntimeRegistration({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: daemonCwd,
+    runtimeProfile: "managed",
+    dataRoot,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: path.join(daemonCwd, ".devgod", "install-manifest.json"),
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "2", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async inspectQdrant() {
+          return {
+            ok: false,
+            summary: "qdrant unreachable during runtime preflight"
+          };
+        },
+        async inspectReviewIdentity() {
+          return {
+            authorityLabel: "derived_only" as const,
+            adapterConfigured: true,
+            adapterExists: true,
+            adapterModulePath: path.join(daemonCwd, "review-identity-adapter.ts"),
+            selectedBackend: "devgod_local_seed",
+            availableBackends: ["devgod_local_seed"],
+            bindingsPresent: true,
+            bindingsPath: path.join(daemonCwd, ".devgod", "review-identity-bindings.json"),
+            bindingsUseShippedTemplate: false,
+            liveTrustReady: true,
+            notes: []
+          };
+        },
+        async runCodexTurn() {
+          assert.fail("runCodexTurn should not be called when runtime preflight fails");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.match(result.result.reason, /runtime execution preflight failed/);
+    assert.match(result.result.reason, /qdrant unreachable during runtime preflight/);
+    assert.equal(result.result.cycles.length, 0);
+
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      blockerKind: string;
+      reason: string;
+      nextActions: string[];
+    };
+    assert.equal(operatorHandoff.blockerKind, "runtime_preflight");
+    assert.match(operatorHandoff.reason, /qdrant unreachable during runtime preflight/);
+    assert.deepEqual(operatorHandoff.nextActions, [
+      "run `npm run devgod:doctor -- --repair` to replay safe runtime setup healing",
+      "if task-state drift remains after services are healthy, run `npm run devgod:reconcile` before retrying execution"
+    ]);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs blocks after two consecutive no-progress owner turns", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "No-progress retry reproduction",
+    request: "Detect repeated no-progress owner turns."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "task-owner",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"]
+    })
+  ]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-stagnation-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    let turnCount = 0;
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "4", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn() {
+          turnCount += 1;
+          return {
+            sessionId: "thread-stagnation-1",
+            finalMessage: JSON.stringify({
+              summary: "Still gathering context for the active task.",
+              status: "needs_followup",
+              blockers: []
+            }),
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(turnCount, 2);
+    assert.equal(result.result.status, "blocked");
+    assert.match(result.result.reason, /2 consecutive no-progress turns/);
+    assert.equal(result.result.cycles.length, 3);
+    assert.equal(result.result.cycles[0]?.action, "run_codex_owner");
+    assert.equal(result.result.cycles[1]?.action, "run_codex_owner");
+    assert.equal(result.result.cycles[2]?.action, "blocked");
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    const daemonMetadata = runtimeState?.metadata.devgodDaemon as {
+      stagnation?: { count?: number; taskId?: string; directiveKind?: string };
+    } | undefined;
+    assert.equal(daemonMetadata?.stagnation?.count, 2);
+    assert.equal(daemonMetadata?.stagnation?.taskId, "task-owner");
+    assert.equal(daemonMetadata?.stagnation?.directiveKind, "dispatch_owner");
   } finally {
     await rm(daemonCwd, { recursive: true, force: true });
   }
@@ -1793,12 +2693,18 @@ test("executeDaemonCommandFromArgs advances the final approved task to completio
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-complete-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     const result = await executeDaemonCommandFromArgs(
       ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -1933,6 +2839,11 @@ test("executeDaemonCommandFromArgs executes typed workflow-proof continuation be
   assert.equal(preDaemonPlan.directive.kind, "continue_analysis");
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-proof-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     let codexTurnCalled = false;
     const result = await executeDaemonCommandFromArgs(
@@ -1940,6 +2851,7 @@ test("executeDaemonCommandFromArgs executes typed workflow-proof continuation be
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2082,6 +2994,11 @@ test("executeDaemonCommandFromArgs blocks advisory-only continuation targets bef
   assert.equal(preDaemonPlan.directive.kind, "continue_analysis");
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-advisory-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     let codexTurnCalled = false;
     const result = await executeDaemonCommandFromArgs(
@@ -2089,6 +3006,7 @@ test("executeDaemonCommandFromArgs blocks advisory-only continuation targets bef
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2282,6 +3200,11 @@ test("executeDaemonCommandFromArgs consumes matching operator continuation actio
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-operator-action-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   const operatorActionDir = path.join(daemonCwd, ".devgod", "operator-actions");
   await mkdir(operatorActionDir, { recursive: true });
   try {
@@ -2322,6 +3245,7 @@ test("executeDaemonCommandFromArgs consumes matching operator continuation actio
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2474,6 +3398,11 @@ test("executeDaemonCommandFromArgs clears stale continuation status once runtime
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-continuation-clear-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     await mkdir(path.join(daemonCwd, ".devgod", "work", "daemon"), { recursive: true });
     await writeFile(
@@ -2501,6 +3430,7 @@ test("executeDaemonCommandFromArgs clears stale continuation status once runtime
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2629,6 +3559,11 @@ test("executeDaemonCommandFromArgs quarantines invalid queued operator continuat
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-operator-action-invalid-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   const operatorActionDir = path.join(daemonCwd, ".devgod", "operator-actions");
   await mkdir(operatorActionDir, { recursive: true });
   try {
@@ -2667,6 +3602,7 @@ test("executeDaemonCommandFromArgs quarantines invalid queued operator continuat
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2815,6 +3751,11 @@ test("executeSupervisorCommandFromArgs synthesizes operator continuation actions
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     let codexPrompt: string | undefined;
     const result = await executeSupervisorCommandFromArgs(
@@ -2833,6 +3774,7 @@ test("executeSupervisorCommandFromArgs synthesizes operator continuation actions
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -2993,6 +3935,11 @@ test("executeSupervisorCommandFromArgs synthesizes trusted review actions and re
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-review-queue-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   try {
     await mkdir(path.join(daemonCwd, ".devgod"), { recursive: true });
     await writeFile(
@@ -3039,6 +3986,7 @@ test("executeSupervisorCommandFromArgs synthesizes trusted review actions and re
           ...process.env,
           DEVGOD_REVIEW_IDENTITY_BINDINGS: ".devgod/review-identity-bindings.json"
         },
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -3219,6 +4167,11 @@ test("executeSupervisorCommandFromArgs omits authContext for placeholder review 
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-placeholder-bindings-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   try {
     await mkdir(path.join(daemonCwd, ".devgod"), { recursive: true });
@@ -3251,6 +4204,7 @@ test("executeSupervisorCommandFromArgs omits authContext for placeholder review 
           ...process.env,
           DEVGOD_REVIEW_IDENTITY_BINDINGS: ".devgod/review-identity-bindings.json"
         },
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -3404,9 +4358,15 @@ test("executeSupervisorCommandFromArgs appends supervisor history across repeate
 
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-history-"));
   try {
+    await seedHealthyRuntimeRegistration(store, {
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      repoPath: directory
+    });
     const baseOptions: Parameters<typeof executeSupervisorCommandFromArgs>[1] = {
       cwd: directory,
       env: process.env,
+      ...buildHealthyRuntimePreflightOptions(store, directory),
       getProjectContext(params: { workspaceSlug: string; projectSlug: string }) {
         return store.getProjectContext(params);
       },
@@ -3589,9 +4549,15 @@ test("executeSupervisorCommandFromArgs trims supervisor history to the configure
 
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-history-retention-"));
   try {
+    await seedHealthyRuntimeRegistration(store, {
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      repoPath: directory
+    });
     const baseOptions: Parameters<typeof executeSupervisorCommandFromArgs>[1] = {
       cwd: directory,
       env: process.env,
+      ...buildHealthyRuntimePreflightOptions(store, directory),
       getProjectContext(params: { workspaceSlug: string; projectSlug: string }) {
         return store.getProjectContext(params);
       },
@@ -3927,6 +4893,11 @@ test("executeDaemonCommandFromArgs consumes queued review actions and archives p
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
   await mkdir(reviewQueueDir, { recursive: true });
   try {
@@ -3986,6 +4957,7 @@ test("executeDaemonCommandFromArgs consumes queued review actions and archives p
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -4155,6 +5127,11 @@ test("executeDaemonCommandFromArgs quarantines invalid queued review actions and
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-invalid-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
   const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
   await mkdir(reviewQueueDir, { recursive: true });
   try {
@@ -4194,6 +5171,7 @@ test("executeDaemonCommandFromArgs quarantines invalid queued review actions and
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },
@@ -4378,6 +5356,11 @@ test("executeDaemonCommandFromArgs archives stale queued review actions that no 
   });
 
   const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-review-queue-stale-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: daemonCwd
+  });
   const reviewQueueDir = path.join(daemonCwd, ".devgod", "review-actions");
   await mkdir(reviewQueueDir, { recursive: true });
   try {
@@ -4417,6 +5400,7 @@ test("executeDaemonCommandFromArgs archives stale queued review actions that no 
       {
         cwd: daemonCwd,
         env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
         getProjectContext(params) {
           return store.getProjectContext(params);
         },

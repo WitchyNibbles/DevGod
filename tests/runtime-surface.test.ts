@@ -106,6 +106,23 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
           return {
             async findLatestRun() {
               assert.fail("findLatestRun should not be called with an explicit run id");
+            },
+            async getProjectRuntimeRegistration(projectId: string) {
+              assert.equal(projectId, "project-1");
+              return {
+                projectId,
+                workspaceId: "workspace-1",
+                repoPath: process.cwd(),
+                runtimeProfile: "managed",
+                dataRoot: process.cwd(),
+                qdrantUrl: "http://127.0.0.1:6333",
+                qdrantCollection: "devgod-memory",
+                installManifestPath: ".devgod/install-manifest.json",
+                manifest: {},
+                provenance: {},
+                createdAt: "2026-05-13T00:00:00.000Z",
+                updatedAt: "2026-05-13T00:00:00.000Z"
+              };
             }
           } as never;
         },
@@ -326,6 +343,27 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
               return [];
             }
           };
+        },
+        async inspectQdrant() {
+          return {
+            ok: true,
+            summary: "qdrant reachable"
+          };
+        },
+        async inspectReviewIdentity() {
+          return {
+            authorityLabel: "derived_only" as const,
+            adapterConfigured: true,
+            adapterExists: true,
+            adapterModulePath: "review-identity-adapter.ts",
+            selectedBackend: "devgod_local_seed",
+            availableBackends: ["devgod_local_seed"],
+            bindingsPresent: true,
+            bindingsPath: ".devgod/review-identity-bindings.json",
+            bindingsUseShippedTemplate: false,
+            liveTrustReady: true,
+            notes: []
+          };
         }
       }
     }
@@ -340,7 +378,21 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
   assert.equal(result.result.finalPlan.directive.kind, "blocked");
   assert.deepEqual(
     calls.map((entry) => entry.method),
-    ["getExecutionPlan", "applyRecovery", "getExecutionPlan", "executeDirectiveStep"]
+    ["getStatus", "getExecutionPlan", "applyRecovery", "getExecutionPlan", "executeDirectiveStep"]
+  );
+});
+
+test("getLoopSurface rethrows database connectivity failures as runtime preflight errors", async () => {
+  await assert.rejects(
+    getLoopSurface(["--run-id", "run-1", "--format", "json"], {
+      dependencies: {
+        async loadDotEnv() {},
+        async withClient() {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:55432");
+        }
+      }
+    }),
+    /runtime execution preflight failed: database unavailable: connect ECONNREFUSED 127\.0\.0\.1:55432/i
   );
 });
 

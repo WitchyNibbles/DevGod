@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -23,6 +23,7 @@ const adminCommands = new Set([
   "workflow-proof",
   "seed-workflow-proof",
   "advance-active-task",
+  "reconcile-runtime-state",
   "sync-runtime-exports",
   "daemon",
   "supervisor",
@@ -56,6 +57,14 @@ const installCliPath = path.join(repoRoot, "src/install/cli.ts");
 const mcpServerPath = path.join(repoRoot, "src/mcp/server.ts");
 const uiServerPath = path.join(repoRoot, "src/ui/server.ts");
 
+function resolveRealPath(candidate: string): string {
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return path.resolve(candidate);
+  }
+}
+
 function printUsage(): void {
   process.stdout.write(
     [
@@ -68,8 +77,8 @@ function printUsage(): void {
       "  devgod <install-command> [args]",
       "",
       "Runtime commands:",
-      "  status | coverage | gaps | checkpoint | resume | workflow-proof | seed-workflow-proof | advance-active-task | sync-runtime-exports | daemon | supervisor | supervisor-history | ops | loop | recover | report | plan-context | export-docs | github-dispatch",
-      "  migrate | health | doctor | bootstrap-project | verify-setup | verify-live-migrations",
+      "  status | coverage | gaps | checkpoint | resume | workflow-proof | seed-workflow-proof | advance-active-task | reconcile-runtime-state | sync-runtime-exports | daemon | supervisor | supervisor-history | ops | loop | recover | report | plan-context | export-docs | github-dispatch",
+      "  migrate | health | doctor [--repair] | bootstrap-project | verify-setup | verify-live-migrations",
       "  verify-review-identity | record-review | index-repo-markdown | refresh-retrieval | run-embedding-jobs",
       "  mcp | serve-ui",
       "",
@@ -128,8 +137,8 @@ function main(argv: readonly string[]): void {
   process.exitCode = 1;
 }
 
-const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-const modulePath = fileURLToPath(import.meta.url);
+const entryPath = process.argv[1] ? resolveRealPath(process.argv[1]) : "";
+const modulePath = resolveRealPath(fileURLToPath(import.meta.url));
 
 if (
   process.env.DEVGOD_FORCE_CLI_ENTRYPOINT === pathToFileURL(modulePath).href ||

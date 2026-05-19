@@ -172,6 +172,95 @@ function createService(store: MemoryStore = new MemoryStore()) {
   return { service, store };
 }
 
+async function seedHealthyLoopRuntimeRegistration(
+  store: MemoryStore,
+  repoPath: string = process.cwd()
+): Promise<void> {
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    repoPath
+  });
+  const dataRoot = path.join(repoPath, ".devgod", "runtime", "data");
+  await mkdir(dataRoot, { recursive: true });
+  await store.saveProjectRuntimeRegistration({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath,
+    runtimeProfile: "managed",
+    dataRoot,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: path.join(repoPath, ".devgod", "install-manifest.json"),
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function buildHealthyLoopPreflightOptions(store: MemoryStore, cwd: string = process.cwd()) {
+  return {
+    cwd,
+    env: process.env,
+    findProjectContext(workspaceSlug: string, projectSlug: string) {
+      return store.getProjectContext({ workspaceSlug, projectSlug });
+    },
+    async getProjectRuntimeRegistration(projectId: string) {
+      const existing = await store.getProjectRuntimeRegistration(projectId);
+      if (existing?.repoPath === cwd) {
+        return existing;
+      }
+      const projectContext = await store.ensureProjectContext({
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        repoPath: cwd
+      });
+      if (!projectContext || projectContext.project.id !== projectId) {
+        return undefined;
+      }
+      const dataRoot = path.join(cwd, ".devgod", "runtime", "data");
+      await mkdir(dataRoot, { recursive: true });
+      const registration = {
+        projectId,
+        workspaceId: projectContext.workspace.id,
+        repoPath: cwd,
+        runtimeProfile: "managed",
+        dataRoot,
+        qdrantUrl: "http://127.0.0.1:6333",
+        qdrantCollection: "devgod-memory",
+        installManifestPath: path.join(cwd, ".devgod", "install-manifest.json"),
+        manifest: {},
+        provenance: { authority: "runtime_authoritative" },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await store.saveProjectRuntimeRegistration(registration);
+      return registration;
+    },
+    async inspectQdrant() {
+      return {
+        ok: true,
+        summary: "qdrant reachable"
+      };
+    },
+    async inspectReviewIdentity() {
+      return {
+        authorityLabel: "derived_only" as const,
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: ["devgod_local_seed"],
+        selectedBackend: "devgod_local_seed",
+        bindingsPresent: true,
+        bindingsPath: path.join(cwd, ".devgod", "review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      };
+    }
+  };
+}
+
 function mutateTask(
   store: MemoryStore,
   taskId: string,
@@ -500,8 +589,148 @@ test("executeLoopCommandFromArgs returns the authoritative owner dispatch step",
   assert.equal(result.result.finalPlan.directive.kind, "dispatch_owner");
 });
 
+test("executeLoopCommandFromArgs rejects mutating execution without runtime preflight hooks", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Guard low-level loop execution",
+    request: "Reject direct mutating loop execution without runtime preflight context."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", ownerRole: "planner" })]);
+
+  await assert.rejects(
+    executeLoopCommandFromArgs(
+      ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
+      {
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        executeDirectiveStep(runId, input) {
+          return service.executeDirectiveStep(runId, input);
+        }
+      }
+    ),
+    /runtime execution preflight hooks are required for this execution path/
+  );
+});
+
+test("executeLoopCommandFromArgs rejects externally forced skipRuntimePreflight", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Guard preflight bypass",
+    request: "Reject callers that try to force skipRuntimePreflight directly."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+
+  await assert.rejects(
+    executeLoopCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      skipRuntimePreflight: true
+    }),
+    /skipRuntimePreflight is reserved for internal runtime execution orchestration/
+  );
+});
+
+test("executeLoopCommandFromArgs rejects execution when runtime preflight fails review identity readiness", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Guard loop execution",
+    request: "Do not start directive execution until runtime setup is healthy."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const dataRoot = await mkdtemp(path.join(tmpdir(), "devgod-loop-preflight-data-"));
+
+  await store.saveProjectRuntimeRegistration({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: process.cwd(),
+    runtimeProfile: "managed",
+    dataRoot,
+    qdrantUrl: "http://127.0.0.1:6333",
+    qdrantCollection: "devgod-memory",
+    installManifestPath: path.join(process.cwd(), ".devgod", "install-manifest.json"),
+    manifest: {},
+    provenance: { authority: "runtime_authoritative" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await assert.rejects(
+      executeLoopCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+        env: process.env,
+        findProjectContext(workspaceSlug, projectSlug) {
+          return store.getProjectContext({ workspaceSlug, projectSlug });
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async inspectQdrant() {
+          return {
+            ok: true,
+            summary: "qdrant reachable"
+          };
+        },
+        async inspectReviewIdentity() {
+          return {
+            authorityLabel: "derived_only" as const,
+            adapterConfigured: false,
+            adapterExists: false,
+            availableBackends: [],
+            bindingsPresent: false,
+            bindingsPath: path.join(process.cwd(), ".devgod", "review-identity-bindings.json"),
+            bindingsUseShippedTemplate: false,
+            liveTrustReady: false,
+            notes: ["review identity bindings file missing"]
+          };
+        }
+      }),
+      /runtime execution preflight failed: review identity bindings file missing/
+    );
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("executeLoopCommandFromArgs can auto-apply safe recovery and advance to the next directive", async () => {
   const { service, store } = createService();
+  await seedHealthyLoopRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -527,6 +756,7 @@ test("executeLoopCommandFromArgs can auto-apply safe recovery and advance to the
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--stale-after-hours", "24", "--apply-safe-recovery"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -552,7 +782,8 @@ test("executeLoopCommandFromArgs can auto-apply safe recovery and advance to the
 });
 
 test("executeLoopCommandFromArgs can execute an owner dispatch after optional recovery", async () => {
-  const { service } = createService();
+  const { service, store } = createService();
+  await seedHealthyLoopRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -566,6 +797,7 @@ test("executeLoopCommandFromArgs can execute an owner dispatch after optional re
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -591,7 +823,8 @@ test("executeLoopCommandFromArgs can execute an owner dispatch after optional re
 });
 
 test("executeLoopCommandFromArgs can execute supported review dispatch inputs and re-evaluate to completion", async () => {
-  const { service } = createService();
+  const { service, store } = createService();
+  await seedHealthyLoopRuntimeRegistration(store);
   const run = await service.intakeRequest({
     workspaceSlug: "team",
     projectSlug: "devgod",
@@ -677,7 +910,7 @@ test("executeLoopCommandFromArgs can execute supported review dispatch inputs an
         "qa.json"
       ],
       {
-        cwd: directory,
+        ...buildHealthyLoopPreflightOptions(store, directory),
         getStatusSnapshot(runId) {
           return service.getStatus(runId);
         },
@@ -1373,6 +1606,7 @@ test("executeLoopCommandFromArgs executes supported continue_analysis workflow-p
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1541,6 +1775,7 @@ test("executeLoopCommandFromArgs resolves task-target blocking gaps through work
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1694,6 +1929,7 @@ test("executeLoopCommandFromArgs resumes checkpoint task targets through workflo
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1847,6 +2083,7 @@ test("executeLoopCommandFromArgs clears stale checkpoint review targets through 
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -2007,6 +2244,7 @@ test("executeLoopCommandFromArgs clears stale progress-proof review targets thro
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -2167,6 +2405,7 @@ test("executeLoopCommandFromArgs clears self-referential progress-proof targets 
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -2327,6 +2566,7 @@ test("executeLoopCommandFromArgs clears self-referential checkpoint targets thro
   const result = await executeLoopCommandFromArgs(
     ["--run-id", run.id, "--format", "json", "--execute-supported-directives"],
     {
+      ...buildHealthyLoopPreflightOptions(store),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },

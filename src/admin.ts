@@ -108,6 +108,7 @@ const MAX_CHECKPOINT_STRING_LENGTH = 512;
 const MAX_CHECKPOINT_ARRAY_ITEMS = 32;
 const MAX_CHECKPOINT_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const MAX_CHECKPOINT_INPUT_BYTES = 64 * 1024;
+const MAX_DAEMON_STAGNANT_TURNS = 2;
 type IndexRepoMarkdownStore = Parameters<typeof indexRepoMarkdown>[0]["store"];
 type RetrievalFreshnessStore = Pick<
   DevgodStoreContract,
@@ -786,6 +787,141 @@ interface ExecuteDoctorCommandOptions extends ExecuteStatusCommandOptions {
   inspectGitNexus?: (() => Promise<GitNexusStatusObservation>) | undefined;
 }
 
+interface DoctorCheckObservation {
+  authorityLabel: "runtime_authoritative" | "derived_only";
+  ok: boolean;
+  summary: string;
+}
+
+interface DoctorCommandReport {
+  ok: boolean;
+  run?:
+    | {
+        authorityLabel: "runtime_authoritative";
+        id: string;
+        workspaceId: string;
+        projectId: string;
+      }
+    | undefined;
+  project: {
+    authorityLabel: "runtime_authoritative";
+    workspaceSlug: string;
+    projectSlug: string;
+    workspaceId: string;
+    projectId: string;
+  };
+  runtime: {
+    authorityLabel: "runtime_authoritative";
+    runtimeMode: string | undefined;
+    runtimeProfile: string | undefined;
+    dataRoot: string | undefined;
+    qdrantUrl: string | undefined;
+    qdrantCollection: string | undefined;
+  };
+  checks: {
+    registration: DoctorCheckObservation;
+    repoPath: DoctorCheckObservation;
+    dataRoot: DoctorCheckObservation;
+    qdrant: DoctorCheckObservation;
+    reviewIdentity: DoctorCheckObservation;
+  };
+  blockers: string[];
+  advisories: string[];
+}
+
+interface ExecuteDoctorRepairCommandOptions extends ExecuteDoctorCommandOptions {
+  runBootstrapRepair?: (() => Promise<void>) | undefined;
+  runSetupRepair?: ((cwd: string, env: EnvShape) => Promise<void>) | undefined;
+  getProjectContext?: ((
+    params: {
+      workspaceSlug: string;
+      projectSlug: string;
+    }
+  ) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>) | undefined;
+  getProjectRuntimeState?: ((projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>) | undefined;
+  saveProjectRuntimeState?: ((state: ProjectRuntimeStateRecord) => Promise<void>) | undefined;
+  getExecutionPlan?: ExecuteLoopCommandOptions["getExecutionPlan"];
+  applyRecovery?: ExecuteLoopCommandOptions["applyRecovery"];
+}
+
+interface DoctorRepairObservation {
+  requested: true;
+  attempted: boolean;
+  status: "not_needed" | "repaired" | "skipped" | "failed";
+  executionReady: boolean;
+  stepsAttempted: string[];
+  stepsApplied: string[];
+  skippedReasons: string[];
+  failure?: string | undefined;
+}
+
+interface DoctorRepairCommandResult {
+  ok: boolean;
+  executionReady: boolean;
+  report?: DoctorCommandReport | undefined;
+  repair: DoctorRepairObservation;
+}
+
+interface ExecuteRuntimePreflightCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  findLatestRun?: ExecuteStatusCommandOptions["findLatestRun"];
+  getStatusSnapshot?: ExecuteStatusCommandOptions["getStatusSnapshot"];
+  findProjectContext?: ExecuteDoctorCommandOptions["findProjectContext"];
+  getProjectRuntimeRegistration?: ExecuteDoctorCommandOptions["getProjectRuntimeRegistration"];
+  inspectQdrant?: ExecuteDoctorCommandOptions["inspectQdrant"];
+  pathExists?: ExecuteDoctorCommandOptions["pathExists"];
+  inspectReviewIdentity?: ExecuteStatusCommandOptions["inspectReviewIdentity"];
+  skipRuntimePreflight?: boolean | undefined;
+  requireRuntimePreflight?: boolean | undefined;
+  runtimePreflightBypassToken?: symbol | undefined;
+}
+
+interface RuntimeExecutionPreflightFailure {
+  blockers: string[];
+  reason: string;
+  activeRunId: string | null;
+  nextActions: string[];
+}
+
+const INTERNAL_RUNTIME_PREFLIGHT_BYPASS_TOKEN = Symbol("devgod.runtime_preflight_bypass");
+
+function extractRuntimeExecutionErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  return String(error).trim() || "unknown runtime error";
+}
+
+export function isRuntimeExecutionPreflightConnectionError(error: unknown): boolean {
+  const message = extractRuntimeExecutionErrorMessage(error);
+  return (
+    /DEVGOD_CORE_DATABASE_URL is required/i.test(message) ||
+    /\bECONNREFUSED\b/i.test(message) ||
+    /\bECONNRESET\b/i.test(message) ||
+    /\bENOTFOUND\b/i.test(message) ||
+    /\bETIMEDOUT\b/i.test(message) ||
+    /\bConnection terminated unexpectedly\b/i.test(message) ||
+    /\bconnect\b.*\brefused\b/i.test(message)
+  );
+}
+
+export function buildRuntimeExecutionConnectionFailure(error: unknown): RuntimeExecutionPreflightFailure {
+  const message = extractRuntimeExecutionErrorMessage(error);
+  const summary = /DEVGOD_CORE_DATABASE_URL is required/i.test(message)
+    ? "DEVGOD_CORE_DATABASE_URL is missing"
+    : `database unavailable: ${message}`;
+  return {
+    blockers: [summary],
+    reason: `runtime execution preflight failed: ${summary}`,
+    activeRunId: null,
+    nextActions: [
+      "restore Postgres connectivity or set a valid `DEVGOD_CORE_DATABASE_URL`",
+      "rerun `npm run devgod:doctor` after connectivity is restored"
+    ]
+  };
+}
+
 interface ExecuteOpsCommandOptions extends ExecuteStatusCommandOptions {
   getExecutionPlan: (runId: string, staleAfterHours: number) => Promise<RunExecutionPlan>;
   getRoutingReport: (runId: string) => Promise<RoutingRecommendationReport>;
@@ -795,6 +931,12 @@ interface ExecuteOpsCommandOptions extends ExecuteStatusCommandOptions {
 interface ExecuteLoopCommandOptions extends ExecuteStatusCommandOptions {
   getExecutionPlan: (runId: string, staleAfterHours: number) => Promise<RunExecutionPlan>;
   applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
+  findProjectContext?: ExecuteDoctorCommandOptions["findProjectContext"];
+  getProjectRuntimeRegistration?: ExecuteDoctorCommandOptions["getProjectRuntimeRegistration"];
+  inspectQdrant?: ExecuteDoctorCommandOptions["inspectQdrant"];
+  pathExists?: ExecuteDoctorCommandOptions["pathExists"];
+  skipRuntimePreflight?: boolean | undefined;
+  runtimePreflightBypassToken?: symbol | undefined;
   executeDirectiveStep?: ((
     runId: string,
     input: Omit<ExecuteDirectiveStepOptions, "executeReviewRecommendation"> & {
@@ -874,6 +1016,17 @@ export interface SeedWorkflowProofResult extends WorkflowProofResult {
   projectSlug: string;
 }
 
+interface ExecuteReconcileRuntimeStateCommandOptions extends ExecuteLoopCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  getProjectContext: (params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+  saveProjectRuntimeState: (state: ProjectRuntimeStateRecord) => Promise<void>;
+}
+
 interface ExecuteAdvanceActiveTaskCommandOptions extends ExecuteWorkflowProofCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
@@ -911,6 +1064,28 @@ export interface SyncRuntimeExportsCommandResult {
   queue: TaskQueue;
 }
 
+type RuntimeStateReconcileAction =
+  | "none"
+  | "rebuild_missing_runtime_state"
+  | "rebuild_stale_runtime_queue"
+  | "sync_active_task_to_in_progress"
+  | "activate_owner_dispatch_target"
+  | "clear_completed_active_task";
+
+export interface ReconcileRuntimeStateCommandResult {
+  mode: "dry_run" | "applied";
+  workspaceSlug: string;
+  projectSlug: string;
+  activeRunId: string | null;
+  activeTaskId: string | null;
+  queue: TaskQueue;
+  repairAction: RuntimeStateReconcileAction;
+  runtimeStateChanged: boolean;
+  localExportsSynced: boolean;
+  reason: string;
+  executionPlanDirectiveKind?: RunExecutionPlan["directive"]["kind"] | undefined;
+}
+
 interface DaemonCycleRecord {
   cycle: number;
   directiveKind: RunExecutionPlan["directive"]["kind"];
@@ -920,6 +1095,8 @@ interface DaemonCycleRecord {
     | "run_workflow_proof"
     | "apply_runtime_continuation"
     | "record_review"
+    | "reconcile_runtime_state"
+    | "request_scope_expansion"
     | "advance_active_task"
     | "blocked"
     | "complete";
@@ -1003,6 +1180,29 @@ interface RunCodexTurnResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+}
+
+interface ParsedDaemonTurnMessage {
+  summary: string;
+  status: "completed" | "blocked" | "needs_review" | "needs_followup";
+  blockers: string[];
+  scopeRequest?: {
+    blockedPaths: string[];
+    requestedWriteScope: string[];
+    reason?: string | undefined;
+  } | undefined;
+}
+
+interface DaemonStagnationMetadata {
+  runId: string;
+  taskId: string;
+  directiveKind: RunExecutionPlan["directive"]["kind"];
+  progressKey: string;
+  count: number;
+  updatedAt: string;
+  lastStatus?: ParsedDaemonTurnMessage["status"] | undefined;
+  lastSummary?: string | undefined;
+  lastBlockers?: string[] | undefined;
 }
 
 interface ExecuteDaemonCommandOptions extends ExecuteAdvanceActiveTaskCommandOptions, ExecuteLoopCommandOptions {
@@ -1354,6 +1554,14 @@ function resolveCommandFlag(args: readonly string[], flag: string): string | und
   return value;
 }
 
+function hasCommandFlag(args: readonly string[], flag: string): boolean {
+  return args.includes(flag);
+}
+
+function stripCommandFlag(args: readonly string[], flag: string): string[] {
+  return args.filter((value) => value !== flag);
+}
+
 function resolveDaemonSupervisorHistoryReadOptions(
   args: readonly string[],
   env: EnvShape | undefined,
@@ -1438,6 +1646,67 @@ function parseTaskQueueRecord(candidate: TaskQueue | Record<string, unknown> | u
   return parseTaskQueueContent(JSON.stringify(candidate ?? buildDefaultTaskQueue()));
 }
 
+function parseTaskQueueRecordOrDefault(candidate: TaskQueue | Record<string, unknown> | undefined): TaskQueue {
+  try {
+    return parseTaskQueueRecord(candidate);
+  } catch {
+    return buildDefaultTaskQueue();
+  }
+}
+
+function mapSnapshotTaskStatusToQueueStatus(status: TaskStatus): TaskQueue["tasks"][number]["status"] {
+  switch (status) {
+    case "ready":
+      return "pending";
+    case "in_progress":
+      return "in_progress";
+    case "approved":
+    case "done":
+      return "done";
+    case "blocked":
+    case "review_blocked":
+      return "blocked";
+  }
+}
+
+function mapSnapshotTaskPacketToQueueClass(packet: TaskPacketInput): TaskQueue["tasks"][number]["class"] {
+  if (packet.qualityGates.includes("release_readiness_required")) {
+    return "release_candidate";
+  }
+
+  if (packet.qualityGates.includes("product_acceptance")) {
+    return "prototype_slice";
+  }
+
+  return "docs_only";
+}
+
+function buildAuthoritativeTaskQueueFromSnapshot(
+  snapshot: RunStatusSnapshot,
+  activeTaskId: string | null
+): TaskQueue {
+  return {
+    project_status: snapshot.run.status,
+    current_task_id: activeTaskId,
+    tasks: snapshot.tasks.map((task) => ({
+      id: task.packet.taskId,
+      title: task.packet.title,
+      status: mapSnapshotTaskStatusToQueueStatus(task.status),
+      class: mapSnapshotTaskPacketToQueueClass(task.packet),
+      depends_on: [...task.packet.dependencies],
+      acceptance_criteria: [...task.packet.acceptanceCriteria],
+      verification: [...task.packet.verificationSteps],
+      evidence: [],
+      blocker:
+        task.status === "blocked"
+          ? "runtime task blocked"
+          : task.status === "review_blocked"
+            ? "awaiting required reviews"
+            : null
+    }))
+  };
+}
+
 function alignQueueToActiveTask(
   candidate: TaskQueue | Record<string, unknown> | undefined,
   taskId: string
@@ -1490,6 +1759,194 @@ function readDaemonSessionId(metadata: ProjectRuntimeStateRecord["metadata"] | R
   return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : undefined;
 }
 
+function readDaemonStagnationMetadata(
+  metadata: ProjectRuntimeStateRecord["metadata"] | Record<string, unknown> | undefined
+): DaemonStagnationMetadata | undefined {
+  const candidate = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).devgodDaemon
+    : undefined;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const stagnation = (candidate as Record<string, unknown>).stagnation;
+  if (!stagnation || typeof stagnation !== "object" || Array.isArray(stagnation)) {
+    return undefined;
+  }
+
+  const record = stagnation as Record<string, unknown>;
+  const runId = typeof record.runId === "string" && record.runId.trim().length > 0 ? record.runId.trim() : undefined;
+  const taskId = typeof record.taskId === "string" && record.taskId.trim().length > 0 ? record.taskId.trim() : undefined;
+  const directiveKind =
+    record.directiveKind === "complete" ||
+    record.directiveKind === "dispatch_owner" ||
+    record.directiveKind === "dispatch_reviews" ||
+    record.directiveKind === "apply_recovery" ||
+    record.directiveKind === "continue_analysis" ||
+    record.directiveKind === "blocked"
+      ? record.directiveKind
+      : undefined;
+  const progressKey =
+    typeof record.progressKey === "string" && record.progressKey.trim().length > 0 ? record.progressKey.trim() : undefined;
+  const count = typeof record.count === "number" && Number.isInteger(record.count) && record.count > 0 ? record.count : undefined;
+  if (!runId || !taskId || !directiveKind || !progressKey || !count) {
+    return undefined;
+  }
+
+  const status =
+    record.lastStatus === "completed" ||
+    record.lastStatus === "blocked" ||
+    record.lastStatus === "needs_review" ||
+    record.lastStatus === "needs_followup"
+      ? record.lastStatus
+      : undefined;
+
+  return {
+    runId,
+    taskId,
+    directiveKind,
+    progressKey,
+    count,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date(0).toISOString(),
+    lastStatus: status,
+    lastSummary: typeof record.lastSummary === "string" ? record.lastSummary : undefined,
+    lastBlockers: Array.isArray(record.lastBlockers)
+      ? record.lastBlockers.filter((value): value is string => typeof value === "string")
+      : undefined
+  };
+}
+
+function parseDaemonTurnMessage(message: string | undefined): ParsedDaemonTurnMessage | undefined {
+  if (!message) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    const summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0 ? parsed.summary.trim() : undefined;
+    const status =
+      parsed.status === "completed" ||
+      parsed.status === "blocked" ||
+      parsed.status === "needs_review" ||
+      parsed.status === "needs_followup"
+        ? parsed.status
+        : undefined;
+    const blockers = Array.isArray(parsed.blockers)
+      ? parsed.blockers.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    const scopeRequestCandidate =
+      parsed.scope_request && typeof parsed.scope_request === "object" && !Array.isArray(parsed.scope_request)
+        ? (parsed.scope_request as Record<string, unknown>)
+        : undefined;
+    const blockedPaths = Array.isArray(scopeRequestCandidate?.blocked_paths)
+      ? scopeRequestCandidate.blocked_paths.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const requestedWriteScope = Array.isArray(scopeRequestCandidate?.requested_write_scope)
+      ? scopeRequestCandidate.requested_write_scope.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const scopeRequest =
+      blockedPaths.length > 0 || requestedWriteScope.length > 0
+        ? {
+            blockedPaths,
+            requestedWriteScope,
+            reason:
+              typeof scopeRequestCandidate?.reason === "string" && scopeRequestCandidate.reason.trim().length > 0
+                ? scopeRequestCandidate.reason.trim()
+                : undefined
+          }
+        : undefined;
+
+    if (!summary || !status) {
+      return undefined;
+    }
+
+    return {
+      summary,
+      status,
+      blockers,
+      scopeRequest
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function buildDirectiveProgressFingerprint(directive: RunExecutionPlan["directive"]): string {
+  if (directive.kind === "dispatch_owner") {
+    return JSON.stringify({
+      kind: directive.kind,
+      taskId: directive.recommendation.taskId,
+      targetRole: directive.recommendation.targetRole
+    });
+  }
+
+  if (directive.kind === "dispatch_reviews") {
+    return JSON.stringify({
+      kind: directive.kind,
+      targets: directive.recommendations.map((recommendation) => ({
+        taskId: recommendation.taskId,
+        reviewRole: recommendation.targetReviewRole
+      }))
+    });
+  }
+
+  if (directive.kind === "continue_analysis") {
+    return JSON.stringify({
+      kind: directive.kind,
+      targetId: directive.targetId,
+      source: directive.source,
+      actions: directive.actions.map((action) => action.kind),
+      nextActions: directive.nextActions
+    });
+  }
+
+  if (directive.kind === "blocked") {
+    return JSON.stringify({
+      kind: directive.kind,
+      blockers: directive.blockers
+    });
+  }
+
+  if (directive.kind === "apply_recovery") {
+    return JSON.stringify({
+      kind: directive.kind,
+      actions: directive.actions.map((action) => action.id)
+    });
+  }
+
+  return JSON.stringify({ kind: directive.kind });
+}
+
+function buildDaemonProgressKey(input: {
+  runtimeState: ProjectRuntimeStateRecord | undefined;
+  snapshot: RunStatusSnapshot;
+  directive: RunExecutionPlan["directive"];
+  activeTaskId: string;
+}): string {
+  const activeTask = input.snapshot.tasks.find((task) => task.packet.taskId === input.activeTaskId);
+  return JSON.stringify({
+    runtimeActiveRunId: input.runtimeState?.activeRunId ?? null,
+    runtimeActiveTaskId: input.runtimeState?.activeTaskId ?? null,
+    runStatus: input.snapshot.run.status,
+    activeTaskStatus: activeTask?.status ?? null,
+    activeTaskUpdatedAt: activeTask?.updatedAt ?? null,
+    directive: buildDirectiveProgressFingerprint(input.directive)
+  });
+}
+
+function daemonMessageHasScopeConflict(message: ParsedDaemonTurnMessage | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const combined = [message.summary, ...message.blockers].join("\n");
+  return /\bout of scope\b|\bwrite scope\b|\bscope mismatch\b|\boutside the allowed scope\b/i.test(combined);
+}
+
 async function withDaemonLock<T>(cwd: string, fn: () => Promise<T>): Promise<T> {
   const daemonDir = path.join(cwd, ".devgod", "work", "daemon");
   const lockPath = path.join(daemonDir, "daemon.lock");
@@ -1531,6 +1988,22 @@ async function runCodexTurnViaCli(input: RunCodexTurnInput): Promise<RunCodexTur
           blockers: {
             type: "array",
             items: { type: "string" }
+          },
+          scope_request: {
+            type: "object",
+            properties: {
+              blocked_paths: {
+                type: "array",
+                items: { type: "string" }
+              },
+              requested_write_scope: {
+                type: "array",
+                items: { type: "string" }
+              },
+              reason: { type: "string" }
+            },
+            required: ["blocked_paths", "requested_write_scope"],
+            additionalProperties: false
           }
         },
         required: ["summary", "status", "blockers"],
@@ -1635,6 +2108,8 @@ function buildDaemonTaskPrompt(input: {
       : undefined,
     "Follow the repository AGENTS.md and the devgod workflow.",
     "Use runtime-backed devgod commands when they are needed for proof, status, or advancement.",
+    "If a required edit falls outside the allowed write scope, stop immediately, name the exact blocked paths, and include a scope_request with blocked_paths, requested_write_scope, and a short reason describing the minimum safe scope expansion.",
+    "Do not spend another turn repeating the same blocked attempt when runtime state has not changed.",
     "Complete the task if possible; otherwise stop at the real blocker and state it explicitly.",
     input.operatorNotes ? `Operator notes: ${input.operatorNotes}` : undefined,
     input.directive.kind === "continue_analysis"
@@ -2446,11 +2921,13 @@ async function writeDaemonOperatorHandoff(
     state: "blocked";
     blockerKind:
       | "bootstrapping"
+      | "runtime_preflight"
       | "missing_active_runtime"
       | "review_queue"
       | "review_execution_unsupported"
       | "operator_required_continuation"
       | "workflow_proof_failure"
+      | "scope_expansion_required"
       | "runtime_blocked"
       | "recovery_required"
       | "runtime_task_missing"
@@ -2467,6 +2944,7 @@ async function writeDaemonOperatorHandoff(
     detailFiles: {
       continuationStatus?: string | undefined;
       reviewQueueStatus?: string | undefined;
+      scopeExpansionRequest?: string | undefined;
     };
     updatedAt: string;
   }
@@ -2486,11 +2964,37 @@ async function clearDaemonOperatorHandoff(cwd: string): Promise<void> {
   });
 }
 
+async function writeDaemonScopeExpansionRequest(
+  cwd: string,
+  request: {
+    runId: string;
+    taskId: string;
+    directiveKind: RunExecutionPlan["directive"]["kind"];
+    blockedPaths: string[];
+    requestedWriteScope: string[];
+    reason: string;
+    updatedAt: string;
+  }
+): Promise<string> {
+  const daemonDir = path.join(cwd, ".devgod", "work", "daemon");
+  await mkdir(daemonDir, { recursive: true });
+  const relativePath = ".devgod/work/daemon/scope-expansion-request.json";
+  await writeFile(path.join(cwd, relativePath), `${JSON.stringify(request, null, 2)}\n`, "utf8");
+  return relativePath;
+}
+
+async function clearDaemonScopeExpansionRequest(cwd: string): Promise<void> {
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "scope-expansion-request.json"), {
+    force: true
+  });
+}
+
 async function writeDaemonSupervisorStatus(
   cwd: string,
   status: {
     state: "completed" | "blocked" | "max_cycles_reached";
     blockerKind?:
+      | "runtime_preflight"
       | "missing_review_actor_bindings"
       | "handoff_missing"
       | "unsupported_handoff"
@@ -2545,6 +3049,7 @@ async function appendDaemonSupervisorHistory(
     recordedAt: string;
     state: "completed" | "blocked" | "max_cycles_reached";
     blockerKind?:
+      | "runtime_preflight"
       | "missing_review_actor_bindings"
       | "handoff_missing"
       | "unsupported_handoff"
@@ -2693,11 +3198,13 @@ async function readDaemonOperatorHandoff(
     const state = parsed.state === "blocked" ? "blocked" : "invalid";
     const blockerKind =
       parsed.blockerKind === "bootstrapping" ||
+      parsed.blockerKind === "runtime_preflight" ||
       parsed.blockerKind === "missing_active_runtime" ||
       parsed.blockerKind === "review_queue" ||
       parsed.blockerKind === "review_execution_unsupported" ||
       parsed.blockerKind === "operator_required_continuation" ||
       parsed.blockerKind === "workflow_proof_failure" ||
+      parsed.blockerKind === "scope_expansion_required" ||
       parsed.blockerKind === "runtime_blocked" ||
       parsed.blockerKind === "recovery_required" ||
       parsed.blockerKind === "runtime_task_missing" ||
@@ -2756,6 +3263,10 @@ async function readDaemonOperatorHandoff(
         reviewQueueStatus:
           typeof detailFilesCandidate.reviewQueueStatus === "string"
             ? detailFilesCandidate.reviewQueueStatus
+            : undefined,
+        scopeExpansionRequest:
+          typeof detailFilesCandidate.scopeExpansionRequest === "string"
+            ? detailFilesCandidate.scopeExpansionRequest
             : undefined
       },
       updatedAt
@@ -2798,6 +3309,7 @@ async function readDaemonSupervisorStatus(
         ? parsed.state
         : "invalid";
     const blockerKind =
+      parsed.blockerKind === "runtime_preflight" ||
       parsed.blockerKind === "missing_review_actor_bindings" ||
       parsed.blockerKind === "handoff_missing" ||
       parsed.blockerKind === "unsupported_handoff" ||
@@ -2956,6 +3468,7 @@ async function readDaemonSupervisorHistory(
           return [];
         }
         const blockerKind =
+          parsed.blockerKind === "runtime_preflight" ||
           parsed.blockerKind === "missing_review_actor_bindings" ||
           parsed.blockerKind === "handoff_missing" ||
           parsed.blockerKind === "unsupported_handoff" ||
@@ -4052,7 +4565,7 @@ async function inspectQdrantHealthWithRetry(
 export async function executeDoctorCommandFromArgs(
   args: readonly string[],
   options: ExecuteDoctorCommandOptions
-) {
+): Promise<DoctorCommandReport> {
   const env = options.env ?? process.env;
   const explicitRunId = resolveCommandFlag(args, "--run-id");
   const projectSelector =
@@ -4211,7 +4724,490 @@ export async function executeDoctorCommandFromArgs(
   };
 }
 
+function buildDoctorExecutionReady(report: DoctorCommandReport): boolean {
+  return report.ok && report.checks.reviewIdentity.ok;
+}
+
+function isDoctorBootstrapRepairableError(error: unknown): boolean {
+  const message = extractRuntimeExecutionErrorMessage(error);
+  return (
+    /is not bootstrapped/i.test(message) ||
+    /doctor could not resolve project context/i.test(message)
+  );
+}
+
+async function runSpawnedCommand(
+  command: string,
+  args: readonly string[],
+  options: {
+    cwd: string;
+    env: EnvShape;
+  }
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: "inherit"
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`${command} exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+async function runLocalDoctorSetupRepair(cwd: string, env: EnvShape): Promise<void> {
+  const isWindows = process.platform === "win32";
+  const candidates = isWindows
+    ? [
+        path.join(cwd, "scripts", "devgod-setup.ps1"),
+        path.join(cwd, "scripts", "setup-devgod.ps1")
+      ]
+    : [
+        path.join(cwd, "scripts", "devgod-setup.sh"),
+        path.join(cwd, "scripts", "setup-devgod.sh")
+      ];
+
+  for (const candidate of candidates) {
+    if (!(await runtimePathExists(candidate))) {
+      continue;
+    }
+
+    if (isWindows) {
+      await runSpawnedCommand(
+        "powershell",
+        ["-ExecutionPolicy", "Bypass", "-File", candidate],
+        { cwd, env }
+      );
+      return;
+    }
+
+    await runSpawnedCommand("bash", [candidate], { cwd, env });
+    return;
+  }
+
+  const relativeCandidates = candidates.map((candidate) => path.relative(cwd, candidate) || candidate);
+  throw new Error(`no local devgod setup script found (${relativeCandidates.join(", ")})`);
+}
+
+async function runBootstrapAndVerifySetupRepair(): Promise<void> {
+  await bootstrapProject();
+  await verifySetup();
+}
+
+function resolveDoctorRepairPlan(input: {
+  report?: DoctorCommandReport | undefined;
+  error?: unknown;
+}): {
+  step: "setup_script" | "bootstrap_verify" | undefined;
+  skippedReasons: string[];
+} {
+  const skippedReasons: string[] = [];
+
+  if (input.error) {
+    if (isRuntimeExecutionPreflightConnectionError(input.error)) {
+      return {
+        step: "setup_script",
+        skippedReasons
+      };
+    }
+
+    if (isDoctorBootstrapRepairableError(input.error)) {
+      return {
+        step: "bootstrap_verify",
+        skippedReasons
+      };
+    }
+
+    return {
+      step: undefined,
+      skippedReasons: [
+        `doctor failed before a safe repair plan could be derived: ${extractRuntimeExecutionErrorMessage(input.error)}`
+      ]
+    };
+  }
+
+  const report = input.report;
+  if (!report) {
+    return {
+      step: undefined,
+      skippedReasons: ["doctor did not produce a report"]
+    };
+  }
+
+  if (!report.checks.reviewIdentity.ok) {
+    skippedReasons.push(
+      `review identity requires live operator remediation: ${report.checks.reviewIdentity.summary}`
+    );
+  }
+
+  if (!report.checks.registration.ok || !report.checks.repoPath.ok || !report.checks.dataRoot.ok) {
+    return {
+      step: "bootstrap_verify",
+      skippedReasons
+    };
+  }
+
+  if (!report.checks.qdrant.ok) {
+    return {
+      step: "setup_script",
+      skippedReasons
+    };
+  }
+
+  return {
+    step: undefined,
+    skippedReasons
+  };
+}
+
+function isDoctorSafeRuntimeReconcileAction(action: RuntimeStateReconcileAction): boolean {
+  return (
+    action === "rebuild_missing_runtime_state" ||
+    action === "sync_active_task_to_in_progress" ||
+    action === "activate_owner_dispatch_target"
+  );
+}
+
+function resolveDoctorRepairReconcileOptions(
+  options: ExecuteDoctorRepairCommandOptions
+): ExecuteReconcileRuntimeStateCommandOptions | undefined {
+  const getProjectContext =
+    options.getProjectContext ??
+    (options.findProjectContext
+      ? async (params: { workspaceSlug: string; projectSlug: string }) =>
+          options.findProjectContext!(params.workspaceSlug, params.projectSlug)
+      : undefined);
+
+  if (
+    !getProjectContext ||
+    !options.getProjectRuntimeState ||
+    !options.saveProjectRuntimeState ||
+    !options.getStatusSnapshot ||
+    !options.getExecutionPlan ||
+    !options.applyRecovery
+  ) {
+    return undefined;
+  }
+
+  return {
+    cwd: options.cwd,
+    env: options.env,
+    findLatestRun: options.findLatestRun,
+    getProjectContext,
+    getProjectRuntimeState: options.getProjectRuntimeState,
+    saveProjectRuntimeState: options.saveProjectRuntimeState,
+    getStatusSnapshot: options.getStatusSnapshot,
+    getExecutionPlan: options.getExecutionPlan,
+    applyRecovery: options.applyRecovery
+  };
+}
+
+export async function executeDoctorRepairCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteDoctorRepairCommandOptions
+): Promise<DoctorRepairCommandResult> {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const cleanArgs = stripCommandFlag(args, "--repair");
+  const runBootstrapRepair = options.runBootstrapRepair ?? runBootstrapAndVerifySetupRepair;
+  const runSetupRepair = options.runSetupRepair ?? runLocalDoctorSetupRepair;
+  const repairStepsAttempted: string[] = [];
+  const repairStepsApplied: string[] = [];
+  let pendingSemanticRepair = false;
+
+  let initialReport: DoctorCommandReport | undefined;
+  let initialError: unknown;
+  try {
+    initialReport = await executeDoctorCommandFromArgs(cleanArgs, options);
+  } catch (error) {
+    initialError = error;
+  }
+
+  const plan = resolveDoctorRepairPlan({
+    report: initialReport,
+    error: initialError
+  });
+  const baseRepair: DoctorRepairObservation = {
+    requested: true,
+    attempted: false,
+    status: "not_needed",
+    executionReady: initialReport ? buildDoctorExecutionReady(initialReport) : false,
+    stepsAttempted: repairStepsAttempted,
+    stepsApplied: repairStepsApplied,
+    skippedReasons: [...plan.skippedReasons]
+  };
+
+  if (!plan.step) {
+    if (initialError) {
+      return {
+        ok: false,
+        executionReady: false,
+        report: initialReport,
+        repair: {
+          ...baseRepair,
+          status: "failed",
+          failure: extractRuntimeExecutionErrorMessage(initialError)
+        }
+      };
+    }
+  }
+
+  let report = initialReport;
+  let skippedReasons = [...plan.skippedReasons];
+
+  if (plan.step) {
+    const stepLabel =
+      plan.step === "setup_script"
+        ? "run local devgod setup script"
+        : "rerun bootstrap-project and verify-setup";
+    repairStepsAttempted.push(stepLabel);
+
+    try {
+      if (plan.step === "setup_script") {
+        await runSetupRepair(cwd, env);
+      } else {
+        await runBootstrapRepair();
+      }
+      repairStepsApplied.push(stepLabel);
+      report = await executeDoctorCommandFromArgs(cleanArgs, options);
+      const finalPlan = resolveDoctorRepairPlan({
+        report
+      });
+      skippedReasons = [...new Set([...skippedReasons, ...finalPlan.skippedReasons])];
+      if (finalPlan.step) {
+        const executionReady = buildDoctorExecutionReady(report);
+        return {
+          ok: report.ok,
+          executionReady,
+          report,
+          repair: {
+            requested: true,
+            attempted: repairStepsAttempted.length > 0,
+            status: "failed",
+            executionReady,
+            stepsAttempted: repairStepsAttempted,
+            stepsApplied: repairStepsApplied,
+            skippedReasons,
+            failure: `safe repair did not clear ${finalPlan.step}`
+          }
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        executionReady: false,
+        report: initialReport,
+        repair: {
+          requested: true,
+          attempted: repairStepsAttempted.length > 0,
+          status: "failed",
+          executionReady: false,
+          stepsAttempted: repairStepsAttempted,
+          stepsApplied: repairStepsApplied,
+          skippedReasons,
+          failure: extractRuntimeExecutionErrorMessage(error)
+        }
+      };
+    }
+  }
+
+  const reconcileOptions = report ? resolveDoctorRepairReconcileOptions(options) : undefined;
+  if (report && buildDoctorExecutionReady(report) && reconcileOptions) {
+    const reconcileStepLabel = "reconcile authoritative runtime task state";
+    const reconcileArgs = [
+      "--workspace-slug",
+      report.project.workspaceSlug,
+      "--project-slug",
+      report.project.projectSlug,
+      "--format",
+      "json"
+    ] as const;
+    const preview = await executeReconcileRuntimeStateCommandFromArgs(reconcileArgs, reconcileOptions);
+
+    if (preview.result.runtimeStateChanged) {
+      if (isDoctorSafeRuntimeReconcileAction(preview.result.repairAction)) {
+        repairStepsAttempted.push(reconcileStepLabel);
+        await executeReconcileRuntimeStateCommandFromArgs(
+          [
+            ...reconcileArgs,
+            "--apply"
+          ],
+          reconcileOptions
+        );
+        repairStepsApplied.push(reconcileStepLabel);
+        report = await executeDoctorCommandFromArgs(cleanArgs, options);
+      } else {
+        pendingSemanticRepair = true;
+        skippedReasons = [
+          ...new Set([
+            ...skippedReasons,
+            `runtime reconcile requires operator review: ${preview.result.reason}`
+          ])
+        ];
+      }
+    }
+  }
+
+  if (!report) {
+    return {
+      ok: false,
+      executionReady: false,
+      report,
+      repair: {
+        requested: true,
+        attempted: repairStepsAttempted.length > 0,
+        status: "failed",
+        executionReady: false,
+        stepsAttempted: repairStepsAttempted,
+        stepsApplied: repairStepsApplied,
+        skippedReasons,
+        failure: "doctor did not produce a report after repair"
+      }
+    };
+  }
+
+  const executionReady = buildDoctorExecutionReady(report) && !pendingSemanticRepair;
+  const status =
+    repairStepsApplied.length > 0 ? "repaired" : skippedReasons.length > 0 ? "skipped" : "not_needed";
+
+  return {
+    ok: report.ok,
+    executionReady,
+    report,
+    repair: {
+      requested: true,
+      attempted: repairStepsAttempted.length > 0,
+      status,
+      executionReady,
+      stepsAttempted: repairStepsAttempted,
+      stepsApplied: repairStepsApplied,
+      skippedReasons
+    }
+  };
+}
+
+async function executeRuntimeExecutionPreflight(
+  args: readonly string[],
+  options: ExecuteRuntimePreflightCommandOptions
+): Promise<RuntimeExecutionPreflightFailure | undefined> {
+  if (options.skipRuntimePreflight) {
+    if (options.runtimePreflightBypassToken !== INTERNAL_RUNTIME_PREFLIGHT_BYPASS_TOKEN) {
+      throw new Error("skipRuntimePreflight is reserved for internal runtime execution orchestration");
+    }
+    return undefined;
+  }
+
+  const runtimeProjectContextResolver = (options as {
+    getProjectContext?: ((
+      params: {
+        workspaceSlug: string;
+        projectSlug: string;
+      }
+    ) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>) | undefined;
+  }).getProjectContext;
+  const findProjectContext =
+    options.findProjectContext ??
+    (runtimeProjectContextResolver
+      ? (workspaceSlug: string, projectSlug: string) =>
+          runtimeProjectContextResolver({
+            workspaceSlug,
+            projectSlug
+          })
+      : undefined);
+
+  if (!options.getStatusSnapshot || !options.getProjectRuntimeRegistration || !findProjectContext) {
+    if (options.requireRuntimePreflight) {
+      throw new Error(
+        "runtime execution preflight hooks are required for this execution path; use the CLI/runtime surface or provide the full runtime context"
+      );
+    }
+    return undefined;
+  }
+
+  const report = await executeDoctorCommandFromArgs(args, {
+    cwd: options.cwd,
+    env: options.env,
+    findLatestRun: options.findLatestRun,
+    getStatusSnapshot: options.getStatusSnapshot,
+    findProjectContext,
+    getProjectRuntimeRegistration: options.getProjectRuntimeRegistration,
+    inspectQdrant: options.inspectQdrant,
+    pathExists: options.pathExists,
+    inspectReviewIdentity: options.inspectReviewIdentity
+  });
+
+  const blockers = [...report.blockers];
+  if (!report.checks.reviewIdentity.ok) {
+    blockers.push(report.checks.reviewIdentity.summary);
+  }
+
+  if (blockers.length === 0) {
+    return undefined;
+  }
+
+  return {
+    blockers,
+    reason: `runtime execution preflight failed: ${blockers.join(" | ")}`,
+    activeRunId: report.run?.id ?? null,
+    nextActions: [
+      "run `npm run devgod:doctor -- --repair` to replay safe runtime setup healing",
+      "if task-state drift remains after services are healthy, run `npm run devgod:reconcile` before retrying execution"
+    ]
+  };
+}
+
 async function doctorCommand(args: readonly string[]) {
+  if (hasCommandFlag(args, "--repair")) {
+    await withClient(async (client) => {
+      const store = new PostgresStore(client);
+      const service = new DevgodCoreService(store);
+      const result = await executeDoctorRepairCommandFromArgs(args, {
+        cwd: process.cwd(),
+        env: process.env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        findProjectContext(workspaceSlug, projectSlug) {
+          return store.getProjectContext({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        }
+      });
+      console.log(JSON.stringify(result));
+    });
+    return;
+  }
+
   await withClient(async (client) => {
     const store = new PostgresStore(client);
     const service = new DevgodCoreService(store);
@@ -4542,6 +5538,19 @@ export async function executeLoopCommandFromArgs(
   args: readonly string[],
   options: ExecuteLoopCommandOptions
 ): Promise<{ format: "json" | "text"; result: LoopCommandResult }> {
+  const requiresRuntimeMutationPreflight =
+    args.includes("--apply-safe-recovery") || args.includes("--execute-supported-directives");
+  const runtimePreflightFailure = await executeRuntimeExecutionPreflight(
+    args,
+    {
+      ...(options as ExecuteRuntimePreflightCommandOptions),
+      requireRuntimePreflight: requiresRuntimeMutationPreflight
+    }
+  );
+  if (runtimePreflightFailure) {
+    throw new Error(runtimePreflightFailure.reason);
+  }
+
   const runId = await resolveRunIdForCommand(args, {
     env: options.env,
     findLatestRun: options.findLatestRun
@@ -4610,85 +5619,98 @@ export async function executeLoopCommandFromArgs(
 }
 
 async function loopCommand(args: readonly string[]) {
-  await withClient(async (client) => {
-    const store = new PostgresStore(client);
-    const service = new DevgodCoreService(store);
-    const { format, result } = await executeLoopCommandFromArgs(args, {
-      cwd: process.cwd(),
-      env: process.env,
-      findLatestRun(workspaceSlug, projectSlug) {
-        return store.findLatestRun({ workspaceSlug, projectSlug });
-      },
-      getStatusSnapshot(runId) {
-        return service.getStatus(runId);
-      },
-      getExecutionPlan(runId, staleAfterHours) {
-        return service.getExecutionPlan(runId, { staleAfterHours });
-      },
-      applyRecovery(runId, actionIds, staleAfterHours) {
-        return service.applyRecovery(runId, actionIds, { staleAfterHours });
-      },
-      async executeDirectiveStep(runId, input) {
-        const executeReviewRecommendation =
-          input.reviewCommands.length > 0
-            ? createQueuedLoopReviewExecutor(
-                runId,
-                input.reviewCommands,
-                await createLiveLoopReviewCommandExecutor({
-                  cwd: process.cwd(),
-                  env: process.env,
-                  recordReview({ command, resolver }) {
-                    const reviewService = new DevgodCoreService(store, {
-                      resolveReviewActionContext: resolver
-                    });
-                    return reviewService.recordReview(
-                      command.runId,
-                      command.taskId,
-                      command.actor,
-                      command.review
-                    );
-                  }
-                })
-              )
-            : undefined;
-        const executeContinuationAction = createSupportedContinuationExecutor({
-          env: process.env,
-          getStatusSnapshot(runId) {
-            return service.getStatus(runId);
-          },
-          getReviews(runId, taskId) {
-            return store.getReviews(runId, taskId);
-          },
-          getApprovals(runId, taskId) {
-            return store.getApprovals(runId, taskId);
-          },
-          upsertCoverageGaps(runId, gaps) {
-            return service.upsertCoverageGaps(runId, gaps);
-          },
-          recordProgressProof(runId, proof) {
-            return service.recordProgressProof(runId, proof);
-          },
-          checkpointRun(runId, checkpoint, checkpointOptions) {
-            return service.checkpointRun(runId, checkpoint, checkpointOptions);
-          }
-        });
+  try {
+    await withClient(async (client) => {
+      const store = new PostgresStore(client);
+      const service = new DevgodCoreService(store);
+      const { format, result } = await executeLoopCommandFromArgs(args, {
+        cwd: process.cwd(),
+        env: process.env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        findProjectContext(workspaceSlug, projectSlug) {
+          return store.getProjectContext({ workspaceSlug, projectSlug });
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          const executeReviewRecommendation =
+            input.reviewCommands.length > 0
+              ? createQueuedLoopReviewExecutor(
+                  runId,
+                  input.reviewCommands,
+                  await createLiveLoopReviewCommandExecutor({
+                    cwd: process.cwd(),
+                    env: process.env,
+                    recordReview({ command, resolver }) {
+                      const reviewService = new DevgodCoreService(store, {
+                        resolveReviewActionContext: resolver
+                      });
+                      return reviewService.recordReview(
+                        command.runId,
+                        command.taskId,
+                        command.actor,
+                        command.review
+                      );
+                    }
+                  })
+                )
+              : undefined;
+          const executeContinuationAction = createSupportedContinuationExecutor({
+            env: process.env,
+            getStatusSnapshot(runId) {
+              return service.getStatus(runId);
+            },
+            getReviews(runId, taskId) {
+              return store.getReviews(runId, taskId);
+            },
+            getApprovals(runId, taskId) {
+              return store.getApprovals(runId, taskId);
+            },
+            upsertCoverageGaps(runId, gaps) {
+              return service.upsertCoverageGaps(runId, gaps);
+            },
+            recordProgressProof(runId, proof) {
+              return service.recordProgressProof(runId, proof);
+            },
+            checkpointRun(runId, checkpoint, checkpointOptions) {
+              return service.checkpointRun(runId, checkpoint, checkpointOptions);
+            }
+          });
 
-        return service.executeDirectiveStep(runId, {
-          staleAfterHours: input.staleAfterHours,
-          ownerActor: input.ownerActor,
-          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {}),
-          executeContinuationAction
-        });
+          return service.executeDirectiveStep(runId, {
+            staleAfterHours: input.staleAfterHours,
+            ownerActor: input.ownerActor,
+            ...(executeReviewRecommendation ? { executeReviewRecommendation } : {}),
+            executeContinuationAction
+          });
+        }
+      });
+
+      if (format === "text") {
+        process.stdout.write(formatLoopCommandResult(result));
+        return;
       }
+
+      console.log(JSON.stringify(result));
     });
-
-    if (format === "text") {
-      process.stdout.write(formatLoopCommandResult(result));
-      return;
+  } catch (error) {
+    if (isRuntimeExecutionPreflightConnectionError(error)) {
+      throw new Error(buildRuntimeExecutionConnectionFailure(error).reason);
     }
-
-    console.log(JSON.stringify(result));
-  });
+    throw error;
+  }
 }
 
 export async function executeReportCommandFromArgs(
@@ -4988,15 +6010,35 @@ function formatActiveWorkflowContent(taskId: string | null, queue: TaskQueue): s
   return `${lines.join("\n")}\n`;
 }
 
+async function writeFileIfChanged(filePath: string, content: string): Promise<boolean> {
+  try {
+    const existing = await readFile(filePath, "utf8");
+    if (existing === content) {
+      return false;
+    }
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : "";
+    if (code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await writeFile(filePath, content, "utf8");
+  return true;
+}
+
 async function syncRuntimeWorkflowExports(
   cwd: string | undefined,
   runtimeState: {
     activeTaskId?: string | null | undefined;
     taskQueue: ProjectRuntimeStateRecord["taskQueue"];
   }
-): Promise<void> {
+): Promise<boolean> {
   if (!cwd) {
-    return;
+    return false;
   }
 
   const queue = parseTaskQueueRecord(runtimeState.taskQueue);
@@ -5008,8 +6050,15 @@ async function syncRuntimeWorkflowExports(
   const workRoot = path.join(devgodRoot, "work");
 
   await mkdir(workRoot, { recursive: true });
-  await writeFile(path.join(workRoot, "task-queue.json"), `${JSON.stringify(queue, null, 2)}\n`, "utf8");
-  await writeFile(path.join(devgodRoot, "ACTIVE"), formatActiveWorkflowContent(activeTaskId ?? null, queue), "utf8");
+  const queueChanged = await writeFileIfChanged(
+    path.join(workRoot, "task-queue.json"),
+    `${JSON.stringify(queue, null, 2)}\n`
+  );
+  const activeChanged = await writeFileIfChanged(
+    path.join(devgodRoot, "ACTIVE"),
+    formatActiveWorkflowContent(activeTaskId ?? null, queue)
+  );
+  return queueChanged || activeChanged;
 }
 
 function formatAdvanceActiveTaskCommandResult(result: AdvanceActiveTaskCommandResult): string {
@@ -5031,6 +6080,212 @@ function formatSyncRuntimeExportsCommandResult(result: SyncRuntimeExportsCommand
     `queue-current-task: ${result.queue.current_task_id ?? "none"}`,
     `project-status: ${result.queue.project_status}`
   ].join("\n");
+}
+
+function formatReconcileRuntimeStateCommandResult(result: ReconcileRuntimeStateCommandResult): string {
+  return [
+    `mode: ${result.mode}`,
+    `workspace: ${result.workspaceSlug}`,
+    `project: ${result.projectSlug}`,
+    `active-run: ${result.activeRunId ?? "none"}`,
+    `active-task: ${result.activeTaskId ?? "none"}`,
+    `repair-action: ${result.repairAction}`,
+    `runtime-state-changed: ${result.runtimeStateChanged ? "yes" : "no"}`,
+    `local-exports-synced: ${result.localExportsSynced ? "yes" : "no"}`,
+    `directive: ${result.executionPlanDirectiveKind ?? "none"}`,
+    `reason: ${result.reason}`
+  ].join("\n");
+}
+
+function buildRuntimeStateFromSnapshot(input: {
+  projectContext: { workspace: WorkspaceRecord; project: ProjectRecord };
+  existingState: ProjectRuntimeStateRecord | undefined;
+  runId: string;
+  activeTaskId: string | null;
+  snapshot: RunStatusSnapshot;
+  now: string;
+}): ProjectRuntimeStateRecord {
+  return {
+    projectId: input.projectContext.project.id,
+    workspaceId: input.projectContext.workspace.id,
+    activeRunId: input.runId,
+    activeTaskId: input.activeTaskId ?? undefined,
+    taskQueue: buildAuthoritativeTaskQueueFromSnapshot(input.snapshot, input.activeTaskId),
+    productState: input.existingState?.productState ?? buildDefaultProductState(),
+    lastVerifiedRunId: input.existingState?.lastVerifiedRunId,
+    metadata: input.existingState?.metadata ?? {},
+    createdAt: input.existingState?.createdAt ?? input.now,
+    updatedAt: input.now
+  };
+}
+
+export async function executeReconcileRuntimeStateCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteReconcileRuntimeStateCommandOptions
+): Promise<{ format: "json" | "text"; result: ReconcileRuntimeStateCommandResult }> {
+  const env = options.env ?? process.env;
+  const format = resolveFormatFlag(args);
+  const apply = hasCommandFlag(args, "--apply");
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+  const staleAfterHoursValue = resolveCommandFlag(args, "--stale-after-hours") ?? "24";
+  const staleAfterHours = Number.parseInt(staleAfterHoursValue, 10);
+
+  if (!Number.isInteger(staleAfterHours) || staleAfterHours <= 0) {
+    throw new Error(`Invalid --stale-after-hours value: ${staleAfterHoursValue}`);
+  }
+  if (!workspaceSlug || !projectSlug) {
+    throw new Error("reconcile-runtime-state requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags");
+  }
+
+  const projectContext = await options.getProjectContext({
+    workspaceSlug,
+    projectSlug
+  });
+  if (!projectContext) {
+    throw new Error(`Project ${workspaceSlug}/${projectSlug} is not bootstrapped`);
+  }
+
+  const existingState = await options.getProjectRuntimeState(projectContext.project.id);
+  const latestRun = existingState?.activeRunId
+    ? undefined
+    : await options.findLatestRun?.(workspaceSlug, projectSlug);
+  const resolvedRunId = existingState?.activeRunId ?? latestRun?.id ?? null;
+  const existingQueue = parseTaskQueueRecordOrDefault(existingState?.taskQueue);
+
+  if (!resolvedRunId) {
+    const localExportsSynced =
+      apply &&
+      await syncRuntimeWorkflowExports(options.cwd, {
+        activeTaskId: existingState?.activeTaskId ?? null,
+        taskQueue: existingState?.taskQueue ?? existingQueue
+      });
+    return {
+      format,
+      result: {
+        mode: apply ? "applied" : "dry_run",
+        workspaceSlug,
+        projectSlug,
+        activeRunId: existingState?.activeRunId ?? null,
+        activeTaskId: existingState?.activeTaskId ?? null,
+        queue: existingQueue,
+        repairAction: "none",
+        runtimeStateChanged: false,
+        localExportsSynced,
+        reason: "no runtime run is available to reconcile"
+      }
+    };
+  }
+
+  const snapshot = await options.getStatusSnapshot(resolvedRunId);
+  const authoritativeInProgressTasks = snapshot.tasks.filter((task) => task.status === "in_progress");
+  const inProgressTaskId =
+    authoritativeInProgressTasks.length === 1 ? authoritativeInProgressTasks[0]!.packet.taskId : undefined;
+
+  let desiredActiveTaskId: string | null =
+    existingState?.activeTaskId && existingState.activeTaskId.trim().length > 0
+      ? existingState.activeTaskId.trim()
+      : null;
+  let repairAction: RuntimeStateReconcileAction = !existingState ? "rebuild_missing_runtime_state" : "none";
+  let reason = !existingState
+    ? "runtime state record is missing and can be rebuilt from the authoritative runtime snapshot"
+    : "runtime state already matches authoritative runtime signals";
+  let executionPlanDirectiveKind: RunExecutionPlan["directive"]["kind"] | undefined;
+
+  if (authoritativeInProgressTasks.length > 1) {
+    desiredActiveTaskId = existingState?.activeTaskId ?? null;
+    reason = `multiple in-progress runtime tasks make automatic reconciliation unsafe: ${authoritativeInProgressTasks
+      .map((task) => task.packet.taskId)
+      .join(", ")}`;
+    if (repairAction === "rebuild_missing_runtime_state") {
+      repairAction = "none";
+    }
+  } else if (inProgressTaskId) {
+    desiredActiveTaskId = inProgressTaskId;
+    if (!existingState) {
+      reason = `rebuilt missing runtime state from the authoritative in-progress task ${inProgressTaskId}`;
+    } else if (existingState.activeTaskId !== inProgressTaskId) {
+      repairAction = "sync_active_task_to_in_progress";
+      reason = `runtime active task drifted from the authoritative in-progress task ${inProgressTaskId}`;
+    }
+  } else {
+    const executionPlan = await options.getExecutionPlan(resolvedRunId, staleAfterHours);
+    executionPlanDirectiveKind = executionPlan.directive.kind;
+
+    if (
+      executionPlan.directive.kind === "dispatch_owner" &&
+      snapshot.nextTaskIds.length === 1 &&
+      snapshot.nextTaskIds[0] === executionPlan.directive.recommendation.taskId
+    ) {
+      desiredActiveTaskId = executionPlan.directive.recommendation.taskId;
+      if (!existingState) {
+        reason = `rebuilt missing runtime state and activated the unique owner-dispatch target ${desiredActiveTaskId}`;
+      } else if (existingState.activeTaskId !== desiredActiveTaskId) {
+        repairAction = "activate_owner_dispatch_target";
+        reason = `activated the unique owner-dispatch target ${desiredActiveTaskId}`;
+      }
+    } else if (
+      executionPlan.directive.kind === "complete" ||
+      (snapshot.tasks.length > 0 && snapshot.tasks.every((task) => task.status === "approved" || task.status === "done"))
+    ) {
+      desiredActiveTaskId = null;
+      if (!existingState) {
+        reason = "rebuilt missing runtime state for a completed run with no active task";
+      } else if (existingState.activeTaskId || existingQueue.current_task_id) {
+        repairAction = "clear_completed_active_task";
+        reason = "cleared a stale active task from a completed runtime run";
+      }
+    } else {
+      desiredActiveTaskId = existingState?.activeTaskId ?? null;
+      if (repairAction === "rebuild_missing_runtime_state") {
+        reason = "rebuilt missing runtime state from the authoritative runtime snapshot without changing task ownership";
+      }
+    }
+  }
+
+  const nextState = buildRuntimeStateFromSnapshot({
+    projectContext,
+    existingState,
+    runId: resolvedRunId,
+    activeTaskId: desiredActiveTaskId,
+    snapshot,
+    now: new Date().toISOString()
+  });
+  const runtimeStateChanged =
+    !existingState ||
+    existingState.activeRunId !== nextState.activeRunId ||
+    (existingState.activeTaskId ?? null) !== (nextState.activeTaskId ?? null) ||
+    JSON.stringify(parseTaskQueueRecordOrDefault(existingState.taskQueue)) !==
+      JSON.stringify(parseTaskQueueRecord(nextState.taskQueue));
+  const normalizedRepairAction =
+    runtimeStateChanged && repairAction === "none" ? "rebuild_stale_runtime_queue" : repairAction;
+
+  if (apply && runtimeStateChanged) {
+    await options.saveProjectRuntimeState(nextState);
+  }
+  const localExportsSynced =
+    apply &&
+    await syncRuntimeWorkflowExports(options.cwd, {
+      activeTaskId: nextState.activeTaskId ?? null,
+      taskQueue: nextState.taskQueue
+    });
+
+  return {
+    format,
+    result: {
+      mode: apply ? "applied" : "dry_run",
+      workspaceSlug,
+      projectSlug,
+      activeRunId: nextState.activeRunId ?? null,
+      activeTaskId: nextState.activeTaskId ?? null,
+      queue: parseTaskQueueRecord(nextState.taskQueue),
+      repairAction: normalizedRepairAction,
+      runtimeStateChanged,
+      localExportsSynced,
+      reason,
+      executionPlanDirectiveKind
+    }
+  };
 }
 
 export async function executeSyncRuntimeExportsCommandFromArgs(
@@ -5174,6 +6429,26 @@ function formatDaemonCommandResult(result: DaemonCommandResult): string {
   }
 
   return lines.join("\n");
+}
+
+function formatRuntimeExecutionPreflightFailureResult(input: {
+  status: "blocked";
+  reason: string;
+  workspaceSlug: string;
+  projectSlug: string;
+  activeRunId: string | null;
+  activeTaskId: string | null;
+  sessionId: string | null;
+}): string {
+  return [
+    `status: ${input.status}`,
+    `reason: ${input.reason}`,
+    `workspace: ${input.workspaceSlug}`,
+    `project: ${input.projectSlug}`,
+    `active-run: ${input.activeRunId ?? "none"}`,
+    `active-task: ${input.activeTaskId ?? "none"}`,
+    `session-id: ${input.sessionId ?? "none"}`
+  ].join("\n");
 }
 
 function formatSupervisorCommandResult(result: SupervisorCommandResult): string {
@@ -5607,11 +6882,13 @@ export async function executeDaemonCommandFromArgs(
     const blockedResult = async (input: {
       blockerKind:
         | "bootstrapping"
+        | "runtime_preflight"
         | "missing_active_runtime"
         | "review_queue"
         | "review_execution_unsupported"
         | "operator_required_continuation"
         | "workflow_proof_failure"
+        | "scope_expansion_required"
         | "runtime_blocked"
         | "recovery_required"
         | "runtime_task_missing"
@@ -5625,6 +6902,7 @@ export async function executeDaemonCommandFromArgs(
       detailFiles?: {
         continuationStatus?: string | undefined;
         reviewQueueStatus?: string | undefined;
+        scopeExpansionRequest?: string | undefined;
       } | undefined;
     }) => {
       await writeDaemonOperatorHandoff(cwd, {
@@ -5656,6 +6934,69 @@ export async function executeDaemonCommandFromArgs(
       };
     };
 
+    const attemptRuntimeReconcile = async (cycle: number): Promise<ReconcileRuntimeStateCommandResult | undefined> => {
+      const baseArgs = [
+        "--workspace-slug",
+        workspaceSlug,
+        "--project-slug",
+        projectSlug,
+        "--stale-after-hours",
+        String(staleAfterHours),
+        "--format",
+        "json"
+      ] as const;
+      const preview = await executeReconcileRuntimeStateCommandFromArgs(
+        baseArgs,
+        options
+      );
+      const repairAction = preview.result.repairAction;
+      const shouldApply =
+        repairAction === "rebuild_missing_runtime_state" ||
+        repairAction === "sync_active_task_to_in_progress" ||
+        repairAction === "activate_owner_dispatch_target";
+
+      if (!preview.result.runtimeStateChanged || !shouldApply) {
+        return undefined;
+      }
+
+      const { result } = await executeReconcileRuntimeStateCommandFromArgs(
+        [
+          ...baseArgs,
+          "--apply",
+        ],
+        options
+      );
+
+      cycles.push({
+        cycle,
+        directiveKind: result.executionPlanDirectiveKind ?? "blocked",
+        action: "reconcile_runtime_state",
+        runId: result.activeRunId ?? "none",
+        taskId: result.activeTaskId,
+        sessionId: latestSessionId ?? null,
+        summary: `${result.repairAction}: ${result.reason}`
+      });
+      return result;
+    };
+
+    const runtimePreflightFailure = await executeRuntimeExecutionPreflight(
+      args,
+      {
+        ...(options as ExecuteRuntimePreflightCommandOptions),
+        requireRuntimePreflight: true
+      }
+    );
+    if (runtimePreflightFailure) {
+      return blockedResult({
+        blockerKind: "runtime_preflight",
+        reason: runtimePreflightFailure.reason,
+        cycle: 1,
+        activeRunId: runtimePreflightFailure.activeRunId,
+        activeTaskId: null,
+        nextActions: runtimePreflightFailure.nextActions
+      });
+    }
+
     for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
       const projectContext = await options.getProjectContext({
         workspaceSlug,
@@ -5672,12 +7013,15 @@ export async function executeDaemonCommandFromArgs(
         });
       }
 
+      await attemptRuntimeReconcile(cycle);
+
       const projectRuntimeState = await options.getProjectRuntimeState(projectContext.project.id);
       const activeRunId = projectRuntimeState?.activeRunId ?? null;
       const activeTaskId = projectRuntimeState?.activeTaskId ?? null;
       latestSessionId = latestSessionId ?? readDaemonSessionId(projectRuntimeState?.metadata);
       await clearDaemonContinuationStatus(cwd);
       await clearDaemonOperatorHandoff(cwd);
+      await clearDaemonScopeExpansionRequest(cwd);
 
       if (!activeRunId || !activeTaskId) {
         if (cycles.length > 0) {
@@ -5714,7 +7058,11 @@ export async function executeDaemonCommandFromArgs(
           String(staleAfterHours),
           "--apply-safe-recovery"
         ],
-        options
+        {
+          ...options,
+          skipRuntimePreflight: true,
+          runtimePreflightBypassToken: INTERNAL_RUNTIME_PREFLIGHT_BYPASS_TOKEN
+        }
       );
       const directive = loop.result.finalPlan.directive;
       const runDaemonCodexTurn = async (input: {
@@ -5727,6 +7075,10 @@ export async function executeDaemonCommandFromArgs(
         const snapshot = await options.getStatusSnapshot(input.activeRunId);
         const taskRecord = snapshot.tasks.find((task) => task.packet.taskId === input.activeTaskId);
         if (!taskRecord) {
+          const reconciled = await attemptRuntimeReconcile(cycle);
+          if (reconciled?.runtimeStateChanged) {
+            return undefined;
+          }
           cycles.push({
             cycle,
             directiveKind: input.directive.kind,
@@ -5744,9 +7096,18 @@ export async function executeDaemonCommandFromArgs(
             activeRunId: input.activeRunId,
             activeTaskId: input.activeTaskId,
             directiveKind: input.directive.kind,
-            nextActions: []
+            nextActions: [
+              "inspect `npm run devgod:status -- --format json` to confirm the runtime task snapshot",
+              "run `npm run devgod:reconcile` to repair safe runtime/local task drift before retrying the daemon"
+            ]
           });
         }
+        const beforeProgressKey = buildDaemonProgressKey({
+          runtimeState: projectRuntimeState,
+          snapshot,
+          directive: input.directive,
+          activeTaskId: input.activeTaskId
+        });
 
         const prompt = buildDaemonTaskPrompt({
           directive: input.directive,
@@ -5763,25 +7124,63 @@ export async function executeDaemonCommandFromArgs(
         });
 
         latestSessionId = codexTurn.sessionId ?? latestSessionId;
+        const parsedTurnMessage = parseDaemonTurnMessage(codexTurn.finalMessage);
+        const refreshedProjectRuntimeState = await options.getProjectRuntimeState(projectContext.project.id);
+        const refreshedSnapshot = await options.getStatusSnapshot(input.activeRunId);
+        const refreshedPlan = await options.getExecutionPlan(input.activeRunId, staleAfterHours);
+        const afterProgressKey = buildDaemonProgressKey({
+          runtimeState: refreshedProjectRuntimeState,
+          snapshot: refreshedSnapshot,
+          directive: refreshedPlan.directive,
+          activeTaskId: input.activeTaskId
+        });
+        const noProgress = beforeProgressKey === afterProgressKey;
+        const priorStagnation = readDaemonStagnationMetadata(projectRuntimeState?.metadata);
+        const stagnantTurnCount =
+          noProgress &&
+          priorStagnation &&
+          priorStagnation.runId === input.activeRunId &&
+          priorStagnation.taskId === input.activeTaskId &&
+          priorStagnation.directiveKind === input.directive.kind &&
+          priorStagnation.progressKey === beforeProgressKey
+            ? priorStagnation.count + 1
+            : noProgress
+              ? 1
+              : 0;
         await options.saveProjectRuntimeState({
-          projectId: projectRuntimeState?.projectId ?? projectContext.project.id,
-          workspaceId: projectRuntimeState?.workspaceId ?? projectContext.workspace.id,
-          activeRunId: input.activeRunId,
-          activeTaskId: input.activeTaskId,
-          taskQueue: projectRuntimeState?.taskQueue ?? buildDefaultTaskQueue(),
-          productState: projectRuntimeState?.productState ?? buildDefaultProductState(),
-          lastVerifiedRunId: projectRuntimeState?.lastVerifiedRunId,
+          projectId: refreshedProjectRuntimeState?.projectId ?? projectRuntimeState?.projectId ?? projectContext.project.id,
+          workspaceId: refreshedProjectRuntimeState?.workspaceId ?? projectRuntimeState?.workspaceId ?? projectContext.workspace.id,
+          activeRunId: refreshedProjectRuntimeState?.activeRunId,
+          activeTaskId: refreshedProjectRuntimeState?.activeTaskId,
+          taskQueue: refreshedProjectRuntimeState?.taskQueue ?? projectRuntimeState?.taskQueue ?? buildDefaultTaskQueue(),
+          productState: refreshedProjectRuntimeState?.productState ?? projectRuntimeState?.productState ?? buildDefaultProductState(),
+          lastVerifiedRunId: refreshedProjectRuntimeState?.lastVerifiedRunId ?? projectRuntimeState?.lastVerifiedRunId,
           metadata: {
-            ...(projectRuntimeState?.metadata ?? {}),
+            ...(refreshedProjectRuntimeState?.metadata ?? projectRuntimeState?.metadata ?? {}),
             devgodDaemon: {
               sessionId: latestSessionId,
               lastRunId: input.activeRunId,
               lastTaskId: input.activeTaskId,
               lastDirectiveKind: input.directive.kind,
+              ...(noProgress
+                ? {
+                    stagnation: {
+                      runId: input.activeRunId,
+                      taskId: input.activeTaskId,
+                      directiveKind: input.directive.kind,
+                      progressKey: beforeProgressKey,
+                      count: stagnantTurnCount,
+                      updatedAt: now().toISOString(),
+                      lastStatus: parsedTurnMessage?.status,
+                      lastSummary: parsedTurnMessage?.summary,
+                      lastBlockers: parsedTurnMessage?.blockers
+                    }
+                  }
+                : {}),
               updatedAt: now().toISOString()
             }
           },
-          createdAt: projectRuntimeState?.createdAt ?? now().toISOString(),
+          createdAt: refreshedProjectRuntimeState?.createdAt ?? projectRuntimeState?.createdAt ?? now().toISOString(),
           updatedAt: now().toISOString()
         });
 
@@ -5792,8 +7191,74 @@ export async function executeDaemonCommandFromArgs(
           runId: input.activeRunId,
           taskId: input.activeTaskId,
           sessionId: latestSessionId ?? null,
-          summary: codexTurn.finalMessage?.slice(0, 160) || "codex turn executed"
+          summary: parsedTurnMessage?.summary || codexTurn.finalMessage?.slice(0, 160) || "codex turn executed"
         });
+
+        if (noProgress) {
+          const workerSummary =
+            parsedTurnMessage
+              ? [parsedTurnMessage.summary, ...parsedTurnMessage.blockers].filter(Boolean).join(" | ")
+              : "runtime state was unchanged after the Codex turn";
+          const scopeConflict = daemonMessageHasScopeConflict(parsedTurnMessage);
+          const shouldBlockNow =
+            parsedTurnMessage?.status === "blocked" || stagnantTurnCount >= MAX_DAEMON_STAGNANT_TURNS;
+
+          if (shouldBlockNow) {
+            let scopeExpansionRequestPath: string | undefined;
+            if (scopeConflict && parsedTurnMessage?.scopeRequest) {
+              scopeExpansionRequestPath = await writeDaemonScopeExpansionRequest(cwd, {
+                runId: input.activeRunId,
+                taskId: input.activeTaskId,
+                directiveKind: input.directive.kind,
+                blockedPaths: [...parsedTurnMessage.scopeRequest.blockedPaths],
+                requestedWriteScope:
+                  parsedTurnMessage.scopeRequest.requestedWriteScope.length > 0
+                    ? [...parsedTurnMessage.scopeRequest.requestedWriteScope]
+                    : [...parsedTurnMessage.scopeRequest.blockedPaths],
+                reason: parsedTurnMessage.scopeRequest.reason ?? parsedTurnMessage.summary,
+                updatedAt: now().toISOString()
+              });
+            }
+            const reason = scopeConflict
+              ? `daemon stopped after a scope-blocked no-progress turn: ${workerSummary}`
+              : parsedTurnMessage?.status === "blocked"
+                ? `daemon stopped after a blocked no-progress turn: ${workerSummary}`
+                : `daemon detected ${stagnantTurnCount} consecutive no-progress turns for ${input.activeTaskId}: ${workerSummary}`;
+            const nextActions = scopeConflict
+              ? [
+                  "widen the task packet allowed write scope to include the blocked paths or split them into a follow-on task",
+                  "record the exact blocked paths in the blocker handoff before rerouting"
+                ]
+              : [
+                  "inspect the active task packet and daemon session for missing runtime proof, handoff, or verification steps",
+                  "reroute only after a concrete runtime state change is possible"
+                ];
+            cycles.push({
+              cycle,
+              directiveKind: input.directive.kind,
+              action: scopeConflict ? "request_scope_expansion" : "blocked",
+              runId: input.activeRunId,
+              taskId: input.activeTaskId,
+              sessionId: latestSessionId ?? null,
+              summary: reason
+            });
+
+            return blockedResult({
+              blockerKind: scopeConflict ? "scope_expansion_required" : "runtime_blocked",
+              reason,
+              cycle,
+              activeRunId: input.activeRunId,
+              activeTaskId: input.activeTaskId,
+              directiveKind: input.directive.kind,
+              nextActions,
+              detailFiles: scopeExpansionRequestPath
+                ? {
+                    scopeExpansionRequest: scopeExpansionRequestPath
+                  }
+                : undefined
+            });
+          }
+        }
 
         return undefined;
       };
@@ -6325,6 +7790,10 @@ export async function executeDaemonCommandFromArgs(
       }
 
       if (directive.kind === "dispatch_owner" && directive.recommendation.taskId !== activeTaskId) {
+        const reconciled = await attemptRuntimeReconcile(cycle);
+        if (reconciled?.runtimeStateChanged) {
+          continue;
+        }
         cycles.push({
           cycle,
           directiveKind: directive.kind,
@@ -6342,7 +7811,10 @@ export async function executeDaemonCommandFromArgs(
           activeRunId,
           activeTaskId,
           directiveKind: directive.kind,
-          nextActions: []
+          nextActions: [
+            "inspect `npm run devgod:status -- --format json` to compare the active runtime task and owner dispatch target",
+            "run `npm run devgod:reconcile` to align the active runtime task with the authoritative owner-dispatch target"
+          ]
         });
       }
 
@@ -6989,13 +8461,16 @@ async function syncRuntimeExportsCommand(args: readonly string[]) {
   });
 }
 
-async function daemonCommand(args: readonly string[]) {
+async function reconcileRuntimeStateCommand(args: readonly string[]) {
   await withClient(async (client) => {
     const store = new PostgresStore(client);
     const service = new DevgodCoreService(store);
-    const { format, result } = await executeDaemonCommandFromArgs(args, {
+    const { format, result } = await executeReconcileRuntimeStateCommandFromArgs(args, {
       cwd: process.cwd(),
       env: process.env,
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
       getProjectContext(params) {
         return store.getProjectContext(params);
       },
@@ -7013,71 +8488,11 @@ async function daemonCommand(args: readonly string[]) {
       },
       applyRecovery(runId, actionIds, staleAfterHours) {
         return service.applyRecovery(runId, actionIds, { staleAfterHours });
-      },
-      async executeDirectiveStep(runId, input) {
-        const executeReviewRecommendation =
-          input.reviewCommands.length > 0
-            ? createQueuedLoopReviewExecutor(
-                runId,
-                input.reviewCommands,
-                await createLiveLoopReviewCommandExecutor({
-                  cwd: process.cwd(),
-                  env: process.env,
-                  recordReview({ command, resolver }) {
-                    const reviewService = new DevgodCoreService(store, {
-                      resolveReviewActionContext: resolver
-                    });
-                    return reviewService.recordReview(
-                      command.runId,
-                      command.taskId,
-                      command.actor,
-                      command.review
-                    );
-                  }
-                })
-              )
-            : undefined;
-
-        return service.executeDirectiveStep(runId, {
-          staleAfterHours: input.staleAfterHours,
-          ownerActor: input.ownerActor,
-          executeContinuationAction: createSupportedContinuationExecutor({
-            env: process.env,
-            getStatusSnapshot(candidateRunId) {
-              return service.getStatus(candidateRunId);
-            },
-            getReviews(candidateRunId, taskId) {
-              return store.getReviews(candidateRunId, taskId);
-            },
-            getApprovals(candidateRunId, taskId) {
-              return store.getApprovals(candidateRunId, taskId);
-            },
-            upsertCoverageGaps(candidateRunId, gaps) {
-              return service.upsertCoverageGaps(candidateRunId, gaps);
-            },
-            recordProgressProof(candidateRunId, proof) {
-              return service.recordProgressProof(candidateRunId, proof);
-            },
-            checkpointRun(candidateRunId, checkpoint, checkpointOptions) {
-              return service.checkpointRun(candidateRunId, checkpoint, checkpointOptions);
-            }
-          }),
-          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
-        });
-      },
-      upsertCoverageGaps(runId, gaps) {
-        return service.upsertCoverageGaps(runId, gaps);
-      },
-      getReviews(runId, taskId) {
-        return store.getReviews(runId, taskId);
-      },
-      getApprovals(runId, taskId) {
-        return store.getApprovals(runId, taskId);
       }
     });
 
     if (format === "text") {
-      process.stdout.write(`${formatDaemonCommandResult(result)}\n`);
+      process.stdout.write(`${formatReconcileRuntimeStateCommandResult(result)}\n`);
       return;
     }
 
@@ -7085,100 +8500,304 @@ async function daemonCommand(args: readonly string[]) {
   });
 }
 
-async function supervisorCommand(args: readonly string[]) {
-  await withClient(async (client) => {
-    const store = new PostgresStore(client);
-    const service = new DevgodCoreService(store);
-    const { format, result } = await executeSupervisorCommandFromArgs(args, {
-      cwd: process.cwd(),
-      env: process.env,
-      getProjectContext(params) {
-        return store.getProjectContext(params);
-      },
-      getProjectRuntimeState(projectId) {
-        return store.getProjectRuntimeState(projectId);
-      },
-      saveProjectRuntimeState(state) {
-        return store.saveProjectRuntimeState(state);
-      },
-      getStatusSnapshot(runId) {
-        return service.getStatus(runId);
-      },
-      getExecutionPlan(runId, staleAfterHours) {
-        return service.getExecutionPlan(runId, { staleAfterHours });
-      },
-      applyRecovery(runId, actionIds, staleAfterHours) {
-        return service.applyRecovery(runId, actionIds, { staleAfterHours });
-      },
-      async executeDirectiveStep(runId, input) {
-        const executeReviewRecommendation =
-          input.reviewCommands.length > 0
-            ? createQueuedLoopReviewExecutor(
-                runId,
-                input.reviewCommands,
-                await createLiveLoopReviewCommandExecutor({
-                  cwd: process.cwd(),
-                  env: process.env,
-                  recordReview({ command, resolver }) {
-                    const reviewService = new DevgodCoreService(store, {
-                      resolveReviewActionContext: resolver
-                    });
-                    return reviewService.recordReview(
-                      command.runId,
-                      command.taskId,
-                      command.actor,
-                      command.review
-                    );
-                  }
-                })
-              )
-            : undefined;
+async function daemonCommand(args: readonly string[]) {
+  const env = process.env;
+  const cwd = process.cwd();
+  const format = resolveFormatFlag(args);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "unknown";
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG ?? "unknown";
+  try {
+    await withClient(async (client) => {
+      const store = new PostgresStore(client);
+      const service = new DevgodCoreService(store);
+      const { format: resolvedFormat, result } = await executeDaemonCommandFromArgs(args, {
+        cwd,
+        env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          const executeReviewRecommendation =
+            input.reviewCommands.length > 0
+              ? createQueuedLoopReviewExecutor(
+                  runId,
+                  input.reviewCommands,
+                  await createLiveLoopReviewCommandExecutor({
+                    cwd,
+                    env,
+                    recordReview({ command, resolver }) {
+                      const reviewService = new DevgodCoreService(store, {
+                        resolveReviewActionContext: resolver
+                      });
+                      return reviewService.recordReview(
+                        command.runId,
+                        command.taskId,
+                        command.actor,
+                        command.review
+                      );
+                    }
+                  })
+                )
+              : undefined;
 
-        return service.executeDirectiveStep(runId, {
-          staleAfterHours: input.staleAfterHours,
-          ownerActor: input.ownerActor,
-          executeContinuationAction: createSupportedContinuationExecutor({
-            env: process.env,
-            getStatusSnapshot(candidateRunId) {
-              return service.getStatus(candidateRunId);
-            },
-            getReviews(candidateRunId, taskId) {
-              return store.getReviews(candidateRunId, taskId);
-            },
-            getApprovals(candidateRunId, taskId) {
-              return store.getApprovals(candidateRunId, taskId);
-            },
-            upsertCoverageGaps(candidateRunId, gaps) {
-              return service.upsertCoverageGaps(candidateRunId, gaps);
-            },
-            recordProgressProof(candidateRunId, proof) {
-              return service.recordProgressProof(candidateRunId, proof);
-            },
-            checkpointRun(candidateRunId, checkpoint, checkpointOptions) {
-              return service.checkpointRun(candidateRunId, checkpoint, checkpointOptions);
-            }
-          }),
-          ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
-        });
-      },
-      upsertCoverageGaps(runId, gaps) {
-        return service.upsertCoverageGaps(runId, gaps);
-      },
-      getReviews(runId, taskId) {
-        return store.getReviews(runId, taskId);
-      },
-      getApprovals(runId, taskId) {
-        return store.getApprovals(runId, taskId);
+          return service.executeDirectiveStep(runId, {
+            staleAfterHours: input.staleAfterHours,
+            ownerActor: input.ownerActor,
+            executeContinuationAction: createSupportedContinuationExecutor({
+              env,
+              getStatusSnapshot(candidateRunId) {
+                return service.getStatus(candidateRunId);
+              },
+              getReviews(candidateRunId, taskId) {
+                return store.getReviews(candidateRunId, taskId);
+              },
+              getApprovals(candidateRunId, taskId) {
+                return store.getApprovals(candidateRunId, taskId);
+              },
+              upsertCoverageGaps(candidateRunId, gaps) {
+                return service.upsertCoverageGaps(candidateRunId, gaps);
+              },
+              recordProgressProof(candidateRunId, proof) {
+                return service.recordProgressProof(candidateRunId, proof);
+              },
+              checkpointRun(candidateRunId, checkpoint, checkpointOptions) {
+                return service.checkpointRun(candidateRunId, checkpoint, checkpointOptions);
+              }
+            }),
+            ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
+          });
+        },
+        upsertCoverageGaps(runId, gaps) {
+          return service.upsertCoverageGaps(runId, gaps);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      });
+
+      if (resolvedFormat === "text") {
+        process.stdout.write(`${formatDaemonCommandResult(result)}\n`);
+        return;
       }
-    });
 
+      console.log(JSON.stringify(result));
+    });
+  } catch (error) {
+    if (!isRuntimeExecutionPreflightConnectionError(error)) {
+      throw error;
+    }
+    const failure = buildRuntimeExecutionConnectionFailure(error);
+    const result: DaemonCommandResult = {
+      authorityLabel: "derived_only",
+      workspaceSlug,
+      projectSlug,
+      status: "blocked",
+      reason: failure.reason,
+      activeRunId: null,
+      activeTaskId: null,
+      sessionId: null,
+      cycles: []
+    };
+    await writeDaemonOperatorHandoff(cwd, {
+      state: "blocked",
+      blockerKind: "runtime_preflight",
+      reason: failure.reason,
+      workspaceSlug,
+      projectSlug,
+      activeRunId: null,
+      activeTaskId: null,
+      sessionId: null,
+      cycle: 0,
+      nextActions: failure.nextActions,
+      detailFiles: {},
+      updatedAt: new Date().toISOString()
+    });
+    if (format === "text") {
+      process.stdout.write(
+        `${formatRuntimeExecutionPreflightFailureResult({
+          status: "blocked",
+          reason: result.reason,
+          workspaceSlug: result.workspaceSlug,
+          projectSlug: result.projectSlug,
+          activeRunId: result.activeRunId,
+          activeTaskId: result.activeTaskId,
+          sessionId: result.sessionId
+        })}\n`
+      );
+      return;
+    }
+    console.log(JSON.stringify(result));
+  }
+}
+
+async function supervisorCommand(args: readonly string[]) {
+  const env = process.env;
+  const cwd = process.cwd();
+  const format = resolveFormatFlag(args);
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "unknown";
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG ?? "unknown";
+  try {
+    await withClient(async (client) => {
+      const store = new PostgresStore(client);
+      const service = new DevgodCoreService(store);
+      const { format: resolvedFormat, result } = await executeSupervisorCommandFromArgs(args, {
+        cwd,
+        env,
+        findLatestRun(workspaceSlug, projectSlug) {
+          return store.findLatestRun({ workspaceSlug, projectSlug });
+        },
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeRegistration(projectId) {
+          return store.getProjectRuntimeRegistration(projectId);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(runId, input) {
+          const executeReviewRecommendation =
+            input.reviewCommands.length > 0
+              ? createQueuedLoopReviewExecutor(
+                  runId,
+                  input.reviewCommands,
+                  await createLiveLoopReviewCommandExecutor({
+                    cwd,
+                    env,
+                    recordReview({ command, resolver }) {
+                      const reviewService = new DevgodCoreService(store, {
+                        resolveReviewActionContext: resolver
+                      });
+                      return reviewService.recordReview(
+                        command.runId,
+                        command.taskId,
+                        command.actor,
+                        command.review
+                      );
+                    }
+                  })
+                )
+              : undefined;
+
+          return service.executeDirectiveStep(runId, {
+            staleAfterHours: input.staleAfterHours,
+            ownerActor: input.ownerActor,
+            executeContinuationAction: createSupportedContinuationExecutor({
+              env,
+              getStatusSnapshot(candidateRunId) {
+                return service.getStatus(candidateRunId);
+              },
+              getReviews(candidateRunId, taskId) {
+                return store.getReviews(candidateRunId, taskId);
+              },
+              getApprovals(candidateRunId, taskId) {
+                return store.getApprovals(candidateRunId, taskId);
+              },
+              upsertCoverageGaps(candidateRunId, gaps) {
+                return service.upsertCoverageGaps(candidateRunId, gaps);
+              },
+              recordProgressProof(candidateRunId, proof) {
+                return service.recordProgressProof(candidateRunId, proof);
+              },
+              checkpointRun(candidateRunId, checkpoint, checkpointOptions) {
+                return service.checkpointRun(candidateRunId, checkpoint, checkpointOptions);
+              }
+            }),
+            ...(executeReviewRecommendation ? { executeReviewRecommendation } : {})
+          });
+        },
+        upsertCoverageGaps(runId, gaps) {
+          return service.upsertCoverageGaps(runId, gaps);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      });
+
+      if (resolvedFormat === "text") {
+        process.stdout.write(`${formatSupervisorCommandResult(result)}\n`);
+        return;
+      }
+
+      console.log(JSON.stringify(result));
+    });
+  } catch (error) {
+    if (!isRuntimeExecutionPreflightConnectionError(error)) {
+      throw error;
+    }
+    const failure = buildRuntimeExecutionConnectionFailure(error);
+    const result: SupervisorCommandResult = {
+      authorityLabel: "derived_only",
+      workspaceSlug,
+      projectSlug,
+      status: "blocked",
+      reason: failure.reason,
+      activeRunId: null,
+      activeTaskId: null,
+      sessionId: null,
+      daemonRuns: [],
+      actions: []
+    };
+    await writeDaemonSupervisorStatus(cwd, {
+      state: "blocked",
+      blockerKind: "runtime_preflight",
+      reason: failure.reason,
+      workspaceSlug,
+      projectSlug,
+      activeRunId: null,
+      activeTaskId: null,
+      sessionId: null,
+      supervisorCycles: 0,
+      nextActions: failure.nextActions,
+      missingReviewRoles: [],
+      actions: [],
+      updatedAt: new Date().toISOString()
+    });
     if (format === "text") {
       process.stdout.write(`${formatSupervisorCommandResult(result)}\n`);
       return;
     }
-
     console.log(JSON.stringify(result));
-  });
+  }
 }
 
 async function supervisorHistoryCommand(args: readonly string[]) {
@@ -7757,6 +9376,11 @@ async function main() {
 
   if (command === "advance-active-task") {
     await advanceActiveTaskCommand(args);
+    return;
+  }
+
+  if (command === "reconcile-runtime-state") {
+    await reconcileRuntimeStateCommand(args);
     return;
   }
 

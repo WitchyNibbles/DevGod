@@ -309,6 +309,27 @@ export class DevgodCoreService {
     return readAutonomousExecutionState(state?.metadata);
   }
 
+  private async ensureDirectiveExecutionAuthority(
+    runId: string,
+    directive: RunExecutionPlan["directive"]
+  ): Promise<void> {
+    const run = await this.requireRun(runId);
+    const registration = await this.store.getProjectRuntimeRegistration(run.projectId);
+    if (!registration) {
+      throw new Error(
+        "directive execution requires runtime registration for the target project; run doctor --repair or bootstrap-project before executing directives"
+      );
+    }
+
+    const runtimeState = await this.store.getProjectRuntimeState(run.projectId);
+    if (!runtimeState || runtimeState.activeRunId !== runId) {
+      throw new Error(
+        "directive execution requires the target run to be the active authoritative runtime run"
+      );
+    }
+
+  }
+
   async configureAutonomousExecution(
     runId: string,
     input: {
@@ -1182,6 +1203,7 @@ export class DevgodCoreService {
   ): Promise<DirectiveExecutionResult> {
     const staleAfterHours = options.staleAfterHours;
     const initialPlan = await this.getExecutionPlan(runId, { staleAfterHours });
+    await this.ensureDirectiveExecutionAuthority(runId, initialPlan.directive);
     const steps: DirectiveExecutionStep[] = [];
     let finalPlan = initialPlan;
 
