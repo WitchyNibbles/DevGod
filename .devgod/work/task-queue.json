@@ -3,6 +3,35 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-05-20-managed-runtime-postgres-autostart",
+      "title": "Auto-start repo-local PostgreSQL after local runtime connection refusal",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Repo-local loopback PostgreSQL connection failures trigger one restart attempt when explicit local runtime state exists.",
+        "The DB helper retries once after a successful repo-local PostgreSQL start attempt.",
+        "Remote or non-repo-managed database targets still fail without local startup attempts."
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/admin-db.test.ts",
+        "node --experimental-strip-types --test tests/status-report.test.ts tests/runtime-surface.test.ts",
+        "npm run typecheck",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-managed-runtime-postgres-autostart"
+      ],
+      "evidence": [
+        ".devgod/work/briefs/brief-2026-05-20-managed-runtime-postgres-autostart.md",
+        ".devgod/work/plans/plan-2026-05-20-managed-runtime-postgres-autostart.md",
+        ".devgod/work/tasks/task-2026-05-20-managed-runtime-postgres-autostart.md",
+        ".devgod/work/reviews/review-2026-05-20-managed-runtime-postgres-autostart-reviewer.md",
+        ".devgod/work/reviews/review-2026-05-20-managed-runtime-postgres-autostart-security_reviewer.md",
+        ".devgod/work/reviews/review-2026-05-20-managed-runtime-postgres-autostart-qa_engineer.md",
+        "src/admin/db.ts",
+        "tests/admin-db.test.ts"
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-05-19-readme-prettify",
       "title": "Prettify README with badges, emojis, and graphics",
       "status": "done",

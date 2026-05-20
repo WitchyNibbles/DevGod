@@ -37,7 +37,7 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 
 ## Current Milestone
 
-README presentation polish
+Runtime self-healing
 
 ## Completed Milestones
 
@@ -51,11 +51,11 @@ README presentation polish
 
 ## Current Task
 
-`2026-05-19-readme-prettify` is complete. The README now uses a more visual landing-page style with badges, emojis, collapsible sections, and a Mermaid flow graphic while preserving the current package explanation.
+`2026-05-20-managed-runtime-postgres-autostart` is complete. DevGod now revives the repo-local PostgreSQL instance automatically when a loopback runtime-backed command hits `ECONNREFUSED` and explicit local-postgres state already exists.
 
 ## Next Task
 
-None for the current README slice.
+None for the current runtime self-healing slice.
 
 ## Blockers
 
@@ -63,6 +63,10 @@ None for the current README slice.
 
 ## Verification Summary
 
+- `node --experimental-strip-types --test tests/admin-db.test.ts` passed on 2026-05-20, proving one repo-local PostgreSQL restart attempt plus one reconnect attempt for loopback `ECONNREFUSED`, while remote targets still fail without a local start attempt.
+- `node --experimental-strip-types --test tests/status-report.test.ts tests/runtime-surface.test.ts` passed on 2026-05-20 with unchanged doctor/status/runtime-surface behavior.
+- `npm run typecheck` passed on 2026-05-20 for `2026-05-20-managed-runtime-postgres-autostart`.
+- live verification passed on 2026-05-20: after stopping the repo-local PostgreSQL instance with `pg_ctl stop -m fast`, `npm run status` succeeded and restarted the repo-local instance. `.devgod/state/local-postgres/postgres.log` recorded the shutdown at `2026-05-20 07:19:09 CEST` and the new startup at `2026-05-20 07:19:23 CEST`.
 - `git diff --check -- README.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-readme-prettify.md .devgod/work/plans/plan-2026-05-19-readme-prettify.md .devgod/work/tasks/task-2026-05-19-readme-prettify.md .devgod/work/reviews/review-2026-05-19-readme-prettify-reviewer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-qa_engineer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-readme-prettify` passed on 2026-05-19.
 - `git diff --check -- README.md docs/current-state.md docs/global-setup.md docs/autonomous-execution-redesign.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-docs-refresh.md .devgod/work/plans/plan-2026-05-19-docs-refresh.md .devgod/work/tasks/task-2026-05-19-docs-refresh.md .devgod/work/reviews/review-2026-05-19-docs-refresh-reviewer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-qa_engineer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
@@ -134,6 +138,7 @@ None for the current README slice.
 
 ## Review Summary
 
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-managed-runtime-postgres-autostart`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-readme-prettify`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-docs-refresh`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-local-review-identity-setup`, and authoritative local proof run `42fe51d6-4a67-4363-858d-633196eb7c62` approved the task on 2026-05-15.
