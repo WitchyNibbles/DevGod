@@ -37,7 +37,7 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 
 ## Current Milestone
 
-Runtime self-healing
+Coverage and release posture hardened
 
 ## Completed Milestones
 
@@ -51,18 +51,28 @@ Runtime self-healing
 
 ## Current Task
 
-`2026-05-20-managed-runtime-postgres-autostart` is complete. DevGod now revives the repo-local PostgreSQL instance automatically when a loopback runtime-backed command hits `ECONNREFUSED` and explicit local-postgres state already exists.
+None. `2026-05-20-coverage-gate-hardening` is complete.
 
 ## Next Task
 
-None for the current runtime self-healing slice.
+None queued.
 
 ## Blockers
 
-- None at the package-maintainer workflow layer for this slice.
+- None currently recorded for the coverage and release posture milestone.
 
 ## Verification Summary
 
+- `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts` passed on 2026-05-20 after refactoring the launcher into injectable helpers that locally cover both runnable and skipped registration paths while preserving the real Windows-only runner in `tests/setup-powershell-smoke-runner.ts`.
+- `node --experimental-strip-types --test tests/release-overlay.test.ts` passed on 2026-05-20 after asserting that `scripts/check-quality.sh` includes `npm run check:coverage`.
+- `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts tests/postgres-store.test.ts tests/github-dispatch.test.ts tests/qdrant-artifact-index.test.ts tests/release-overlay.test.ts` passed on 2026-05-20 after expanding the hotspot coverage slice and normalizing counted assertion branches.
+- `npm run typecheck` passed on 2026-05-20 after widening the coverage task and fixing local test-fixture type issues.
+- `node --experimental-strip-types --test tests/runtime-surface.test.ts` passed on 2026-05-20 after covering the remaining `src/admin/autonomous-summary.ts` fallback, default, and ordering branches that were keeping aggregate branch coverage below threshold.
+- `npm run check:coverage` passed on 2026-05-20 with aggregate coverage at `90.94%` lines, `80.03%` branches, and `85.17%` functions.
+- `npm run verify:release-overlay` passed on 2026-05-20, proving the release overlay now stays green only when the coverage gate is green.
+- `.devgod/work/coverage/coverage-2026-05-20-coverage-gate-hardening.json` was updated on 2026-05-20 with the passing aggregate coverage and verification results for the slice.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-20-coverage-gate-hardening` passed on 2026-05-20 and produced authoritative run `c7126547-6f14-418d-92c4-2badd3fda9c2`.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-coverage-gate-hardening` passed on 2026-05-20 using authoritative runtime proof run `c7126547-6f14-418d-92c4-2badd3fda9c2`.
 - `node --experimental-strip-types --test tests/admin-db.test.ts` passed on 2026-05-20, proving one repo-local PostgreSQL restart attempt plus one reconnect attempt for loopback `ECONNREFUSED`, while remote targets still fail without a local start attempt.
 - `node --experimental-strip-types --test tests/status-report.test.ts tests/runtime-surface.test.ts` passed on 2026-05-20 with unchanged doctor/status/runtime-surface behavior.
 - `npm run typecheck` passed on 2026-05-20 for `2026-05-20-managed-runtime-postgres-autostart`.
@@ -138,6 +148,7 @@ None for the current runtime self-healing slice.
 
 ## Review Summary
 
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-coverage-gate-hardening`, and authoritative local proof run `c7126547-6f14-418d-92c4-2badd3fda9c2` approved the task on 2026-05-20.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-managed-runtime-postgres-autostart`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-readme-prettify`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-docs-refresh`.
@@ -160,4 +171,4 @@ Resolved. The restricted-environment harness issues were fixed and the previousl
 
 ## Last Updated
 
-2026-05-19
+2026-05-20

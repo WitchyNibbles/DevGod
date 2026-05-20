@@ -5,6 +5,7 @@ import type {
   MarkdownArtifactRecord,
   MemoryEntryRecord,
   PlanArtifact,
+  ProjectRuntimeStateRecord,
   RuntimeMigrationJournalRecord,
   RuntimeProjectRegistrationRecord,
   RunRecord,
@@ -39,6 +40,11 @@ function sqlClientWithRows<Row>(
       };
     }
   };
+}
+
+function must<T>(value: T | undefined): T {
+  assert.notEqual(value, undefined);
+  return value as T;
 }
 
 function createRunRecord(): RunRecord {
@@ -221,6 +227,17 @@ function createRuntimeMigrationJournalRecord(): RuntimeMigrationJournalRecord {
   };
 }
 
+test("PostgresStore.getProjectContext returns undefined when the project is missing", async () => {
+  const store = new PostgresStore(sqlClientWithRows([]));
+
+  const result = await store.getProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "missing"
+  });
+
+  assert.equal(result, undefined);
+});
+
 test("sqlClientWithRows supports single-response mode without capture", async () => {
   const client = sqlClientWithRows([{ id: "row-1" }]);
   const result = await client.query<{ id: string }>("select 1");
@@ -266,17 +283,39 @@ test("PostgresStore.ensureProjectContext upserts workspace and project metadata"
 
   assert.equal(result.workspace.id, "workspace:team");
   assert.equal(result.project.id, "project:team:devgod");
-  assert.match(capture[0]?.text ?? "", /insert into workspaces/);
-  assert.match(capture[0]?.text ?? "", /do update set name = excluded.name/);
-  assert.deepEqual(capture[0]?.values, ["workspace:team", "team", "Team Workspace"]);
-  assert.match(capture[1]?.text ?? "", /insert into projects/);
-  assert.match(capture[1]?.text ?? "", /repo_path = excluded.repo_path/);
-  assert.deepEqual(capture[1]?.values, [
+  assert.match(must(capture[0]).text, /insert into workspaces/);
+  assert.match(must(capture[0]).text, /do update set name = excluded.name/);
+  assert.deepEqual(must(capture[0]).values, ["workspace:team", "team", "Team Workspace"]);
+  assert.match(must(capture[1]).text, /insert into projects/);
+  assert.match(must(capture[1]).text, /repo_path = excluded.repo_path/);
+  assert.deepEqual(must(capture[1]).values, [
     "project:team:devgod",
     "workspace:team",
     "devgod",
     "Devgod",
     "/repo/devgod"
+  ]);
+});
+
+test("PostgresStore.ensureProjectContext defaults names and repoPath when optional values are omitted", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  const result = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+
+  assert.equal(result.workspace.name, "team");
+  assert.equal(result.project.name, "devgod");
+  assert.equal(result.project.repoPath, undefined);
+  assert.deepEqual(must(capture[0]).values, ["workspace:team", "team", "team"]);
+  assert.deepEqual(must(capture[1]).values, [
+    "project:team:devgod",
+    "workspace:team",
+    "devgod",
+    "devgod",
+    null
   ]);
 });
 
@@ -297,9 +336,9 @@ test("PostgresStore.saveProjectRuntimeRegistration persists canonical repo regis
   const loaded = await store.getProjectRuntimeRegistration(registration.projectId);
 
   assert.deepEqual(loaded, registration);
-  assert.match(capture[0]?.text ?? "", /insert into runtime_project_registrations/);
-  assert.match(capture[0]?.text ?? "", /on conflict \(project_id\) do update/);
-  assert.deepEqual(capture[0]?.values, [
+  assert.match(must(capture[0]).text, /insert into runtime_project_registrations/);
+  assert.match(must(capture[0]).text, /on conflict \(project_id\) do update/);
+  assert.deepEqual(must(capture[0]).values, [
     registration.projectId,
     registration.workspaceId,
     registration.repoPath,
@@ -311,8 +350,16 @@ test("PostgresStore.saveProjectRuntimeRegistration persists canonical repo regis
     JSON.stringify(registration.manifest),
     JSON.stringify(registration.provenance)
   ]);
-  assert.match(capture[1]?.text ?? "", /from runtime_project_registrations/);
-  assert.deepEqual(capture[1]?.values, [registration.projectId]);
+  assert.match(must(capture[1]).text, /from runtime_project_registrations/);
+  assert.deepEqual(must(capture[1]).values, [registration.projectId]);
+});
+
+test("PostgresStore.getProjectRuntimeRegistration returns undefined when no registration exists", async () => {
+  const store = new PostgresStore(sqlClientWithRows([]));
+
+  const loaded = await store.getProjectRuntimeRegistration("project:team:missing");
+
+  assert.equal(loaded, undefined);
 });
 
 test("PostgresStore.saveRuntimeMigrationJournal records backup manifest, verification report, and rollback state", async () => {
@@ -332,9 +379,9 @@ test("PostgresStore.saveRuntimeMigrationJournal records backup manifest, verific
   const loaded = await store.listRuntimeMigrationJournals(journal.projectId);
 
   assert.deepEqual(loaded, [journal]);
-  assert.match(capture[0]?.text ?? "", /insert into runtime_migration_journals/);
-  assert.match(capture[0]?.text ?? "", /on conflict \(id\) do update/);
-  assert.deepEqual(capture[0]?.values, [
+  assert.match(must(capture[0]).text, /insert into runtime_migration_journals/);
+  assert.match(must(capture[0]).text, /on conflict \(id\) do update/);
+  assert.deepEqual(must(capture[0]).values, [
     journal.id,
     journal.workspaceId,
     journal.projectId,
@@ -346,8 +393,170 @@ test("PostgresStore.saveRuntimeMigrationJournal records backup manifest, verific
     journal.rollbackState,
     JSON.stringify(journal.details)
   ]);
-  assert.match(capture[1]?.text ?? "", /from runtime_migration_journals/);
-  assert.deepEqual(capture[1]?.values, [journal.projectId]);
+  assert.match(must(capture[1]).text, /from runtime_migration_journals/);
+  assert.deepEqual(must(capture[1]).values, [journal.projectId]);
+});
+
+test("PostgresStore.saveProjectRuntimeState and getProjectRuntimeState round-trip runtime queue state", async () => {
+  const capture: QueryCapture[] = [];
+  const state: ProjectRuntimeStateRecord = {
+    projectId: "project:team:devgod",
+    workspaceId: "workspace:team",
+    activeRunId: "run-1",
+    activeTaskId: "task-1",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-1",
+      tasks: [
+        {
+          id: "task-1",
+          title: "Implement runtime queue state",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: ["queue state persists"],
+          verification: ["npm test"],
+          evidence: ["runtime state fixture"],
+          blocker: null
+        }
+      ]
+    },
+    productState: {
+      currentTask: "task-1",
+      blockers: []
+    },
+    lastVerifiedRunId: "run-verified",
+    metadata: {
+      source: "runtime"
+    },
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z"
+  };
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: state }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveProjectRuntimeState(state);
+  const loaded = await store.getProjectRuntimeState(state.projectId);
+
+  assert.deepEqual(loaded, state);
+  assert.match(must(capture[0]).text, /insert into project_runtime_state/);
+  assert.match(must(capture[0]).text, /on conflict \(project_id\) do update/);
+  assert.deepEqual(must(capture[0]).values, [
+    state.projectId,
+    state.workspaceId,
+    state.activeRunId,
+    state.activeTaskId,
+    JSON.stringify(state.taskQueue),
+    JSON.stringify(state.productState),
+    state.lastVerifiedRunId,
+    JSON.stringify(state.metadata)
+  ]);
+  assert.match(must(capture[1]).text, /from project_runtime_state/);
+  assert.deepEqual(must(capture[1]).values, [state.projectId]);
+});
+
+test("PostgresStore.saveWorkflowDocument and listWorkflowDocuments honor run, task, and kind filters", async () => {
+  const capture: QueryCapture[] = [];
+  const document = {
+    id: "workflow-document-1",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: "run-1",
+    taskId: "task-1",
+    kind: "brief" as const,
+    title: "GitHub intake",
+    body: "Body",
+    metadata: { source: "github_dispatch" },
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z"
+  };
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: document }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveWorkflowDocument(document);
+  const listed = await store.listWorkflowDocuments({
+    projectId: document.projectId,
+    runId: document.runId,
+    taskId: document.taskId,
+    kind: document.kind
+  });
+
+  assert.deepEqual(listed, [document]);
+  assert.match(must(capture[0]).text, /insert into workflow_documents/);
+  assert.match(must(capture[0]).text, /on conflict \(id\) do update/);
+  assert.deepEqual(must(capture[0]).values, [
+    document.id,
+    document.workspaceId,
+    document.projectId,
+    document.runId,
+    document.taskId,
+    document.kind,
+    document.title,
+    document.body,
+    JSON.stringify(document.metadata)
+  ]);
+  assert.match(must(capture[1]).text, /where project_id = \$1 and run_id = \$2 and task_id = \$3 and kind = \$4/);
+  assert.deepEqual(must(capture[1]).values, [document.projectId, document.runId, document.taskId, document.kind]);
+});
+
+test("PostgresStore.saveWorkflowDocument and listWorkflowDocuments support omitted run and task filters", async () => {
+  const capture: QueryCapture[] = [];
+  const document = {
+    id: "workflow-document-2",
+    workspaceId: "workspace:team",
+    projectId: "project:team:devgod",
+    runId: undefined,
+    taskId: undefined,
+    kind: "review_summary" as const,
+    title: "Review summary",
+    body: "Body",
+    metadata: {},
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z"
+  };
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: document }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveWorkflowDocument(document);
+  const listed = await store.listWorkflowDocuments({
+    projectId: document.projectId
+  });
+
+  assert.deepEqual(listed, [document]);
+  assert.deepEqual(must(capture[0]).values, [
+    document.id,
+    document.workspaceId,
+    document.projectId,
+    null,
+    null,
+    document.kind,
+    document.title,
+    document.body,
+    JSON.stringify(document.metadata)
+  ]);
+  assert.match(must(capture[1]).text, /where project_id = \$1/);
+  assert.deepEqual(must(capture[1]).values, [document.projectId]);
 });
 
 test("PostgresStore.createRun, getRun, and updateRun persist run summaries", async () => {
@@ -373,13 +582,51 @@ test("PostgresStore.createRun, getRun, and updateRun persist run summaries", asy
   });
 
   assert.deepEqual(loaded, run);
-  assert.match(capture[0]?.text ?? "", /insert into runs/);
-  assert.equal(capture[0]?.values?.[6], JSON.stringify(run.summary));
-  assert.match(capture[1]?.text ?? "", /from runs/);
-  assert.deepEqual(capture[1]?.values, ["run-1"]);
-  assert.match(capture[2]?.text ?? "", /update runs/);
-  assert.equal(capture[2]?.values?.[1], "manager-2");
-  assert.equal(capture[2]?.values?.[5], "in_progress");
+  assert.match(must(capture[0]).text, /insert into runs/);
+  assert.equal(must(must(capture[0]).values)[6], JSON.stringify(run.summary));
+  assert.match(must(capture[1]).text, /from runs/);
+  assert.deepEqual(must(capture[1]).values, ["run-1"]);
+  assert.match(must(capture[2]).text, /update runs/);
+  assert.equal(must(must(capture[2]).values)[1], "manager-2");
+  assert.equal(must(must(capture[2]).values)[5], "in_progress");
+});
+
+test("PostgresStore.findLatestRun and findLatestRunForTask return the most recent matching run", async () => {
+  const run = createRunRecord();
+  const store = new PostgresStore(
+    sqlClientWithRows([
+      [{ payload: run }],
+      [{ payload: { ...run, id: "run-2" } }]
+    ])
+  );
+
+  const latestRun = await store.findLatestRun({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  const latestTaskRun = await store.findLatestRunForTask({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    taskId: "task-1"
+  });
+
+  assert.equal(must(latestRun).id, "run-1");
+  assert.equal(must(latestTaskRun).id, "run-2");
+});
+
+test("PostgresStore.findRunsByProjectActivity preserves null date filters", async () => {
+  const run = createRunRecord();
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([[{ payload: run }]], capture));
+
+  const runs = await store.findRunsByProjectActivity({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    timezone: "UTC"
+  });
+
+  assert.deepEqual(runs, [run]);
+  assert.deepEqual(must(capture[0]).values, ["team", "devgod", null, null, "UTC"]);
 });
 
 test("PostgresStore.savePlan and getPlan round-trip plan artifacts", async () => {
@@ -399,15 +646,15 @@ test("PostgresStore.savePlan and getPlan round-trip plan artifacts", async () =>
   const loaded = await store.getPlan(plan.runId);
 
   assert.deepEqual(loaded, plan);
-  assert.match(capture[0]?.text ?? "", /insert into artifacts/);
-  assert.deepEqual(capture[0]?.values, [
+  assert.match(must(capture[0]).text, /insert into artifacts/);
+  assert.deepEqual(must(capture[0]).values, [
     "plan-1",
     "run-1",
     "Plan",
     JSON.stringify(plan.content),
     JSON.stringify({ kind: "plan" })
   ]);
-  assert.match(capture[1]?.text ?? "", /where run_id = \$1 and kind = 'plan'/);
+  assert.match(must(capture[1]).text, /where run_id = \$1 and kind = 'plan'/);
 });
 
 test("PostgresStore.replaceTasks rewrites tasks and dependencies", async () => {
@@ -417,15 +664,15 @@ test("PostgresStore.replaceTasks rewrites tasks and dependencies", async () => {
 
   await store.replaceTasks([task]);
 
-  assert.match(capture[0]?.text ?? "", /delete from task_dependencies/);
-  assert.deepEqual(capture[0]?.values, ["run-1"]);
-  assert.match(capture[1]?.text ?? "", /delete from tasks/);
-  assert.deepEqual(capture[1]?.values, ["run-1"]);
-  assert.match(capture[2]?.text ?? "", /insert into tasks/);
-  assert.equal(capture[2]?.values?.[17], JSON.stringify(task.packet));
-  assert.equal(capture[2]?.values?.[18], null);
-  assert.match(capture[3]?.text ?? "", /insert into task_dependencies/);
-  assert.deepEqual(capture[3]?.values, ["task-record-1", "dep-1"]);
+  assert.match(must(capture[0]).text, /delete from task_dependencies/);
+  assert.deepEqual(must(capture[0]).values, ["run-1"]);
+  assert.match(must(capture[1]).text, /delete from tasks/);
+  assert.deepEqual(must(capture[1]).values, ["run-1"]);
+  assert.match(must(capture[2]).text, /insert into tasks/);
+  assert.equal(must(must(capture[2]).values)[17], JSON.stringify(task.packet));
+  assert.equal(must(must(capture[2]).values)[18], null);
+  assert.match(must(capture[3]).text, /insert into task_dependencies/);
+  assert.deepEqual(must(capture[3]).values, ["task-record-1", "dep-1"]);
 });
 
 test("PostgresStore.replaceTasks ignores empty task lists", async () => {
@@ -461,12 +708,12 @@ test("PostgresStore.getTasksByRun, getTask, and updateTask preserve claimed owne
 
   assert.deepEqual(tasks, [task]);
   assert.deepEqual(loaded, task);
-  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
-  assert.deepEqual(capture[0]?.values, ["run-1"]);
-  assert.match(capture[1]?.text ?? "", /where run_id = \$1 and task_key = \$2/);
-  assert.deepEqual(capture[1]?.values, ["run-1", "task-1"]);
-  assert.match(capture[2]?.text ?? "", /update tasks/);
-  assert.deepEqual(capture[2]?.values, [
+  assert.match(must(capture[0]).text, /where run_id = \$1/);
+  assert.deepEqual(must(capture[0]).values, ["run-1"]);
+  assert.match(must(capture[1]).text, /where run_id = \$1 and task_key = \$2/);
+  assert.deepEqual(must(capture[1]).values, ["run-1", "task-1"]);
+  assert.match(must(capture[2]).text, /update tasks/);
+  assert.deepEqual(must(capture[2]).values, [
     "task-record-1",
     "in_progress",
     "backend-1",
@@ -496,8 +743,8 @@ test("PostgresStore lock methods persist and release active locks", async () => 
   await store.releaseLocksForTask("run-1", "task-1", "2026-05-05T01:00:00.000Z");
   const locks = await store.getActiveLocks(lock.projectId);
 
-  assert.match(capture[0]?.text ?? "", /insert into locks/);
-  assert.deepEqual(capture[0]?.values, [
+  assert.match(must(capture[0]).text, /insert into locks/);
+  assert.deepEqual(must(capture[0]).values, [
     "lock-1",
     "workspace:team",
     "project:team:devgod",
@@ -506,8 +753,8 @@ test("PostgresStore lock methods persist and release active locks", async () => 
     ["src/core/service.ts"],
     "active"
   ]);
-  assert.match(capture[1]?.text ?? "", /set status = 'released'/);
-  assert.deepEqual(capture[1]?.values, ["run-1", "task-1", "2026-05-05T01:00:00.000Z"]);
+  assert.match(must(capture[1]).text, /set status = 'released'/);
+  assert.deepEqual(must(capture[1]).values, ["run-1", "task-1", "2026-05-05T01:00:00.000Z"]);
   assert.deepEqual(locks, [releasedLock]);
 });
 
@@ -518,8 +765,8 @@ test("PostgresStore.saveMemoryEntry serializes metadata and optional fields", as
 
   await store.saveMemoryEntry(entry);
 
-  assert.match(capture[0]?.text ?? "", /insert into memory_entries/);
-  assert.deepEqual(capture[0]?.values, [
+  assert.match(must(capture[0]).text, /insert into memory_entries/);
+  assert.deepEqual(must(capture[0]).values, [
     "memory-1",
     "workspace:team",
     "project:team:devgod",
@@ -538,6 +785,33 @@ test("PostgresStore.saveMemoryEntry serializes metadata and optional fields", as
   ]);
 });
 
+test("PostgresStore.listMemoryEntries preserves optional filter arguments", async () => {
+  const capture: QueryCapture[] = [];
+  const entry = createMemoryEntryRecord();
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [{ payload: entry }],
+        [{ payload: entry }]
+      ],
+      capture
+    )
+  );
+
+  const unfiltered = await store.listMemoryEntries({ runId: "run-1" });
+  const filtered = await store.listMemoryEntries({
+    runId: "run-1",
+    taskId: "task-1",
+    entryType: "decision",
+    status: "approved"
+  });
+
+  assert.deepEqual(unfiltered, [entry]);
+  assert.deepEqual(filtered, [entry]);
+  assert.deepEqual(must(capture[0]).values, ["run-1", null, null, null]);
+  assert.deepEqual(must(capture[1]).values, ["run-1", "task-1", "decision", "approved"]);
+});
+
 test("PostgresStore.replaceMarkdownArtifacts replaces stale rows inside a transaction", async () => {
   const capture: QueryCapture[] = [];
   const artifact = createMarkdownArtifactRecord();
@@ -550,13 +824,13 @@ test("PostgresStore.replaceMarkdownArtifacts replaces stale rows inside a transa
     artifacts: [artifact]
   });
 
-  assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /delete from embedding_jobs/);
-  assert.deepEqual(capture[1]?.values, ["project:team:devgod"]);
-  assert.match(capture[2]?.text ?? "", /delete from artifacts/);
-  assert.deepEqual(capture[2]?.values, ["project:team:devgod"]);
-  assert.match(capture[3]?.text ?? "", /insert into artifacts/);
-  assert.deepEqual(capture[3]?.values, [
+  assert.equal(must(capture[0]).text, "begin");
+  assert.match(must(capture[1]).text, /delete from embedding_jobs/);
+  assert.deepEqual(must(capture[1]).values, ["project:team:devgod"]);
+  assert.match(must(capture[2]).text, /delete from artifacts/);
+  assert.deepEqual(must(capture[2]).values, ["project:team:devgod"]);
+  assert.match(must(capture[3]).text, /insert into artifacts/);
+  assert.deepEqual(must(capture[3]).values, [
     "artifact-1",
     "workspace:team",
     "project:team:devgod",
@@ -570,7 +844,7 @@ test("PostgresStore.replaceMarkdownArtifacts replaces stale rows inside a transa
       sourceAnchor: "runbook"
     })
   ]);
-  assert.equal(capture[4]?.text, "commit");
+  assert.equal(must(capture[4]).text, "commit");
 });
 
 test("PostgresStore.replaceMarkdownArtifacts rolls back when artifact persistence fails", async () => {
@@ -600,8 +874,8 @@ test("PostgresStore.replaceMarkdownArtifacts rolls back when artifact persistenc
     /insert failed/
   );
 
-  assert.equal(capture[0]?.text, "begin");
-  assert.equal(capture[capture.length - 1]?.text, "rollback");
+  assert.equal(must(capture[0]).text, "begin");
+  assert.equal(must(capture[capture.length - 1]).text, "rollback");
 });
 
 test("PostgresStore.replaceMarkdownArtifacts does not clear Qdrant when the transaction rolls back", async () => {
@@ -648,8 +922,8 @@ test("PostgresStore.replaceMarkdownArtifacts does not clear Qdrant when the tran
   );
 
   assert.deepEqual(qdrantCalls, []);
-  assert.equal(capture[0]?.text, "begin");
-  assert.equal(capture[capture.length - 1]?.text, "rollback");
+  assert.equal(must(capture[0]).text, "begin");
+  assert.equal(must(capture[capture.length - 1]).text, "rollback");
 });
 
 test("PostgresStore.replaceMarkdownArtifacts clears configured project vectors from Qdrant", async () => {
@@ -704,9 +978,9 @@ test("PostgresStore.replaceMarkdownArtifacts clears configured project vectors f
       collection: "devgod-memory"
     }
   ]);
-  assert.equal(capture[0]?.text, "begin");
-  assert.equal(capture[4]?.text, "commit");
-  assert.match(capture[5]?.text ?? "", /from runtime_project_registrations/);
+  assert.equal(must(capture[0]).text, "begin");
+  assert.equal(must(capture[4]).text, "commit");
+  assert.match(must(capture[5]).text, /from runtime_project_registrations/);
 });
 
 test("PostgresStore.saveReview persists actor provenance and waiver authority", async () => {
@@ -729,8 +1003,8 @@ test("PostgresStore.saveReview persists actor provenance and waiver authority", 
     createdAt: "2026-05-05T00:00:00.000Z"
   });
 
-  assert.match(capture[0]?.text ?? "", /actor_role/);
-  assert.deepEqual(capture[0]?.values?.slice(3), [
+  assert.match(must(capture[0]).text, /actor_role/);
+  assert.deepEqual(must(must(capture[0]).values).slice(3), [
     "qa_engineer",
     "planner-1",
     "planner",
@@ -759,13 +1033,55 @@ test("PostgresStore.saveApproval persists actor role", async () => {
     createdAt: "2026-05-05T00:00:00.000Z"
   });
 
-  assert.match(capture[0]?.text ?? "", /actor_role/);
-  assert.deepEqual(capture[0]?.values?.slice(3), [
+  assert.match(must(capture[0]).text, /actor_role/);
+  assert.deepEqual(must(must(capture[0]).values).slice(3), [
     "planner-1",
     "planner",
     "authenticated",
     "approved",
     "All required reviews passed"
+  ]);
+});
+
+test("PostgresStore.saveMemoryEntry serializes missing optional fields as null or empty metadata", async () => {
+  const capture: QueryCapture[] = [];
+  const store = new PostgresStore(sqlClientWithRows([], capture));
+
+  await store.saveMemoryEntry({
+    id: "memory-optional",
+    workspaceId: "workspace:team",
+    projectId: undefined,
+    runId: "run-1",
+    taskId: undefined,
+    scope: "project",
+    entryType: "decision",
+    title: "Decision",
+    content: "Content",
+    reviewer: "reviewer-1",
+    actor: "memory_curator",
+    status: "approved",
+    sourcePath: undefined,
+    sourceAnchor: undefined,
+    metadata: {},
+    createdAt: "2026-05-05T00:00:00.000Z"
+  });
+
+  assert.deepEqual(must(capture[0]).values, [
+    "memory-optional",
+    "workspace:team",
+    null,
+    "run-1",
+    null,
+    "project",
+    "decision",
+    "Decision",
+    "Content",
+    "reviewer-1",
+    "memory_curator",
+    "approved",
+    null,
+    null,
+    JSON.stringify({})
   ]);
 });
 
@@ -790,10 +1106,10 @@ test("PostgresStore.saveHandoff persists specialist execution evidence", async (
     createdAt: "2026-05-05T00:00:00.000Z"
   });
 
-  assert.match(capture[0]?.text ?? "", /owner_role/);
-  assert.match(capture[0]?.text ?? "", /execution_evidence/);
-  assert.match(capture[0]?.text ?? "", /quality_gate_evidence/);
-  assert.deepEqual(capture[0]?.values?.slice(3), [
+  assert.match(must(capture[0]).text, /owner_role/);
+  assert.match(must(capture[0]).text, /execution_evidence/);
+  assert.match(must(capture[0]).text, /quality_gate_evidence/);
+  assert.deepEqual(must(must(capture[0]).values).slice(3), [
     "backend-1",
     "backend_engineer",
     "specialist_verified",
@@ -861,9 +1177,9 @@ test("PostgresStore.getReviews scopes reads by run and task", async () => {
 
   await store.getReviews("run-1", "task-1");
 
-  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
-  assert.match(capture[0]?.text ?? "", /and task_id = \$2/);
-  assert.deepEqual(capture[0]?.values, ["run-1", "task-1"]);
+  assert.match(must(capture[0]).text, /where run_id = \$1/);
+  assert.match(must(capture[0]).text, /and task_id = \$2/);
+  assert.deepEqual(must(capture[0]).values, ["run-1", "task-1"]);
 });
 
 test("PostgresStore.getApprovals scopes reads by run and task", async () => {
@@ -872,9 +1188,9 @@ test("PostgresStore.getApprovals scopes reads by run and task", async () => {
 
   await store.getApprovals("run-1", "task-1");
 
-  assert.match(capture[0]?.text ?? "", /where run_id = \$1/);
-  assert.match(capture[0]?.text ?? "", /and task_id = \$2/);
-  assert.deepEqual(capture[0]?.values, ["run-1", "task-1"]);
+  assert.match(must(capture[0]).text, /where run_id = \$1/);
+  assert.match(must(capture[0]).text, /and task_id = \$2/);
+  assert.deepEqual(must(capture[0]).values, ["run-1", "task-1"]);
 });
 
 test("PostgresStore.searchMemory maps and ranks results consistently", async () => {
@@ -921,17 +1237,17 @@ test("PostgresStore.searchMemory maps and ranks results consistently", async () 
     includeGlobal: true
   });
 
-  assert.equal(results[0]?.title, "Incident playbook");
-  assert.equal(results[0]?.projectSlug, "devgod");
-  assert.equal(results[0]?.authority.scope, "project");
-  assert.equal(results[0]?.authority.precedence, "retrieval_hint");
-  assert.equal(results[0]?.citation.runId, "run-project");
-  assert.equal(results[0]?.citation.taskId, undefined);
-  assert.equal(results[0]?.citation.sourcePath, ".devgod/memory/decision-log.md");
-  assert.equal(results[0]?.citation.sourceAnchor, "incident-playbook");
-  assert.equal(results[0]?.citation.canonicalRef, ".devgod/memory/decision-log.md#incident-playbook");
-  assert.equal(results[0]?.provenance.entryType, "pattern");
-  assert.equal(results[0]?.freshness.createdAt, "2026-05-03T00:00:00.000Z");
+  assert.equal(must(results[0]).title, "Incident playbook");
+  assert.equal(must(results[0]).projectSlug, "devgod");
+  assert.equal(must(results[0]).authority.scope, "project");
+  assert.equal(must(results[0]).authority.precedence, "retrieval_hint");
+  assert.equal(must(results[0]).citation.runId, "run-project");
+  assert.equal(must(results[0]).citation.taskId, undefined);
+  assert.equal(must(results[0]).citation.sourcePath, ".devgod/memory/decision-log.md");
+  assert.equal(must(results[0]).citation.sourceAnchor, "incident-playbook");
+  assert.equal(must(results[0]).citation.canonicalRef, ".devgod/memory/decision-log.md#incident-playbook");
+  assert.equal(must(results[0]).provenance.entryType, "pattern");
+  assert.equal(must(results[0]).freshness.createdAt, "2026-05-03T00:00:00.000Z");
 });
 
 test("PostgresStore.searchMemory redacts sensitive provenance for global results", async () => {
@@ -964,16 +1280,16 @@ test("PostgresStore.searchMemory redacts sensitive provenance for global results
     includeGlobal: true
   });
 
-  assert.equal(result?.authority.reviewedBy, undefined);
-  assert.equal(result?.citation.sourcePath, undefined);
-  assert.equal(result?.citation.sourceAnchor, undefined);
-  assert.equal(result?.citation.canonicalRef, `memory://entry/${result?.citation.memoryId}`);
-  assert.equal(result?.citation.runId, undefined);
-  assert.equal(result?.citation.taskId, undefined);
-  assert.equal(result?.provenance.actor, undefined);
-  assert.equal(result?.provenance.reviewer, undefined);
-  assert.equal(result?.provenance.runId, undefined);
-  assert.equal(result?.provenance.taskId, undefined);
+  assert.equal(must(result).authority.reviewedBy, undefined);
+  assert.equal(must(result).citation.sourcePath, undefined);
+  assert.equal(must(result).citation.sourceAnchor, undefined);
+  assert.equal(must(result).citation.canonicalRef, `memory://entry/${must(result).citation.memoryId}`);
+  assert.equal(must(result).citation.runId, undefined);
+  assert.equal(must(result).citation.taskId, undefined);
+  assert.equal(must(result).provenance.actor, undefined);
+  assert.equal(must(result).provenance.reviewer, undefined);
+  assert.equal(must(result).provenance.runId, undefined);
+  assert.equal(must(result).provenance.taskId, undefined);
 });
 
 test("PostgresStore.searchMemory keeps a source path canonical ref when no anchor exists", async () => {
@@ -1008,9 +1324,9 @@ test("PostgresStore.searchMemory keeps a source path canonical ref when no ancho
     includeGlobal: false
   });
 
-  assert.equal(result?.citation.sourcePath, ".devgod/memory/decision-log.md");
-  assert.equal(result?.citation.sourceAnchor, undefined);
-  assert.equal(result?.citation.canonicalRef, ".devgod/memory/decision-log.md");
+  assert.equal(must(result).citation.sourcePath, ".devgod/memory/decision-log.md");
+  assert.equal(must(result).citation.sourceAnchor, undefined);
+  assert.equal(must(result).citation.canonicalRef, ".devgod/memory/decision-log.md");
 });
 
 test("PostgresStore.searchMemory filters restricted rows by requesterRole", async () => {
@@ -1061,9 +1377,9 @@ test("PostgresStore.searchMemory filters restricted rows by requesterRole", asyn
     requesterRole: "security_reviewer"
   });
 
-  assert.equal(securityResults[0]?.title, "Security-only note");
-  assert.deepEqual(securityResults[0]?.metadata.allowedRoles, ["security_reviewer"]);
-  assert.deepEqual(securityResults[0]?.metadata.tags, ["incident"]);
+  assert.equal(must(securityResults[0]).title, "Security-only note");
+  assert.deepEqual(must(securityResults[0]).metadata.allowedRoles, ["security_reviewer"]);
+  assert.deepEqual(must(securityResults[0]).metadata.tags, ["incident"]);
 });
 
 test("PostgresStore.searchMemory uses a stable id tie-break when titles match", async () => {
@@ -1106,8 +1422,8 @@ test("PostgresStore.searchMemory uses a stable id tie-break when titles match", 
     includeGlobal: true
   });
 
-  assert.equal(results[0]?.id, "a-id");
-  assert.equal(results[1]?.id, "z-id");
+  assert.equal(must(results[0]).id, "a-id");
+  assert.equal(must(results[1]).id, "z-id");
 });
 
 test("PostgresStore.searchMemory sends the expected SQL parameters", async () => {
@@ -1123,22 +1439,22 @@ test("PostgresStore.searchMemory sends the expected SQL parameters", async () =>
   });
 
   assert.equal(capture.length, 5);
-  assert.match(capture[0]?.text ?? "", /with project_context as/);
-  assert.match(capture[0]?.text ?? "", /where w\.slug = \$1 and p\.slug = \$2/);
-  assert.match(capture[0]?.text ?? "", /join project_context pc on true/);
-  assert.match(capture[0]?.text ?? "", /\$3::boolean and m\.scope = 'global'/);
-  assert.match(capture[0]?.text ?? "", /limit \$4/);
-  assert.deepEqual(capture[0]?.values, ["team", "devgod", false, 25]);
-  assert.match(capture[1]?.text ?? "", /ilike/);
-  assert.match(capture[1]?.text ?? "", /limit \$7/);
-  assert.deepEqual(capture[1]?.values, ["team", "devgod", false, "%shared orchestration%", "%shared%", "%orchestration%", 15]);
-  assert.match(capture[2]?.text ?? "", /from artifacts a/);
-  assert.match(capture[2]?.text ?? "", /where a\.kind = 'markdown_chunk'/);
-  assert.deepEqual(capture[2]?.values, ["team", "devgod", 25]);
-  assert.match(capture[3]?.text ?? "", /coalesce\(a\.content->>'text', a\.content::text\) ilike/);
-  assert.deepEqual(capture[3]?.values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
-  assert.match(capture[4]?.text ?? "", /from workflow_documents d/);
-  assert.deepEqual(capture[4]?.values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+  assert.match(must(capture[0]).text, /with project_context as/);
+  assert.match(must(capture[0]).text, /where w\.slug = \$1 and p\.slug = \$2/);
+  assert.match(must(capture[0]).text, /join project_context pc on true/);
+  assert.match(must(capture[0]).text, /\$3::boolean and m\.scope = 'global'/);
+  assert.match(must(capture[0]).text, /limit \$4/);
+  assert.deepEqual(must(capture[0]).values, ["team", "devgod", false, 25]);
+  assert.match(must(capture[1]).text, /ilike/);
+  assert.match(must(capture[1]).text, /limit \$7/);
+  assert.deepEqual(must(capture[1]).values, ["team", "devgod", false, "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+  assert.match(must(capture[2]).text, /from artifacts a/);
+  assert.match(must(capture[2]).text, /where a\.kind = 'markdown_chunk'/);
+  assert.deepEqual(must(capture[2]).values, ["team", "devgod", 25]);
+  assert.match(must(capture[3]).text, /coalesce\(a\.content->>'text', a\.content::text\) ilike/);
+  assert.deepEqual(must(capture[3]).values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
+  assert.match(must(capture[4]).text, /from workflow_documents d/);
+  assert.deepEqual(must(capture[4]).values, ["team", "devgod", "%shared orchestration%", "%shared%", "%orchestration%", 15]);
 });
 
 test("PostgresStore.searchMemory issues a vector query when query embeddings are supplied", async () => {
@@ -1181,11 +1497,11 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
     embeddingModel: "text-embedding-3-small"
   });
 
-  assert.equal(result?.id, "vector-best");
+  assert.equal(must(result).id, "vector-best");
   assert.equal(capture.length, 7);
-  assert.match(capture[2]?.text ?? "", /m\.embedding <=> \$4::vector/);
-  assert.match(capture[2]?.text ?? "", /m\.embedding_model = \$5/);
-  assert.deepEqual(capture[2]?.values, [
+  assert.match(must(capture[2]).text, /m\.embedding <=> \$4::vector/);
+  assert.match(must(capture[2]).text, /m\.embedding_model = \$5/);
+  assert.deepEqual(must(capture[2]).values, [
     "team",
     "devgod",
     false,
@@ -1193,9 +1509,9 @@ test("PostgresStore.searchMemory issues a vector query when query embeddings are
     "text-embedding-3-small",
     15
   ]);
-  assert.match(capture[5]?.text ?? "", /a\.embedding <=> \$3::vector/);
-  assert.match(capture[5]?.text ?? "", /a\.embedding_model = \$4/);
-  assert.deepEqual(capture[5]?.values, ["team", "devgod", "[0.1,0.2]", "text-embedding-3-small", 15]);
+  assert.match(must(capture[5]).text, /a\.embedding <=> \$3::vector/);
+  assert.match(must(capture[5]).text, /a\.embedding_model = \$4/);
+  assert.deepEqual(must(capture[5]).values, ["team", "devgod", "[0.1,0.2]", "text-embedding-3-small", 15]);
 });
 
 test("PostgresStore.searchMemory augments artifact vector retrieval with configured Qdrant matches", async () => {
@@ -1268,9 +1584,9 @@ test("PostgresStore.searchMemory augments artifact vector retrieval with configu
     requesterRole: "planner"
   });
 
-  assert.equal(result?.id, "artifact-1");
-  assert.equal(result?.authority.source, "repo_artifact");
-  assert.equal(result?.citation.sourcePath, ".agents/skills/devgod-test/SKILL.md");
+  assert.equal(must(result).id, "artifact-1");
+  assert.equal(must(result).authority.source, "repo_artifact");
+  assert.equal(must(result).citation.sourcePath, ".agents/skills/devgod-test/SKILL.md");
   assert.deepEqual(qdrantQueries, [
     {
       projectId: "project:team:devgod",
@@ -1278,9 +1594,190 @@ test("PostgresStore.searchMemory augments artifact vector retrieval with configu
       limit: 15
     }
   ]);
-  assert.match(capture[7]?.text ?? "", /from runtime_project_registrations/);
-  assert.match(capture[8]?.text ?? "", /from artifacts a/);
-  assert.match(capture[8]?.text ?? "", /a\.id::text = any\(\$2::text\[\]\)/);
+  assert.match(must(capture[7]).text, /from runtime_project_registrations/);
+  assert.match(must(capture[8]).text, /from artifacts a/);
+  assert.match(must(capture[8]).text, /a\.id::text = any\(\$2::text\[\]\)/);
+});
+
+test("PostgresStore.searchMemory skips Qdrant augmentation without a configured artifact index", async () => {
+  const store = new PostgresStore(sqlClientWithRows([]));
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.deepEqual(results, []);
+});
+
+test("PostgresStore.searchMemory skips Qdrant augmentation when query embeddings are empty", async () => {
+  let qdrantCalls = 0;
+  const store = new PostgresStore(sqlClientWithRows([]), {
+    artifactVectorIndex: {
+      async upsertArtifactPoint() {},
+      async deleteProjectArtifacts() {},
+      async queryArtifactMatches() {
+        qdrantCalls += 1;
+        return [];
+      }
+    }
+  });
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: []
+  });
+
+  assert.deepEqual(results, []);
+  assert.equal(qdrantCalls, 0);
+});
+
+test("PostgresStore.searchMemory skips Qdrant augmentation when runtime registration is incomplete", async () => {
+  const capture: QueryCapture[] = [];
+  let qdrantCalls = 0;
+  const store = new PostgresStore(
+    sqlClientWithRows([[], [], [], [], [], [], [], [{ runtimeProfile: "local-native" }]], capture),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint() {},
+        async deleteProjectArtifacts() {},
+        async queryArtifactMatches() {
+          qdrantCalls += 1;
+          return [];
+        }
+      }
+    }
+  );
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.deepEqual(results, []);
+  assert.equal(qdrantCalls, 0);
+  assert.equal(capture.length, 8);
+});
+
+test("PostgresStore.searchMemory skips Qdrant augmentation when no artifact ids are returned", async () => {
+  let qdrantCalls = 0;
+  const store = new PostgresStore(
+    sqlClientWithRows([[], [], [], [], [], [], [], [{ runtimeProfile: "local-native", qdrantUrl: "http://127.0.0.1:6333", qdrantCollection: "devgod-memory" }]]),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint() {},
+        async deleteProjectArtifacts() {},
+        async queryArtifactMatches() {
+          qdrantCalls += 1;
+          return [];
+        }
+      }
+    }
+  );
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small"
+  });
+
+  assert.deepEqual(results, []);
+  assert.equal(qdrantCalls, 1);
+});
+
+test("PostgresStore.searchMemory skips Qdrant artifacts that cannot be hydrated or accessed", async () => {
+  const qdrantQueries: Array<{ projectId: string; collection: string; limit: number }> = [];
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+          {
+            runtimeProfile: "local-native",
+            qdrantUrl: "http://127.0.0.1:6333",
+            qdrantCollection: "devgod-memory"
+          }
+        ],
+        [
+          {
+            id: "artifact-hidden",
+            runId: "run-1",
+            kind: "markdown_chunk",
+            title: "Hidden Runbook",
+            content: "Restricted content",
+            sourcePath: ".agents/skills/devgod-test/SKILL.md",
+            sourceAnchor: "hidden",
+            metadata: {
+              retrievalRoles: ["security_reviewer"],
+              tags: ["repo_markdown"]
+            },
+            createdAt: "2026-05-11T00:00:00.000Z"
+          }
+        ]
+      ]
+    ),
+    {
+      artifactVectorIndex: {
+        async upsertArtifactPoint() {},
+        async deleteProjectArtifacts() {},
+        async queryArtifactMatches(input) {
+          qdrantQueries.push({
+            projectId: input.projectId,
+            collection: input.collection,
+            limit: input.limit
+          });
+          return [
+            { id: "artifact-hidden", score: 0.99 },
+            { id: "artifact-missing", score: 0.75 }
+          ];
+        }
+      }
+    }
+  );
+
+  const results = await store.searchMemory({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    query: "skill context retrieval",
+    limit: 5,
+    includeGlobal: false,
+    queryEmbedding: [0.1, 0.2],
+    embeddingModel: "text-embedding-3-small",
+    requesterRole: "planner"
+  });
+
+  assert.deepEqual(results, []);
+  assert.deepEqual(qdrantQueries, [
+    {
+      projectId: "project:team:devgod",
+      collection: "devgod-memory",
+      limit: 15
+    }
+  ]);
 });
 
 test("PostgresStore.searchMemory backfills older lexical matches outside the recent window", async () => {
@@ -1327,8 +1824,8 @@ test("PostgresStore.searchMemory backfills older lexical matches outside the rec
     includeGlobal: true
   });
 
-  assert.equal(results[0]?.id, "older-best");
-  assert.equal(results[0]?.citation.taskId, "task-older");
+  assert.equal(must(results[0]).id, "older-best");
+  assert.equal(must(results[0]).citation.taskId, "task-older");
 });
 
 test("PostgresStore.searchMemory de-duplicates recent and backfill candidates", async () => {
@@ -1414,13 +1911,13 @@ test("PostgresStore.queueEmbeddingJob clears derived embeddings and inserts a pe
   assert.equal(job.id, "job-1");
   assert.equal(job.status, "pending");
   assert.equal(capture.length, 2);
-  assert.match(capture[0]?.text ?? "", /update memory_entries/);
-  assert.match(capture[0]?.text ?? "", /set embedding = null/);
-  assert.deepEqual(capture[0]?.values, ["memory-1"]);
-  assert.match(capture[1]?.text ?? "", /insert into embedding_jobs/);
-  assert.match(capture[1]?.text ?? "", /on conflict \(source_table, source_id, embedding_model\) do update/);
-  assert.match(capture[1]?.text ?? "", /status = 'pending'/);
-  assert.deepEqual(capture[1]?.values, [
+  assert.match(must(capture[0]).text, /update memory_entries/);
+  assert.match(must(capture[0]).text, /set embedding = null/);
+  assert.deepEqual(must(capture[0]).values, ["memory-1"]);
+  assert.match(must(capture[1]).text, /insert into embedding_jobs/);
+  assert.match(must(capture[1]).text, /on conflict \(source_table, source_id, embedding_model\) do update/);
+  assert.match(must(capture[1]).text, /status = 'pending'/);
+  assert.deepEqual(must(capture[1]).values, [
     "workspace:team",
     "project:team:devgod",
     "memory_entries",
@@ -1465,8 +1962,8 @@ test("PostgresStore.queueEmbeddingJob reuses an existing job for the same source
   assert.equal(job.id, "job-existing");
   assert.equal(job.status, "pending");
   assert.equal(capture.length, 2);
-  assert.match(capture[1]?.text ?? "", /insert into embedding_jobs/);
-  assert.match(capture[1]?.text ?? "", /on conflict \(source_table, source_id, embedding_model\) do update/);
+  assert.match(must(capture[1]).text, /insert into embedding_jobs/);
+  assert.match(must(capture[1]).text, /on conflict \(source_table, source_id, embedding_model\) do update/);
 });
 
 test("PostgresStore.queueEmbeddingJob clears derived artifact embeddings before enqueueing", async () => {
@@ -1503,9 +2000,9 @@ test("PostgresStore.queueEmbeddingJob clears derived artifact embeddings before 
   });
 
   assert.equal(job.sourceTable, "artifacts");
-  assert.match(capture[0]?.text ?? "", /update artifacts/);
-  assert.match(capture[0]?.text ?? "", /set embedding = null/);
-  assert.deepEqual(capture[0]?.values, ["artifact-1"]);
+  assert.match(must(capture[0]).text, /update artifacts/);
+  assert.match(must(capture[0]).text, /set embedding = null/);
+  assert.deepEqual(must(capture[0]).values, ["artifact-1"]);
 });
 
 test("PostgresStore.leaseEmbeddingJobs marks pending jobs as processing", async () => {
@@ -1535,11 +2032,11 @@ test("PostgresStore.leaseEmbeddingJobs marks pending jobs as processing", async 
   const jobs = await store.leaseEmbeddingJobs({ limit: 2 });
 
   assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.status, "processing");
-  assert.match(capture[0]?.text ?? "", /with leased as/);
-  assert.match(capture[0]?.text ?? "", /for update skip locked/);
-  assert.match(capture[0]?.text ?? "", /status = 'processing'/);
-  assert.deepEqual(capture[0]?.values, [2]);
+  assert.equal(must(jobs[0]).status, "processing");
+  assert.match(must(capture[0]).text, /with leased as/);
+  assert.match(must(capture[0]).text, /for update skip locked/);
+  assert.match(must(capture[0]).text, /status = 'processing'/);
+  assert.deepEqual(must(capture[0]).values, [2]);
 });
 
 test("PostgresStore.getEmbeddingSource delegates memory and artifact lookups", async () => {
@@ -1617,16 +2114,16 @@ test("PostgresStore.completeEmbeddingJob writes the vector and marks the job don
   });
 
   assert.equal(capture.length, 5);
-  assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
-  assert.match(capture[2]?.text ?? "", /update memory_entries/);
-  assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
-  assert.deepEqual(capture[2]?.values, ["memory-1", "[0.1,0.2,0.3]", "text-embedding-3-small"]);
-  assert.match(capture[3]?.text ?? "", /update embedding_jobs/);
-  assert.match(capture[3]?.text ?? "", /status = 'done'/);
-  assert.match(capture[3]?.text ?? "", /status = 'processing'/);
-  assert.deepEqual(capture[3]?.values, ["job-1", "memory_entries", "memory-1", "text-embedding-3-small"]);
-  assert.equal(capture[4]?.text, "commit");
+  assert.equal(must(capture[0]).text, "begin");
+  assert.match(must(capture[1]).text, /from embedding_jobs/);
+  assert.match(must(capture[2]).text, /update memory_entries/);
+  assert.match(must(capture[2]).text, /embedding = \$2::vector/);
+  assert.deepEqual(must(capture[2]).values, ["memory-1", "[0.1,0.2,0.3]", "text-embedding-3-small"]);
+  assert.match(must(capture[3]).text, /update embedding_jobs/);
+  assert.match(must(capture[3]).text, /status = 'done'/);
+  assert.match(must(capture[3]).text, /status = 'processing'/);
+  assert.deepEqual(must(capture[3]).values, ["job-1", "memory_entries", "memory-1", "text-embedding-3-small"]);
+  assert.equal(must(capture[4]).text, "commit");
 });
 
 test("PostgresStore.completeEmbeddingJob writes artifact vectors and marks the job done", async () => {
@@ -1665,14 +2162,14 @@ test("PostgresStore.completeEmbeddingJob writes artifact vectors and marks the j
   });
 
   assert.equal(capture.length, 5);
-  assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
-  assert.match(capture[2]?.text ?? "", /update artifacts/);
-  assert.match(capture[2]?.text ?? "", /embedding = \$2::vector/);
-  assert.deepEqual(capture[2]?.values, ["artifact-1", "[0.4,0.5]", "text-embedding-3-small"]);
-  assert.match(capture[3]?.text ?? "", /update embedding_jobs/);
-  assert.deepEqual(capture[3]?.values, ["job-artifact", "artifacts", "artifact-1", "text-embedding-3-small"]);
-  assert.equal(capture[4]?.text, "commit");
+  assert.equal(must(capture[0]).text, "begin");
+  assert.match(must(capture[1]).text, /from embedding_jobs/);
+  assert.match(must(capture[2]).text, /update artifacts/);
+  assert.match(must(capture[2]).text, /embedding = \$2::vector/);
+  assert.deepEqual(must(capture[2]).values, ["artifact-1", "[0.4,0.5]", "text-embedding-3-small"]);
+  assert.match(must(capture[3]).text, /update embedding_jobs/);
+  assert.deepEqual(must(capture[3]).values, ["job-artifact", "artifacts", "artifact-1", "text-embedding-3-small"]);
+  assert.equal(must(capture[4]).text, "commit");
 });
 
 test("PostgresStore.completeEmbeddingJob syncs artifact vectors to the configured Qdrant index", async () => {
@@ -1752,10 +2249,10 @@ test("PostgresStore.completeEmbeddingJob syncs artifact vectors to the configure
       vector: [0.4, 0.5]
     }
   ]);
-  assert.match(capture[1]?.text ?? "", /from embedding_jobs/);
-  assert.match(capture[2]?.text ?? "", /update artifacts/);
-  assert.match(capture[3]?.text ?? "", /from artifacts a/);
-  assert.match(capture[4]?.text ?? "", /update embedding_jobs/);
+  assert.match(must(capture[1]).text, /from embedding_jobs/);
+  assert.match(must(capture[2]).text, /update artifacts/);
+  assert.match(must(capture[3]).text, /from artifacts a/);
+  assert.match(must(capture[4]).text, /update embedding_jobs/);
 });
 
 test("PostgresStore.failEmbeddingJob records failures without changing the source vector", async () => {
@@ -1765,10 +2262,10 @@ test("PostgresStore.failEmbeddingJob records failures without changing the sourc
   await store.failEmbeddingJob("job-1", "provider timeout");
 
   assert.equal(capture.length, 3);
-  assert.equal(capture[0]?.text, "begin");
-  assert.match(capture[1]?.text ?? "", /update embedding_jobs/);
-  assert.match(capture[1]?.text ?? "", /status = 'failed'/);
-  assert.match(capture[1]?.text ?? "", /status = 'processing'/);
-  assert.deepEqual(capture[1]?.values, ["job-1", "provider timeout"]);
-  assert.equal(capture[2]?.text, "commit");
+  assert.equal(must(capture[0]).text, "begin");
+  assert.match(must(capture[1]).text, /update embedding_jobs/);
+  assert.match(must(capture[1]).text, /status = 'failed'/);
+  assert.match(must(capture[1]).text, /status = 'processing'/);
+  assert.deepEqual(must(capture[1]).values, ["job-1", "provider timeout"]);
+  assert.equal(must(capture[2]).text, "commit");
 });

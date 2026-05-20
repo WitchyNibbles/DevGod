@@ -8,6 +8,9 @@ cd "$repo_root"
 echo "typecheck"
 npm run typecheck
 
+echo "coverage"
+npm run check:coverage
+
 echo "workflow fixtures"
 npm run verify:workflow
 

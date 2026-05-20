@@ -23,6 +23,10 @@ test("release overlay verification script stays aligned with CI", async () => {
   assert.match(releaseOverlayScript, /npm test/);
   assert.match(releaseOverlayScript, /npm run check:quality/);
   assert.match(releaseOverlayScript, /npm run verify:review-identity/);
+  assert.match(releaseOverlayScript, /npm run check:coverage|npm run check:quality/);
+
+  const qualityScript = await readFile(join(repoRoot, "scripts", "check-quality.sh"), "utf8");
+  assert.match(qualityScript, /npm run check:coverage/);
 });
 
 test("README documents the opt-in overlay release posture honestly", async () => {

@@ -14,22 +14,26 @@ export async function loadDotEnv(): Promise<void> {
 
   try {
     const raw = await readFile(envPath, "utf8");
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (trimmed.length === 0 || trimmed.startsWith("#") || !trimmed.includes("=")) {
-        continue;
-      }
-
-      const [key, ...rest] = trimmed.split("=");
-      if (!key || process.env[key]) {
-        continue;
-      }
-
-      const value = rest.join("=").replace(/^"(.*)"$/, "$1");
-      process.env[key] = value;
-    }
+    applyDotEnvText(raw, process.env);
   } catch {
     // .env is optional as long as the environment variables were provided another way.
+  }
+}
+
+function applyDotEnvText(raw: string, env: NodeJS.ProcessEnv): void {
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#") || !trimmed.includes("=")) {
+      continue;
+    }
+
+    const [key, ...rest] = trimmed.split("=");
+    if (!key || env[key]) {
+      continue;
+    }
+
+    const value = rest.join("=").replace(/^"(.*)"$/, "$1");
+    env[key] = value;
   }
 }
 
@@ -59,7 +63,7 @@ interface WithClientUsingOptions {
 }
 
 function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
 }
 
 function isConnectionRefusedError(error: unknown): boolean {
@@ -118,6 +122,13 @@ function parseLeadingCommand(commandLine: string): string | undefined {
 
   return trimmed.split(/\s+/, 1)[0];
 }
+
+export const dbInternals = {
+  applyDotEnvText,
+  isConnectionRefusedError,
+  resolveLoopbackDatabaseTarget,
+  parseLeadingCommand
+} as const;
 
 async function resolveRepoLocalPgCtlPath(repoRoot: string, postmasterOptionsPath: string): Promise<string | undefined> {
   try {
