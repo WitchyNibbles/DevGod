@@ -1,5 +1,5 @@
 {
-  "project_status": "in_progress",
+  "project_status": "complete",
   "current_task_id": null,
   "tasks": [
     {
@@ -15,8 +15,7 @@
         "focused runtime and workflow-check regression coverage"
       ],
       "evidence": [
-        ".devgod/work/coverage/coverage-2026-05-15-autonomous-execution-redesign.json",
-        ".devgod/work/proofs/progress-2026-05-15-autonomous-execution-redesign.json"
+        "runtime workflow proof run 4e634017-e28e-4a29-8f9d-e0fa3366ae7b"
       ],
       "blocker": null
     },
@@ -139,7 +138,7 @@
     {
       "id": "2026-05-20-autonomous-phase-orchestration-and-eval",
       "title": "2026-05-20-autonomous-phase-orchestration-and-eval",
-      "status": "ready",
+      "status": "done",
       "class": "release_candidate",
       "depends_on": [
         "2026-05-20-autonomous-coverage-gap-proof-engine",
@@ -154,9 +153,12 @@
         "runtime reconciliation required before queue advancement"
       ],
       "evidence": [
-        ".devgod/work/plans/plan-2026-05-20-autonomous-system-closeout-plan.md"
+        ".devgod/work/plans/plan-2026-05-20-autonomous-system-closeout-plan.md",
+        ".devgod/work/coverage/coverage-2026-05-20-autonomous-phase-orchestration-and-eval.json",
+        ".devgod/work/proofs/progress-2026-05-20-autonomous-phase-orchestration-and-eval.json",
+        "runtime workflow proof run 50a9d556-3763-4ac3-b792-a2bd14efd9a1"
       ],
-      "blocker": "next slice cannot start until its brief/task artifacts are added to writable scope"
+      "blocker": null
     }
   ]
 }
