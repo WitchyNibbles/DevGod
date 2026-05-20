@@ -1,0 +1,30 @@
+{
+  "task_id": "2026-05-20-external-eval-and-hitl-hardening",
+  "status": "completed",
+  "date": "2026-05-20",
+  "summary": "External eval posture and sensitive-action review controls are now runtime-backed and visible through operator status/report surfaces.",
+  "changed_files": [
+    "src/domain/types.ts",
+    "src/runtime/autonomous-execution.ts",
+    "src/core/service.ts",
+    "src/admin/status.ts",
+    "src/admin/report.ts",
+    "tests/service.test.ts",
+    "tests/status-report.test.ts",
+    "tests/report-command.test.ts"
+  ],
+  "verification": [
+    "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts",
+    "npm run check:coverage",
+    "npm run typecheck",
+    "git diff --check -- src/domain/types.ts src/runtime/autonomous-execution.ts src/core/service.ts src/admin/status.ts src/admin/report.ts tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts .devgod/ACTIVE .devgod/work/product-state.md .devgod/work/task-queue.json .devgod/work/tasks/task-2026-05-20-external-eval-and-hitl-hardening.md"
+  ],
+  "evidence": [
+    "runtime state persists external eval records",
+    "runtime state persists sensitive-action control records",
+    "operator status surfaces eval posture and review controls",
+    "operator report surfaces eval posture and review controls",
+    "full-suite verification passed after continuation-selection repair"
+  ],
+  "blockers": []
+}

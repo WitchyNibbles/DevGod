@@ -1,0 +1,34 @@
+{
+  "task_id": "2026-05-20-operator-truth-alignment",
+  "captured_at": "2026-05-20T11:47:00.000Z",
+  "status": "verified",
+  "summary": "Operator-visible truth is aligned for the reopened remediation sequence: workflow artifacts no longer claim broader completion, and unconfigured autonomous state is now explicitly described as compatible with valid run-level workflow proof but insufficient to prove active autonomous continuation.",
+  "research_basis": [
+    "https://developers.openai.com/api/docs/guides/agent-evals",
+    "https://developers.openai.com/api/docs/guides/trace-grading",
+    "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run benchmark:orchestration -- --format markdown",
+      "status": "passed",
+      "detail": "14/14 baseline cases passed"
+    },
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    }
+  ],
+  "release_readiness": {
+    "status": "confirmed",
+    "reason": "This slice changes shipped operator semantics and benchmark docs only; focused regressions and typecheck passed, and the wording now fails closed against false autonomy-complete claims."
+  },
+  "residual_risk": [
+    "The next remediation slice still needs a scope transition before code changes can begin.",
+    "This slice intentionally preserves existing run-selection behavior; it clarifies interpretation instead of changing selection semantics."
+  ]
+}

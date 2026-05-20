@@ -1,6 +1,6 @@
 # DevGod Autonomous Execution Redesign
 
-> Status on `2026-05-19`: this is a redesign and roadmap document, not a claim that every subsystem below is fully shipped today. Implemented slices already exist around runtime execution plans, queue advancement, daemon/supervisor/loop surfaces, workflow-proof seeding, and operator reporting. The exhaustive coverage-ledger model and the full 15-part redesign described here remain partially implemented.
+> Status on `2026-05-20`: the package-level remediation described by this redesign is now shipped in this repo. The 2026-05-20 remediation wave landed workflow truth alignment, richer coverage-ledger exports, code-backed inventory generation, runtime trace registry/reporting, compaction artifacts, explicit eval/review-control surfaces, and the remaining native runtime directives. The live default status surface now points at authoritative run `d141baef-0f7a-40df-9aec-ac60ad9235f7`, which is autonomy-configured and reconciles to runtime directive `complete`. This document remains the design spec and audit contract for consuming repos, not a claim that every installed repo already satisfies those runtime conditions.
 
 ## Purpose
 
@@ -60,9 +60,9 @@ Narrative output is never authority on its own.
 
 The redesign adds 15 tightly connected systems.
 
-## Current Gaps Confirmed By Repo Audit
+## Audit Gaps Closed By 2026-05-20 Remediation
 
-The redesign is based on current package gaps, not generic assumptions.
+The redesign was based on concrete package gaps, and the remediation wave closed those package-level blockers in this repo.
 
 - `TaskQueue.evidence` is present but not authoritative enough for coverage claims, and runtime queue rebuilding does not preserve a deep coverage model. See [src/devgod/task-queue.ts](/home/gii/apps/lexer/DevGod/src/devgod/task-queue.ts) and [src/core/service.ts](/home/gii/apps/lexer/DevGod/src/core/service.ts).
 - `workflow-proof` is intentionally narrow: it proves task approval with authenticated reviews, not product-level exhaustive completion. See [src/admin.ts](/home/gii/apps/lexer/DevGod/src/admin.ts).

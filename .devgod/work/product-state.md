@@ -6,211 +6,100 @@ Enable DevGod to operate as the broader autonomous execution and audit system de
 
 ## Global Acceptance Criteria
 
-- Product state is tracked separately from single-task completion.
-- Unblocked tasks can be selected from a queue with dependency awareness.
-- Failed verification paths enter a bounded repair loop instead of stopping at the first failed command.
-- Completion claims require explicit verification evidence.
-
-## Required Capabilities
-
-| Capability | Status | Evidence |
-|---|---|---|
-| Full-project autopilot skill | done | `.agents/skills/devgod-autopilot/SKILL.md` |
-| Repair-loop skill | done | `.agents/skills/devgod-repair-loop/SKILL.md` |
-| Product-state template | done | `.devgod/templates/product-state.md` |
-| Task-queue template | done | `.devgod/templates/task-queue.json` |
-| Queue validation and next-task helper | done | `src/devgod/task-queue.ts`, `src/devgod/autopilot-status.ts` |
-| Queue validation tests | done | `tests/autopilot-status.test.ts` |
-| Runtime execution-plan engine | done | `src/core/service.ts`, `tests/service.test.ts`, `tests/actions.test.ts` |
-| Admin/runtime loop surface | done | `src/admin.ts`, `src/admin/runtime-surface.ts`, `tests/ops-recovery.test.ts`, `tests/runtime-surface.test.ts` |
-| MCP and install exposure for loop surface | done | `src/mcp/tools.ts`, `src/mcp/server.ts`, `src/install/merge.ts`, `tests/mcp-tools.test.ts`, `tests/install.test.ts` |
-| Local runtime workflow-proof seeding | done | `src/admin.ts`, `src/install/merge.ts`, `tests/admin.test.ts`, `tests/install.test.ts` |
-| Runtime directive execution beyond safe recovery | done | `src/core/service.ts`, `src/admin.ts`, `src/admin/runtime-surface.ts`, `tests/service.test.ts`, `tests/ops-recovery.test.ts`, `tests/runtime-surface.test.ts` |
-| Persisted runtime loop execution history | done | `src/core/service.ts`, `src/admin/report.ts`, `src/admin.ts`, `src/admin/runtime-surface.ts`, `tests/service.test.ts`, `tests/admin.test.ts` |
-| Runtime-approved task advancement into queue state | done | `src/admin.ts`, `src/devgod/task-queue.ts`, `tests/admin.test.ts`, `tests/autopilot-status.test.ts` |
-| Verification harness compatibility under restricted/sandboxed execution | done | `src/install/cli.ts`, `tests/install.test.ts`, `tests/workflow-check.test.ts`, `tests/workflow-scaffold.test.ts`, `tests/orchestration-benchmark.test.ts`, `tests/orchestration-eval.test.ts`, `tests/ui-server.test.ts` |
-| Reasoning-quality skepticism layer across prompts, workflow artifacts, and runtime reporting | done | `src/core/reasoning-quality.ts`, `src/core/service.ts`, `src/admin/report.ts`, `src/admin/ops.ts`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/report-command.test.ts`, `tests/control-layer-contract.test.ts` |
-| Reasoning-quality hardening with strict lifecycle enforcement and legacy upgrade tooling | done | `src/domain/types.ts`, `src/domain/contracts.ts`, `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `scripts/check-devgod-workflow.sh`, `tests/install.test.ts`, `tests/workflow-check.test.ts` |
-| Strict reasoning mode as the default for unspecified workflows | done | `src/core/reasoning-quality.ts`, `src/install/cli.ts`, `.devgod/templates/task-packet.md`, `.devgod/rules/reasoning-quality.md`, `tests/service.test.ts`, `tests/install.test.ts`, `tests/orchestration-eval.test.ts` |
-| Autonomous execution schema and workflow-enforcement slice | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/core/service.ts`, `scripts/check-devgod-workflow.sh`, `tests/service.test.ts`, `tests/workflow-check.test.ts`, `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-execution-redesign` |
-| Autonomous continuation selection, packaged surface exposure, and checkpoint-import hardening | done | `src/core/service.ts`, `src/admin.ts`, `src/admin/devgod.ts`, `src/admin/ops.ts`, `src/install/merge.ts`, `tests/admin.test.ts`, `tests/install.test.ts`, `tests/ops-recovery.test.ts`, `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-next-target-directives` |
+- product state is tracked separately from single-task completion
+- unblocked tasks can be selected from a queue with dependency awareness
+- failed verification paths enter a bounded repair loop instead of stopping at the first failed command
+- completion claims require explicit verification evidence and honest operator surfaces
 
 ## Current Milestone
 
-Broader autonomous-system redesign closeout
+Autonomous redesign gap remediation completed after completion-proof reopen
 
-## Scope correction
+## Scope Correction
 
-- The previously reported `done` state applied to the narrower runtime-loop and coverage-hardening milestone, not to the full 15-part autonomous-system redesign.
-- On 2026-05-20 the broader goal was reopened after clarifying that `docs/autonomous-execution-redesign.md` is the target, not just the already shipped runtime continuation slices.
+- The earlier false-complete state only covered the narrower runtime-loop foundation.
+- On 2026-05-20 the broader goal was reopened, completed, and re-verified against authoritative runtime evidence.
+- This file now records the closed remediation sequence and the final completion-proof run instead of the stale partial-complete claim.
 
-## Completed Milestones
+## Shipped Foundation
 
-- Baseline autopilot control-layer scaffolding
-- Runtime execution-plan authority surfaced to CLI, runtime helpers, MCP, and installed scripts
-- Local runtime proof bootstrap restored live workflow validation for package-maintainer work
-- Reasoning-quality skepticism and evidence discipline standardized across prompts, workflow artifacts, runtime routing, and reporting
-- Reasoning-quality hardening added strict/dual/legacy lifecycle enforcement, migration tooling, and completion blocking on insufficient evidence
-- Strict reasoning is now the default for unspecified runtime, CLI, template, and planning flows, with dual and legacy retained only as explicit compatibility modes
-- Autonomous continuation is now runtime-selected, exposed through packaged operator surfaces, and hardened against unsafe checkpoint imports
-- Autonomous phase-readiness orchestration, checkpoint freshness, and long-horizon fail-closed eval coverage are complete, closing the broader redesign goal.
+The repo already ships the runtime-backed base that the remaining work builds on:
+
+- runtime execution-plan engine
+- runtime-approved task advancement and workflow-proof authority
+- reasoning-quality enforcement with strict default mode
+- packaged operator, MCP, and install surfaces for the runtime loop
+- checkpoint and progress-proof data structures
+
+## Remaining Goal Queue
+
+| Task | Status | Why it exists |
+|---|---|---|
+| `2026-05-20-operator-truth-alignment` | done | reopened the workflow honestly and removed false completion signals |
+| `2026-05-20-authoritative-coverage-ledger-exports` | done | exported the fuller authoritative ledger artifact set and hardened checks |
+| `2026-05-20-code-understanding-inventory` | done | generated code-backed inventory and understanding maps |
+| `2026-05-20-runtime-trace-registry` | done | record and surface risky-flow runtime trace evidence |
+| `2026-05-20-continuation-and-compaction-hardening` | done | broaden safe continuation execution and make compaction operational |
+| `2026-05-20-external-eval-and-hitl-hardening` | done | add stronger external eval posture and clearer sensitive-action review controls |
+| `2026-05-20-broader-autonomy-completion-reopen` | done | reopened the false-complete state, absorbed the final runtime-native directive work, and closed the completion-proof gap |
+| `2026-05-20-runtime-native-directive-expansion` | done | expanded the native directive model and seeded the live autonomy-configured proof path under the reopen task |
 
 ## Current Task
 
-None. `2026-05-20-autonomous-phase-orchestration-and-eval` is complete.
+`none`
 
 ## Next Task
 
-None. The broader autonomous-system redesign is complete.
+`none`
 
 ## Blockers
 
-- No active blocker remains. `2026-05-20-autonomous-phase-orchestration-and-eval` passed artifact and live workflow proof on 2026-05-20, and no downstream autonomous redesign task remains open.
+- none
+
+## Research Basis
+
+- OpenAI agent evals guidance: operator-facing claims should align with reproducible workflow evidence rather than narrative summaries alone.
+- OpenAI trace grading guidance: trace-backed state and evaluation should be clearly distinguished from derived interpretation.
+- Anthropic eval guidance: the harness and workflow should be evaluated as a system, which requires accurate operator truth before adding deeper autonomy features.
+
+## Current Slice Summary
+
+`2026-05-20-operator-truth-alignment` through `2026-05-20-external-eval-and-hitl-hardening` remain complete, and the reopened completion-proof slice is now also closed. The shipped runtime-native directive model now covers `complete`, `dispatch_owner`, `dispatch_reviews`, `apply_recovery`, `continue_analysis`, `dispatch_subagents`, `trace_runtime`, `rebuild_inventory`, `checkpoint`, `replan_migration`, and `blocked`. The latest authoritative default run `d141baef-0f7a-40df-9aec-ac60ad9235f7` is `approved`, reports `autonomous.configured=true`, and reconciles to runtime directive `complete`, so the broader package-level redesign claim is now backed by live runtime evidence instead of narrative-only assertions.
 
 ## Verification Summary
 
-- `node --experimental-strip-types --test tests/service.test.ts tests/orchestration-eval.test.ts` passed on 2026-05-20 for `2026-05-20-autonomous-phase-orchestration-and-eval`.
-- `node --experimental-strip-types --test tests/status-report.test.ts` passed on 2026-05-20 for `2026-05-20-autonomous-phase-orchestration-and-eval`.
-- `node --experimental-strip-types --test tests/report-command.test.ts` passed on 2026-05-20 for `2026-05-20-autonomous-phase-orchestration-and-eval`.
-- `npm run typecheck` passed on 2026-05-20 after the backward-compatible autonomous schema repair.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-phase-orchestration-and-eval` passed on 2026-05-20 and produced authoritative run `50a9d556-3763-4ac3-b792-a2bd14efd9a1`.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-autonomous-phase-orchestration-and-eval` passed on 2026-05-20 after adding required task-packet sections and queue evidence backfill.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-phase-orchestration-and-eval` passed on 2026-05-20 using authoritative runtime proof run `50a9d556-3763-4ac3-b792-a2bd14efd9a1`.
-- `node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-check.test.ts` passed on 2026-05-20 after adding inherited-artifact refs, runtime-optional review-export coverage, and queue-validation regression coverage.
-- `node --experimental-strip-types --test tests/install.test.ts tests/admin.test.ts tests/service.test.ts` passed on 2026-05-20 after aligning the repo-local and installed runtime contract guidance.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 and produced authoritative run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 using authoritative runtime proof run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
-- `node --experimental-strip-types --test tests/coverage-ledger.test.ts tests/gap-engine.test.ts tests/progress-proof.test.ts` passed on 2026-05-20 after adding typed coverage-item, gap, and progress-proof validation coverage.
-- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/service.test.ts tests/admin.test.ts` passed on 2026-05-20 after tightening runtime validation, runtime-optional artifact checking, and workflow-check autonomous artifact semantics.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-autonomous-coverage-gap-proof-engine` passed on 2026-05-20 after adding valid coverage and progress-proof artifacts plus explicit release-readiness evidence.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-coverage-gap-proof-engine` passed on 2026-05-20 and produced authoritative run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3`.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --task-id 2026-05-20-autonomous-coverage-gap-proof-engine --run-id b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3` passed on 2026-05-20 with `authorityLabel=runtime_authoritative` and `taskStatus=approved`.
-- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/admin.test.ts` passed on 2026-05-20 after adding typed understanding-map and runtime-trace validation, rewrite-threshold blocking, and comprehension reporting coverage.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 after repairing stale queue exports and adding runtime-proof citations to the review summaries.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 using authoritative runtime proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 and produced authoritative run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --task-id 2026-05-20-autonomous-understanding-and-tracing --run-id 034705c2-b598-4bbc-8c8d-eb61f5026ed2` passed on 2026-05-20 with `authorityLabel=runtime_authoritative` and `taskStatus=approved`.
-- `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts` passed on 2026-05-20 after refactoring the launcher into injectable helpers that locally cover both runnable and skipped registration paths while preserving the real Windows-only runner in `tests/setup-powershell-smoke-runner.ts`.
-- `node --experimental-strip-types --test tests/release-overlay.test.ts` passed on 2026-05-20 after asserting that `scripts/check-quality.sh` includes `npm run check:coverage`.
-- `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts tests/postgres-store.test.ts tests/github-dispatch.test.ts tests/qdrant-artifact-index.test.ts tests/release-overlay.test.ts` passed on 2026-05-20 after expanding the hotspot coverage slice and normalizing counted assertion branches.
-- `npm run typecheck` passed on 2026-05-20 after widening the coverage task and fixing local test-fixture type issues.
-- `node --experimental-strip-types --test tests/runtime-surface.test.ts` passed on 2026-05-20 after covering the remaining `src/admin/autonomous-summary.ts` fallback, default, and ordering branches that were keeping aggregate branch coverage below threshold.
-- `npm run check:coverage` passed on 2026-05-20 with aggregate coverage at `90.94%` lines, `80.03%` branches, and `85.17%` functions.
-- `npm run verify:release-overlay` passed on 2026-05-20, proving the release overlay now stays green only when the coverage gate is green.
-- `.devgod/work/coverage/coverage-2026-05-20-coverage-gate-hardening.json` was updated on 2026-05-20 with the passing aggregate coverage and verification results for the slice.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-20-coverage-gate-hardening` passed on 2026-05-20 and produced authoritative run `c7126547-6f14-418d-92c4-2badd3fda9c2`.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-coverage-gate-hardening` passed on 2026-05-20 using authoritative runtime proof run `c7126547-6f14-418d-92c4-2badd3fda9c2`.
-- `node --experimental-strip-types --test tests/admin-db.test.ts` passed on 2026-05-20, proving one repo-local PostgreSQL restart attempt plus one reconnect attempt for loopback `ECONNREFUSED`, while remote targets still fail without a local start attempt.
-- `node --experimental-strip-types --test tests/status-report.test.ts tests/runtime-surface.test.ts` passed on 2026-05-20 with unchanged doctor/status/runtime-surface behavior.
-- `npm run typecheck` passed on 2026-05-20 for `2026-05-20-managed-runtime-postgres-autostart`.
-- live verification passed on 2026-05-20: after stopping the repo-local PostgreSQL instance with `pg_ctl stop -m fast`, `npm run status` succeeded and restarted the repo-local instance. `.devgod/state/local-postgres/postgres.log` recorded the shutdown at `2026-05-20 07:19:09 CEST` and the new startup at `2026-05-20 07:19:23 CEST`.
-- `git diff --check -- README.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-readme-prettify.md .devgod/work/plans/plan-2026-05-19-readme-prettify.md .devgod/work/tasks/task-2026-05-19-readme-prettify.md .devgod/work/reviews/review-2026-05-19-readme-prettify-reviewer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-qa_engineer.md .devgod/work/reviews/review-2026-05-19-readme-prettify-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-readme-prettify` passed on 2026-05-19.
-- `git diff --check -- README.md docs/current-state.md docs/global-setup.md docs/autonomous-execution-redesign.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-05-19-docs-refresh.md .devgod/work/plans/plan-2026-05-19-docs-refresh.md .devgod/work/tasks/task-2026-05-19-docs-refresh.md .devgod/work/reviews/review-2026-05-19-docs-refresh-reviewer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-qa_engineer.md .devgod/work/reviews/review-2026-05-19-docs-refresh-security_reviewer.md .devgod/work/product-state.md .devgod/work/task-queue.json` passed on 2026-05-19.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-docs-refresh` passed on 2026-05-19.
-- `npm run typecheck` passed on 2026-05-19 for `2026-05-19-daemon-stagnation-hardening`.
-- `node --experimental-strip-types --test tests/admin.test.ts` passed on 2026-05-19, including the new scope-blocked and consecutive-no-progress daemon regressions.
-- `node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-19 with unchanged reporting behavior.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-19-daemon-stagnation-hardening` passed on 2026-05-19.
-- `npm run verify:review-identity` passed on 2026-05-15 after adding a repo-owned local review-identity adapter, live bindings, live fixtures, and explicit backend selection.
-- `npm run doctor` passed on 2026-05-15 with review identity reported as live-trust ready and no advisories.
-- `npm run status` reported adapterConfigured=true, selectedBackend=`devgod_local_seed`, and liveTrustReady=true on 2026-05-15.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-devgod-local-review-identity-setup` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-devgod-local-review-identity-setup` passed on 2026-05-15 after seeding authoritative runtime proof for the task.
-- `npm run setup:local` passed on 2026-05-15 after aligning the source-repo `.env` to the updated runtime/Qdrant/review settings and replacing the blocked default local password.
-- `npm run doctor` passed with host-backed runtime access on 2026-05-15 for the local docker setup path.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-devgod-upgrade-configure` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-devgod-upgrade-configure` passed on 2026-05-15 after seeding authoritative runtime proof for the task.
-- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-reasoning-quality-layer`.
-- `npm test` passed on 2026-05-15 for `2026-05-15-reasoning-quality-layer`, including reasoning-quality coverage for debugging, planning, code review, schema investigation, and weak-evidence paths.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-layer` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-layer` passed on 2026-05-15 after seeding authoritative runtime proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8`.
-- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-reasoning-quality-hardening`.
-- `npm test` passed on 2026-05-15 for `2026-05-15-reasoning-quality-hardening`, including strict routing, strict terminal blocking, legacy upgrade tooling, and dual-mode workflow checks.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-reasoning-quality-hardening` passed on 2026-05-15 after seeding authoritative runtime proof run `bc242568-80c2-4de6-8768-7a25597306e8`.
-- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-strict-default-reasoning`.
-- `npm test` passed on 2026-05-15 for `2026-05-15-strict-default-reasoning`, including strict-default runtime routing, CLI default parsing, report semantics, and orchestration eval fixture coverage.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-strict-default-reasoning` passed on 2026-05-15 after seeding authoritative runtime proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad`.
-- `node --experimental-strip-types --test tests/service.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including autonomous-execution runtime state and terminal completion blocking coverage.
-- `node --experimental-strip-types --test tests/workflow-check.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including autonomous artifact enforcement and fixture verification coverage.
-- `node --experimental-strip-types --test tests/workflow-scaffold.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`, including starter-workflow compatibility under the stronger contract.
-- `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed on 2026-05-15 for `2026-05-15-autonomous-execution-redesign`.
-- `npm run health` passed on 2026-05-15 after repairing the source repo to use an isolated local PG18 + `pgvector` runtime on port `55432`.
-- `npm run migrate` passed on 2026-05-15 against the repaired local runtime.
-- `npm run bootstrap` passed on 2026-05-15 against the repaired local runtime.
-- `npm run verify:setup` passed on 2026-05-15 against the repaired local runtime.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 and produced authoritative run `4e634017-e28e-4a29-8f9d-e0fa3366ae7b`.
-- `node --experimental-strip-types src/admin.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 with `authorityLabel=runtime_authoritative`, `taskStatus=approved`, and authenticated required reviews.
-- `node --experimental-strip-types src/admin.ts advance-active-task --workspace-slug default --project-slug devgod` returned a clean dry run on 2026-05-15 after queue-state backfill from the repaired seed path.
-- `node --experimental-strip-types src/admin.ts advance-active-task --workspace-slug default --project-slug devgod --apply` passed on 2026-05-15 and left runtime queue state with no current task.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-execution-redesign` passed on 2026-05-15 after the local runtime repair and authoritative workflow-proof seeding.
-- `node --experimental-strip-types --test tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/admin.test.ts` passed.
-- `npm test` passed.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-loop-surface` passed.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-13-runtime-loop-surface` passed on 2026-05-14.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-proof-seed` passed.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-13-runtime-proof-seed` passed on 2026-05-14.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-13-runtime-directive-executor` passed.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-13-runtime-directive-executor` passed on 2026-05-14.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-14-runtime-loop-history` passed.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-14-runtime-loop-history` passed on 2026-05-14.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-14-verification-harness-compat` passed.
-- `DEVGOD_WORKSPACE_SLUG=default DEVGOD_PROJECT_SLUG=devgod bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-14-verification-harness-compat` passed on 2026-05-14.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-14-runtime-task-advance` passed.
-- `DEVGOD_WORKSPACE_SLUG=default DEVGOD_PROJECT_SLUG=devgod bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-14-runtime-task-advance` passed on 2026-05-14.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-13-runtime-proof-seed` passed.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-13-runtime-loop-surface` passed.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-13-runtime-directive-executor` passed.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-14-runtime-loop-history` passed.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-14-verification-harness-compat` passed.
-- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --workspace-slug default --project-slug devgod --run-id latest --task-id 2026-05-14-runtime-task-advance` passed.
-- `node --experimental-strip-types src/admin.ts advance-active-task --run-id 88ddf654-297a-4c5c-986e-255f09d22ae5 --apply` advanced the final queued slice and left the queue idle.
-- `npm run typecheck` passed on 2026-05-15 for `2026-05-15-autonomous-next-target-directives`.
-- `node --experimental-strip-types --test tests/admin.test.ts tests/install.test.ts tests/ops-recovery.test.ts tests/runtime-surface.test.ts tests/service.test.ts tests/report-command.test.ts tests/status-report.test.ts` passed `158/158` on 2026-05-15 for `2026-05-15-autonomous-next-target-directives`.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-15-autonomous-next-target-directives` passed on 2026-05-15 and produced authoritative run `5fe2a260-81d0-402c-8d13-c074dd769383`.
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-15-autonomous-next-target-directives` passed on 2026-05-15.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-15-autonomous-next-target-directives` passed on 2026-05-15 using authoritative runtime proof run `5fe2a260-81d0-402c-8d13-c074dd769383`.
-
-## Review Summary
-
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-autonomous-phase-orchestration-and-eval`, and authoritative local proof run `50a9d556-3763-4ac3-b792-a2bd14efd9a1` approved the task on 2026-05-20.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-autonomous-authority-and-artifact-contract`, and authoritative local proof run `d3c134b7-93e8-40a4-9918-0c97afb7bec5` approved the task on 2026-05-20.
-Authoritative runtime review records were seeded for `2026-05-20-autonomous-coverage-gap-proof-engine`, and runtime workflow proof run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3` approved the task on 2026-05-20.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-autonomous-understanding-and-tracing`, and authoritative local proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2` approved the task on 2026-05-20.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-coverage-gate-hardening`, and authoritative local proof run `c7126547-6f14-418d-92c4-2badd3fda9c2` approved the task on 2026-05-20.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-managed-runtime-postgres-autostart`.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-readme-prettify`.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-docs-refresh`.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-local-review-identity-setup`, and authoritative local proof run `42fe51d6-4a67-4363-858d-633196eb7c62` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-devgod-upgrade-configure`, and an authoritative local proof run `9edb1449-4718-4e4e-8db8-24434910928a` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-layer`, and authoritative local proof run `cb527270-3b4c-446f-9b94-4ae86bd1c6d8` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-reasoning-quality-hardening`, and authoritative local proof run `bc242568-80c2-4de6-8768-7a25597306e8` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-strict-default-reasoning`, and authoritative local proof run `411b83b2-4bda-4abe-a2e8-67d5528e21ad` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-autonomous-execution-redesign`, and authoritative local proof run `4e634017-e28e-4a29-8f9d-e0fa3366ae7b` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-15-autonomous-next-target-directives`, and authoritative local proof run `5fe2a260-81d0-402c-8d13-c074dd769383` approved the task on 2026-05-15.
-Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-13-runtime-loop-surface`, `2026-05-13-runtime-proof-seed`, `2026-05-13-runtime-directive-executor`, `2026-05-14-runtime-loop-history`, `2026-05-14-verification-harness-compat`, and `2026-05-14-runtime-task-advance`. The original control-layer gap around runtime-approved queue advancement is now closed.
+- `node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-20.
+- `npm run benchmark:orchestration -- --format markdown` passed on 2026-05-20 and confirmed `14/14` baseline cases.
+- `npm run typecheck` passed on 2026-05-20.
+- Workflow scope was rolled forward on 2026-05-20 so the exported-ledger hardening slice can proceed under its own task packet.
+- `node --experimental-strip-types --test tests/coverage-ledger.test.ts tests/workflow-check.test.ts tests/service.test.ts` passed on 2026-05-20.
+- `npm run typecheck` passed on 2026-05-20 after authoritative coverage-ledger export hardening.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-20 after code-backed inventory generation.
+- `npm run typecheck` passed on 2026-05-20 after code-backed inventory generation.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-20 after runtime trace registry hardening.
+- `npm run typecheck` passed on 2026-05-20 after runtime trace registry hardening.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-20 after continuation and compaction hardening.
+- `npm run typecheck` passed on 2026-05-20 after continuation and compaction hardening.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts` passed on 2026-05-20 after external eval and review-control hardening.
+- `npm run check:coverage` passed on 2026-05-20 after repairing continuation-selection regressions; aggregate coverage was lines `91.39%`, branches `80.58%`, functions `85.90%`.
+- `npm run typecheck` passed on 2026-05-20 after external eval and review-control hardening.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/runtime-surface.test.ts tests/ops-recovery.test.ts` passed on 2026-05-20 after runtime-native directive expansion and live-proof seeding.
+- `npm run check:coverage` passed on 2026-05-20 after final completion-proof repair; aggregate coverage was lines `91.34%`, branches `80.53%`, functions `85.77%`.
+- `npm run typecheck` passed on 2026-05-20 after runtime-native directive expansion and live-proof seeding.
+- `npm run status` passed on 2026-05-20 and the default authoritative run is now `d141baef-0f7a-40df-9aec-ac60ad9235f7` with `autonomous.configured=true`.
+- `npm run eval:orchestration` passed on 2026-05-20 with `14/14`.
+- `npm run benchmark:orchestration -- --format markdown` passed on 2026-05-20.
+- `npm run devgod -- reconcile-runtime-state --apply --format text` passed on 2026-05-20 and reported `directive: complete` for run `d141baef-0f7a-40df-9aec-ac60ad9235f7`.
 
 ## Active Verification Blocker
 
-- No active verification blocker remains for `2026-05-20-autonomous-phase-orchestration-and-eval`; focused service/eval/report suites, artifact workflow proof, and live workflow proof all passed on 2026-05-20.
-- No active verification blocker remains for `2026-05-20-autonomous-authority-and-artifact-contract`; runtime workflow proof, inherited-artifact validation, and queue-schema enforcement all passed on 2026-05-20.
-- No active verification blocker remains for `2026-05-20-autonomous-coverage-gap-proof-engine`; runtime workflow proof run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3`, artifact checks, and focused regression suites all passed on 2026-05-20.
-- No active verification blocker remains for `2026-05-20-autonomous-understanding-and-tracing`; runtime workflow proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`, artifact checks, and focused runtime/admin/report suites all passed on 2026-05-20.
-
-Supporting evidence:
-
-- `node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-check.test.ts` passed on 2026-05-20.
-- `node --experimental-strip-types --test tests/install.test.ts tests/admin.test.ts tests/service.test.ts` passed on 2026-05-20.
-- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 and produced authoritative run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20.
-
-Historical note:
-
-- child `node` CLI parse checks now use exported behavior surfaces where appropriate
-- hosted UI and setup-script health checks no longer require forbidden loopback listeners during tests
-- `npm pack --json --dry-run` now uses a writable temp cache and file-backed capture in the install suite
+- No active verification blocker remains for `2026-05-20-operator-truth-alignment`.
+- No active verification blocker remains for `2026-05-20-authoritative-coverage-ledger-exports`.
+- No active verification blocker remains for `2026-05-20-code-understanding-inventory`.
+- No active verification blocker remains for `2026-05-20-runtime-trace-registry`.
+- No active verification blocker remains for `2026-05-20-continuation-and-compaction-hardening`.
+- No active verification blocker remains for `2026-05-20-external-eval-and-hitl-hardening`.
+- none
 
 ## Last Updated
 

@@ -1,0 +1,24 @@
+{
+  "task_id": "2026-05-20-authoritative-coverage-ledger-exports",
+  "captured_at": "2026-05-20T12:21:00.000Z",
+  "status": "verified",
+  "summary": "Coverage-ledger-gated work now depends on a richer exported artifact package rather than a single manifest file. The repo can build that export from runtime state, and the workflow checker rejects missing or malformed manifest/items/gaps/dependency/traces artifacts.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/coverage-ledger.test.ts tests/workflow-check.test.ts tests/service.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    }
+  ],
+  "release_readiness": {
+    "status": "confirmed",
+    "reason": "This slice changes shipped workflow-check semantics. Focused unit, integration, and installed-fixture checks passed, and the richer gate now fails closed instead of over-accepting manifest-only evidence."
+  },
+  "residual_risk": [
+    "This slice hardens exported ledger packaging but does not yet generate the deeper code-understanding inventories promised by the redesign.",
+    "Runtime trace capture remains a later slice; the current traces artifact is exported from existing runtime state only."
+  ]
+}

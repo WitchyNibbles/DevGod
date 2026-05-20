@@ -2,7 +2,9 @@
 
 Generated from `npm run benchmark:orchestration -- --format markdown`.
 
-Runtime proof: 8/8 baseline cases passed (100%).
+Generated: 2026-05-20T11:50:19.425Z
+
+Runtime proof: 14/14 baseline cases passed (100%).
 
 This report mixes repo-verified `devgod` runtime proof with reviewed comparative capability fixtures for adjacent systems. It is a reproducible rubric, not an external lab certification.
 

@@ -1,6 +1,6 @@
 # Devgod Current State
 
-Status date: `2026-05-19`
+Status date: `2026-05-20`
 
 This document is the plain-language snapshot of what `devgod` is today.
 If another doc sounds bigger, older, or more visionary than this one, treat this file and the repo itself as the current truth.
@@ -191,12 +191,26 @@ Current and shipped:
 
 Still evolving:
 
-- exhaustive coverage-ledger enforcement everywhere
-- the full redesign described in `docs/autonomous-execution-redesign.md`
-- the long-term authority boundary between markdown artifacts and runtime state across every repo mode
+- consuming repos still need their own runtime registrations, authenticated reviews, and project-specific evidence after installation
+- the long-term authority boundary between markdown artifacts and runtime state across every repo mode can still be tightened further
+- future redesign work can extend the system, but the broader package-level redesign claim in this repo is now shipped and runtime-proven
 
 ## Working description
 
 If someone asks, "What is devgod right now?", the most honest answer is:
 
 > Devgod is a reusable package that tries to make Codex work like a small engineering organization instead of a single chat session. It installs workflow rules and operator tools into a repo, stores runtime state in a database, exposes status and recovery surfaces, and pushes work toward evidence-backed completion.
+
+## Important boundary: broader package goal is now runtime-proven
+
+The 2026-05-20 remediation wave closed the package-level redesign gaps that had blocked an honest completion claim:
+
+- richer coverage-ledger exports
+- code-backed inventory generation
+- runtime trace registry/reporting
+- compaction artifact generation
+- explicit eval posture and sensitive-action review controls
+- redesign-native runtime directives including `dispatch_subagents`, `trace_runtime`, `rebuild_inventory`, `checkpoint`, and `replan_migration`
+- a live default authoritative run that is autonomy-configured
+
+The current authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`, which is `approved`, reports `autonomous.configured=true`, and reconciles to runtime directive `complete`.
