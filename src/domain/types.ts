@@ -805,6 +805,9 @@ export interface ProjectRuntimeMetadata extends Record<string, unknown> {
     lastRunId?: string | undefined;
     lastTaskId?: string | undefined;
     lastDirectiveKind?: string | undefined;
+    lastPromptTaskId?: string | undefined;
+    lastPromptPacketFingerprint?: string | undefined;
+    lastPromptMode?: "full" | "delta" | undefined;
     updatedAt: string;
   } | undefined;
 }

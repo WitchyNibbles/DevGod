@@ -95,6 +95,39 @@ function Import-DevgodEnvFile {
 
 Import-DevgodEnvFile -Path ".env"
 
+function Resolve-DevgodNpmScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$Preferred,
+        [Parameter(Mandatory = $true)][string]$Fallback
+    )
+
+    $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
+    $scriptNames = @()
+    if ($null -ne $packageJson.scripts) {
+        $scriptNames = $packageJson.scripts.PSObject.Properties.Name
+    }
+
+    if ($scriptNames -contains $Preferred) {
+        return $Preferred
+    }
+
+    if ($scriptNames -contains $Fallback) {
+        return $Fallback
+    }
+
+    throw "missing npm script aliases: $Preferred or $Fallback"
+}
+
+function Invoke-DevgodNpmScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$Preferred,
+        [Parameter(Mandatory = $true)][string]$Fallback
+    )
+
+    $scriptName = Resolve-DevgodNpmScript -Preferred $Preferred -Fallback $Fallback
+    npm run $scriptName
+}
+
 function Resolve-DevgodRuntimeModeFromProfile {
     param([string]$Profile)
 
@@ -291,10 +324,10 @@ if ((Test-Path -LiteralPath ".devgod/install-manifest.json")) {
     }
 }
 
-npm run migrate
-npm run bootstrap
+Invoke-DevgodNpmScript -Preferred "devgod:migrate" -Fallback "migrate"
+Invoke-DevgodNpmScript -Preferred "devgod:bootstrap" -Fallback "bootstrap"
 npm run devgod:refresh-retrieval
-npm run verify:setup
+Invoke-DevgodNpmScript -Preferred "devgod:verify:setup" -Fallback "verify:setup"
 
 Write-Host ""
 Write-Host "devgod local setup complete"

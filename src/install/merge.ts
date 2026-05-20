@@ -27,8 +27,6 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - treat substantive requests as devgod work by default unless the user opts out
 - use \`devgod-intake\` as the default first skill for substantive work
 - keep canonical workflow state in runtime records, not repo markdown files
-- treat repo files under \`.devgod/\` as package assets or generated exports, never as workflow authority
-- use runtime-approved memory and workflow documents instead of repo-local durable-memory authority
 - if devgod is not configured yet, use the setup path before relying on it
 
 ## Workflow contract
@@ -42,28 +40,18 @@ ${workflowContractBlock}
 - root Codex thread acts as engineering manager on first contact
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
-- create or update the runtime intake record before moving past intake
-- require task packets to declare explicit workflow artifact refs whenever they inherit a parent brief or plan, or when runtime authority may satisfy review gates before markdown review exports exist
-- do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses \`review_exports=runtime_optional\` under runtime authority
+- task packets that inherit a brief or plan must carry explicit workflow artifact refs; only use \`review_exports=runtime_optional\` when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
-- use \`tdd-guide\`, \`e2e-runner\`, and \`release-readiness\` when the slice needs those gates
-- treat refactors as behavior-preserving hardening work: preserve behavior, add regression coverage, and either fix or explicitly block discovered touched-scope risks
-- preserve the trivial fast path for single-scope low-risk work
-- unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
-- exported review markdown, if present, is evidence only and never reviewer authority
-- runtime workflow proof is the completion authority; exported markdown remains evidence and export regression coverage
-- reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
+- runtime-backed devgod commands should be used for proof, status, and task advancement
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
-- release-sensitive work also requires \`release_readiness_required\` quality-gate evidence; this is mandatory evidence, not a fourth review role
 
 ## Autonomy Loop
 
 - for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
 - the manager must not stop after intake, architecture, planning, or one implementation slice unless product-level acceptance is complete, a real blocker requires user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
 - do not wait for the user to say continue between internal tasks; keep executing until the product-level stop condition is met
-- verification must cover the required unit, integration, E2E, regression, and negative-case checks for the active task before completion is claimed
 - after each completed task, update runtime product state, update runtime task queue, advance the active task pointer, select the next unblocked task, and continue execution
 - a completed phase is not a completed product
 

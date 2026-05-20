@@ -76,6 +76,8 @@ function hashContent(content: string): string {
 test("mergeAgentsMd appends and is idempotent", () => {
   const first = mergeAgentsMd("# Existing Rules\n");
   const second = mergeAgentsMd(first);
+  const managedBlock = first.match(/<!-- BEGIN DEVGOD MANAGED -->([\s\S]*?)<!-- END DEVGOD MANAGED -->/)?.[1] ?? "";
+  const managedWordCount = managedBlock.split(/\s+/).filter(Boolean).length;
 
   assert.match(first, /BEGIN DEVGOD MANAGED/);
   assert.match(first, /## Department Workflow/);
@@ -91,44 +93,45 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /`planner`/);
   assert.match(first, /`git_operator`/);
   assert.match(first, /workflow-proof --run-id latest --task-id/);
-  assert.match(first, /`tdd-guide`/);
-  assert.match(first, /`e2e-runner`/);
-  assert.match(first, /`release-readiness`/);
   assert.match(first, /## Autonomy Loop/);
   assert.match(first, /update runtime product state/i);
   assert.match(first, /update runtime task queue/i);
   assert.match(first, /a completed phase is not a completed product/i);
   assert.match(first, /clarify ambiguous intent before planning/i);
   assert.match(first, /do not wait for the user to say continue/i);
-  assert.match(first, /negative-case checks for the active task/i);
-  assert.match(first, /treat refactors as behavior-preserving hardening work/i);
+  assert.match(first, /runtime-backed devgod commands/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
+  assert.ok(managedWordCount < 450, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
 test("mergeCodexConfig preserves existing values and adds missing devgod defaults", () => {
   const merged = mergeCodexConfig(
     `model = "custom-model"\n\n[features]\npersonality = false\n`,
-    `model = "gpt-5.4"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\n\n[features]\nmulti_agent = true\nenable_request_compression = true\nplugin_hooks = true\n\n[agents]\nmax_threads = 8\n`
+    `model = "gpt-5.4"\nmodel_verbosity = "low"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\nproject_doc_max_bytes = 16384\n\n[features]\nmulti_agent = true\nenable_request_compression = true\nplugin_hooks = true\n\n[agents]\nmax_threads = 8\n`
   );
   const parsed = parseToml(merged) as {
     model?: string;
+    model_verbosity?: string;
     approval_policy?: string;
     sandbox_mode?: string;
     project_doc_fallback_filenames?: string[];
+    project_doc_max_bytes?: number;
     suppress_unstable_features_warning?: boolean;
     features?: Record<string, unknown>;
     agents?: Record<string, unknown>;
   };
 
   assert.equal(parsed.model, "custom-model");
+  assert.equal(parsed.model_verbosity, "low");
   assert.equal(parsed.approval_policy, "never");
   assert.equal(parsed.sandbox_mode, "danger-full-access");
   assert.deepEqual(parsed.project_doc_fallback_filenames, [".agents.md", "AGENTS.md"]);
+  assert.equal(parsed.project_doc_max_bytes, 16384);
   assert.equal(parsed.suppress_unstable_features_warning, true);
   assert.equal(parsed.features?.multi_agent, true);
   assert.equal(parsed.features?.plugin_hooks, true);
@@ -1752,7 +1755,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
+        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1779,10 +1782,10 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
-      "run migrate",
-      "run bootstrap",
+      "run devgod:migrate",
+      "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run verify:setup"
+      "run devgod:verify:setup"
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
@@ -1914,7 +1917,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
+        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1957,10 +1960,10 @@ test("installed setup script falls back to native Linux services when docker is 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
-      "run migrate",
-      "run bootstrap",
+      "run devgod:migrate",
+      "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run verify:setup"
+      "run devgod:verify:setup"
     ]);
 
     const unitFiles = await readdir(unitDir);
@@ -2032,7 +2035,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      migrate|bootstrap|verify:setup|devgod:refresh-retrieval)",
+        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2061,10 +2064,10 @@ test("installed setup script honors managed runtime mode without taking service 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
-      "run migrate",
-      "run bootstrap",
+      "run devgod:migrate",
+      "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run verify:setup"
+      "run devgod:verify:setup"
     ]);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });

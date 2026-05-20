@@ -118,3 +118,93 @@ test("createMcpToolDefinitions wires status, ops, loop, report, and plan-context
     }
   ]);
 });
+
+test("MCP tools default to summary detail and allow full detail opt-in", async () => {
+  const tools = createMcpToolDefinitions({
+    async status() {
+      return {
+        run: { id: "run-1", status: "in_progress", updatedAt: "2026-05-20T00:00:00.000Z", taskCounts: { ready: 1 } },
+        orchestration: { blockers: ["blocked-1"], nextTaskIds: ["task-2"] },
+        autonomous: {
+          configured: true,
+          phase: "implementation",
+          resume: { status: "ready", source: "checkpoint", summary: "resume at task-2", executionMode: "runtime_executable" }
+        },
+        compaction: { status: "present", checkpointId: "cp-1", generatedAt: "2026-05-20T00:00:00.000Z" },
+        reviewIdentity: { liveTrustReady: true },
+        daemon: {
+          continuation: { summary: "continuation summary", nextActions: ["a", "b", "c"] }
+        },
+        giantNested: { preserved: true }
+      };
+    },
+    async runtimeHealth() {
+      return { ok: true, giantNested: { preserved: true } };
+    },
+    async ops() {
+      return {
+        alerts: ["a1", "a2", "a3", "a4", "a5"],
+        nextActions: ["n1", "n2", "n3"],
+        giantNested: { preserved: true, values: Array.from({ length: 10 }, (_, i) => `value-${i}`) }
+      };
+    },
+    async loop() {
+      return {
+        status: "blocked",
+        cycles: Array.from({ length: 8 }, (_, i) => ({ cycle: i + 1, summary: `cycle-${i + 1}` })),
+        giantNested: { preserved: true }
+      };
+    },
+    async report() {
+      return {
+        runId: "run-1",
+        summary: { totalTasks: 4, totalLoopExecutions: 7 },
+        autonomous: { resume: { summary: "resume at task-2" } },
+        tasks: Array.from({ length: 8 }, (_, i) => ({ taskId: `task-${i + 1}` })),
+        giantNested: { preserved: true }
+      };
+    },
+    async planContext() {
+      return {
+        query: "incident playbook",
+        requesterRole: "planner",
+        totalResults: 9,
+        summary: ["item-1", "item-2", "item-3"],
+        items: Array.from({ length: 6 }, (_, i) => ({
+          title: `Title ${i + 1}`,
+          preview: `Preview ${i + 1}`,
+          tags: ["alpha", "beta", "gamma"]
+        }))
+      };
+    }
+  });
+
+  const summaryStatus = await tools[0]!.invoke({ runId: "run-1" });
+  const fullStatus = await tools[0]!.invoke({ runId: "run-1", detail: "full" });
+  const summaryReport = await tools[4]!.invoke({ runId: "run-1" });
+  const fullReport = await tools[4]!.invoke({ runId: "run-1", detail: "full" });
+  const summaryPlanContext = await tools[5]!.invoke({ query: "incident playbook" });
+
+  assert.deepEqual(summaryStatus.structuredContent.run, {
+    id: "run-1",
+    status: "in_progress",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    taskCounts: { ready: 1 }
+  });
+  assert.equal((summaryStatus.structuredContent as Record<string, unknown>).giantNested, undefined);
+  assert.deepEqual((fullStatus.structuredContent as Record<string, unknown>).giantNested, { preserved: true });
+
+  assert.deepEqual(summaryReport.structuredContent, {
+    runId: "run-1",
+    totals: { totalLoopExecutions: 7, totalTasks: 4 },
+    resume: "resume at task-2"
+  });
+  assert.ok(Array.isArray((fullReport.structuredContent as Record<string, unknown>).tasks));
+
+  assert.deepEqual(summaryPlanContext.structuredContent, {
+    query: "incident playbook",
+    requesterRole: "planner",
+    totalResults: 9,
+    summary: ["item-1", "item-2", "item-3"]
+  });
+});

@@ -19,6 +19,8 @@ export interface McpToolDefinition {
   }>;
 }
 
+type DetailLevel = "summary" | "standard" | "full";
+
 function pushOptionalStringFlag(args: string[], flag: string, value: unknown): void {
   if (typeof value === "string" && value.trim().length > 0) {
     args.push(flag, value.trim());
@@ -47,17 +49,200 @@ function buildRunSelectorArgs(input: {
   return args;
 }
 
-function buildTextResult(summary: string, structuredContent: unknown) {
+function resolveDetailLevel(value: unknown): DetailLevel {
+  return value === "full" || value === "standard" ? value : "summary";
+}
+
+function compactStructuredContent(
+  value: unknown,
+  limits: { maxDepth: number; maxArrayItems: number; maxStringLength: number },
+  depth = 0
+): unknown {
+  if (typeof value === "string") {
+    return value.length > limits.maxStringLength
+      ? `${value.slice(0, Math.max(0, limits.maxStringLength - 1))}…`
+      : value;
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, limits.maxArrayItems)
+      .map((item) => compactStructuredContent(item, limits, depth + 1));
+    return value.length > limits.maxArrayItems ? [...items, `… +${value.length - limits.maxArrayItems} more`] : items;
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (depth >= limits.maxDepth) {
+    return "[truncated]";
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).slice(0, limits.maxArrayItems);
+  const compacted = Object.fromEntries(
+    entries.map(([key, nestedValue]) => [key, compactStructuredContent(nestedValue, limits, depth + 1)])
+  );
+  const omitted = Object.keys(value as Record<string, unknown>).length - entries.length;
+  return omitted > 0 ? { ...compacted, _truncated: `+${omitted} more keys` } : compacted;
+}
+
+function summarizeStatusReport(report: Record<string, unknown>): Record<string, unknown> {
+  const run = report.run && typeof report.run === "object" ? (report.run as Record<string, unknown>) : undefined;
+  const orchestration =
+    report.orchestration && typeof report.orchestration === "object"
+      ? (report.orchestration as Record<string, unknown>)
+      : undefined;
+  const autonomous =
+    report.autonomous && typeof report.autonomous === "object"
+      ? (report.autonomous as Record<string, unknown>)
+      : undefined;
+  const resume =
+    autonomous?.resume && typeof autonomous.resume === "object"
+      ? (autonomous.resume as Record<string, unknown>)
+      : undefined;
+  const compaction =
+    report.compaction && typeof report.compaction === "object"
+      ? (report.compaction as Record<string, unknown>)
+      : undefined;
+  const reviewIdentity =
+    report.reviewIdentity && typeof report.reviewIdentity === "object"
+      ? (report.reviewIdentity as Record<string, unknown>)
+      : undefined;
+  const daemon = report.daemon && typeof report.daemon === "object" ? (report.daemon as Record<string, unknown>) : undefined;
+  const continuation =
+    daemon?.continuation && typeof daemon.continuation === "object"
+      ? (daemon.continuation as Record<string, unknown>)
+      : undefined;
+
+  return {
+    run: run
+      ? {
+          id: run.id,
+          status: run.status,
+          updatedAt: run.updatedAt,
+          taskCounts: run.taskCounts
+        }
+      : undefined,
+    orchestration: orchestration
+      ? {
+          blockers: orchestration.blockers,
+          nextTaskIds: orchestration.nextTaskIds
+        }
+      : undefined,
+    autonomous: autonomous
+      ? {
+          configured: autonomous.configured,
+          phase: autonomous.phase,
+          resume: resume
+            ? {
+                status: resume.status,
+                source: resume.source,
+                summary: resume.summary,
+                executionMode: resume.executionMode
+              }
+            : undefined
+        }
+      : undefined,
+    compaction: compaction
+      ? {
+          status: compaction.status,
+          checkpointId: compaction.checkpointId,
+          generatedAt: compaction.generatedAt
+        }
+      : undefined,
+    reviewIdentity: reviewIdentity
+      ? {
+          liveTrustReady: reviewIdentity.liveTrustReady
+        }
+      : undefined,
+    daemon: continuation
+      ? {
+          continuation: {
+            summary: continuation.summary
+          }
+        }
+      : undefined
+  };
+}
+
+function summarizeRuntimeHealthReport(report: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ok: report.ok,
+    blockers: report.blockers,
+    advisories: report.advisories,
+    runtime: report.runtime,
+    project: report.project
+  };
+}
+
+function summarizeReport(report: Record<string, unknown>): Record<string, unknown> {
+  const summary =
+    report.summary && typeof report.summary === "object" ? (report.summary as Record<string, unknown>) : undefined;
+  const autonomous =
+    report.autonomous && typeof report.autonomous === "object"
+      ? (report.autonomous as Record<string, unknown>)
+      : undefined;
+  const resume =
+    autonomous?.resume && typeof autonomous.resume === "object"
+      ? (autonomous.resume as Record<string, unknown>)
+      : undefined;
+  return {
+    runId: report.runId,
+    totals: {
+      totalLoopExecutions: summary?.totalLoopExecutions,
+      totalTasks: summary?.totalTasks
+    },
+    resume: resume?.summary
+  };
+}
+
+function summarizePlanContext(report: Record<string, unknown>): Record<string, unknown> {
+  return {
+    query: report.query,
+    requesterRole: report.requesterRole,
+    totalResults: report.totalResults,
+    summary: report.summary
+  };
+}
+
+function buildTextResult(
+  summary: string,
+  structuredContent: unknown,
+  options: {
+    detail?: unknown;
+    summarize?: (structuredContent: Record<string, unknown>) => Record<string, unknown>;
+  } = {}
+) {
   const normalizedStructuredContent =
     structuredContent && typeof structuredContent === "object" && !Array.isArray(structuredContent)
       ? (structuredContent as Record<string, unknown>)
       : { value: structuredContent };
+  const detail = resolveDetailLevel(options.detail);
+  const resolvedStructuredContent =
+    detail === "full"
+      ? normalizedStructuredContent
+      : detail === "standard"
+        ? (compactStructuredContent(normalizedStructuredContent, {
+            maxDepth: 3,
+            maxArrayItems: 4,
+            maxStringLength: 180
+          }) as Record<string, unknown>)
+        : options.summarize
+          ? options.summarize(normalizedStructuredContent)
+          : (compactStructuredContent(normalizedStructuredContent, {
+              maxDepth: 2,
+              maxArrayItems: 3,
+              maxStringLength: 140
+            }) as Record<string, unknown>);
 
   return {
     content: [{ type: "text" as const, text: summary }],
-    structuredContent: normalizedStructuredContent
+    structuredContent: resolvedStructuredContent
   };
 }
+
+const detailInput = z.enum(["summary", "standard", "full"]).optional();
 
 export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly McpToolDefinition[] {
   return [
@@ -69,13 +254,17 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         runId: z.string().trim().optional(),
         workspaceSlug: z.string().trim().optional(),
         projectSlug: z.string().trim().optional(),
-        staleAfterDays: z.number().int().min(0).optional()
+        staleAfterDays: z.number().int().min(0).optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const args = buildRunSelectorArgs(input);
         pushOptionalNumberFlag(args, "--stale-after-days", input.staleAfterDays);
         const report = await runtime.status(args);
-        return buildTextResult("Returned the devgod status report.", report);
+        return buildTextResult("Returned the devgod status report.", report, {
+          detail: input.detail,
+          summarize: summarizeStatusReport
+        });
       }
     },
     {
@@ -85,11 +274,15 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
       inputSchema: {
         runId: z.string().trim().optional(),
         workspaceSlug: z.string().trim().optional(),
-        projectSlug: z.string().trim().optional()
+        projectSlug: z.string().trim().optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const report = await runtime.runtimeHealth(buildRunSelectorArgs(input));
-        return buildTextResult("Returned the devgod runtime health report.", report);
+        return buildTextResult("Returned the devgod runtime health report.", report, {
+          detail: input.detail,
+          summarize: summarizeRuntimeHealthReport
+        });
       }
     },
     {
@@ -100,13 +293,16 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         runId: z.string().trim().optional(),
         workspaceSlug: z.string().trim().optional(),
         projectSlug: z.string().trim().optional(),
-        staleAfterHours: z.number().int().min(0).optional()
+        staleAfterHours: z.number().int().min(0).optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const args = buildRunSelectorArgs(input);
         pushOptionalNumberFlag(args, "--stale-after-hours", input.staleAfterHours);
         const report = await runtime.ops(args);
-        return buildTextResult("Returned the devgod operator dashboard.", report);
+        return buildTextResult("Returned the devgod operator dashboard.", report, {
+          detail: input.detail
+        });
       }
     },
     {
@@ -121,7 +317,8 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         applySafeRecovery: z.boolean().optional(),
         executeSupportedDirectives: z.boolean().optional(),
         ownerActor: z.string().trim().optional(),
-        reviewInputPaths: z.array(z.string().trim().min(1)).optional()
+        reviewInputPaths: z.array(z.string().trim().min(1)).optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const args = [...buildRunSelectorArgs(input), "--format", "json"];
@@ -139,7 +336,9 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
           }
         }
         const report = await runtime.loop(args);
-        return buildTextResult("Returned the devgod loop execution step.", report);
+        return buildTextResult("Returned the devgod loop execution step.", report, {
+          detail: input.detail
+        });
       }
     },
     {
@@ -150,13 +349,17 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         runId: z.string().trim().optional(),
         workspaceSlug: z.string().trim().optional(),
         projectSlug: z.string().trim().optional(),
-        staleAfterHours: z.number().int().min(0).optional()
+        staleAfterHours: z.number().int().min(0).optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const args = [...buildRunSelectorArgs(input), "--format", "json"];
         pushOptionalNumberFlag(args, "--stale-after-hours", input.staleAfterHours);
         const report = await runtime.report(args);
-        return buildTextResult("Returned the devgod run evidence report.", report);
+        return buildTextResult("Returned the devgod run evidence report.", report, {
+          detail: input.detail,
+          summarize: summarizeReport
+        });
       }
     },
     {
@@ -169,7 +372,8 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
         projectSlug: z.string().trim().optional(),
         role: z.string().trim().optional(),
         limit: z.number().int().min(1).max(20).optional(),
-        projectOnly: z.boolean().optional()
+        projectOnly: z.boolean().optional(),
+        detail: detailInput
       },
       async invoke(input) {
         const args = ["--query", String(input.query), "--format", "json"];
@@ -181,7 +385,10 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
           args.push("--project-only");
         }
         const report = await runtime.planContext(args);
-        return buildTextResult("Returned devgod planning context results.", report);
+        return buildTextResult("Returned devgod planning context results.", report, {
+          detail: input.detail,
+          summarize: summarizePlanContext
+        });
       }
     }
   ];

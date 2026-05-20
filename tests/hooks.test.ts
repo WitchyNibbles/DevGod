@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// @ts-expect-error internal hook policy module is a runtime .mjs helper without TypeScript declarations
-import { evaluatePreToolUse, evaluateStop } from "../plugins/devgod/scripts/hook-policy.mjs";
-// @ts-expect-error internal hook utility module is a runtime .mjs helper without TypeScript declarations
+// @ts-ignore internal hook policy module is a runtime .mjs helper without TypeScript declarations
+import {
+  evaluatePreToolUse,
+  evaluateSessionStart,
+  evaluateStop,
+  evaluateUserPromptSubmit
+} from "../plugins/devgod/scripts/hook-policy.mjs";
+// @ts-ignore internal hook utility module is a runtime .mjs helper without TypeScript declarations
 import { readActiveTaskContext } from "../plugins/devgod/scripts/hook-utils.mjs";
 
 test("pre-tool-use hook denies apply_patch edits outside the active task scope", () => {
@@ -140,6 +145,80 @@ test("stop hook still blocks completion summaries without an external closure ca
   assert.ok(parsed);
   assert.equal(parsed.decision, "block");
   assert.match(parsed.reason, /state the real blocker explicitly/i);
+});
+
+test("session-start hook stays silent when it would only repeat generic devgod policy", () => {
+  const parsed = evaluateSessionStart(
+    { source: "startup" },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("session-start hook emits compact context when an active task is present", () => {
+  const parsed = evaluateSessionStart(
+    { source: "resume" },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-session",
+      allowedWriteScope: ["src/runtime", "tests"],
+      queueCurrentTaskId: "task-hook-session"
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /task-hook-session/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /src\/runtime, tests/);
+  assert.doesNotMatch(
+    parsed.hookSpecificOutput.additionalContext,
+    /use devgod as the default workflow controller/i
+  );
+});
+
+test("user-prompt-submit hook stays silent when no active task context exists", () => {
+  const parsed = evaluateUserPromptSubmit(
+    {
+      prompt: "Refactor the runtime layer."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("user-prompt-submit hook emits compact scope context when active task state exists", () => {
+  const parsed = evaluateUserPromptSubmit(
+    {
+      prompt: "Refactor the runtime layer."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-submit",
+      allowedWriteScope: ["src/runtime"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /task-hook-submit/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /keep edits within: src\/runtime/);
+  assert.doesNotMatch(
+    parsed.hookSpecificOutput.additionalContext,
+    /treat substantive product or engineering requests as devgod work/i
+  );
 });
 
 test("hook context prefers queue state over stale ACTIVE export when the queue is complete", async () => {

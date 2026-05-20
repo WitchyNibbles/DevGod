@@ -13,7 +13,11 @@
     "exactOptionalPropertyTypes": true
   },
   "include": [
+    "plugins/**/*.d.ts",
+    "plugins/**/*.d.mts",
     "src/**/*.ts",
-    "tests/**/*.ts"
+    "src/**/*.d.ts",
+    "tests/**/*.ts",
+    "tests/**/*.d.ts"
   ]
 }

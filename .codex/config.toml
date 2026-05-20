@@ -4,7 +4,7 @@ model_verbosity = "low"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 project_doc_fallback_filenames = [".agents.md", "AGENTS.md"]
-project_doc_max_bytes = 32768
+project_doc_max_bytes = 16384
 
 [features]
 multi_agent = true

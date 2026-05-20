@@ -135,6 +135,41 @@ load_env_file() {
   done < "$env_file"
 }
 
+resolve_npm_script() {
+  local preferred="$1"
+  local fallback="$2"
+
+  node --input-type=module - "$preferred" "$fallback" <<'EOF'
+import { readFileSync } from "node:fs";
+
+const [, , preferred, fallback] = process.argv;
+const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+const scripts =
+  packageJson && typeof packageJson === "object" && packageJson.scripts && typeof packageJson.scripts === "object"
+    ? packageJson.scripts
+    : undefined;
+
+if (scripts && typeof scripts[preferred] === "string") {
+  process.stdout.write(preferred);
+  process.exit(0);
+}
+
+if (scripts && typeof scripts[fallback] === "string") {
+  process.stdout.write(fallback);
+  process.exit(0);
+}
+
+console.error(`missing npm script aliases: ${preferred} or ${fallback}`);
+process.exit(1);
+EOF
+}
+
+run_devgod_npm_script() {
+  local script_name
+  script_name="$(resolve_npm_script "$1" "$2")"
+  npm run "$script_name"
+}
+
 fail() {
   printf '%s\n' "$1" >&2
   exit 1
@@ -552,10 +587,10 @@ if [[ -f .devgod/install-manifest.json ]] && git rev-parse --show-toplevel >/dev
   npm run devgod:setup:git-guard
 fi
 
-npm run migrate
-npm run bootstrap
+run_devgod_npm_script "devgod:migrate" "migrate"
+run_devgod_npm_script "devgod:bootstrap" "bootstrap"
 npm run devgod:refresh-retrieval
-npm run verify:setup
+run_devgod_npm_script "devgod:verify:setup" "verify:setup"
 
 echo ""
 echo "devgod local setup complete"

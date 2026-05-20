@@ -108,26 +108,24 @@ export function evaluateSessionStart(payload, context) {
   if (context.allowedWriteScope.length > 0) {
     lines.push(`allowed write scope: ${context.allowedWriteScope.join(", ")}`);
   }
-  lines.push("use devgod as the default workflow controller for substantive work");
-  lines.push("do not stop at one slice when an active devgod task remains unless a real blocker exists");
-  if (payload?.source === "resume") {
+  if (payload?.source === "resume" && lines.length > 0) {
     lines.push("this is a resumed session; prefer continuing from the active devgod task and queue state");
+  }
+
+  if (lines.length === 0) {
+    return undefined;
   }
 
   return buildAdditionalContext("SessionStart", lines.join("; "));
 }
 
 export function evaluateUserPromptSubmit(payload, context) {
-  const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
   const lines = [];
   if (context.activeTaskId) {
     lines.push(`active devgod task: ${context.activeTaskId}`);
   }
   if (context.allowedWriteScope.length > 0) {
     lines.push(`keep edits within: ${context.allowedWriteScope.join(", ")}`);
-  }
-  if (prompt && !/\b(opt out|non-devgod|outside devgod)\b/i.test(prompt)) {
-    lines.push("treat substantive product or engineering requests as devgod work unless the user explicitly opts out");
   }
 
   if (lines.length === 0) {

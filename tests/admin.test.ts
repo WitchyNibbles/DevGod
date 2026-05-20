@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TaskQueue } from "../src/devgod/task-queue.ts";
 import {
+  buildDaemonTaskPacketFingerprint,
+  buildDaemonTaskPrompt,
+  determineDaemonPromptMode,
   executeDaemonCommandFromArgs,
   executeAdvanceActiveTaskCommandFromArgs,
   executeCheckpointCommandFromArgs,
@@ -189,6 +192,95 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     }
   };
 }
+
+test("determineDaemonPromptMode uses full prompts for fresh sessions and compact prompts for stable resumed sessions", () => {
+  const packet = taskPacket({
+    taskId: "task-owner",
+    acceptanceCriteria: ["criterion-a", "criterion-b"],
+    verificationSteps: ["verify-a", "verify-b"]
+  });
+  const fingerprint = buildDaemonTaskPacketFingerprint(packet);
+
+  assert.equal(
+    determineDaemonPromptMode({
+      sessionId: undefined,
+      previousTaskId: undefined,
+      previousPacketFingerprint: undefined,
+      taskId: "task-owner",
+      packetFingerprint: fingerprint
+    }),
+    "full"
+  );
+
+  assert.equal(
+    determineDaemonPromptMode({
+      sessionId: "session-1",
+      previousTaskId: "task-owner",
+      previousPacketFingerprint: fingerprint,
+      taskId: "task-owner",
+      packetFingerprint: fingerprint
+    }),
+    "delta"
+  );
+
+  assert.equal(
+    determineDaemonPromptMode({
+      sessionId: "session-1",
+      previousTaskId: "task-owner",
+      previousPacketFingerprint: "old-fingerprint",
+      taskId: "task-owner",
+      packetFingerprint: fingerprint
+    }),
+    "full"
+  );
+});
+
+test("buildDaemonTaskPrompt keeps full bootstrap details on first turn and uses compressed context on resumed turns", () => {
+  const packet = taskPacket({
+    taskId: "task-owner",
+    goal: "Ship the owner slice",
+    allowedWriteScope: ["src/runtime", "tests"],
+    acceptanceCriteria: ["criterion-a", "criterion-b"],
+    verificationSteps: ["verify-a", "verify-b"],
+    requiredReviews: ["reviewer", "qa_engineer"]
+  });
+
+  const fullPrompt = buildDaemonTaskPrompt({
+    promptMode: "full",
+    directive: {
+      kind: "continue_analysis",
+      targetId: "task:task-owner",
+      actions: [{ kind: "resume_target", targetId: "task:task-owner" }]
+    },
+    taskId: "task-owner",
+    packet,
+    operatorNotes: "follow the runtime ledger"
+  });
+  const compactPrompt = buildDaemonTaskPrompt({
+    promptMode: "delta",
+    directive: {
+      kind: "continue_analysis",
+      targetId: "task:task-owner",
+      actions: [{ kind: "resume_target", targetId: "task:task-owner" }]
+    },
+    taskId: "task-owner",
+    packet,
+    operatorNotes: "follow the runtime ledger",
+    compressedContextSummary: "phase=implementation; targets=task:task-owner; open-gaps=none",
+    compressedContextRef: "memory://checkpoint/cp-1/compressed-context"
+  });
+
+  assert.match(fullPrompt, /Acceptance criteria: criterion-a \| criterion-b/);
+  assert.match(fullPrompt, /Verification steps: verify-a \| verify-b/);
+  assert.match(fullPrompt, /Required reviews: reviewer, qa_engineer/);
+
+  assert.match(compactPrompt, /Compressed context: phase=implementation; targets=task:task-owner; open-gaps=none/);
+  assert.match(compactPrompt, /Compressed context ref: memory:\/\/checkpoint\/cp-1\/compressed-context/);
+  assert.match(compactPrompt, /Previously bootstrapped task requirements remain in force/);
+  assert.doesNotMatch(compactPrompt, /Acceptance criteria:/);
+  assert.doesNotMatch(compactPrompt, /Verification steps:/);
+  assert.doesNotMatch(compactPrompt, /Required reviews:/);
+});
 
 async function createApprovedRuntimeTask(options: {
   store: MemoryStore;

@@ -1,4 +1,5 @@
 import { access, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1187,6 +1188,30 @@ interface RunCodexTurnResult {
   exitCode: number;
 }
 
+export type DaemonPromptMode = "full" | "delta";
+
+type DaemonPromptContinuationAction =
+  | { kind: "run_workflow_proof"; taskId: string }
+  | { kind: "resolve_blocking_gap"; gapId: string; targetId: string }
+  | {
+      kind: "resume_target";
+      targetId: string;
+      source?: "blocking_gap" | "progress_proof" | "checkpoint";
+      sourceId?: string | undefined;
+    };
+
+type DaemonPromptDirective =
+  | RunExecutionPlan["directive"]
+  | {
+      kind: "continue_analysis";
+      targetId: string;
+      actions: DaemonPromptContinuationAction[];
+    }
+  | {
+      kind: "dispatch_owner";
+      rationale: string[];
+    };
+
 interface ParsedDaemonTurnMessage {
   summary: string;
   status: "completed" | "blocked" | "needs_review" | "needs_followup";
@@ -1208,6 +1233,11 @@ interface DaemonStagnationMetadata {
   lastStatus?: ParsedDaemonTurnMessage["status"] | undefined;
   lastSummary?: string | undefined;
   lastBlockers?: string[] | undefined;
+}
+
+interface DaemonPromptMetadata {
+  taskId?: string | undefined;
+  packetFingerprint?: string | undefined;
 }
 
 interface ExecuteDaemonCommandOptions extends ExecuteAdvanceActiveTaskCommandOptions, ExecuteLoopCommandOptions {
@@ -1768,6 +1798,36 @@ function readDaemonSessionId(metadata: ProjectRuntimeStateRecord["metadata"] | R
   return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : undefined;
 }
 
+function readDaemonPromptMetadata(
+  metadata: ProjectRuntimeStateRecord["metadata"] | Record<string, unknown> | undefined
+): DaemonPromptMetadata | undefined {
+  const candidate = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).devgodDaemon
+    : undefined;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const record = candidate as Record<string, unknown>;
+  const taskId =
+    typeof record.lastPromptTaskId === "string" && record.lastPromptTaskId.trim().length > 0
+      ? record.lastPromptTaskId.trim()
+      : undefined;
+  const packetFingerprint =
+    typeof record.lastPromptPacketFingerprint === "string" && record.lastPromptPacketFingerprint.trim().length > 0
+      ? record.lastPromptPacketFingerprint.trim()
+      : undefined;
+
+  if (!taskId && !packetFingerprint) {
+    return undefined;
+  }
+
+  return {
+    taskId,
+    packetFingerprint
+  };
+}
+
 function readDaemonStagnationMetadata(
   metadata: ProjectRuntimeStateRecord["metadata"] | Record<string, unknown> | undefined
 ): DaemonStagnationMetadata | undefined {
@@ -2141,31 +2201,91 @@ async function runCodexTurnViaCli(input: RunCodexTurnInput): Promise<RunCodexTur
   }
 }
 
-function buildDaemonTaskPrompt(input: {
-  directive: RunExecutionPlan["directive"];
+export function buildDaemonTaskPacketFingerprint(packet: TaskPacketInput | undefined): string | undefined {
+  if (!packet) {
+    return undefined;
+  }
+
+  const fingerprintSource = {
+    taskId: packet.taskId,
+    goal: packet.goal ?? null,
+    allowedWriteScope: packet.allowedWriteScope ?? [],
+    acceptanceCriteria: packet.acceptanceCriteria ?? [],
+    verificationSteps: packet.verificationSteps ?? [],
+    requiredReviews: packet.requiredReviews ?? []
+  };
+
+  return createHash("sha256").update(JSON.stringify(fingerprintSource)).digest("hex");
+}
+
+export function determineDaemonPromptMode(input: {
+  sessionId?: string | undefined;
+  previousTaskId?: string | undefined;
+  previousPacketFingerprint?: string | undefined;
+  taskId: string;
+  packetFingerprint?: string | undefined;
+}): DaemonPromptMode {
+  if (!input.sessionId || !input.packetFingerprint) {
+    return "full";
+  }
+
+  if (
+    input.previousTaskId === input.taskId &&
+    input.previousPacketFingerprint === input.packetFingerprint
+  ) {
+    return "delta";
+  }
+
+  return "full";
+}
+
+export function buildDaemonTaskPrompt(input: {
+  promptMode: DaemonPromptMode;
+  directive: DaemonPromptDirective;
   taskId: string;
   packet?: TaskPacketInput | undefined;
   operatorNotes?: string | undefined;
+  compressedContextSummary?: string | undefined;
+  compressedContextRef?: string | undefined;
 }): string {
   const packet = input.packet;
-  const lines = [
-    "Operate as the active devgod worker for the current task.",
+  const baseLines = [
+    input.promptMode === "delta"
+      ? "Continue the active devgod worker session for the current task."
+      : "Operate as the active devgod worker for the current task.",
     `Active task: ${input.taskId}`,
     `Directive: ${input.directive.kind}`,
     packet?.goal ? `Goal: ${packet.goal}` : undefined,
-    packet?.allowedWriteScope?.length ? `Allowed write scope: ${packet.allowedWriteScope.join(", ")}` : undefined,
-    packet?.acceptanceCriteria?.length
-      ? `Acceptance criteria: ${packet.acceptanceCriteria.join(" | ")}`
-      : undefined,
-    packet?.verificationSteps?.length
-      ? `Verification steps: ${packet.verificationSteps.join(" | ")}`
-      : undefined,
-    packet?.requiredReviews?.length
-      ? `Required reviews: ${packet.requiredReviews.join(", ")}`
-      : undefined,
+    packet?.allowedWriteScope?.length ? `Allowed write scope: ${packet.allowedWriteScope.join(", ")}` : undefined
+  ];
+
+  const detailLines =
+    input.promptMode === "full"
+      ? [
+          packet?.acceptanceCriteria?.length
+            ? `Acceptance criteria: ${packet.acceptanceCriteria.join(" | ")}`
+            : undefined,
+          packet?.verificationSteps?.length
+            ? `Verification steps: ${packet.verificationSteps.join(" | ")}`
+            : undefined,
+          packet?.requiredReviews?.length
+            ? `Required reviews: ${packet.requiredReviews.join(", ")}`
+            : undefined
+        ]
+      : [
+          "Previously bootstrapped task requirements remain in force unless explicitly updated below.",
+          input.compressedContextSummary
+            ? `Compressed context: ${input.compressedContextSummary}`
+            : undefined,
+          input.compressedContextRef ? `Compressed context ref: ${input.compressedContextRef}` : undefined
+        ];
+
+  const guidanceLines = [
     "Follow the repository AGENTS.md and the devgod workflow.",
     "Use runtime-backed devgod commands when they are needed for proof, status, or advancement.",
-    "If a required edit falls outside the allowed write scope, stop immediately, name the exact blocked paths, and include a scope_request with blocked_paths, requested_write_scope, and a short reason describing the minimum safe scope expansion.",
+    input.promptMode === "delta"
+      ? "If scope blocks the next required edit, stop immediately and return the minimum safe scope_request delta."
+      : "If a required edit falls outside the allowed write scope, stop immediately, name the exact blocked paths, and include a scope_request with blocked_paths, requested_write_scope, and a short reason describing the minimum safe scope expansion.",
     "Do not spend another turn repeating the same blocked attempt when runtime state has not changed.",
     "Complete the task if possible; otherwise stop at the real blocker and state it explicitly.",
     input.operatorNotes ? `Operator notes: ${input.operatorNotes}` : undefined,
@@ -2175,12 +2295,16 @@ function buildDaemonTaskPrompt(input: {
     input.directive.kind === "dispatch_owner"
       ? `Owner rationale: ${input.directive.rationale.join(" | ")}`
       : undefined
-  ].filter((value): value is string => Boolean(value));
+  ];
+
+  const lines = [...baseLines, ...detailLines, ...guidanceLines].filter(
+    (value): value is string => Boolean(value)
+  );
 
   return lines.join("\n");
 }
 
-function formatContinuationAction(action: ContinuationAction): string {
+function formatContinuationAction(action: DaemonPromptContinuationAction): string {
   if (action.kind === "run_workflow_proof") {
     return `run_workflow_proof(${action.taskId})`;
   }
@@ -7217,12 +7341,31 @@ export async function executeDaemonCommandFromArgs(
           directive: input.directive,
           activeTaskId: input.activeTaskId
         });
+        const promptMetadata = readDaemonPromptMetadata(projectRuntimeState?.metadata);
+        const packetFingerprint = buildDaemonTaskPacketFingerprint(taskRecord.packet);
+        const promptMode = determineDaemonPromptMode({
+          sessionId: latestSessionId,
+          previousTaskId: promptMetadata?.taskId,
+          previousPacketFingerprint: promptMetadata?.packetFingerprint,
+          taskId: input.activeTaskId,
+          packetFingerprint
+        });
+        const latestCheckpoint = snapshot.autonomousExecution?.state.checkpoints.at(-1);
 
         const prompt = buildDaemonTaskPrompt({
+          promptMode,
           directive: input.directive,
           taskId: input.activeTaskId,
           packet: taskRecord.packet,
-          operatorNotes: input.operatorNotes
+          operatorNotes: input.operatorNotes,
+          compressedContextSummary:
+            promptMode === "delta" && input.directive.kind === "continue_analysis"
+              ? latestCheckpoint?.compressedContextSummary
+              : undefined,
+          compressedContextRef:
+            promptMode === "delta" && input.directive.kind === "continue_analysis"
+              ? latestCheckpoint?.compressedContextRef
+              : undefined
         });
         const codexTurn = await runCodexTurn({
           codexBin,
@@ -7271,6 +7414,9 @@ export async function executeDaemonCommandFromArgs(
               lastRunId: input.activeRunId,
               lastTaskId: input.activeTaskId,
               lastDirectiveKind: input.directive.kind,
+              lastPromptTaskId: input.activeTaskId,
+              lastPromptPacketFingerprint: packetFingerprint,
+              lastPromptMode: promptMode,
               ...(noProgress
                 ? {
                     stagnation: {
