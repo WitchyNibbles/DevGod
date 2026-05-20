@@ -156,6 +156,9 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod -- report --run-id latest
+npm run devgod -- coverage --run-id latest --format text
+npm run devgod -- gaps --run-id latest --format text
 npm run mcp
 npm run ui
 ```
@@ -171,9 +174,17 @@ npm run devgod:setup:local
 npm run devgod:doctor
 npm run devgod:verify:setup
 npm run devgod:status
+npm run devgod:coverage
+npm run devgod:gaps
 npm run devgod:ops
+npm run devgod:report
+npm run devgod:loop
+npm run devgod:supervisor
+npm run devgod:verify:review-identity
 npm run devgod:export-docs -- "summarize what we worked on today"
 ```
+
+The installed surface is broader than the sample above. Notable additional scripts include `devgod:checkpoint`, `devgod:resume`, `devgod:reconcile`, `devgod:sync-runtime-exports`, `devgod:refresh-retrieval`, `devgod:mcp`, `devgod:ui`, `devgod:record-review`, and the workflow scaffolding helpers.
 
 ## Important nuance: current truth vs roadmap
 

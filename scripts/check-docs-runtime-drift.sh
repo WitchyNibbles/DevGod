@@ -8,6 +8,7 @@ benchmark_source=""
 goal_gap_audit="$repo_root/docs/devgod-goal-gap-audit.md"
 current_state_doc="$repo_root/docs/current-state.md"
 redesign_doc="$repo_root/docs/autonomous-execution-redesign.md"
+readme_doc="$repo_root/README.md"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
       goal_gap_audit="$repo_root/docs/devgod-goal-gap-audit.md"
       current_state_doc="$repo_root/docs/current-state.md"
       redesign_doc="$repo_root/docs/autonomous-execution-redesign.md"
+      readme_doc="$repo_root/README.md"
       shift 2
       ;;
     --benchmark-doc)
@@ -76,6 +78,7 @@ require_file "$benchmark_doc"
 require_file "$goal_gap_audit"
 require_file "$current_state_doc"
 require_file "$redesign_doc"
+require_file "$readme_doc"
 
 benchmark_reference_file=""
 cleanup() {
@@ -107,5 +110,10 @@ done
 grep -Fq 'runtime-proven' "$current_state_doc" || fail "current-state doc is missing runtime-proven package status"
 grep -Fq 'authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`' "$current_state_doc" || fail "current-state doc lost the authoritative completion proof reference"
 grep -Fq 'package-level remediation described by this redesign is now shipped' "$redesign_doc" || fail "redesign doc is missing shipped-status framing"
+grep -Fq 'As of `2026-05-20`' "$readme_doc" || fail "README status date is stale"
+grep -Fq 'runtime-proven at the package level' "$readme_doc" || fail "README is missing runtime-proven package status"
+grep -Fq '`coverage`' "$readme_doc" || fail "README command families are missing coverage"
+grep -Fq '`gaps`' "$readme_doc" || fail "README command families are missing gaps"
+grep -Fq '`report`' "$readme_doc" || fail "README command families are missing report"
 
 echo 'docs/runtime drift checks passed'

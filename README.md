@@ -25,7 +25,8 @@ brief → plan → task → reviews → proof → next task
 
 ## ✨ What It Is
 
-As of `2026-05-19`, this repo is the source-of-truth package for a manager-led workflow system that can be installed into other repositories.
+As of `2026-05-20`, this repo is the source-of-truth package for a manager-led workflow system that can be installed into other repositories.
+The package-level remediation described in the redesign docs is now shipped in this repo and runtime-proven at the package level.
 
 ### 🏷️ Fast tags
 
@@ -159,6 +160,9 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod -- report --run-id latest
+npm run devgod -- coverage --run-id latest --format text
+npm run devgod -- gaps --run-id latest --format text
 ```
 
 ### If you want to install `devgod` into another repo
@@ -207,6 +211,7 @@ That still depends on the target repo, its runtime wiring, its review identity s
 - `verify`
 - `scaffold-workflow`
 - `upgrade-reasoning-workflow`
+- `seed-happy-path-fixture`
 
 </details>
 
@@ -214,15 +219,24 @@ That still depends on the target repo, its runtime wiring, its review identity s
 <summary><strong>Runtime operations</strong></summary>
 
 - `status`
+- `coverage`
+- `gaps`
+- `report`
+- `plan-context`
 - `ops`
 - `loop`
 - `daemon`
 - `supervisor`
+- `supervisor-history`
 - `recover`
 - `checkpoint`
 - `resume`
 - `workflow-proof`
+- `seed-workflow-proof`
 - `advance-active-task`
+- `reconcile-runtime-state`
+- `sync-runtime-exports`
+- `github-dispatch`
 
 </details>
 
@@ -235,14 +249,17 @@ That still depends on the target repo, its runtime wiring, its review identity s
 - `bootstrap-project`
 - `verify-setup`
 - `verify-live-migrations`
+- `verify-review-identity`
+- `record-review`
 
 </details>
 
 <details>
 <summary><strong>Knowledge and export</strong></summary>
 
-- `refresh-retrieval`
 - `index-repo-markdown`
+- `refresh-retrieval`
+- `run-embedding-jobs`
 - `export-docs`
 
 </details>
@@ -265,17 +282,17 @@ Devgod is opinionated about a few things:
 - runtime state should outrank chat confidence
 - "continue until complete" should mean bounded repair loops and explicit blockers, not infinite retries
 
-## 🔄 What Is Still In Motion
+## 🔄 Current Boundaries
 
-The repo already has working runtime and operator surfaces, but it is still evolving.
+The package repo is runtime-proven, but rollout and consuming-repo adoption still have important boundaries.
 
-Current moving areas:
+Important current boundaries:
 
-- deeper autonomous continuation and coverage logic
-- the line between repo markdown artifacts and runtime authority
-- stronger proof/reporting around long-running multi-task execution
+- consuming repos still need their own runtime registrations, authenticated review wiring, and local evidence after installation
+- runtime rows remain authoritative over markdown exports, but docs and exported artifacts still need to stay synchronized
+- redesign docs remain the contract and roadmap for consuming repos, not proof that every installed repo already satisfies the package-level runtime posture
 
-The redesign doc is roadmap material with implemented slices, not a claim that every proposed subsystem is already live:
+The redesign doc remains the design contract and forward path, but the package-level remediation described there is already shipped in this repo:
 
 - [docs/autonomous-execution-redesign.md](docs/autonomous-execution-redesign.md)
 
@@ -284,6 +301,7 @@ The redesign doc is roadmap material with implemented slices, not a claim that e
 - [docs/current-state.md](docs/current-state.md): what devgod actually is right now
 - [docs/global-setup.md](docs/global-setup.md): source repo vs consuming repo setup notes
 - [docs/autonomous-execution-redesign.md](docs/autonomous-execution-redesign.md): forward-looking redesign direction
+- [docs/devgod-goal-gap-audit.md](docs/devgod-goal-gap-audit.md): historical gap audit and closure context
 - [docs/benchmarks/orchestration-benchmark.md](docs/benchmarks/orchestration-benchmark.md): current benchmark report
 
 ## 🧩 Repo Layout
