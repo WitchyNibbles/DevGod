@@ -10,14 +10,17 @@ import type {
   CoverageManifestRecord,
   CoverageSummary,
   CoverageItemRecord,
+  ExternalEvalRecord,
   PhaseReadinessRecord,
   ProgressProofRecord,
   RuntimeTraceRecord,
   RunProfile,
+  SensitiveActionControlRecord,
   TaskRecord,
   UnderstandingMapKind,
   UnderstandingMapRecord
 } from "../domain/types.ts";
+import { buildRuntimeTraceRegistry } from "./runtime-trace-registry.ts";
 
 export interface AutonomousNextTarget {
   targetId: string;
@@ -145,6 +148,16 @@ function latestCheckpointRecord(checkpoints: readonly CheckpointRecord[]): Check
     }
     return right.checkpointId.localeCompare(left.checkpointId);
   })[0];
+}
+
+function checkpointResumeTarget(checkpoint: CheckpointRecord | undefined): string | undefined {
+  const activeTarget = checkpoint?.activeTargets.find((target) => target.trim().length > 0)?.trim();
+  return activeTarget || undefined;
+}
+
+function progressProofResumeTarget(proof: ProgressProofRecord | undefined): string | undefined {
+  const explicitTarget = proof?.nextTarget.trim();
+  return explicitTarget || undefined;
 }
 
 export function isCheckpointStale(
@@ -391,6 +404,50 @@ export function validateRuntimeTraceRecord(trace: RuntimeTraceRecord): string[] 
   return errors;
 }
 
+export function validateExternalEvalRecord(record: ExternalEvalRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.evalId.trim().length === 0) {
+    errors.push("external eval must include evalId");
+  }
+
+  if (record.label.trim().length === 0) {
+    errors.push(`external eval ${record.evalId} must include label`);
+  }
+
+  if (record.harness.trim().length === 0) {
+    errors.push(`external eval ${record.evalId} must include harness`);
+  }
+
+  if (record.artifactRef.trim().length === 0) {
+    errors.push(`external eval ${record.evalId} must include artifactRef`);
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`external eval ${record.evalId} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
+export function validateSensitiveActionControlRecord(record: SensitiveActionControlRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.controlId.trim().length === 0) {
+    errors.push("sensitive action control must include controlId");
+  }
+
+  if (record.summary.trim().length === 0) {
+    errors.push(`sensitive action control ${record.controlId} must include summary`);
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`sensitive action control ${record.controlId} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
 export function runRequiresAutonomousExecution(tasks: readonly TaskRecord[]): boolean {
   return tasks.some((task) => task.packet.qualityGates.some((gate) => autonomousQualityGates.has(gate)));
 }
@@ -412,6 +469,8 @@ export function createAutonomousExecutionState(input: {
     progressProofs: [],
     understandingMaps: [],
     runtimeTraces: [],
+    externalEvals: [],
+    sensitiveActionControls: [],
     pendingInvestigations: [],
     executionEpoch: 1,
     updatedAt: input.now
@@ -463,6 +522,7 @@ export function computeComprehensionSummary(
   coverageSummary: CoverageSummary
 ): ComprehensionSummary {
   const understandingMaps = state.understandingMaps ?? [];
+  const traceRegistry = buildRuntimeTraceRegistry(state);
   const runtimeTraces = state.runtimeTraces ?? [];
   const requiredKinds = requiredUnderstandingKinds(state.profile);
   const presentKinds = [
@@ -485,7 +545,7 @@ export function computeComprehensionSummary(
     (gap) => gap.status === "open" && gap.kind === "contradicting_evidence"
   ).length;
   const openBlockerCount = coverageSummary.blockingGapCount;
-  const riskyTraceCount = runtimeTraces.filter((trace) => trace.risky).length;
+  const riskyTraceCount = traceRegistry.riskyTraceCount;
   const missingEvidence: string[] = [];
   const inventoryThreshold = thresholdValue(
     state.manifest,
@@ -537,6 +597,16 @@ export function computeComprehensionSummary(
 
   if (riskyTraceCount === 0 && runtimeTraceThreshold > 0) {
     missingEvidence.push("risky runtime traces are missing from the trace registry");
+  }
+
+  for (const targetId of traceRegistry.riskyTargetsMissingTrace) {
+    missingEvidence.push(`runtime trace missing for risky target: ${targetId}`);
+  }
+
+  if (traceRegistry.openMissingTraceGapIds.length > 0) {
+    missingEvidence.push(
+      `open runtime trace gaps: ${traceRegistry.openMissingTraceGapIds.join(", ")}`
+    );
   }
 
   if (contradictionGapCount > maxContradictionGapCount) {
@@ -732,6 +802,10 @@ export function collectAutonomousExecutionBlockers(
     const latestCheckpoint = state.checkpoints[state.checkpoints.length - 1];
     if (!latestCheckpoint?.compressedContextRef) {
       blockers.push("memory compaction required but the latest checkpoint lacks compressed context");
+    } else if (!latestCheckpoint.compressedContextSummary?.trim()) {
+      blockers.push("memory compaction required but the latest checkpoint lacks compressed context summary");
+    } else if (!hasNonEmptyStrings(latestCheckpoint.compressedContextSourceRefs)) {
+      blockers.push("memory compaction required but the latest checkpoint lacks compressed context provenance");
     }
   }
 
@@ -790,6 +864,28 @@ export function mergeRuntimeTraces(
   return [...byId.values()].sort((left, right) => left.traceId.localeCompare(right.traceId));
 }
 
+export function mergeExternalEvalRecords(
+  existing: readonly ExternalEvalRecord[],
+  updates: readonly ExternalEvalRecord[]
+): ExternalEvalRecord[] {
+  const byId = new Map(existing.map((record) => [record.evalId, record]));
+  for (const record of updates) {
+    byId.set(record.evalId, record);
+  }
+  return [...byId.values()].sort((left, right) => left.evalId.localeCompare(right.evalId));
+}
+
+export function mergeSensitiveActionControls(
+  existing: readonly SensitiveActionControlRecord[],
+  updates: readonly SensitiveActionControlRecord[]
+): SensitiveActionControlRecord[] {
+  const byId = new Map(existing.map((record) => [record.controlId, record]));
+  for (const record of updates) {
+    byId.set(record.controlId, record);
+  }
+  return [...byId.values()].sort((left, right) => left.controlId.localeCompare(right.controlId));
+}
+
 function extractWorkflowProofTaskId(targetId: string, nextActions: readonly string[]): string | undefined {
   const normalizedTargetId = targetId.trim();
   if (!normalizedTargetId.startsWith("task:")) {
@@ -840,44 +936,6 @@ export function selectAutonomousNextTarget(
     };
   }
 
-  const latestProgressProof = [...state.progressProofs]
-    .sort((left, right) => {
-      const cycleOrder = right.cycle - left.cycle;
-      if (cycleOrder !== 0) {
-        return cycleOrder;
-      }
-      return right.createdAt.localeCompare(left.createdAt);
-    })
-    .find((proof) => validateProgressProofRecord(proof).length === 0);
-  if (latestProgressProof?.nextTarget.trim()) {
-    const progressProofTarget = latestProgressProof.nextTarget.trim();
-    const nextActions = latestProgressProof.whyNext?.trim()
-      ? [latestProgressProof.whyNext.trim()]
-      : [`continue at ${progressProofTarget}`];
-    const workflowProofTaskId = extractWorkflowProofTaskId(progressProofTarget, nextActions);
-    const actions: ContinuationAction[] = workflowProofTaskId
-      ? [{ kind: "run_workflow_proof", taskId: workflowProofTaskId }]
-      : [
-          {
-            kind: "resume_target",
-            targetId: progressProofTarget,
-            source: "progress_proof",
-            sourceId: latestProgressProof.proofId
-          }
-        ];
-
-    return {
-      targetId: progressProofTarget,
-      source: "progress_proof",
-      rationale: [
-        `latest progress proof ${latestProgressProof.proofId} selected the next target`,
-        ...(latestProgressProof.whyNext ? [latestProgressProof.whyNext] : [])
-      ],
-      actions,
-      nextActions
-    };
-  }
-
   const latestCheckpoint = [...state.checkpoints]
     .sort((left, right) => {
       const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
@@ -887,7 +945,7 @@ export function selectAutonomousNextTarget(
       return right.checkpointId.localeCompare(left.checkpointId);
     })
     .find((checkpoint) => !isCheckpointStale(state, checkpoint));
-  const checkpointTarget = latestCheckpoint?.activeTargets[0]?.trim();
+  const checkpointTarget = checkpointResumeTarget(latestCheckpoint);
   if (latestCheckpoint && checkpointTarget) {
     const nextActions =
       latestCheckpoint.nextActions.length > 0
@@ -910,6 +968,44 @@ export function selectAutonomousNextTarget(
       source: "checkpoint",
       rationale: [
         `latest checkpoint ${latestCheckpoint.checkpointId} still lists an active target`
+      ],
+      actions,
+      nextActions
+    };
+  }
+
+  const latestProgressProof = [...state.progressProofs]
+    .sort((left, right) => {
+      const cycleOrder = right.cycle - left.cycle;
+      if (cycleOrder !== 0) {
+        return cycleOrder;
+      }
+      return right.createdAt.localeCompare(left.createdAt);
+    })
+    .find((proof) => validateProgressProofRecord(proof).length === 0);
+  const progressProofTarget = progressProofResumeTarget(latestProgressProof);
+  if (latestProgressProof && progressProofTarget) {
+    const nextActions = latestProgressProof.whyNext?.trim()
+      ? [latestProgressProof.whyNext.trim()]
+      : [`continue at ${progressProofTarget}`];
+    const workflowProofTaskId = extractWorkflowProofTaskId(progressProofTarget, nextActions);
+    const actions: ContinuationAction[] = workflowProofTaskId
+      ? [{ kind: "run_workflow_proof", taskId: workflowProofTaskId }]
+      : [
+          {
+            kind: "resume_target",
+            targetId: progressProofTarget,
+            source: "progress_proof",
+            sourceId: latestProgressProof.proofId
+          }
+        ];
+
+    return {
+      targetId: progressProofTarget,
+      source: "progress_proof",
+      rationale: [
+        `latest progress proof ${latestProgressProof.proofId} selected the next target`,
+        ...(latestProgressProof.whyNext ? [latestProgressProof.whyNext] : [])
       ],
       actions,
       nextActions

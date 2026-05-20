@@ -95,6 +95,195 @@ if (errors.length > 0) {
 EOF
 }
 
+validate_coverage_ledger_artifacts() {
+  local manifest_path="$1"
+  local items_path="$2"
+  local gaps_path="$3"
+  local dependency_graph_path="$4"
+  local traces_path="$5"
+
+  node --input-type=module - \
+    "$manifest_path" \
+    "$items_path" \
+    "$gaps_path" \
+    "$dependency_graph_path" \
+    "$traces_path" <<'EOF'
+import fs from "node:fs";
+
+const [manifestPath, itemsPath, gapsPath, dependencyGraphPath, tracesPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const items = JSON.parse(fs.readFileSync(itemsPath, "utf8"));
+const gaps = JSON.parse(fs.readFileSync(gapsPath, "utf8"));
+const dependencyGraph = JSON.parse(fs.readFileSync(dependencyGraphPath, "utf8"));
+const traces = JSON.parse(fs.readFileSync(tracesPath, "utf8"));
+const errors = [];
+
+if (!Array.isArray(manifest.required_categories) || manifest.required_categories.length === 0) {
+  errors.push("required_categories must contain at least one category");
+}
+
+for (const key of [
+  "critical_item_coverage",
+  "critical_item_validation",
+  "callsite_coverage",
+  "runtime_trace_coverage"
+]) {
+  const value = manifest.thresholds?.[key];
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    errors.push(`thresholds.${key} must be a finite number between 0 and 1`);
+  }
+}
+
+if (!Array.isArray(items)) {
+  errors.push("coverage items artifact must be an array");
+}
+
+if (!Array.isArray(gaps)) {
+  errors.push("coverage gaps artifact must be an array");
+}
+
+if (!Array.isArray(traces)) {
+  errors.push("coverage traces artifact must be an array");
+}
+
+if (!dependencyGraph || typeof dependencyGraph !== "object") {
+  errors.push("coverage dependency graph artifact must be an object");
+}
+
+if (Array.isArray(items)) {
+  const itemIds = new Set();
+  const presentCategories = new Set();
+  for (const item of items) {
+    if (itemIds.has(item.id)) {
+      errors.push(`duplicate coverage item id ${item.id}`);
+    }
+    itemIds.add(item.id);
+    presentCategories.add(item.category);
+
+    if (!Array.isArray(item.sources) || item.sources.length === 0) {
+      errors.push(`coverage item ${item.id} must include at least one source`);
+    }
+    if (!Array.isArray(item.evidence_refs) || item.evidence_refs.length === 0) {
+      errors.push(`coverage item ${item.id} must include at least one evidenceRef`);
+    }
+    if (
+      Number.isFinite(item.callsite_count) &&
+      Number.isFinite(item.callsites_analyzed) &&
+      item.callsites_analyzed > item.callsite_count
+    ) {
+      errors.push(`coverage item ${item.id} callsitesAnalyzed cannot exceed callsiteCount`);
+    }
+    if (item.state === "validated" && (!Array.isArray(item.verification_refs) || item.verification_refs.length === 0)) {
+      errors.push(`validated coverage item ${item.id} must include verificationRefs`);
+    }
+  }
+
+  for (const category of manifest.required_categories ?? []) {
+    if (!presentCategories.has(category)) {
+      errors.push(`coverage items artifact is missing required category ${category}`);
+    }
+  }
+
+  if (!dependencyGraph || typeof dependencyGraph !== "object") {
+    // handled above
+  } else {
+    if (typeof dependencyGraph.generated_at !== "string" || dependencyGraph.generated_at.trim().length === 0) {
+      errors.push("coverage dependency graph artifact must include generated_at");
+    }
+    if (!Array.isArray(dependencyGraph.nodes)) {
+      errors.push("coverage dependency graph artifact must include nodes");
+    }
+    if (!Array.isArray(dependencyGraph.edges)) {
+      errors.push("coverage dependency graph artifact must include edges");
+    }
+
+    if (Array.isArray(dependencyGraph.nodes) && Array.isArray(dependencyGraph.edges)) {
+      const nodeIds = new Set();
+      for (const node of dependencyGraph.nodes) {
+        if (typeof node.id !== "string" || node.id.trim().length === 0) {
+          errors.push("coverage dependency graph node must include id");
+          continue;
+        }
+        if (nodeIds.has(node.id)) {
+          errors.push(`duplicate coverage dependency graph node ${node.id}`);
+          continue;
+        }
+        nodeIds.add(node.id);
+      }
+
+      for (const item of items) {
+        if (!nodeIds.has(item.id)) {
+          errors.push(`coverage dependency graph is missing node for coverage item ${item.id}`);
+        }
+      }
+
+      for (const edge of dependencyGraph.edges) {
+        if (typeof edge.from !== "string" || edge.from.trim().length === 0) {
+          errors.push("coverage dependency graph edge must include from");
+          continue;
+        }
+        if (typeof edge.to !== "string" || edge.to.trim().length === 0) {
+          errors.push("coverage dependency graph edge must include to");
+          continue;
+        }
+        if (edge.kind !== "depends_on") {
+          errors.push(`coverage dependency graph edge ${edge.from}->${edge.to} has unsupported kind ${String(edge.kind)}`);
+        }
+        if (!nodeIds.has(edge.from)) {
+          errors.push(`coverage dependency graph edge references unknown from node ${edge.from}`);
+        }
+        if (!nodeIds.has(edge.to)) {
+          errors.push(`coverage dependency graph edge references unknown to node ${edge.to}`);
+        }
+      }
+    }
+  }
+}
+
+if (Array.isArray(gaps)) {
+  for (const gap of gaps) {
+    if (typeof gap.target_id !== "string" || gap.target_id.trim().length === 0) {
+      errors.push(`gap ${gap.id} must include a targetId`);
+    }
+    if (!Array.isArray(gap.evidence_refs) || gap.evidence_refs.length === 0) {
+      errors.push(`gap ${gap.id} must include evidenceRefs`);
+    }
+    if (typeof gap.created_by !== "string" || gap.created_by.trim().length === 0) {
+      errors.push(`gap ${gap.id} must include createdBy`);
+    }
+    if (gap.status === "open" && (!Array.isArray(gap.suggested_next_actions) || gap.suggested_next_actions.length === 0)) {
+      errors.push(`open gap ${gap.id} must include suggestedNextActions`);
+    }
+  }
+}
+
+if (Array.isArray(traces)) {
+  for (const trace of traces) {
+    if (typeof trace.trace_id !== "string" || trace.trace_id.trim().length === 0) {
+      errors.push("runtime trace must include traceId");
+    }
+    if (typeof trace.target_id !== "string" || trace.target_id.trim().length === 0) {
+      errors.push(`runtime trace ${trace.trace_id} must include targetId`);
+    }
+    if (!Array.isArray(trace.side_effects)) {
+      errors.push(`runtime trace ${trace.trace_id} must include sideEffects`);
+    }
+    if (!Array.isArray(trace.evidence_refs) || trace.evidence_refs.length === 0) {
+      errors.push(`runtime trace ${trace.trace_id} must include evidenceRefs`);
+    }
+    if (typeof trace.created_at !== "string" || trace.created_at.trim().length === 0) {
+      errors.push(`runtime trace ${trace.trace_id} must include createdAt`);
+    }
+  }
+}
+
+if (errors.length > 0) {
+  console.error(`devgod workflow check failed: invalid coverage ledger artifact ${manifestPath}: ${errors.join("; ")}`);
+  process.exit(1);
+}
+EOF
+}
+
 validate_progress_proof_artifact() {
   local path="$1"
   node --input-type=module - "$path" <<'EOF'
@@ -843,6 +1032,10 @@ fi
 if [[ -f "$task_file" ]]; then
   mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
   coverage_manifest_file="$repo_root/.devgod/work/coverage/coverage-${artifact_task_id}.json"
+  coverage_items_file="$repo_root/.devgod/work/coverage/items-${artifact_task_id}.json"
+  coverage_gaps_file="$repo_root/.devgod/work/coverage/gaps-${artifact_task_id}.json"
+  coverage_dependency_graph_file="$repo_root/.devgod/work/coverage/dependency-graph-${artifact_task_id}.json"
+  coverage_traces_file="$repo_root/.devgod/work/coverage/traces-${artifact_task_id}.json"
   progress_proof_file="$repo_root/.devgod/work/proofs/progress-${artifact_task_id}.json"
   checkpoint_file="$repo_root/.devgod/work/checkpoints/checkpoint-${artifact_task_id}.md"
 
@@ -850,7 +1043,16 @@ if [[ -f "$task_file" ]]; then
     case "$gate" in
       coverage_ledger_required)
         require_file "$coverage_manifest_file"
-        validate_coverage_manifest_artifact "$coverage_manifest_file"
+        require_file "$coverage_items_file"
+        require_file "$coverage_gaps_file"
+        require_file "$coverage_dependency_graph_file"
+        require_file "$coverage_traces_file"
+        validate_coverage_ledger_artifacts \
+          "$coverage_manifest_file" \
+          "$coverage_items_file" \
+          "$coverage_gaps_file" \
+          "$coverage_dependency_graph_file" \
+          "$coverage_traces_file"
         ;;
       progress_proof_required)
         require_file "$progress_proof_file"

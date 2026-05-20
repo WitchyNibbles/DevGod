@@ -27,19 +27,29 @@ import {
   buildAutonomousExecutionSnapshot,
   collectAutonomousExecutionBlockers,
   createAutonomousExecutionState,
+  mergeExternalEvalRecords,
   mergeCoverageGaps,
   mergeCoverageItems,
   mergeRuntimeTraces,
+  mergeSensitiveActionControls,
   mergeUnderstandingMaps,
+  validateExternalEvalRecord,
   validateCoverageGapRecord,
   validateCoverageItemRecord,
   validateCoverageManifestRecord,
   validateProgressProofRecord,
   validateRuntimeTraceRecord,
+  validateSensitiveActionControlRecord,
   validateUnderstandingMapRecord,
   runRequiresAutonomousExecution,
   selectAutonomousNextTarget
 } from "../runtime/autonomous-execution.ts";
+import {
+  buildCoverageLedgerArtifacts,
+  type CoverageLedgerArtifacts
+} from "../runtime/coverage-ledger.ts";
+import { generateRepoInventory } from "../runtime/repo-inventory.ts";
+import { buildRuntimeTraceRegistry } from "../runtime/runtime-trace-registry.ts";
 import { annotateConflictSignals, isProvenancedSearchResult } from "./search-memory-results.ts";
 import type {
   ResolveReviewActionContext,
@@ -47,11 +57,13 @@ import type {
 } from "./review-context.ts";
 import type {
   AnalysisPhase,
+  AutonomousExecutionSnapshot,
   AutonomousExecutionState,
   CheckpointRecord,
   CoverageGapRecord,
   CoverageItemRecord,
   CoverageManifestRecord,
+  ExternalEvalRecord,
   HandoffInput,
   IntakeRequestInput,
   LockRecord,
@@ -61,6 +73,7 @@ import type {
   ProgressProofRecord,
   ProjectRuntimeMetadata,
   RuntimeTraceRecord,
+  RuntimeTraceRegistrySummary,
   RunExecutionPlan,
   RunResumeSnapshot,
   ReviewInput,
@@ -75,6 +88,7 @@ import type {
   RunStatusSnapshot,
   SearchMemoryInput,
   SearchMemoryResult,
+  SensitiveActionControlRecord,
   TaskPacketInput,
   TaskRecord,
   UnderstandingMapRecord
@@ -135,6 +149,183 @@ export interface DirectiveExecutionResult {
 
 function timestamp(): string {
   return new Date().toISOString();
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+function deriveNativeAutonomousDirective(input: {
+  autonomousExecution: AutonomousExecutionSnapshot;
+  blockers: readonly string[];
+  terminalTasks: boolean;
+}): RunExecutionPlan["directive"] | undefined {
+  const { autonomousExecution, blockers, terminalTasks } = input;
+  const { state, comprehensionSummary, coverageSummary, phaseReadiness, blockingGaps } = autonomousExecution;
+  const manifestThresholds = state.manifest?.thresholds;
+  const leadingRationale = terminalTasks
+    ? "all tasks are terminal, but autonomous execution still requires native runtime remediation"
+    : "no owner-dispatch task is available, and autonomous execution still requires native runtime remediation";
+
+  const inventoryThreshold = manifestThresholds?.inventoryCompleteness;
+  const inventoryBlockers = uniqueStrings(
+    blockers.filter((blocker) => /understanding map missing|repo-understanding/i.test(blocker))
+  );
+  const needsInventoryRebuild =
+    typeof inventoryThreshold === "number" &&
+    ((comprehensionSummary?.inventoryCompleteness ?? 0) < inventoryThreshold ||
+      inventoryBlockers.length > 0);
+  if (needsInventoryRebuild) {
+    const missingUnderstandingKinds = comprehensionSummary?.missingUnderstandingKinds ?? [];
+    const missingEvidence = uniqueStrings([
+      ...(comprehensionSummary?.missingEvidence ?? []),
+      ...missingUnderstandingKinds.map((kind) => `understanding map missing: ${kind}`)
+    ]);
+    return {
+      kind: "rebuild_inventory",
+      missingUnderstandingKinds,
+      missingEvidence,
+      blockers:
+        inventoryBlockers.length > 0
+          ? inventoryBlockers
+          : missingEvidence.length > 0
+            ? missingEvidence
+            : ["repo inventory remains incomplete for autonomous execution"],
+      nextActions: uniqueStrings([
+        ...missingUnderstandingKinds.map((kind) => `rebuild understanding map: ${kind}`),
+        ...missingEvidence,
+        ...state.pendingInvestigations
+      ]),
+      rationale: [
+        leadingRationale,
+        "comprehension evidence is still below the inventory threshold required for native continuation"
+      ]
+    };
+  }
+
+  const traceGapBlockers = blockingGaps.filter(
+    (gap) => gap.status === "open" && gap.blocking && gap.kind === "missing_runtime_trace"
+  );
+  const traceBlockers = uniqueStrings([
+    ...blockers.filter((blocker) => /runtime trace|risky trace/i.test(blocker)),
+    ...phaseReadiness.reasons.filter((reason) => /runtime trace|risky trace/i.test(reason)),
+    ...traceGapBlockers.map((gap) => gap.description)
+  ]);
+  const traceThreshold = manifestThresholds?.runtimeTraceCoverage;
+  const tracePhaseActive =
+    state.phase === "runtime_tracing" || phaseReadiness.phase === "runtime_tracing";
+  const needsRuntimeTrace =
+    traceGapBlockers.length > 0 ||
+    ((tracePhaseActive || traceBlockers.length > 0) &&
+      typeof traceThreshold === "number" &&
+      coverageSummary.runtimeTraceCoverage < traceThreshold) ||
+    traceBlockers.length > 0;
+  if (needsRuntimeTrace) {
+    return {
+      kind: "trace_runtime",
+      targetIds: uniqueStrings(traceGapBlockers.map((gap) => gap.targetId)),
+      gapIds: uniqueStrings(traceGapBlockers.map((gap) => gap.id)),
+      blockers:
+        traceBlockers.length > 0
+          ? traceBlockers
+          : ["runtime trace coverage remains below the autonomous threshold"],
+      nextActions: uniqueStrings(traceGapBlockers.flatMap((gap) => gap.suggestedNextActions)),
+      rationale: [
+        leadingRationale,
+        "risky runtime paths still require trace-backed evidence before autonomous completion"
+      ]
+    };
+  }
+
+  const checkpointBlockers = uniqueStrings([
+    ...blockers.filter((blocker) =>
+      /progress proof|checkpoint|compressed context|compaction/i.test(blocker)
+    ),
+    ...phaseReadiness.reasons.filter((reason) =>
+      /progress proof|checkpoint|compressed context|compaction/i.test(reason)
+    )
+  ]);
+  if (checkpointBlockers.length > 0) {
+    const latestCheckpoint = state.checkpoints.at(-1);
+    const latestProof = state.progressProofs.at(-1);
+    return {
+      kind: "checkpoint",
+      checkpointId: latestCheckpoint?.checkpointId,
+      progressProofId: latestProof?.proofId,
+      blockers: checkpointBlockers,
+      nextActions: uniqueStrings([
+        ...(latestCheckpoint?.nextActions ?? []),
+        ...(latestProof?.whyNext ? [latestProof.whyNext] : [])
+      ]),
+      rationale: [
+        leadingRationale,
+        "checkpoint, progress-proof, or compaction evidence is still missing for native continuation"
+      ]
+    };
+  }
+
+  const pendingInvestigations = uniqueStrings(state.pendingInvestigations);
+  if (pendingInvestigations.length > 0) {
+    return {
+      kind: "dispatch_subagents",
+      pendingInvestigations,
+      blockers: pendingInvestigations.map((investigation) => `pending investigation: ${investigation}`),
+      nextActions: uniqueStrings(
+        pendingInvestigations.flatMap((investigation) => [
+          investigation,
+          `dispatch subagent investigation: ${investigation}`
+        ])
+      ),
+      rationale: [
+        leadingRationale,
+        "bounded autonomous investigations are still queued and need native subagent dispatch planning"
+      ]
+    };
+  }
+
+  const migrationPhaseActive =
+    state.phase === "modernization_strategy" || state.phase === "migration_sequencing";
+  if (migrationPhaseActive && (phaseReadiness.status === "blocked" || blockers.length > 0)) {
+    const migrationBlockers = uniqueStrings(
+      blockers.length > 0 ? [...blockers] : [...phaseReadiness.reasons]
+    );
+    return {
+      kind: "replan_migration",
+      phase: state.phase,
+      fallbackPhase: phaseReadiness.fallbackPhase,
+      blockers:
+        migrationBlockers.length > 0
+          ? migrationBlockers
+          : ["migration sequencing still requires a runtime-backed replanning pass"],
+      nextActions: uniqueStrings([
+        phaseReadiness.fallbackPhase
+          ? `replan toward ${phaseReadiness.fallbackPhase}`
+          : `replan ${state.phase}`,
+        ...phaseReadiness.reasons
+      ]),
+      rationale: [
+        leadingRationale,
+        "migration-phase readiness has fallen back and now requires an explicit runtime-backed replanning step"
+      ]
+    };
+  }
+
+  return undefined;
+}
+
+function uniqueNonEmpty(values: readonly string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0))].sort(
+    (left, right) => left.localeCompare(right)
+  );
+}
+
+function buildCompressedContextSummary(
+  checkpoint: Omit<CheckpointRecord, "runId" | "authorityLabel">
+): string {
+  const targets =
+    checkpoint.activeTargets.length > 0 ? checkpoint.activeTargets.join(", ") : `checkpoint:${checkpoint.checkpointId}`;
+  const gaps = checkpoint.openGaps.length > 0 ? checkpoint.openGaps.join(", ") : "none";
+  return `phase=${checkpoint.phase}; targets=${targets}; open-gaps=${gaps}`;
 }
 
 function parseHoursSince(createdAt: string, now: string): number | undefined {
@@ -201,7 +392,9 @@ function readAutonomousExecutionState(
   return {
     ...candidate,
     understandingMaps: candidate.understandingMaps ?? [],
-    runtimeTraces: candidate.runtimeTraces ?? []
+    runtimeTraces: candidate.runtimeTraces ?? [],
+    externalEvals: candidate.externalEvals ?? [],
+    sensitiveActionControls: candidate.sensitiveActionControls ?? []
   };
 }
 
@@ -464,6 +657,47 @@ export class DevgodCoreService {
     });
   }
 
+  async upsertExternalEvals(
+    runId: string,
+    records: ExternalEvalRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateExternalEvalRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid external eval: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        externalEvals: mergeExternalEvalRecords(base.externalEvals ?? [], records)
+      };
+    });
+  }
+
+  async upsertSensitiveActionControls(
+    runId: string,
+    records: SensitiveActionControlRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateSensitiveActionControlRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid sensitive action control: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        sensitiveActionControls: mergeSensitiveActionControls(
+          base.sensitiveActionControls ?? [],
+          records
+        )
+      };
+    });
+  }
+
   async upsertCoverageGaps(runId: string, gaps: CoverageGapRecord[]): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
     const errors = gaps.flatMap((gap) => validateCoverageGapRecord(gap));
@@ -533,11 +767,21 @@ export class DevgodCoreService {
     let fullCheckpoint: CheckpointRecord | undefined;
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
+      const compressedContextSourceRefs = uniqueNonEmpty(
+        checkpoint.compressedContextSourceRefs ?? checkpoint.recentEvidenceRefs
+      );
       const storedCheckpoint: CheckpointRecord = {
         ...checkpoint,
         authorityLabel: options.authorityLabel ?? "runtime_authoritative",
         runId,
-        executionEpoch: checkpoint.executionEpoch ?? base.executionEpoch
+        executionEpoch: checkpoint.executionEpoch ?? base.executionEpoch,
+        compressedContextRef:
+          checkpoint.compressedContextRef?.trim() ||
+          `memory://checkpoint/${checkpoint.checkpointId}/compressed-context`,
+        compressedContextSummary:
+          checkpoint.compressedContextSummary?.trim() || buildCompressedContextSummary(checkpoint),
+        compressedContextSourceRefs,
+        compressedContextGeneratedAt: checkpoint.compressedContextGeneratedAt ?? checkpoint.createdAt
       };
       fullCheckpoint = storedCheckpoint;
       const checkpoints = [...base.checkpoints, storedCheckpoint].sort((left, right) =>
@@ -579,6 +823,50 @@ export class DevgodCoreService {
     });
 
     return nextState;
+  }
+
+  async exportCoverageLedger(runId: string): Promise<CoverageLedgerArtifacts> {
+    const snapshot = await this.getStatus(runId);
+    const state = snapshot.autonomousExecution?.state;
+    if (!state?.manifest) {
+      throw new Error("coverage ledger export requires an autonomous execution manifest");
+    }
+
+    return buildCoverageLedgerArtifacts(state);
+  }
+
+  async getRuntimeTraceRegistry(runId: string): Promise<RuntimeTraceRegistrySummary> {
+    const snapshot = await this.getStatus(runId);
+    const state = snapshot.autonomousExecution?.state;
+    if (!state) {
+      throw new Error("runtime trace registry requires autonomous execution state");
+    }
+
+    return buildRuntimeTraceRegistry(state);
+  }
+
+  async generateRepoInventory(
+    runId: string,
+    input: {
+      repoRoot: string;
+      now?: string | undefined;
+    }
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const generated = await generateRepoInventory({
+      repoRoot: input.repoRoot,
+      now: input.now
+    });
+
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        coverageItems: mergeCoverageItems(base.coverageItems, generated.coverageItems),
+        understandingMaps: mergeUnderstandingMaps(base.understandingMaps ?? [], generated.understandingMaps)
+      };
+    });
   }
 
   async intakeRequest(input: IntakeRequestInput): Promise<RunRecord> {
@@ -1086,6 +1374,21 @@ export class DevgodCoreService {
     const autonomousNextTarget = autonomousExecution
       ? selectAutonomousNextTarget(autonomousExecution.state)
       : undefined;
+    const allTasksTerminal =
+      snapshot.tasks.length > 0 && snapshot.tasks.every((task) => task.status === "approved" || task.status === "done");
+    const nativeAutonomousDirective =
+      autonomousExecution &&
+      !autonomousNextTarget &&
+      (autonomousExecutionBlockers.length > 0 ||
+        autonomousExecution.state.pendingInvestigations.length > 0 ||
+        autonomousExecution.state.phase === "modernization_strategy" ||
+        autonomousExecution.state.phase === "migration_sequencing")
+        ? deriveNativeAutonomousDirective({
+            autonomousExecution,
+            blockers: autonomousExecutionBlockers,
+            terminalTasks: allTasksTerminal
+          })
+        : undefined;
 
     const safeRecoveryActions = recovery.actions.filter((action) => action.safeToApply);
     if (safeRecoveryActions.length > 0) {
@@ -1148,7 +1451,7 @@ export class DevgodCoreService {
       };
     }
 
-    if (snapshot.tasks.length > 0 && snapshot.tasks.every((task) => task.status === "approved" || task.status === "done")) {
+    if (allTasksTerminal) {
       const reasoningAssessments = snapshot.tasks.map((task) => ({
         taskId: task.packet.taskId,
         assessment: assessTaskPacketReasoning(task.packet)
@@ -1176,6 +1479,15 @@ export class DevgodCoreService {
       const reasoningWarnings = reasoningAssessments.flatMap(({ taskId, assessment }) =>
         assessment.warnings.map((warning) => `${taskId}: ${warning.message}`)
       );
+      if (nativeAutonomousDirective) {
+        return {
+          mode: "runtime_authoritative",
+          runId,
+          runStatus: snapshot.run.status,
+          autonomousExecution,
+          directive: nativeAutonomousDirective
+        };
+      }
       if (autonomousExecutionBlockers.length > 0 && autonomousNextTarget) {
         return {
           mode: "runtime_authoritative",
@@ -1234,6 +1546,19 @@ export class DevgodCoreService {
               : [])
           ]
         }
+      };
+    }
+
+    if (
+      nativeAutonomousDirective &&
+      snapshot.tasks.every((task) => task.status !== "in_progress")
+    ) {
+      return {
+        mode: "runtime_authoritative",
+        runId,
+        runStatus: snapshot.run.status,
+        autonomousExecution,
+        directive: nativeAutonomousDirective
       };
     }
 
@@ -1456,6 +1781,24 @@ export class DevgodCoreService {
         nextDirectiveKind: finalPlan.directive.kind,
         evidence: [
           "safe recovery must be applied explicitly before directive execution can continue"
+        ]
+      });
+    } else if (
+      initialPlan.directive.kind === "dispatch_subagents" ||
+      initialPlan.directive.kind === "rebuild_inventory" ||
+      initialPlan.directive.kind === "trace_runtime" ||
+      initialPlan.directive.kind === "checkpoint" ||
+      initialPlan.directive.kind === "replan_migration"
+    ) {
+      steps.push({
+        directiveKind: initialPlan.directive.kind,
+        outcome: "blocked",
+        nextDirectiveKind: finalPlan.directive.kind,
+        evidence: [
+          ...initialPlan.directive.blockers,
+          ...(initialPlan.directive.nextActions.length > 0
+            ? initialPlan.directive.nextActions.map((action) => `next:${action}`)
+            : ["native autonomous remediation requires explicit operator or worker execution"])
         ]
       });
     }

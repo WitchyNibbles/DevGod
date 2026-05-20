@@ -1,6 +1,7 @@
 import type {
   ApprovalRecord,
   HandoffRecord,
+  RuntimeTraceRegistrySummary,
   ReasoningWorkflowMode,
   RunExecutionPlan,
   ReviewRecord,
@@ -84,6 +85,7 @@ export interface RunEvidenceReport {
   } | undefined;
   tasks: RunEvidenceTaskReport[];
   autonomous: AutonomousOperatorSummary;
+  traceRegistry?: RuntimeTraceRegistrySummary | undefined;
   reasoningQuality: {
     authorityLabel: "derived_only";
     status: "pass" | "warn";
@@ -190,6 +192,7 @@ export function buildRunEvidenceReport(input: {
       snapshot: input.snapshot,
       executionPlan: input.executionPlan
     }),
+    traceRegistry: input.status.traceRegistry.summary,
     reasoningQuality: {
       authorityLabel: "derived_only",
       status: reasoningWarnings.length > 0 ? "warn" : "pass",
@@ -265,6 +268,9 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   if (!report.autonomous.configured) {
     lines.push(`- configured: no`);
     lines.push(`- resume: ${report.autonomous.resume.summary}`);
+    lines.push(
+      `- autonomy note: run-level workflow proof can still be valid; this report has no active autonomous continuation evidence for the run`
+    );
   } else {
     lines.push(`- configured: yes`);
     lines.push(`- profile: ${report.autonomous.profile}`);
@@ -391,6 +397,74 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     }
   }
   lines.push("");
+
+  lines.push(`## Checkpoint Compaction`);
+  lines.push("");
+  lines.push(`- status: ${report.status.compaction.status}`);
+  if (report.status.compaction.checkpointId) {
+    lines.push(`- checkpoint: ${report.status.compaction.checkpointId}`);
+  }
+  if (report.status.compaction.ref) {
+    lines.push(`- ref: ${report.status.compaction.ref}`);
+  }
+  if (report.status.compaction.summary) {
+    lines.push(`- summary: ${report.status.compaction.summary}`);
+  }
+  if (report.status.compaction.sourceRefs.length > 0) {
+    lines.push(`- source refs: ${report.status.compaction.sourceRefs.join("; ")}`);
+  }
+  lines.push("");
+
+  lines.push(`## Eval Posture`);
+  lines.push("");
+  lines.push(`- status: ${report.status.evalPosture.status}`);
+  if (report.status.evalPosture.labels.length > 0) {
+    lines.push(`- labels: ${report.status.evalPosture.labels.join("; ")}`);
+  }
+  if (report.status.evalPosture.artifactRefs.length > 0) {
+    lines.push(`- artifact refs: ${report.status.evalPosture.artifactRefs.join("; ")}`);
+  }
+  lines.push("");
+
+  lines.push(`## Review Controls`);
+  lines.push("");
+  lines.push(`- status: ${report.status.reviewControls.status}`);
+  if (report.status.reviewControls.controls.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const control of report.status.reviewControls.controls) {
+      lines.push(
+        `- ${control.controlId}: action=${control.actionType} enforcement=${control.enforcement} ${control.summary}`
+      );
+    }
+  }
+  lines.push("");
+
+  if (report.traceRegistry) {
+    lines.push(`## Runtime Trace Registry`);
+    lines.push("");
+    lines.push(
+      `- traces: total=${report.traceRegistry.totalTraces} risky=${report.traceRegistry.riskyTraceCount} traced-targets=${report.traceRegistry.tracedTargetCount}`
+    );
+    if (report.traceRegistry.riskyTargetsMissingTrace.length > 0) {
+      lines.push(
+        `- missing risky targets: ${report.traceRegistry.riskyTargetsMissingTrace.join("; ")}`
+      );
+    }
+    if (report.traceRegistry.openMissingTraceGapIds.length > 0) {
+      lines.push(
+        `- open missing-trace gaps: ${report.traceRegistry.openMissingTraceGapIds.join("; ")}`
+      );
+    }
+    if (report.traceRegistry.targets.length > 0) {
+      lines.push(
+        `- traced targets: ${report.traceRegistry.targets
+          .map((target) => `${target.targetId}[${target.traceIds.join(",")}]`)
+          .join("; ")}`
+      );
+    }
+    lines.push("");
+  }
 
   lines.push(`## Reasoning Quality`);
   lines.push("");

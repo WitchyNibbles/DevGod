@@ -75,11 +75,13 @@ export function buildAutonomousOperatorSummary(input: {
         authorityLabel: "derived_only",
         status: "not_configured",
         source: "none",
-        summary: "autonomous execution is not configured for this run",
+        summary:
+          "autonomous execution is not configured for this run; workflow proof for the run can still be valid, but this run does not prove active autonomous continuation",
         nextActions: [],
         blockers: [],
         executionMode: "none",
-        executionSummary: "no autonomous continuation target is active"
+        executionSummary:
+          "run-level workflow proof may still be valid, but no autonomous continuation target is active"
       }
     };
   }

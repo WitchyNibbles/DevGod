@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SEARCH_MEMORY_STALE_AFTER_DAYS } from "../src/core/policy.ts";
 import {
   createReviewActionContextResolver,
@@ -21,6 +23,8 @@ import type {
   TaskPacketInput
 } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
@@ -2807,7 +2811,146 @@ test("getStatus surfaces autonomous execution coverage and readiness when config
   assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
 });
 
-test("getExecutionPlan blocks rewrite recommendations when repo-understanding thresholds are unmet", async () => {
+test("exportCoverageLedger emits the richer exported ledger artifact set from runtime state", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Coverage ledger export",
+    request: "Export the authoritative coverage ledger artifact set."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      dependencies: ["test:workflow-proof"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+    },
+    {
+      id: "test:workflow-proof",
+      category: "tests",
+      state: "fully_analyzed",
+      criticality: "medium",
+      sources: ["tests/service.test.ts:1"],
+      evidenceRefs: ["tests/service.test.ts:1"],
+      lastUpdatedAt: "2026-05-20T12:01:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:workflow-proof",
+      targetId: "service:workflow-proof",
+      kind: "missing_validation",
+      severity: "high",
+      description: "workflow proof still needs live validation",
+      blocking: true,
+      evidenceRefs: ["tests/service.test.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["run live workflow proof"],
+      status: "open"
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow proof completion"],
+      evidenceRefs: ["tests/service.test.ts:1"],
+      createdAt: "2026-05-20T12:02:00.000Z"
+    }
+  ]);
+
+  const artifacts = await service.exportCoverageLedger(run.id);
+
+  assert.equal(artifacts.manifest.run_id, run.id);
+  assert.equal(artifacts.items.length, 2);
+  assert.equal(artifacts.gaps.length, 1);
+  assert.equal(artifacts.traces.length, 1);
+  assert.ok(
+    artifacts.dependency_graph.edges.some(
+      (edge) => edge.from === "service:workflow-proof" && edge.to === "test:workflow-proof"
+    )
+  );
+});
+
+test("generateRepoInventory persists code-backed coverage items and understanding maps", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Repo inventory",
+    request: "Generate code-backed understanding state."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "inventory",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "inventory",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1
+      }
+    }
+  });
+
+  const state = await service.generateRepoInventory(run.id, {
+    repoRoot,
+    now: "2026-05-20T12:30:00.000Z"
+  });
+
+  assert.ok(state.coverageItems.some((item) => item.id === "file:src/core/service.ts"));
+  assert.ok(state.coverageItems.some((item) => item.category === "tests"));
+  assert.ok(state.understandingMaps?.some((map) => map.kind === "repo_map"));
+  assert.ok(state.understandingMaps?.some((map) => map.kind === "runtime_side_effects"));
+});
+
+test("getExecutionPlan returns rebuild_inventory when repo-understanding thresholds are unmet", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
@@ -2892,16 +3035,26 @@ test("getExecutionPlan blocks rewrite recommendations when repo-understanding th
 
   const plan = await service.getExecutionPlan(run.id);
 
-  assert.equal(plan.directive.kind, "blocked");
-  if (plan.directive.kind === "blocked") {
+  assert.equal(plan.directive.kind, "rebuild_inventory");
+  if (plan.directive.kind === "rebuild_inventory") {
+    assert.deepEqual(plan.directive.missingUnderstandingKinds, [
+      "repo_map",
+      "subsystems",
+      "route_map",
+      "model_map",
+      "integration_map",
+      "authz_map",
+      "config_coupling",
+      "runtime_side_effects"
+    ]);
     assert.ok(
       plan.directive.blockers.includes("rewrite recommendation blocked: critical repo-understanding threshold not met")
     );
-    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("understanding map missing: repo_map")));
+    assert.ok(plan.directive.nextActions.some((action) => action.includes("rebuild understanding map: repo_map")));
   }
 });
 
-test("getExecutionPlan blocks terminal tasks when autonomous execution evidence is missing", async () => {
+test("getExecutionPlan returns checkpoint when autonomous execution evidence is missing and no continuation target exists", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
     workspaceSlug: "team",
@@ -2956,9 +3109,8 @@ test("getExecutionPlan blocks terminal tasks when autonomous execution evidence 
 
   const plan = await service.getExecutionPlan(run.id);
 
-  assert.equal(plan.directive.kind, "blocked");
-  if (plan.directive.kind === "blocked") {
-    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("coverage manifest")));
+  assert.equal(plan.directive.kind, "checkpoint");
+  if (plan.directive.kind === "checkpoint") {
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("progress proof")));
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("checkpoint")));
   }
@@ -3095,27 +3247,398 @@ test("getExecutionPlan returns continue_analysis when autonomous blockers still 
   }
 });
 
-test("selectAutonomousNextTarget falls back to the latest progress proof when no blocking gap remains", () => {
+test("getExecutionPlan returns trace_runtime when risky trace evidence is still missing", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Trace runtime gaps",
+    request: "Keep risky runtime traces explicit before completion."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "trace-runtime",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "trace-runtime", "planner");
+  await service.submitHandoff(run.id, "trace-runtime", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "trace evidence is almost complete",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["trace work recorded"],
+    qualityGateEvidence: ["runtime trace registry initialized"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "trace-runtime", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "trace-runtime", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "trace-runtime", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "external_integrations"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 1
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "   ",
+    whyNext: undefined,
+    createdAt: new Date().toISOString()
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-1",
+    phase: "final_verification",
+    activeTargets: [],
+    recentEvidenceRefs: ["src/core/service.ts:1"],
+    openGaps: [],
+    nextActions: [],
+    createdAt: new Date().toISOString()
+  });
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "trace_runtime");
+  if (plan.directive.kind === "trace_runtime") {
+    assert.deepEqual(plan.directive.targetIds, []);
+    assert.deepEqual(plan.directive.gapIds, []);
+    assert.deepEqual(plan.directive.nextActions, []);
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("runtime trace")));
+  }
+});
+
+test("getExecutionPlan returns checkpoint and executeDirectiveStep preserves the native checkpoint blocker", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint evidence",
+    request: "Do not complete until checkpoint and progress proof evidence exist."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "checkpoint-evidence",
+      qualityGates: [
+        "product_acceptance",
+        "coverage_ledger_required",
+        "progress_proof_required",
+        "checkpoint_resume_required"
+      ]
+    })
+  ]);
+  await service.claimTask(run.id, "checkpoint-evidence", "planner");
+  await service.submitHandoff(run.id, "checkpoint-evidence", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "coverage is complete but checkpoint evidence is missing",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["coverage threshold reached"],
+    qualityGateEvidence: ["checkpoint/progress-proof gates still open"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "checkpoint-evidence", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "checkpoint-evidence", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "checkpoint-evidence", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:checkpoint-ready",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:checkpoint-ready-side-effect",
+      targetId: "service:checkpoint-ready",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists checkpoint evidence"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: "2026-05-20T13:02:00.000Z"
+    }
+  ]);
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "checkpoint");
+  if (plan.directive.kind === "checkpoint") {
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("progress proof")));
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("checkpoint")));
+  }
+
+  const execution = await service.executeDirectiveStep(run.id);
+  assert.equal(execution.initialPlan.directive.kind, "checkpoint");
+  assert.equal(execution.steps[0]?.directiveKind, "checkpoint");
+  assert.equal(execution.steps[0]?.outcome, "blocked");
+});
+
+test("getExecutionPlan returns dispatch_subagents when pending investigations remain queued", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Dispatch queued investigations",
+    request: "Surface bounded native subagent dispatch when investigation work remains queued."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "dispatch-investigations",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "dispatch-investigations", "planner");
+  await service.submitHandoff(run.id, "dispatch-investigations", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "implementation is complete but investigation branches remain queued",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["runtime-native directive work recorded"],
+    qualityGateEvidence: ["queued investigations preserved in runtime metadata"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "dispatch-investigations", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "dispatch-investigations", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "dispatch-investigations", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "discovery",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    },
+    pendingInvestigations: [
+      "map authz boundary before broader rewrite handoff",
+      "inspect migration coupling for queued follow-through"
+    ]
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "dispatch_subagents");
+  if (plan.directive.kind === "dispatch_subagents") {
+    assert.deepEqual(plan.directive.pendingInvestigations, [
+      "map authz boundary before broader rewrite handoff",
+      "inspect migration coupling for queued follow-through"
+    ]);
+    assert.ok(
+      plan.directive.blockers.includes(
+        "pending investigation: map authz boundary before broader rewrite handoff"
+      )
+    );
+    assert.ok(
+      plan.directive.nextActions.includes(
+        "dispatch subagent investigation: inspect migration coupling for queued follow-through"
+      )
+    );
+  }
+});
+
+test("getExecutionPlan returns replan_migration when migration sequencing falls back without a continuation target", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Replan migration sequencing",
+    request: "Require a runtime-backed replanning step when migration sequencing is blocked."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "replan-migration",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "replan-migration", "planner");
+  await service.submitHandoff(run.id, "replan-migration", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "the current migration sequence is stale and needs replanning",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["migration sequencing analysis recorded"],
+    qualityGateEvidence: ["runtime-native migration planning remains blocked"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "migration_sequencing",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 1,
+        criticalItemValidation: 0,
+        callsiteCoverage: 0,
+        runtimeTraceCoverage: 0
+      }
+    }
+  });
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "replan_migration");
+  if (plan.directive.kind === "replan_migration") {
+    assert.equal(plan.directive.phase, "migration_sequencing");
+    assert.equal(plan.directive.fallbackPhase, "modernization_strategy");
+    assert.ok(
+      plan.directive.blockers.some((blocker) =>
+        blocker.includes("critical item coverage 0 is below threshold 1")
+      )
+    );
+    assert.ok(plan.directive.nextActions.includes("replan toward modernization_strategy"));
+  }
+});
+
+test("selectAutonomousNextTarget falls back to the latest progress proof when no blocking gap or checkpoint remains", () => {
   const target = selectAutonomousNextTarget({
     enabled: true,
     profile: "legacy_rewrite",
     phase: "validation",
     coverageItems: [],
     gaps: [],
-    checkpoints: [
-      {
-        runId: "run-1",
-        checkpointId: "cp-1",
-        authorityLabel: "runtime_authoritative",
-        phase: "validation",
-        activeTargets: ["checkpoint:target"],
-        recentEvidenceRefs: ["src/core/service.ts:1"],
-        openGaps: [],
-        nextActions: ["resume from checkpoint"],
-        compressedContextRef: "memory://cp-1",
-        createdAt: "2026-05-15T12:00:00.000Z"
-      }
-    ],
+    checkpoints: [],
     progressProofs: [
       {
         cycle: 3,
@@ -3148,7 +3671,7 @@ test("selectAutonomousNextTarget falls back to the latest progress proof when no
   assert.deepEqual(target?.nextActions, ["proof guidance wins before checkpoint fallback"]);
 });
 
-test("selectAutonomousNextTarget falls back to the latest checkpoint when no blocking gap or proof target remains", () => {
+test("selectAutonomousNextTarget returns undefined when only checkpoint compaction evidence remains", () => {
   const target = selectAutonomousNextTarget({
     enabled: true,
     profile: "legacy_rewrite",
@@ -3161,7 +3684,7 @@ test("selectAutonomousNextTarget falls back to the latest checkpoint when no blo
         checkpointId: "cp-2",
         authorityLabel: "runtime_authoritative",
         phase: "validation",
-        activeTargets: ["checkpoint:target"],
+        activeTargets: [],
         recentEvidenceRefs: ["src/core/service.ts:1"],
         openGaps: [],
         nextActions: ["resume the checkpoint target"],
@@ -3188,17 +3711,67 @@ test("selectAutonomousNextTarget falls back to the latest checkpoint when no blo
     updatedAt: "2026-05-15T12:06:00.000Z"
   });
 
-  assert.equal(target?.source, "checkpoint");
-  assert.equal(target?.targetId, "checkpoint:target");
-  assert.deepEqual(target?.actions, [
-    {
-      kind: "resume_target",
-      targetId: "checkpoint:target",
-      source: "checkpoint",
-      sourceId: "cp-2"
-    }
-  ]);
-  assert.deepEqual(target?.nextActions, ["resume the checkpoint target"]);
+  assert.equal(target, undefined);
+});
+
+test("selectAutonomousNextTarget derives a self-referential progress-proof target when the explicit next target is blank", () => {
+  const target = selectAutonomousNextTarget({
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "validation",
+    coverageItems: [],
+    gaps: [],
+    checkpoints: [],
+    progressProofs: [
+      {
+        cycle: 4,
+        proofId: "proof-4",
+        phaseBefore: "validation",
+        phaseAfter: "regression_detection",
+        evidenceRefs: ["src/core/service.ts:1"],
+        coverageDelta: { validated: 1 },
+        blockingGapDelta: { closed: 1, opened: 0 },
+        nextTarget: "   ",
+        whyNext: "resume from the proof checkpoint",
+        createdAt: "2026-05-20T13:40:00.000Z"
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-20T13:40:00.000Z"
+  });
+
+  assert.equal(target, undefined);
+});
+
+test("selectAutonomousNextTarget does not derive a self-referential checkpoint target when no active checkpoint target remains", () => {
+  const target = selectAutonomousNextTarget({
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "validation",
+    coverageItems: [],
+    gaps: [],
+    checkpoints: [
+      {
+        runId: "run-1",
+        checkpointId: "cp-3",
+        authorityLabel: "runtime_authoritative",
+        phase: "validation",
+        activeTargets: [],
+        recentEvidenceRefs: ["src/core/service.ts:1"],
+        openGaps: [],
+        nextActions: ["resume generated checkpoint context"],
+        compressedContextRef: "memory://checkpoint/cp-3/compressed-context",
+        createdAt: "2026-05-20T13:41:00.000Z"
+      }
+    ],
+    progressProofs: [],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-20T13:41:00.000Z"
+  });
+
+  assert.equal(target, undefined);
 });
 
 test("selectAutonomousNextTarget ignores stale checkpoints from older execution epochs", () => {
@@ -3303,6 +3876,52 @@ test("recordProgressProof advances the execution epoch and checkpointRun persist
   });
 
   assert.equal(afterCheckpoint.checkpoints.at(-1)?.executionEpoch, 2);
+});
+
+test("checkpointRun operationalizes compressed context artifacts when they are omitted", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint compaction",
+    request: "Generate operational compressed context artifacts at checkpoint time."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+
+  const state = await service.checkpointRun(run.id, {
+    checkpointId: "cp-generated",
+    phase: "validation",
+    activeTargets: [],
+    recentEvidenceRefs: ["src/core/service.ts:1", "tests/service.test.ts"],
+    openGaps: [],
+    nextActions: ["resume generated checkpoint context"],
+    createdAt: "2026-05-20T13:42:00.000Z"
+  });
+
+  const checkpoint = state.checkpoints.at(-1);
+  assert.equal(checkpoint?.compressedContextRef, "memory://checkpoint/cp-generated/compressed-context");
+  assert.deepEqual(checkpoint?.compressedContextSourceRefs, [
+    "src/core/service.ts:1",
+    "tests/service.test.ts"
+  ]);
+  assert.equal(checkpoint?.compressedContextGeneratedAt, "2026-05-20T13:42:00.000Z");
+  assert.match(checkpoint?.compressedContextSummary ?? "", /validation/);
 });
 
 test("buildAutonomousExecutionSnapshot exposes fallback guidance for contradiction loops", () => {
@@ -3585,6 +4204,189 @@ test("getExecutionPlan returns blocked when work is already in progress", async 
   if (plan.directive.kind === "blocked") {
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("already claimed by planner")));
   }
+});
+
+test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Runtime trace registry",
+    request: "Make risky trace evidence inspectable."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "trace-registry",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "runtime_tracing",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "external_integrations"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+    },
+    {
+      id: "service:core-loop",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+    },
+    {
+      id: "integration:payments",
+      category: "external_integrations",
+      state: "fully_analyzed",
+      criticality: "high",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof-auth",
+      targetId: "service:workflow-proof",
+      kind: "auth",
+      risky: false,
+      sideEffects: [],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: "2026-05-20T13:01:00.000Z"
+    },
+    {
+      traceId: "trace:workflow-proof-side-effect",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow proof completion"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: "2026-05-20T13:02:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:payments-trace",
+      targetId: "integration:payments",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Payment integration still lacks a risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record payment runtime trace"],
+      status: "open"
+    }
+  ]);
+
+  const registry = await service.getRuntimeTraceRegistry(run.id);
+
+  assert.equal(registry.totalTraces, 2);
+  assert.equal(registry.riskyTraceCount, 1);
+  assert.equal(registry.tracedTargetCount, 1);
+  assert.deepEqual(registry.riskyTargetsMissingTrace, [
+    "integration:payments",
+    "service:core-loop"
+  ]);
+  assert.deepEqual(registry.openMissingTraceGapIds, ["gap:payments-trace"]);
+  assert.deepEqual(
+    registry.targets.map((target) => target.targetId),
+    ["service:workflow-proof"]
+  );
+  assert.deepEqual(registry.targets[0]?.traceIds, [
+    "trace:workflow-proof-auth",
+    "trace:workflow-proof-side-effect"
+  ]);
+  assert.deepEqual(registry.targets[0]?.kinds, ["auth", "side_effect"]);
+});
+
+test("upsertExternalEvals and upsertSensitiveActionControls persist explicit runtime evidence", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "External eval evidence",
+    request: "Persist external eval and sensitive-action controls."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertExternalEvals(run.id, [
+    {
+      evalId: "eval:swe-bench",
+      label: "SWE-bench verified sample",
+      scope: "semi_external",
+      harness: "swe_bench_verified",
+      artifactRef: "https://www.swebench.com/verified.html",
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: "2026-05-20T14:00:00.000Z"
+    }
+  ]);
+  await service.upsertSensitiveActionControls(run.id, [
+    {
+      controlId: "control:workflow-proof-auth",
+      actionType: "workflow_proof",
+      enforcement: "authenticated_runtime",
+      summary: "workflow proof remains gated on authenticated runtime review evidence",
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: "2026-05-20T14:01:00.000Z"
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.externalEvals?.[0]?.scope, "semi_external");
+  assert.equal(
+    status.autonomousExecution?.state.sensitiveActionControls?.[0]?.enforcement,
+    "authenticated_runtime"
+  );
 });
 
 test("searchMemory can retrieve runtime workflow documents generated by intake and planning", async () => {

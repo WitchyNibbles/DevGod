@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { installDevgodIntoProject } from "../src/install/cli.ts";
+import { buildCoverageLedgerArtifacts } from "../src/runtime/coverage-ledger.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -184,25 +185,7 @@ async function writeLiveTaskPacket(
     .join("\n");
 
   await writeFile(join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`), `${content}\n`, "utf8");
-  await writeFile(
-    join(targetRoot, ".devgod", "work", "coverage", `coverage-${taskId}.json`),
-    JSON.stringify(
-      {
-        run_id: taskId,
-        profile: "standard_delivery",
-        required_categories: ["services", "tests"],
-        thresholds: {
-          critical_item_coverage: 0.8,
-          critical_item_validation: 0.6,
-          callsite_coverage: 0.85,
-          runtime_trace_coverage: 0.75
-        }
-      },
-      null,
-      2
-    ) + "\n",
-    "utf8"
-  );
+  await writeCoverageLedgerArtifacts(targetRoot, taskId);
   await writeFile(
     join(targetRoot, ".devgod", "work", "proofs", `progress-${taskId}.json`),
     JSON.stringify(
@@ -259,6 +242,93 @@ async function writeLiveTaskPacket(
       "",
       `memory://checkpoint/${taskId}`
     ].join("\n") + "\n",
+    "utf8"
+  );
+}
+
+async function writeCoverageLedgerArtifacts(targetRoot: string, taskId: string): Promise<void> {
+  const artifacts = buildCoverageLedgerArtifacts({
+    enabled: true,
+    profile: "standard_delivery",
+    phase: "dependency_mapping",
+    manifest: {
+      runId: taskId,
+      profile: "standard_delivery",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    },
+    coverageItems: [
+      {
+        id: "service:workflow-checker",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["scripts/check-devgod-workflow.sh:1"],
+        dependencies: ["test:workflow-checker"],
+        callsiteCount: 1,
+        callsitesAnalyzed: 1,
+        runtimeTraced: true,
+        evidenceRefs: ["scripts/check-devgod-workflow.sh:1"],
+        verificationRefs: ["tests/workflow-check.test.ts"],
+        lastUpdatedAt: "2026-05-20T10:00:00.000Z"
+      },
+      {
+        id: "test:workflow-checker",
+        category: "tests",
+        state: "fully_analyzed",
+        criticality: "medium",
+        sources: ["tests/workflow-check.test.ts:1"],
+        evidenceRefs: ["tests/workflow-check.test.ts:1"],
+        lastUpdatedAt: "2026-05-20T10:01:00.000Z"
+      }
+    ],
+    gaps: [],
+    checkpoints: [],
+    progressProofs: [],
+    runtimeTraces: [
+      {
+        traceId: "trace:workflow-checker",
+        targetId: "service:workflow-checker",
+        kind: "side_effect",
+        risky: true,
+        sideEffects: ["records workflow checker side effects"],
+        evidenceRefs: ["tests/workflow-check.test.ts:1"],
+        createdAt: "2026-05-20T10:02:00.000Z"
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-20T10:03:00.000Z"
+  });
+
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `coverage-${taskId}.json`),
+    JSON.stringify(artifacts.manifest, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `items-${taskId}.json`),
+    JSON.stringify(artifacts.items, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `gaps-${taskId}.json`),
+    JSON.stringify(artifacts.gaps, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `dependency-graph-${taskId}.json`),
+    JSON.stringify(artifacts.dependency_graph, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "coverage", `traces-${taskId}.json`),
+    JSON.stringify(artifacts.traces, null, 2) + "\n",
     "utf8"
   );
 }
@@ -602,7 +672,7 @@ test("check-devgod-workflow-live rejects missing coverage or proof artifacts whe
         "memory_compaction_required"
       ]
     });
-    await rm(join(targetRoot, ".devgod", "work", "coverage", `coverage-${taskId}.json`), {
+    await rm(join(targetRoot, ".devgod", "work", "coverage", `items-${taskId}.json`), {
       force: true
     });
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
@@ -613,7 +683,7 @@ test("check-devgod-workflow-live rejects missing coverage or proof artifacts whe
       execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
         cwd: targetRoot
       }),
-      /missing file: \.devgod\/work\/coverage\/coverage-DG-LIVE-MISSING-AUTONOMOUS-ARTIFACTS\.json/
+      /missing file: \.devgod\/work\/coverage\/items-DG-LIVE-MISSING-AUTONOMOUS-ARTIFACTS\.json/
     );
   } finally {
     if (stubRoot) {
@@ -657,7 +727,95 @@ test("check-devgod-workflow-live rejects invalid coverage manifest content when 
       execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
         cwd: targetRoot
       }),
-      /invalid coverage manifest artifact/i
+      /invalid coverage ledger artifact/i
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects invalid coverage item artifacts when autonomous gates are enabled", async () => {
+  const taskId = "DG-LIVE-BAD-COVERAGE-ITEMS";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-bad-coverage-items-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    });
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "coverage", `items-${taskId}.json`),
+      JSON.stringify(
+        [
+          {
+            id: "service:workflow-checker",
+            category: "services",
+            state: "validated",
+            criticality: "critical",
+            sources: ["scripts/check-devgod-workflow.sh:1"],
+            evidence_refs: ["scripts/check-devgod-workflow.sh:1"],
+            last_updated_at: "2026-05-20T10:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /invalid coverage ledger artifact/i
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects invalid coverage dependency graph artifacts when autonomous gates are enabled", async () => {
+  const taskId = "DG-LIVE-BAD-COVERAGE-GRAPH";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-bad-coverage-graph-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    });
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "coverage", `dependency-graph-${taskId}.json`),
+      JSON.stringify(
+        {
+          generated_at: "2026-05-20T10:00:00.000Z",
+          nodes: [],
+          edges: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /invalid coverage ledger artifact/i
     );
   } finally {
     if (stubRoot) {

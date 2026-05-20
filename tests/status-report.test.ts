@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildOperatorStatusReport } from "../src/admin/status.ts";
 import { executeDoctorCommandFromArgs, executeDoctorRepairCommandFromArgs, executeStatusCommandFromArgs } from "../src/admin.ts";
 import { createReviewActionContextResolver } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
 import type { RuntimeProjectRegistrationRecord, TaskPacketInput } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
@@ -178,6 +181,14 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
   assert.deepEqual(report.orchestration.nextTaskIds, []);
   assert.equal(report.autonomous.configured, false);
   assert.equal(report.autonomous.resume.status, "not_configured");
+  assert.match(
+    report.autonomous.resume.summary,
+    /workflow proof for the run can still be valid, but this run does not prove active autonomous continuation/
+  );
+  assert.match(
+    report.autonomous.resume.executionSummary,
+    /run-level workflow proof may still be valid, but no autonomous continuation target is active/
+  );
   assert.equal(report.reviewIdentity.liveTrustReady, false);
   assert.equal(report.gitNexus.state, "unconfigured");
   assert.deepEqual(report.reviewIdentity.notes, ["adapter module not configured"]);
@@ -330,6 +341,324 @@ test("buildOperatorStatusReport exposes autonomous coverage and resume guidance 
   assert.equal(report.autonomous.resume.source, "blocking_gap");
   assert.equal(report.autonomous.resume.nextTarget, "task:runtime-proof");
   assert.deepEqual(report.autonomous.resume.nextActions, ["resolve the blocking runtime proof gap"]);
+});
+
+test("buildOperatorStatusReport reflects generated code-backed understanding inventory", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Generated inventory",
+    request: "Surface generated repo understanding in status."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "inventory",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "inventory",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1
+      }
+    }
+  });
+  await service.generateRepoInventory(run.id, {
+    repoRoot,
+    now: "2026-05-20T12:31:00.000Z"
+  });
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-20T12:32:00.000Z"
+  });
+
+  assert.ok(report.autonomous.openGaps.length === 0);
+  assert.ok((report.autonomous.comprehensionSummary?.inventoryCompleteness ?? 0) > 0);
+  assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("repo_map"));
+  assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("runtime_side_effects"));
+});
+
+test("buildOperatorStatusReport surfaces runtime trace registry summaries and missing risky targets", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Runtime trace visibility",
+    request: "Show risky trace registry state in operator status."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "trace-registry",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:10:00.000Z"
+    },
+    {
+      id: "service:core-loop",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:10:00.000Z"
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof-side-effect",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow proof completion"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-20T13:11:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:core-loop-trace",
+      targetId: "service:core-loop",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Core loop still lacks a recorded risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record core loop runtime trace"],
+      status: "open"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    now: "2026-05-20T13:12:00.000Z"
+  });
+
+  assert.equal(report.traceRegistry.authorityLabel, "derived_only");
+  assert.equal(report.traceRegistry.summary?.riskyTraceCount, 1);
+  assert.deepEqual(report.traceRegistry.summary?.riskyTargetsMissingTrace, ["service:core-loop"]);
+  assert.deepEqual(report.traceRegistry.summary?.openMissingTraceGapIds, ["gap:core-loop-trace"]);
+  assert.match(
+    report.autonomous.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
+    /runtime trace missing for risky target: service:core-loop/
+  );
+});
+
+test("buildOperatorStatusReport surfaces operational checkpoint compaction and self-referential checkpoint resume guidance", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint compaction visibility",
+    request: "Show generated compressed context in operator status."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "resume",
+      qualityGates: ["product_acceptance", "memory_compaction_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-generated",
+    phase: "validation",
+    activeTargets: [],
+    recentEvidenceRefs: ["src/core/service.ts:1", "tests/status-report.test.ts"],
+    openGaps: [],
+    nextActions: ["resume generated checkpoint context"],
+    createdAt: "2026-05-20T13:43:00.000Z"
+  });
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    now: "2026-05-20T13:44:00.000Z"
+  });
+
+  assert.equal(report.compaction.authorityLabel, "runtime_authoritative");
+  assert.equal(report.compaction.status, "present");
+  assert.equal(report.compaction.checkpointId, "cp-generated");
+  assert.equal(report.compaction.ref, "memory://checkpoint/cp-generated/compressed-context");
+  assert.deepEqual(report.compaction.sourceRefs, [
+    "src/core/service.ts:1",
+    "tests/status-report.test.ts"
+  ]);
+  assert.match(report.compaction.summary ?? "", /validation/);
+});
+
+test("buildOperatorStatusReport surfaces external eval posture and explicit review controls", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Eval posture visibility",
+    request: "Show external eval and review controls in status."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertExternalEvals(run.id, [
+    {
+      evalId: "eval:swe-bench",
+      label: "SWE-bench verified sample",
+      scope: "semi_external",
+      harness: "swe_bench_verified",
+      artifactRef: "https://www.swebench.com/verified.html",
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-20T14:02:00.000Z"
+    }
+  ]);
+  await service.upsertSensitiveActionControls(run.id, [
+    {
+      controlId: "control:workflow-proof-auth",
+      actionType: "workflow_proof",
+      enforcement: "authenticated_runtime",
+      summary: "workflow proof remains gated on authenticated runtime review evidence",
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-20T14:03:00.000Z"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    now: "2026-05-20T14:04:00.000Z"
+  });
+
+  assert.equal(report.evalPosture.status, "semi_external_ready");
+  assert.deepEqual(report.evalPosture.labels, ["SWE-bench verified sample"]);
+  assert.equal(report.reviewControls.status, "explicit");
+  assert.deepEqual(report.reviewControls.controls.map((control) => control.controlId), [
+    "control:workflow-proof-auth"
+  ]);
 });
 
 test("executeStatusCommandFromArgs parses flags and reports env-derived review identity posture", async () => {

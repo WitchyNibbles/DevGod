@@ -115,6 +115,11 @@ export const executionDirectiveKinds = [
   "dispatch_owner",
   "dispatch_reviews",
   "apply_recovery",
+  "dispatch_subagents",
+  "rebuild_inventory",
+  "trace_runtime",
+  "checkpoint",
+  "replan_migration",
   "continue_analysis",
   "blocked"
 ] as const;
@@ -633,6 +638,50 @@ export interface RuntimeTraceRecord {
   createdAt: string;
 }
 
+export interface RuntimeTraceRegistryTargetSummary {
+  targetId: string;
+  traceIds: string[];
+  kinds: RuntimeTraceKind[];
+  riskyTraceCount: number;
+  latestCreatedAt: string;
+  sideEffects: string[];
+  evidenceRefs: string[];
+}
+
+export interface RuntimeTraceRegistrySummary {
+  totalTraces: number;
+  riskyTraceCount: number;
+  tracedTargetCount: number;
+  openMissingTraceGapIds: string[];
+  riskyTargetsMissingTrace: string[];
+  targets: RuntimeTraceRegistryTargetSummary[];
+}
+
+export interface ExternalEvalRecord {
+  evalId: string;
+  label: string;
+  scope: "repo_local" | "semi_external" | "external";
+  harness: string;
+  artifactRef: string;
+  evidenceRefs: string[];
+  createdAt: string;
+}
+
+export interface SensitiveActionControlRecord {
+  controlId: string;
+  actionType:
+    | "approval"
+    | "security_review"
+    | "workflow_proof"
+    | "checkpoint_import"
+    | "continuation"
+    | "waiver";
+  enforcement: "authenticated_runtime" | "operator_required" | "waiver_blocked" | "manager_waiver_only";
+  summary: string;
+  evidenceRefs: string[];
+  createdAt: string;
+}
+
 export interface CheckpointRecord {
   runId: string;
   checkpointId: string;
@@ -644,6 +693,9 @@ export interface CheckpointRecord {
   openGaps: string[];
   nextActions: string[];
   compressedContextRef?: string | undefined;
+  compressedContextSummary?: string | undefined;
+  compressedContextSourceRefs?: string[] | undefined;
+  compressedContextGeneratedAt?: string | undefined;
   createdAt: string;
 }
 
@@ -702,6 +754,8 @@ export interface AutonomousExecutionState {
   progressProofs: ProgressProofRecord[];
   understandingMaps?: UnderstandingMapRecord[] | undefined;
   runtimeTraces?: RuntimeTraceRecord[] | undefined;
+  externalEvals?: ExternalEvalRecord[] | undefined;
+  sensitiveActionControls?: SensitiveActionControlRecord[] | undefined;
   pendingInvestigations: string[];
   executionEpoch: number;
   lastCheckpointId?: string | undefined;
@@ -968,6 +1022,45 @@ export interface ApplyRecoveryExecutionDirective extends BaseExecutionDirective 
   actions: RecoveryAction[];
 }
 
+export interface RebuildInventoryExecutionDirective extends BaseExecutionDirective {
+  kind: "rebuild_inventory";
+  missingUnderstandingKinds: UnderstandingMapKind[];
+  missingEvidence: string[];
+  blockers: string[];
+  nextActions: string[];
+}
+
+export interface TraceRuntimeExecutionDirective extends BaseExecutionDirective {
+  kind: "trace_runtime";
+  targetIds: string[];
+  gapIds: string[];
+  blockers: string[];
+  nextActions: string[];
+}
+
+export interface CheckpointExecutionDirective extends BaseExecutionDirective {
+  kind: "checkpoint";
+  checkpointId?: string | undefined;
+  progressProofId?: string | undefined;
+  blockers: string[];
+  nextActions: string[];
+}
+
+export interface DispatchSubagentsExecutionDirective extends BaseExecutionDirective {
+  kind: "dispatch_subagents";
+  pendingInvestigations: string[];
+  blockers: string[];
+  nextActions: string[];
+}
+
+export interface ReplanMigrationExecutionDirective extends BaseExecutionDirective {
+  kind: "replan_migration";
+  phase: AnalysisPhase;
+  fallbackPhase?: AnalysisPhase | undefined;
+  blockers: string[];
+  nextActions: string[];
+}
+
 export interface ResolveBlockingGapContinuationAction {
   kind: "resolve_blocking_gap";
   gapId: string;
@@ -1010,6 +1103,11 @@ export type RunExecutionDirective =
   | DispatchOwnerExecutionDirective
   | DispatchReviewsExecutionDirective
   | ApplyRecoveryExecutionDirective
+  | DispatchSubagentsExecutionDirective
+  | RebuildInventoryExecutionDirective
+  | TraceRuntimeExecutionDirective
+  | CheckpointExecutionDirective
+  | ReplanMigrationExecutionDirective
   | ContinueAnalysisExecutionDirective
   | BlockedExecutionDirective;
 

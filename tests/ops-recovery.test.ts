@@ -2184,7 +2184,7 @@ test("executeLoopCommandFromArgs clears stale checkpoint review targets through 
   const status = await service.getStatus(run.id);
   const history = await service.getLoopExecutionHistory(run.id, { limit: 5 });
   assert.equal(result.result.executedSteps[0]?.outcome, "executed");
-  assert.equal(result.result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.result.finalPlan.directive.kind, "trace_runtime");
   assert.equal(status.autonomousExecution?.state.checkpoints.at(-1)?.activeTargets.length, 0);
   assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
 });
@@ -2345,7 +2345,7 @@ test("executeLoopCommandFromArgs clears stale progress-proof review targets thro
   const status = await service.getStatus(run.id);
   const history = await service.getLoopExecutionHistory(run.id, { limit: 5 });
   assert.equal(result.result.executedSteps[0]?.outcome, "executed");
-  assert.equal(result.result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.result.finalPlan.directive.kind, "trace_runtime");
   assert.equal(status.autonomousExecution?.state.progressProofs.at(-1)?.nextTarget.trim(), "");
   assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
 });
@@ -2506,7 +2506,7 @@ test("executeLoopCommandFromArgs clears self-referential progress-proof targets 
   const status = await service.getStatus(run.id);
   const history = await service.getLoopExecutionHistory(run.id, { limit: 5 });
   assert.equal(result.result.executedSteps[0]?.outcome, "executed");
-  assert.equal(result.result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.result.finalPlan.directive.kind, "trace_runtime");
   assert.equal(status.autonomousExecution?.state.progressProofs.at(-1)?.nextTarget.trim(), "");
   assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
 });
@@ -2667,7 +2667,7 @@ test("executeLoopCommandFromArgs clears self-referential checkpoint targets thro
   const status = await service.getStatus(run.id);
   const history = await service.getLoopExecutionHistory(run.id, { limit: 5 });
   assert.equal(result.result.executedSteps[0]?.outcome, "executed");
-  assert.equal(result.result.finalPlan.directive.kind, "blocked");
+  assert.equal(result.result.finalPlan.directive.kind, "trace_runtime");
   assert.equal(status.autonomousExecution?.state.checkpoints.at(-1)?.activeTargets.length, 0);
   assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
 });

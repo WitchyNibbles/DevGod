@@ -1791,6 +1791,11 @@ function readDaemonStagnationMetadata(
     record.directiveKind === "dispatch_owner" ||
     record.directiveKind === "dispatch_reviews" ||
     record.directiveKind === "apply_recovery" ||
+    record.directiveKind === "dispatch_subagents" ||
+    record.directiveKind === "rebuild_inventory" ||
+    record.directiveKind === "trace_runtime" ||
+    record.directiveKind === "checkpoint" ||
+    record.directiveKind === "replan_migration" ||
     record.directiveKind === "continue_analysis" ||
     record.directiveKind === "blocked"
       ? record.directiveKind
@@ -1924,6 +1929,49 @@ function buildDirectiveProgressFingerprint(directive: RunExecutionPlan["directiv
     return JSON.stringify({
       kind: directive.kind,
       actions: directive.actions.map((action) => action.id)
+    });
+  }
+
+  if (directive.kind === "dispatch_subagents") {
+    return JSON.stringify({
+      kind: directive.kind,
+      pendingInvestigations: directive.pendingInvestigations,
+      nextActions: directive.nextActions
+    });
+  }
+
+  if (directive.kind === "rebuild_inventory") {
+    return JSON.stringify({
+      kind: directive.kind,
+      missingUnderstandingKinds: directive.missingUnderstandingKinds,
+      nextActions: directive.nextActions
+    });
+  }
+
+  if (directive.kind === "trace_runtime") {
+    return JSON.stringify({
+      kind: directive.kind,
+      targetIds: directive.targetIds,
+      gapIds: directive.gapIds,
+      nextActions: directive.nextActions
+    });
+  }
+
+  if (directive.kind === "checkpoint") {
+    return JSON.stringify({
+      kind: directive.kind,
+      checkpointId: directive.checkpointId ?? null,
+      progressProofId: directive.progressProofId ?? null,
+      nextActions: directive.nextActions
+    });
+  }
+
+  if (directive.kind === "replan_migration") {
+    return JSON.stringify({
+      kind: directive.kind,
+      phase: directive.phase,
+      fallbackPhase: directive.fallbackPhase ?? null,
+      nextActions: directive.nextActions
     });
   }
 
@@ -3238,6 +3286,11 @@ async function readDaemonOperatorHandoff(
       parsed.directiveKind === "dispatch_owner" ||
       parsed.directiveKind === "dispatch_reviews" ||
       parsed.directiveKind === "apply_recovery" ||
+      parsed.directiveKind === "dispatch_subagents" ||
+      parsed.directiveKind === "rebuild_inventory" ||
+      parsed.directiveKind === "trace_runtime" ||
+      parsed.directiveKind === "checkpoint" ||
+      parsed.directiveKind === "replan_migration" ||
       parsed.directiveKind === "continue_analysis" ||
       parsed.directiveKind === "blocked"
         ? parsed.directiveKind
@@ -4104,6 +4157,9 @@ function formatCoverageCommandReport(report: AutonomousCoverageCommandReport): s
   ];
 
   if (!report.autonomous.configured) {
+    lines.push(
+      `autonomy-note: run-level workflow proof can still be valid; no active autonomous continuation target is recorded for this run`
+    );
     return `${lines.join("\n")}\n`;
   }
 
@@ -4134,6 +4190,11 @@ function formatGapsCommandReport(report: AutonomousGapsCommandReport): string {
   ];
   if (report.gaps.length === 0) {
     lines.push(`resume: ${report.autonomous.resume.summary}`);
+    if (!report.autonomous.configured) {
+      lines.push(
+        `autonomy-note: run-level workflow proof can still be valid; no active autonomous continuation target is recorded for this run`
+      );
+    }
     return `${lines.join("\n")}\n`;
   }
   for (const gap of report.gaps) {
@@ -5523,6 +5584,45 @@ function formatLoopCommandResult(result: LoopCommandResult): string {
   } else if (result.finalPlan.directive.kind === "apply_recovery") {
     for (const action of result.finalPlan.directive.actions) {
       lines.push(`next: recover ${action.id}`);
+    }
+  } else if (result.finalPlan.directive.kind === "dispatch_subagents") {
+    for (const investigation of result.finalPlan.directive.pendingInvestigations) {
+      lines.push(`next: dispatch subagent ${investigation}`);
+    }
+    for (const action of result.finalPlan.directive.nextActions) {
+      lines.push(`next: ${action}`);
+    }
+  } else if (result.finalPlan.directive.kind === "rebuild_inventory") {
+    if (result.finalPlan.directive.missingUnderstandingKinds.length > 0) {
+      lines.push(`next: rebuild ${result.finalPlan.directive.missingUnderstandingKinds.join(", ")}`);
+    }
+    for (const action of result.finalPlan.directive.nextActions) {
+      lines.push(`next: ${action}`);
+    }
+  } else if (result.finalPlan.directive.kind === "trace_runtime") {
+    if (result.finalPlan.directive.targetIds.length > 0) {
+      lines.push(`next: trace ${result.finalPlan.directive.targetIds.join(", ")}`);
+    }
+    for (const action of result.finalPlan.directive.nextActions) {
+      lines.push(`next: ${action}`);
+    }
+  } else if (result.finalPlan.directive.kind === "checkpoint") {
+    if (result.finalPlan.directive.checkpointId) {
+      lines.push(`next: checkpoint ${result.finalPlan.directive.checkpointId}`);
+    }
+    if (result.finalPlan.directive.progressProofId) {
+      lines.push(`next: proof ${result.finalPlan.directive.progressProofId}`);
+    }
+    for (const action of result.finalPlan.directive.nextActions) {
+      lines.push(`next: ${action}`);
+    }
+  } else if (result.finalPlan.directive.kind === "replan_migration") {
+    lines.push(`next: replan ${result.finalPlan.directive.phase}`);
+    if (result.finalPlan.directive.fallbackPhase) {
+      lines.push(`next: fallback ${result.finalPlan.directive.fallbackPhase}`);
+    }
+    for (const action of result.finalPlan.directive.nextActions) {
+      lines.push(`next: ${action}`);
     }
   } else if (result.finalPlan.directive.kind === "continue_analysis") {
     lines.push(`next: continue ${result.finalPlan.directive.targetId}`);

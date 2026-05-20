@@ -1,8 +1,14 @@
 import type { FreshnessGateDecision } from "../runtime/freshness-gate.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
-import type { RunExecutionPlan, RunStatusSnapshot, TaskStatus } from "../domain/types.ts";
+import type {
+  RunExecutionPlan,
+  RunStatusSnapshot,
+  RuntimeTraceRegistrySummary,
+  TaskStatus
+} from "../domain/types.ts";
 import type { GitNexusStatusObservation } from "./gitnexus.ts";
 import { buildAutonomousOperatorSummary, type AutonomousOperatorSummary } from "./autonomous-summary.ts";
+import { buildRuntimeTraceRegistry } from "../runtime/runtime-trace-registry.ts";
 
 type StatusAuthorityLabel = "runtime_authoritative" | "derived_only";
 
@@ -153,6 +159,35 @@ export interface OperatorStatusReport {
     freshness: FreshnessGateDecision;
   };
   autonomous: AutonomousOperatorSummary;
+  traceRegistry: {
+    authorityLabel: "derived_only";
+    summary?: RuntimeTraceRegistrySummary | undefined;
+  };
+  compaction: {
+    authorityLabel: "runtime_authoritative";
+    status: "missing" | "present";
+    checkpointId?: string | undefined;
+    ref?: string | undefined;
+    summary?: string | undefined;
+    sourceRefs: string[];
+    generatedAt?: string | undefined;
+  };
+  evalPosture: {
+    authorityLabel: "runtime_authoritative";
+    status: "missing" | "repo_local_only" | "semi_external_ready" | "external_ready";
+    labels: string[];
+    artifactRefs: string[];
+  };
+  reviewControls: {
+    authorityLabel: "runtime_authoritative";
+    status: "missing" | "explicit";
+    controls: Array<{
+      controlId: string;
+      actionType: string;
+      enforcement: string;
+      summary: string;
+    }>;
+  };
   daemon: {
     authorityLabel: "derived_only";
     continuation?: DaemonContinuationStatusObservation | undefined;
@@ -197,6 +232,12 @@ export function buildOperatorStatusReport(input: {
   staleAfterDays?: number | undefined;
 }): OperatorStatusReport {
   const byStatus = emptyTaskBuckets();
+  const traceRegistrySummary = input.snapshot.autonomousExecution
+    ? buildRuntimeTraceRegistry(input.snapshot.autonomousExecution.state)
+    : undefined;
+  const latestCheckpoint = input.snapshot.autonomousExecution?.state.checkpoints.at(-1);
+  const externalEvals = input.snapshot.autonomousExecution?.state.externalEvals ?? [];
+  const sensitiveActionControls = input.snapshot.autonomousExecution?.state.sensitiveActionControls ?? [];
 
   for (const task of input.snapshot.tasks) {
     byStatus[task.status].push(task.packet.taskId);
@@ -237,6 +278,47 @@ export function buildOperatorStatusReport(input: {
       snapshot: input.snapshot,
       executionPlan: input.executionPlan
     }),
+    traceRegistry: {
+      authorityLabel: "derived_only",
+      summary: traceRegistrySummary
+    },
+    compaction: {
+      authorityLabel: "runtime_authoritative",
+      status:
+        latestCheckpoint?.compressedContextRef &&
+        latestCheckpoint.compressedContextSummary?.trim() &&
+        (latestCheckpoint.compressedContextSourceRefs?.some((value) => value.trim().length > 0) ?? false)
+          ? "present"
+          : "missing",
+      checkpointId: latestCheckpoint?.checkpointId,
+      ref: latestCheckpoint?.compressedContextRef,
+      summary: latestCheckpoint?.compressedContextSummary,
+      sourceRefs: [...(latestCheckpoint?.compressedContextSourceRefs ?? [])],
+      generatedAt: latestCheckpoint?.compressedContextGeneratedAt
+    },
+    evalPosture: {
+      authorityLabel: "runtime_authoritative",
+      status:
+        externalEvals.some((record) => record.scope === "external")
+          ? "external_ready"
+          : externalEvals.some((record) => record.scope === "semi_external")
+            ? "semi_external_ready"
+            : externalEvals.length > 0
+              ? "repo_local_only"
+              : "missing",
+      labels: externalEvals.map((record) => record.label),
+      artifactRefs: externalEvals.map((record) => record.artifactRef)
+    },
+    reviewControls: {
+      authorityLabel: "runtime_authoritative",
+      status: sensitiveActionControls.length > 0 ? "explicit" : "missing",
+      controls: sensitiveActionControls.map((record) => ({
+        controlId: record.controlId,
+        actionType: record.actionType,
+        enforcement: record.enforcement,
+        summary: record.summary
+      }))
+    },
     daemon: {
       authorityLabel: "derived_only",
       continuation: input.daemonContinuation,

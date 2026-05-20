@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createReviewActionContextResolver,
   type AuthenticatedPrincipal,
@@ -13,6 +14,8 @@ import type { ReviewActionContext, TaskPacketInput } from "../src/domain/types.t
 import { MemoryStore } from "../src/store/memory-store.ts";
 import { executeReportCommandFromArgs } from "../src/admin.ts";
 import { formatRunEvidenceReportMarkdown } from "../src/admin/report.ts";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
@@ -603,6 +606,398 @@ test("executeReportCommandFromArgs marks advisory continuation targets as operat
 
   const markdown = formatRunEvidenceReportMarkdown(result.report);
   assert.match(markdown, /resume execution: operator_required/);
+});
+
+test("formatRunEvidenceReportMarkdown clarifies workflow-proof-only runs without autonomous state", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Workflow-proof only report",
+    request: "Explain a valid run that has no autonomous continuation state."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.autonomous.configured, false);
+  assert.match(
+    result.report.autonomous.resume.summary,
+    /workflow proof for the run can still be valid, but this run does not prove active autonomous continuation/
+  );
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /configured: no/);
+  assert.match(
+    markdown,
+    /workflow proof can still be valid; this report has no active autonomous continuation evidence for the run/
+  );
+});
+
+test("executeReportCommandFromArgs surfaces generated code-backed inventory in the autonomous report section", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Generated inventory report",
+    request: "Expose generated understanding state through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "inventory",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "inventory",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1
+      }
+    }
+  });
+  await service.generateRepoInventory(run.id, {
+    repoRoot,
+    now: "2026-05-20T12:33:00.000Z"
+  });
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.ok((result.report.autonomous.comprehensionSummary?.inventoryCompleteness ?? 0) > 0);
+  assert.ok(result.report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("repo_map"));
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /comprehension: inventory=/);
+});
+
+test("executeReportCommandFromArgs includes runtime trace registry summaries and missing risky targets", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Runtime trace report",
+    request: "Expose runtime trace registry evidence through the report."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "trace-registry",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
+    },
+    {
+      id: "service:core-loop",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof-side-effect",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow proof completion"],
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T13:21:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:core-loop-trace",
+      targetId: "service:core-loop",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Core loop still lacks a recorded risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record core loop runtime trace"],
+      status: "open"
+    }
+  ]);
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.traceRegistry?.riskyTraceCount, 1);
+  assert.deepEqual(result.report.traceRegistry?.riskyTargetsMissingTrace, ["service:core-loop"]);
+  assert.deepEqual(result.report.traceRegistry?.openMissingTraceGapIds, ["gap:core-loop-trace"]);
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /## Runtime Trace Registry/);
+  assert.match(markdown, /missing risky targets: service:core-loop/);
+  assert.match(markdown, /open missing-trace gaps: gap:core-loop-trace/);
+});
+
+test("executeReportCommandFromArgs includes checkpoint compaction evidence and self-referential checkpoint resume guidance", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint compaction report",
+    request: "Expose operational compressed context evidence through the report."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "resume",
+      qualityGates: ["product_acceptance", "memory_compaction_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-generated",
+    phase: "validation",
+    activeTargets: [],
+    recentEvidenceRefs: ["src/core/service.ts:1", "tests/report-command.test.ts"],
+    openGaps: [],
+    nextActions: ["resume generated checkpoint context"],
+    createdAt: "2026-05-20T13:45:00.000Z"
+  });
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.status.compaction.status, "present");
+  assert.equal(result.report.status.compaction.checkpointId, "cp-generated");
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /## Checkpoint Compaction/);
+  assert.match(markdown, /memory:\/\/checkpoint\/cp-generated\/compressed-context/);
+  assert.match(markdown, /summary: phase=validation; targets=checkpoint:cp-generated; open-gaps=none/);
+});
+
+test("executeReportCommandFromArgs includes eval posture and review controls sections", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Eval posture report",
+    request: "Expose external eval posture and sensitive-action controls."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertExternalEvals(run.id, [
+    {
+      evalId: "eval:agent-evals",
+      label: "OpenAI agent eval sample",
+      scope: "external",
+      harness: "openai_agent_evals",
+      artifactRef: "https://developers.openai.com/api/docs/guides/agent-evals",
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T14:05:00.000Z"
+    }
+  ]);
+  await service.upsertSensitiveActionControls(run.id, [
+    {
+      controlId: "control:security-waiver-blocked",
+      actionType: "waiver",
+      enforcement: "waiver_blocked",
+      summary: "security review waivers remain blocked by runtime policy",
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T14:06:00.000Z"
+    }
+  ]);
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.status.evalPosture.status, "external_ready");
+  assert.equal(result.report.status.reviewControls.status, "explicit");
+
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /## Eval Posture/);
+  assert.match(markdown, /OpenAI agent eval sample/);
+  assert.match(markdown, /## Review Controls/);
+  assert.match(markdown, /control:security-waiver-blocked: action=waiver enforcement=waiver_blocked/);
 });
 
 test("executeReportCommandFromArgs surfaces blocked daemon continuation state in json and markdown", async () => {
