@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 // @ts-ignore internal hook policy module is a runtime .mjs helper without TypeScript declarations
 import {
   evaluatePreToolUse,
@@ -12,6 +14,8 @@ import {
 } from "../plugins/devgod/scripts/hook-policy.mjs";
 // @ts-ignore internal hook utility module is a runtime .mjs helper without TypeScript declarations
 import { readActiveTaskContext } from "../plugins/devgod/scripts/hook-utils.mjs";
+
+const execFileAsync = promisify(execFile);
 
 test("pre-tool-use hook denies apply_patch edits outside the active task scope", () => {
   const parsed = evaluatePreToolUse(
@@ -159,6 +163,17 @@ test("session-start hook stays silent when it would only repeat generic devgod p
   );
 
   assert.equal(parsed, undefined);
+});
+
+test("session-start entrypoint exits cleanly when no additional context is available", async () => {
+  const { stdout, stderr } = await execFileAsync(
+    "bash",
+    ["-lc", `${JSON.stringify(process.execPath)} plugins/devgod/scripts/session-start.mjs < /dev/null`],
+    { cwd: process.cwd() }
+  );
+
+  assert.equal(stdout, "");
+  assert.equal(stderr, "");
 });
 
 test("session-start hook emits compact context when an active task is present", () => {
