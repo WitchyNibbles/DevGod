@@ -8,9 +8,9 @@
       "status": "pending",
       "class": "prototype_slice",
       "depends_on": [],
-      "acceptance_criteria": [],
-      "verification": [],
-      "evidence": [],
+      "acceptance_criteria": ["Example task outcome is explicitly defined."],
+      "verification": ["bash scripts/check-devgod-workflow.sh --task-id task-001"],
+      "evidence": ["task packet: task-001", "verification: bash scripts/check-devgod-workflow.sh --task-id task-001"],
       "blocker": null
     }
   ]

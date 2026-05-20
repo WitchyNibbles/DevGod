@@ -191,6 +191,17 @@ export const gapKinds = [
 ] as const;
 export const gapSeverities = ["low", "medium", "high", "critical"] as const;
 export const gapStatuses = ["open", "closed"] as const;
+export const understandingMapKinds = [
+  "repo_map",
+  "subsystems",
+  "route_map",
+  "model_map",
+  "integration_map",
+  "authz_map",
+  "config_coupling",
+  "runtime_side_effects"
+] as const;
+export const runtimeTraceKinds = ["route", "job", "integration", "auth", "side_effect"] as const;
 export const analysisPhases = [
   "discovery",
   "inventory",
@@ -209,6 +220,7 @@ export const analysisPhases = [
 ] as const;
 export const runProfiles = ["standard_delivery", "legacy_rewrite", "debug_heavy"] as const;
 export const phaseReadinessStatuses = ["ready", "blocked"] as const;
+export const rewriteReadinessStatuses = ["ready", "blocked"] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -244,9 +256,12 @@ export type CoverageCriticality = (typeof coverageCriticalities)[number];
 export type GapKind = (typeof gapKinds)[number];
 export type GapSeverity = (typeof gapSeverities)[number];
 export type GapStatus = (typeof gapStatuses)[number];
+export type UnderstandingMapKind = (typeof understandingMapKinds)[number];
+export type RuntimeTraceKind = (typeof runtimeTraceKinds)[number];
 export type AnalysisPhase = (typeof analysisPhases)[number];
 export type RunProfile = (typeof runProfiles)[number];
 export type PhaseReadinessStatus = (typeof phaseReadinessStatuses)[number];
+export type RewriteReadinessStatus = (typeof rewriteReadinessStatuses)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -522,6 +537,10 @@ export interface CoverageManifestThresholds {
   criticalItemValidation?: number | undefined;
   callsiteCoverage?: number | undefined;
   runtimeTraceCoverage?: number | undefined;
+  inventoryCompleteness?: number | undefined;
+  businessRuleCoverage?: number | undefined;
+  maxContradictionGapCount?: number | undefined;
+  maxOpenBlockers?: number | undefined;
 }
 
 export interface CoverageManifestRecord {
@@ -584,6 +603,25 @@ export interface ProgressProofRecord {
   createdAt: string;
 }
 
+export interface UnderstandingMapRecord {
+  kind: UnderstandingMapKind;
+  itemCount: number;
+  analyzedCount?: number | undefined;
+  sourceRefs: string[];
+  evidenceRefs: string[];
+  updatedAt: string;
+}
+
+export interface RuntimeTraceRecord {
+  traceId: string;
+  targetId: string;
+  kind: RuntimeTraceKind;
+  risky: boolean;
+  sideEffects: string[];
+  evidenceRefs: string[];
+  createdAt: string;
+}
+
 export interface CheckpointRecord {
   runId: string;
   checkpointId: string;
@@ -613,6 +651,19 @@ export interface CoverageSummary {
   blockingGapCount: number;
 }
 
+export interface ComprehensionSummary {
+  inventoryCompleteness: number;
+  businessRuleCoverage: number;
+  contradictionGapCount: number;
+  openBlockerCount: number;
+  requiredUnderstandingKinds: UnderstandingMapKind[];
+  presentUnderstandingKinds: UnderstandingMapKind[];
+  missingUnderstandingKinds: UnderstandingMapKind[];
+  runtimeTraceCount: number;
+  rewriteReadiness: RewriteReadinessStatus;
+  missingEvidence: string[];
+}
+
 export interface PhaseReadinessRecord {
   phase: AnalysisPhase;
   status: PhaseReadinessStatus;
@@ -628,6 +679,8 @@ export interface AutonomousExecutionState {
   gaps: CoverageGapRecord[];
   checkpoints: CheckpointRecord[];
   progressProofs: ProgressProofRecord[];
+  understandingMaps: UnderstandingMapRecord[];
+  runtimeTraces: RuntimeTraceRecord[];
   pendingInvestigations: string[];
   executionEpoch: number;
   lastCheckpointId?: string | undefined;
@@ -641,6 +694,7 @@ export interface AutonomousExecutionState {
 export interface AutonomousExecutionSnapshot {
   state: AutonomousExecutionState;
   coverageSummary: CoverageSummary;
+  comprehensionSummary: ComprehensionSummary;
   phaseReadiness: PhaseReadinessRecord;
   blockingGaps: CoverageGapRecord[];
 }

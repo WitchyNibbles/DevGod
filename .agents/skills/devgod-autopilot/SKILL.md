@@ -48,7 +48,7 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
 11. Record review evidence according to task class:
    - `prototype_slice`: reviewer and QA evidence, plus security evidence when trust boundaries changed
    - `security_sensitive`: reviewer, QA, and security evidence are mandatory
-   - `release_candidate`: reviewer, QA, security, and release-readiness evidence are mandatory
+   - `release_candidate`: reviewer, QA, and security evidence are mandatory, and `release_readiness_required` quality-gate evidence is mandatory when the task uses that gate
    - `docs_only`: reviewer evidence is mandatory; QA and security evidence are required if commands, setup, policy, or behavior changed
 12. Update:
    - `.devgod/work/product-state.md`

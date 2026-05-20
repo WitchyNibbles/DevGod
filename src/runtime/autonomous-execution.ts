@@ -2,13 +2,19 @@ import type {
   AnalysisPhase,
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
+  ComprehensionSummary,
   ContinuationAction,
   CoverageGapRecord,
   CoverageManifestRecord,
   CoverageSummary,
   CoverageItemRecord,
   PhaseReadinessRecord,
-  TaskRecord
+  ProgressProofRecord,
+  RuntimeTraceRecord,
+  RunProfile,
+  TaskRecord,
+  UnderstandingMapKind,
+  UnderstandingMapRecord
 } from "../domain/types.ts";
 
 export interface AutonomousNextTarget {
@@ -34,6 +40,34 @@ const gapSeverityWeight = {
   medium: 2,
   low: 1
 } as const;
+const rewriteCriticalPhases = new Set<AnalysisPhase>([
+  "modernization_strategy",
+  "migration_sequencing",
+  "final_verification",
+  "done"
+]);
+const requiredUnderstandingKindsByProfile: Record<RunProfile, readonly UnderstandingMapKind[]> = {
+  standard_delivery: ["repo_map", "subsystems", "route_map"],
+  legacy_rewrite: [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ],
+  debug_heavy: ["repo_map", "runtime_side_effects"]
+};
+
+function isFiniteMetric(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasNonEmptyStrings(values: readonly string[] | undefined): boolean {
+  return Array.isArray(values) && values.some((value) => value.trim().length > 0);
+}
 
 function roundMetric(value: number): number {
   return Number(value.toFixed(4));
@@ -47,6 +81,27 @@ function ratio(numerator: number, denominator: number): number {
   return roundMetric(numerator / denominator);
 }
 
+function thresholdFallbackForProfile(profile: RunProfile, key: keyof CoverageManifestRecord["thresholds"]): number {
+  switch (key) {
+    case "inventoryCompleteness":
+      return profile === "legacy_rewrite" ? 1 : 0.5;
+    case "businessRuleCoverage":
+      return profile === "legacy_rewrite" ? 0.8 : 0.3;
+    case "maxContradictionGapCount":
+      return profile === "legacy_rewrite" ? 0 : 1;
+    case "maxOpenBlockers":
+      return 0;
+    case "criticalItemCoverage":
+      return 0.8;
+    case "criticalItemValidation":
+      return 0.6;
+    case "callsiteCoverage":
+      return 0.85;
+    case "runtimeTraceCoverage":
+      return 0.75;
+  }
+}
+
 function thresholdValue(
   manifest: CoverageManifestRecord | undefined,
   key: keyof CoverageManifestRecord["thresholds"],
@@ -57,6 +112,195 @@ function thresholdValue(
 
 function collectCriticalItems(items: readonly CoverageItemRecord[]): CoverageItemRecord[] {
   return items.filter((item) => item.criticality === "high" || item.criticality === "critical");
+}
+
+function validateRatioMetric(label: string, value: number | undefined, errors: string[]): void {
+  if (!isFiniteMetric(value) || value < 0 || value > 1) {
+    errors.push(`${label} must be a finite number between 0 and 1`);
+  }
+}
+
+function validateCountMetric(label: string, value: number | undefined, errors: string[]): void {
+  if (!isFiniteMetric(value) || value < 0 || !Number.isInteger(value)) {
+    errors.push(`${label} must be a non-negative integer`);
+  }
+}
+
+export function validateCoverageManifestRecord(manifest: CoverageManifestRecord): string[] {
+  const errors: string[] = [];
+
+  if (!Array.isArray(manifest.requiredCategories) || manifest.requiredCategories.length === 0) {
+    errors.push("requiredCategories must contain at least one category");
+  }
+
+  validateRatioMetric("thresholds.criticalItemCoverage", manifest.thresholds.criticalItemCoverage, errors);
+  validateRatioMetric(
+    "thresholds.criticalItemValidation",
+    manifest.thresholds.criticalItemValidation,
+    errors
+  );
+  validateRatioMetric("thresholds.callsiteCoverage", manifest.thresholds.callsiteCoverage, errors);
+  validateRatioMetric("thresholds.runtimeTraceCoverage", manifest.thresholds.runtimeTraceCoverage, errors);
+  if (manifest.thresholds.inventoryCompleteness !== undefined) {
+    validateRatioMetric("thresholds.inventoryCompleteness", manifest.thresholds.inventoryCompleteness, errors);
+  }
+  if (manifest.thresholds.businessRuleCoverage !== undefined) {
+    validateRatioMetric("thresholds.businessRuleCoverage", manifest.thresholds.businessRuleCoverage, errors);
+  }
+  if (manifest.thresholds.maxContradictionGapCount !== undefined) {
+    validateCountMetric(
+      "thresholds.maxContradictionGapCount",
+      manifest.thresholds.maxContradictionGapCount,
+      errors
+    );
+  }
+  if (manifest.thresholds.maxOpenBlockers !== undefined) {
+    validateCountMetric("thresholds.maxOpenBlockers", manifest.thresholds.maxOpenBlockers, errors);
+  }
+
+  return errors;
+}
+
+export function validateCoverageItemRecord(item: CoverageItemRecord): string[] {
+  const errors: string[] = [];
+
+  if (!hasNonEmptyStrings(item.sources)) {
+    errors.push(`coverage item ${item.id} must include at least one source`);
+  }
+
+  if (!hasNonEmptyStrings(item.evidenceRefs)) {
+    errors.push(`coverage item ${item.id} must include at least one evidenceRef`);
+  }
+
+  if (
+    isFiniteMetric(item.callsiteCount) &&
+    isFiniteMetric(item.callsitesAnalyzed) &&
+    item.callsitesAnalyzed > item.callsiteCount
+  ) {
+    errors.push(`coverage item ${item.id} callsitesAnalyzed cannot exceed callsiteCount`);
+  }
+
+  if (item.state === "validated" && !hasNonEmptyStrings(item.verificationRefs)) {
+    errors.push(`validated coverage item ${item.id} must include verificationRefs`);
+  }
+
+  if (item.confidence !== undefined) {
+    validateRatioMetric(`coverage item ${item.id} confidence`, item.confidence, errors);
+  }
+
+  if (item.gapScore !== undefined) {
+    validateRatioMetric(`coverage item ${item.id} gapScore`, item.gapScore, errors);
+  }
+
+  return errors;
+}
+
+export function isGapBlocking(gap: CoverageGapRecord): boolean {
+  return gap.status === "open" && (gap.blocking || gap.severity === "critical");
+}
+
+export function validateCoverageGapRecord(gap: CoverageGapRecord): string[] {
+  const errors: string[] = [];
+
+  if (gap.targetId.trim().length === 0) {
+    errors.push(`gap ${gap.id} must include a targetId`);
+  }
+
+  if (!hasNonEmptyStrings(gap.evidenceRefs)) {
+    errors.push(`gap ${gap.id} must include evidenceRefs`);
+  }
+
+  if (gap.createdBy.trim().length === 0) {
+    errors.push(`gap ${gap.id} must include createdBy`);
+  }
+
+  if (gap.status === "open" && !hasNonEmptyStrings(gap.suggestedNextActions)) {
+    errors.push(`open gap ${gap.id} must include suggestedNextActions`);
+  }
+
+  return errors;
+}
+
+export function hasMeaningfulProgressDelta(proof: ProgressProofRecord): boolean {
+  const hasCoverageDelta = Object.values(proof.coverageDelta).some(
+    (value) => typeof value === "number" && Number.isFinite(value) && value !== 0
+  );
+  const hasGapDelta =
+    (typeof proof.blockingGapDelta?.closed === "number" && proof.blockingGapDelta.closed !== 0) ||
+    (typeof proof.blockingGapDelta?.opened === "number" && proof.blockingGapDelta.opened !== 0);
+
+  return hasCoverageDelta || hasGapDelta;
+}
+
+export function validateProgressProofRecord(proof: ProgressProofRecord): string[] {
+  const errors: string[] = [];
+
+  if (!Number.isInteger(proof.cycle) || proof.cycle <= 0) {
+    errors.push(`progress proof ${proof.proofId} cycle must be a positive integer`);
+  }
+
+  if (!hasNonEmptyStrings(proof.evidenceRefs)) {
+    errors.push(`progress proof ${proof.proofId} must include evidenceRefs`);
+  }
+
+  if (proof.nextTarget.trim().length === 0) {
+    errors.push(`progress proof ${proof.proofId} must include nextTarget`);
+  }
+
+  if ((proof.whyNext ?? "").trim().length === 0) {
+    errors.push(`progress proof ${proof.proofId} must include whyNext`);
+  }
+
+  if (!hasMeaningfulProgressDelta(proof)) {
+    errors.push(`progress proof ${proof.proofId} must record a measurable delta`);
+  }
+
+  return errors;
+}
+
+export function validateUnderstandingMapRecord(map: UnderstandingMapRecord): string[] {
+  const errors: string[] = [];
+
+  validateCountMetric(`understanding map ${map.kind} itemCount`, map.itemCount, errors);
+
+  if (map.analyzedCount !== undefined) {
+    validateCountMetric(`understanding map ${map.kind} analyzedCount`, map.analyzedCount, errors);
+    if (isFiniteMetric(map.analyzedCount) && isFiniteMetric(map.itemCount) && map.analyzedCount > map.itemCount) {
+      errors.push(`understanding map ${map.kind} analyzedCount cannot exceed itemCount`);
+    }
+  }
+
+  if (!hasNonEmptyStrings(map.sourceRefs)) {
+    errors.push(`understanding map ${map.kind} must include sourceRefs`);
+  }
+
+  if (!hasNonEmptyStrings(map.evidenceRefs)) {
+    errors.push(`understanding map ${map.kind} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
+export function validateRuntimeTraceRecord(trace: RuntimeTraceRecord): string[] {
+  const errors: string[] = [];
+
+  if (trace.traceId.trim().length === 0) {
+    errors.push("runtime trace must include traceId");
+  }
+
+  if (trace.targetId.trim().length === 0) {
+    errors.push(`runtime trace ${trace.traceId} must include targetId`);
+  }
+
+  if (!hasNonEmptyStrings(trace.evidenceRefs)) {
+    errors.push(`runtime trace ${trace.traceId} must include evidenceRefs`);
+  }
+
+  if (trace.risky && !hasNonEmptyStrings(trace.sideEffects)) {
+    errors.push(`runtime trace ${trace.traceId} must include sideEffects for risky flows`);
+  }
+
+  return errors;
 }
 
 export function runRequiresAutonomousExecution(tasks: readonly TaskRecord[]): boolean {
@@ -78,6 +322,8 @@ export function createAutonomousExecutionState(input: {
     gaps: [],
     checkpoints: [],
     progressProofs: [],
+    understandingMaps: [],
+    runtimeTraces: [],
     pendingInvestigations: [],
     executionEpoch: 1,
     updatedAt: input.now
@@ -101,7 +347,7 @@ export function computeCoverageSummary(state: AutonomousExecutionState): Coverag
     0
   );
   const openGaps = state.gaps.filter((gap) => gap.status === "open");
-  const blockingGaps = openGaps.filter((gap) => gap.blocking);
+  const blockingGaps = openGaps.filter((gap) => isGapBlocking(gap));
 
   return {
     totalItems: state.coverageItems.length,
@@ -120,9 +366,111 @@ export function computeCoverageSummary(state: AutonomousExecutionState): Coverag
   };
 }
 
+function requiredUnderstandingKinds(profile: RunProfile): UnderstandingMapKind[] {
+  return [...requiredUnderstandingKindsByProfile[profile]];
+}
+
+export function computeComprehensionSummary(
+  state: AutonomousExecutionState,
+  coverageSummary: CoverageSummary
+): ComprehensionSummary {
+  const understandingMaps = state.understandingMaps ?? [];
+  const runtimeTraces = state.runtimeTraces ?? [];
+  const requiredKinds = requiredUnderstandingKinds(state.profile);
+  const presentKinds = [...new Set(understandingMaps.map((map) => map.kind))].sort();
+  const missingKinds = requiredKinds.filter((kind) => !presentKinds.includes(kind));
+  const inventoryCompleteness = ratio(requiredKinds.length - missingKinds.length, requiredKinds.length);
+  const criticalItems = collectCriticalItems(state.coverageItems);
+  const businessRuleCoverage = ratio(
+    criticalItems.filter((item) => hasNonEmptyStrings(item.businessRules)).length,
+    criticalItems.length
+  );
+  const contradictionGapCount = state.gaps.filter(
+    (gap) => gap.status === "open" && gap.kind === "contradicting_evidence"
+  ).length;
+  const openBlockerCount = coverageSummary.blockingGapCount;
+  const riskyTraceCount = runtimeTraces.filter((trace) => trace.risky).length;
+  const missingEvidence: string[] = [];
+  const inventoryThreshold = thresholdValue(
+    state.manifest,
+    "inventoryCompleteness",
+    thresholdFallbackForProfile(state.profile, "inventoryCompleteness")
+  );
+  const businessRuleThreshold = thresholdValue(
+    state.manifest,
+    "businessRuleCoverage",
+    thresholdFallbackForProfile(state.profile, "businessRuleCoverage")
+  );
+  const runtimeTraceThreshold = thresholdValue(
+    state.manifest,
+    "runtimeTraceCoverage",
+    thresholdFallbackForProfile(state.profile, "runtimeTraceCoverage")
+  );
+  const maxContradictionGapCount = thresholdValue(
+    state.manifest,
+    "maxContradictionGapCount",
+    thresholdFallbackForProfile(state.profile, "maxContradictionGapCount")
+  );
+  const maxOpenBlockers = thresholdValue(
+    state.manifest,
+    "maxOpenBlockers",
+    thresholdFallbackForProfile(state.profile, "maxOpenBlockers")
+  );
+
+  if (inventoryCompleteness < inventoryThreshold) {
+    missingEvidence.push(
+      `inventory completeness ${inventoryCompleteness} is below threshold ${inventoryThreshold}`
+    );
+  }
+
+  for (const kind of missingKinds) {
+    missingEvidence.push(`understanding map missing: ${kind}`);
+  }
+
+  if (businessRuleCoverage < businessRuleThreshold) {
+    missingEvidence.push(
+      `business rule coverage ${businessRuleCoverage} is below threshold ${businessRuleThreshold}`
+    );
+  }
+
+  if (coverageSummary.runtimeTraceCoverage < runtimeTraceThreshold) {
+    missingEvidence.push(
+      `runtime trace coverage ${coverageSummary.runtimeTraceCoverage} is below threshold ${runtimeTraceThreshold}`
+    );
+  }
+
+  if (riskyTraceCount === 0 && runtimeTraceThreshold > 0) {
+    missingEvidence.push("risky runtime traces are missing from the trace registry");
+  }
+
+  if (contradictionGapCount > maxContradictionGapCount) {
+    missingEvidence.push(
+      `contradiction gap count ${contradictionGapCount} exceeds threshold ${maxContradictionGapCount}`
+    );
+  }
+
+  if (openBlockerCount > maxOpenBlockers) {
+    missingEvidence.push(`open blocker count ${openBlockerCount} exceeds threshold ${maxOpenBlockers}`);
+  }
+
+  return {
+    inventoryCompleteness,
+    businessRuleCoverage,
+    contradictionGapCount,
+    openBlockerCount,
+    requiredUnderstandingKinds: requiredKinds,
+    presentUnderstandingKinds: presentKinds,
+    missingUnderstandingKinds: missingKinds,
+    runtimeTraceCount: runtimeTraces.length,
+    rewriteReadiness: missingEvidence.length === 0 ? "ready" : "blocked",
+    missingEvidence
+  };
+}
+
 export function computePhaseReadiness(
   state: AutonomousExecutionState,
-  summary: CoverageSummary
+  summary: CoverageSummary,
+  comprehensionSummary: ComprehensionSummary
 ): PhaseReadinessRecord {
   const reasons: string[] = [];
 
@@ -174,6 +522,10 @@ export function computePhaseReadiness(
     reasons.push(`blocking gaps remain open: ${summary.blockingGapCount}`);
   }
 
+  if (state.profile === "legacy_rewrite" && rewriteCriticalPhases.has(state.phase)) {
+    reasons.push(...comprehensionSummary.missingEvidence);
+  }
+
   return {
     phase: state.phase,
     status: reasons.length === 0 ? "ready" : "blocked",
@@ -185,11 +537,13 @@ export function buildAutonomousExecutionSnapshot(
   state: AutonomousExecutionState
 ): AutonomousExecutionSnapshot {
   const coverageSummary = computeCoverageSummary(state);
+  const comprehensionSummary = computeComprehensionSummary(state, coverageSummary);
   return {
     state,
     coverageSummary,
-    phaseReadiness: computePhaseReadiness(state, coverageSummary),
-    blockingGaps: state.gaps.filter((gap) => gap.status === "open" && gap.blocking)
+    comprehensionSummary,
+    phaseReadiness: computePhaseReadiness(state, coverageSummary, comprehensionSummary),
+    blockingGaps: state.gaps.filter((gap) => isGapBlocking(gap))
   };
 }
 
@@ -201,12 +555,22 @@ export function collectAutonomousExecutionBlockers(
   const blockers = [...snapshot.phaseReadiness.reasons];
   const taskQualityGates = new Set(tasks.flatMap((task) => task.packet.qualityGates));
 
-  if (taskQualityGates.has("coverage_ledger_required") && !state.manifest) {
-    blockers.push("coverage ledger required but no manifest is recorded");
+  if (taskQualityGates.has("coverage_ledger_required")) {
+    if (!state.manifest) {
+      blockers.push("coverage ledger required but no manifest is recorded");
+    } else {
+      const manifestErrors = validateCoverageManifestRecord(state.manifest);
+      if (manifestErrors.length > 0) {
+        blockers.push(`coverage manifest is invalid: ${manifestErrors.join("; ")}`);
+      }
+    }
   }
 
-  if (taskQualityGates.has("progress_proof_required") && state.progressProofs.length === 0) {
-    blockers.push("progress proof required but none is recorded");
+  if (
+    taskQualityGates.has("progress_proof_required") &&
+    !state.progressProofs.some((proof) => validateProgressProofRecord(proof).length === 0)
+  ) {
+    blockers.push("progress proof required but none is valid");
   }
 
   if (taskQualityGates.has("checkpoint_resume_required") && state.checkpoints.length === 0) {
@@ -218,6 +582,14 @@ export function collectAutonomousExecutionBlockers(
     if (!latestCheckpoint?.compressedContextRef) {
       blockers.push("memory compaction required but the latest checkpoint lacks compressed context");
     }
+  }
+
+  if (
+    state.profile === "legacy_rewrite" &&
+    rewriteCriticalPhases.has(state.phase) &&
+    snapshot.comprehensionSummary.rewriteReadiness === "blocked"
+  ) {
+    blockers.push("rewrite recommendation blocked: critical repo-understanding threshold not met");
   }
 
   return [...new Set(blockers)];
@@ -245,6 +617,28 @@ export function mergeCoverageGaps(
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+export function mergeUnderstandingMaps(
+  existing: readonly UnderstandingMapRecord[],
+  updates: readonly UnderstandingMapRecord[]
+): UnderstandingMapRecord[] {
+  const byKind = new Map(existing.map((map) => [map.kind, map]));
+  for (const map of updates) {
+    byKind.set(map.kind, map);
+  }
+  return [...byKind.values()].sort((left, right) => left.kind.localeCompare(right.kind));
+}
+
+export function mergeRuntimeTraces(
+  existing: readonly RuntimeTraceRecord[],
+  updates: readonly RuntimeTraceRecord[]
+): RuntimeTraceRecord[] {
+  const byId = new Map(existing.map((trace) => [trace.traceId, trace]));
+  for (const trace of updates) {
+    byId.set(trace.traceId, trace);
+  }
+  return [...byId.values()].sort((left, right) => left.traceId.localeCompare(right.traceId));
+}
+
 function extractWorkflowProofTaskId(targetId: string, nextActions: readonly string[]): string | undefined {
   const normalizedTargetId = targetId.trim();
   if (!normalizedTargetId.startsWith("task:")) {
@@ -264,7 +658,7 @@ export function selectAutonomousNextTarget(
   state: AutonomousExecutionState
 ): AutonomousNextTarget | undefined {
   const blockingGap = [...state.gaps]
-    .filter((gap) => gap.status === "open" && gap.blocking)
+    .filter((gap) => isGapBlocking(gap))
     .sort((left, right) => {
       const severityOrder = gapSeverityWeight[right.severity] - gapSeverityWeight[left.severity];
       if (severityOrder !== 0) {
@@ -295,13 +689,15 @@ export function selectAutonomousNextTarget(
     };
   }
 
-  const latestProgressProof = [...state.progressProofs].sort((left, right) => {
-    const cycleOrder = right.cycle - left.cycle;
-    if (cycleOrder !== 0) {
-      return cycleOrder;
-    }
-    return right.createdAt.localeCompare(left.createdAt);
-  })[0];
+  const latestProgressProof = [...state.progressProofs]
+    .sort((left, right) => {
+      const cycleOrder = right.cycle - left.cycle;
+      if (cycleOrder !== 0) {
+        return cycleOrder;
+      }
+      return right.createdAt.localeCompare(left.createdAt);
+    })
+    .find((proof) => validateProgressProofRecord(proof).length === 0);
   if (latestProgressProof?.nextTarget.trim()) {
     const progressProofTarget = latestProgressProof.nextTarget.trim();
     const nextActions = latestProgressProof.whyNext?.trim()

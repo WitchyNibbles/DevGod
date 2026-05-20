@@ -1384,6 +1384,8 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.doesNotMatch(agentsMd, /\.devgod\/ACTIVE/);
   assert.match(agentsMd, /`reviewer`, `qa_engineer`, and `security_reviewer` gates/);
   assert.match(agentsMd, /workflow-proof --run-id latest --task-id/);
+  assert.match(agentsMd, /explicit workflow artifact refs/);
+  assert.match(agentsMd, /review_exports=runtime_optional/);
 
   const memoryReadme = await readFile(path.join(targetRoot, ".devgod/memory/README.md"), "utf8");
   assert.match(memoryReadme, /devgod memory/i);

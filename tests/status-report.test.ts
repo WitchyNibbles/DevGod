@@ -229,9 +229,38 @@ test("buildOperatorStatusReport exposes autonomous coverage and resume guidance 
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["runtime proof must remain blocked until authenticated reviews complete"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/status-report.test.ts"],
       lastUpdatedAt: "2026-05-15T10:00:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    updatedAt: "2026-05-15T10:00:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:status-report",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow-proof side effects"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-15T10:00:00.000Z"
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -293,6 +322,7 @@ test("buildOperatorStatusReport exposes autonomous coverage and resume guidance 
   assert.equal(report.autonomous.configured, true);
   assert.equal(report.autonomous.profile, "legacy_rewrite");
   assert.equal(report.autonomous.coverageSummary?.criticalItemCoverage, 1);
+  assert.equal(report.autonomous.comprehensionSummary?.inventoryCompleteness, 1);
   assert.equal(report.autonomous.blockers[0], "blocking gaps remain open: 1");
   assert.equal(report.autonomous.latestProgressProof?.proofId, "proof-2");
   assert.equal(report.autonomous.latestCheckpoint?.checkpointId, "cp-2");

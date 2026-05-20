@@ -283,6 +283,16 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
         `- gaps: open=${report.autonomous.coverageSummary.openGapCount} blocking=${report.autonomous.coverageSummary.blockingGapCount}`
       );
     }
+    if (report.autonomous.comprehensionSummary) {
+      lines.push(
+        `- comprehension: inventory=${report.autonomous.comprehensionSummary.inventoryCompleteness} business-rules=${report.autonomous.comprehensionSummary.businessRuleCoverage} contradictions=${report.autonomous.comprehensionSummary.contradictionGapCount} trace-records=${report.autonomous.comprehensionSummary.runtimeTraceCount} rewrite=${report.autonomous.comprehensionSummary.rewriteReadiness}`
+      );
+      if (report.autonomous.comprehensionSummary.missingEvidence.length > 0) {
+        lines.push(
+          `- comprehension missing: ${report.autonomous.comprehensionSummary.missingEvidence.join("; ")}`
+        );
+      }
+    }
     if (report.autonomous.latestProgressProof) {
       lines.push(
         `- latest proof: ${report.autonomous.latestProgressProof.proofId} next=${report.autonomous.latestProgressProof.nextTarget}`

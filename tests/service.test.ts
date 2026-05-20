@@ -2735,9 +2735,38 @@ test("getStatus surfaces autonomous execution coverage and readiness when config
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["workflow proof must not pass before authenticated reviews complete"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records authenticated workflow proof"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
     }
   ]);
   await service.recordProgressProof(run.id, {
@@ -2769,7 +2798,102 @@ test("getStatus surfaces autonomous execution coverage and readiness when config
   assert.equal(status.autonomousExecution?.state.profile, "legacy_rewrite");
   assert.equal(status.autonomousExecution?.coverageSummary.criticalItemCoverage, 1);
   assert.equal(status.autonomousExecution?.coverageSummary.runtimeTraceCoverage, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary.rewriteReadiness, "ready");
   assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
+});
+
+test("getExecutionPlan blocks rewrite recommendations when repo-understanding thresholds are unmet", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite readiness",
+    request: "Block modernization advice until repo understanding is complete."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous execution artifacts recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 1,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:rewrite-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["rewrite planning must respect authenticated proof authority"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "blocked");
+  if (plan.directive.kind === "blocked") {
+    assert.ok(
+      plan.directive.blockers.includes("rewrite recommendation blocked: critical repo-understanding threshold not met")
+    );
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("understanding map missing: repo_map")));
+  }
 });
 
 test("getExecutionPlan blocks terminal tasks when autonomous execution evidence is missing", async () => {
@@ -3072,6 +3196,33 @@ test("selectAutonomousNextTarget falls back to the latest checkpoint when no blo
   assert.deepEqual(target?.nextActions, ["resume the checkpoint target"]);
 });
 
+test("recordProgressProof rejects narrative-only progress proofs with no measurable delta", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Progress proof validation",
+    request: "Reject shallow progress proofs."
+  });
+
+  await assert.rejects(
+    service.recordProgressProof(run.id, {
+      cycle: 1,
+      proofId: "proof-invalid",
+      phaseBefore: "validation",
+      phaseAfter: "validation",
+      evidenceRefs: ["src/core/service.ts:1"],
+      coverageDelta: { validated: 0 },
+      blockingGapDelta: { closed: 0, opened: 0 },
+      nextTarget: "task:rewrite",
+      whyNext: "narrative only",
+      createdAt: new Date().toISOString()
+    }),
+    /measurable delta/i
+  );
+});
+
 test("getExecutionPlan returns complete once autonomous execution evidence satisfies the gates", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -3150,9 +3301,38 @@ test("getExecutionPlan returns complete once autonomous execution evidence satis
       callsiteCount: 4,
       callsitesAnalyzed: 4,
       runtimeTraced: true,
+      businessRules: ["workflow proof completion remains gated by authenticated reviews"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:workflow-proof-complete",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["approves runtime workflow proof"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
     }
   ]);
   await service.recordProgressProof(run.id, {
@@ -3182,6 +3362,7 @@ test("getExecutionPlan returns complete once autonomous execution evidence satis
 
   assert.equal(plan.directive.kind, "complete");
   assert.ok(plan.autonomousExecution);
+  assert.equal(plan.autonomousExecution?.comprehensionSummary.rewriteReadiness, "ready");
   assert.equal(plan.autonomousExecution?.phaseReadiness.status, "ready");
 });
 

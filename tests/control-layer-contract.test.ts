@@ -50,6 +50,8 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(taskPacket, /## Required runtime traces/);
   assert.match(taskPacket, /## Progress proof/);
   assert.match(taskPacket, /## Interrupt checkpoint policy/);
+  assert.match(taskPacket, /## Workflow artifact refs/);
+  assert.match(taskPacket, /review_exports=required \| runtime_optional/);
   assert.match(taskPacket, /## Bad-path or edge-case checks/);
   assert.match(taskPacket, /## Residual risk disposition/);
 

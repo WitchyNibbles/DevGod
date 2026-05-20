@@ -11,6 +11,7 @@ workflow_documents=workflow_documents
 task_queue=project_runtime_state.task_queue
 product_state=project_runtime_state.product_state
 required_review_roles=reviewer,qa_engineer,security_reviewer
+release_candidate_quality_gate=release_readiness_required
 review_authority=runtime_authenticated_only
 workflow_check=node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts workflow-proof --run-id latest --task-id <task-id>
 workflow_check_scope=runtime_authority_only
@@ -42,6 +43,8 @@ ${workflowContractBlock}
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
 - create or update the runtime intake record before moving past intake
+- require task packets to declare explicit workflow artifact refs whenever they inherit a parent brief or plan, or when runtime authority may satisfy review gates before markdown review exports exist
+- do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses \`review_exports=runtime_optional\` under runtime authority
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
@@ -50,8 +53,10 @@ ${workflowContractBlock}
 - preserve the trivial fast path for single-scope low-risk work
 - unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
 - exported review markdown, if present, is evidence only and never reviewer authority
+- runtime workflow proof is the completion authority; exported markdown remains evidence and export regression coverage
 - reviewer identity and waiver authority must come from authenticated runtime policy or another authenticated principal-binding source
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
+- release-sensitive work also requires \`release_readiness_required\` quality-gate evidence; this is mandatory evidence, not a fourth review role
 
 ## Autonomy Loop
 

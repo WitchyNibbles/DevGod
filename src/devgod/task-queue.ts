@@ -47,6 +47,44 @@ export interface AdvanceTaskQueueResult {
   nextTask: TaskQueueTask | null;
 }
 
+function uniqueNonEmptyItems(items: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of items) {
+    const normalized = item.trim();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+function requiresDetailedWorkflowEvidence(task: TaskQueueTask): boolean {
+  return task.class !== "docs_only";
+}
+
+export function deriveTaskQueueEvidence(input: {
+  taskId: string;
+  verification: readonly string[];
+  qualityGates?: readonly string[] | undefined;
+}): string[] {
+  const evidence = [`task packet: ${input.taskId}`];
+
+  for (const step of input.verification) {
+    evidence.push(`verification: ${step}`);
+  }
+
+  if (input.qualityGates?.includes("release_readiness_required")) {
+    evidence.push("quality gate: release_readiness_required");
+  }
+
+  return uniqueNonEmptyItems(evidence);
+}
+
 function asRecord(value: unknown, context: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${context} must be an object`);
@@ -140,6 +178,28 @@ function validateTaskQueue(queue: TaskQueue): TaskQueue {
       if (!taskIds.has(dependencyId)) {
         throw new Error(`task "${task.id}" has missing dependency "${dependencyId}"`);
       }
+    }
+  }
+
+  return queue;
+}
+
+export function validateWorkflowTaskQueue(queue: TaskQueue): TaskQueue {
+  for (const task of queue.tasks) {
+    if (!requiresDetailedWorkflowEvidence(task)) {
+      continue;
+    }
+
+    if (uniqueNonEmptyItems(task.acceptance_criteria).length === 0) {
+      throw new Error(`task "${task.id}" must include at least one acceptance criterion`);
+    }
+
+    if (uniqueNonEmptyItems(task.verification).length === 0) {
+      throw new Error(`task "${task.id}" must include at least one verification step`);
+    }
+
+    if (uniqueNonEmptyItems(task.evidence).length === 0) {
+      throw new Error(`task "${task.id}" must include at least one evidence reference`);
     }
   }
 

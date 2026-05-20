@@ -48,7 +48,12 @@ import { ObsidianMarkdownRenderer } from "./docs-export/renderer.ts";
 import { ObsidianVaultWriter } from "./docs-export/obsidian-writer.ts";
 import { buildObsidianTargetPath } from "./docs-export/targets.ts";
 import { RuntimeWorklogProvider, type WorklogProvider } from "./docs-export/worklog-provider.ts";
-import { advanceTaskQueue, parseTaskQueueContent, type TaskQueue } from "./devgod/task-queue.ts";
+import {
+  advanceTaskQueue,
+  deriveTaskQueueEvidence,
+  parseTaskQueueContent,
+  type TaskQueue
+} from "./devgod/task-queue.ts";
 import { effectiveRequiredReviews, isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
 import { analysisPhases } from "./domain/types.ts";
 import {
@@ -1696,7 +1701,11 @@ function buildAuthoritativeTaskQueueFromSnapshot(
       depends_on: [...task.packet.dependencies],
       acceptance_criteria: [...task.packet.acceptanceCriteria],
       verification: [...task.packet.verificationSteps],
-      evidence: [],
+      evidence: deriveTaskQueueEvidence({
+        taskId: task.packet.taskId,
+        verification: task.packet.verificationSteps,
+        qualityGates: task.packet.qualityGates
+      }),
       blocker:
         task.status === "blocked"
           ? "runtime task blocked"
@@ -1732,9 +1741,9 @@ function alignQueueToActiveTask(
           status: "in_progress" as const,
           class: "release_candidate" as const,
           depends_on: [],
-          acceptance_criteria: [],
-          verification: [],
-          evidence: [],
+          acceptance_criteria: ["runtime active task must align with the task packet before completion"],
+          verification: ["runtime reconciliation required before queue advancement"],
+          evidence: ["runtime synthesized active-task export"],
           blocker: null
         }
       ];

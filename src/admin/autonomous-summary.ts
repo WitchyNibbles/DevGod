@@ -1,4 +1,4 @@
-import { collectAutonomousExecutionBlockers } from "../runtime/autonomous-execution.ts";
+import { collectAutonomousExecutionBlockers, isGapBlocking } from "../runtime/autonomous-execution.ts";
 import type {
   AutonomousExecutionState,
   AutonomousExecutionSnapshot,
@@ -48,6 +48,7 @@ export interface AutonomousOperatorSummary {
   phase?: AutonomousExecutionSnapshot["state"]["phase"] | undefined;
   manifest?: AutonomousExecutionSnapshot["state"]["manifest"] | undefined;
   coverageSummary?: AutonomousExecutionSnapshot["coverageSummary"] | undefined;
+  comprehensionSummary?: AutonomousExecutionSnapshot["comprehensionSummary"] | undefined;
   phaseReadiness?: AutonomousExecutionSnapshot["phaseReadiness"] | undefined;
   blockers: string[];
   openGaps: CoverageGapRecord[];
@@ -85,7 +86,7 @@ export function buildAutonomousOperatorSummary(input: {
 
   const { state } = autonomousExecution;
   const openGaps = state.gaps.filter((gap) => gap.status === "open");
-  const blockingGaps = openGaps.filter((gap) => gap.blocking);
+  const blockingGaps = openGaps.filter((gap) => isGapBlocking(gap));
   const blockers = collectAutonomousExecutionBlockers(state, input.snapshot.tasks);
   const latestProgressProof = latestProgressProofRecord(state.progressProofs);
   const latestCheckpoint = latestCheckpointRecord(state.checkpoints);
@@ -99,6 +100,7 @@ export function buildAutonomousOperatorSummary(input: {
     phase: state.phase,
     manifest: state.manifest,
     coverageSummary: autonomousExecution.coverageSummary,
+    comprehensionSummary: autonomousExecution.comprehensionSummary,
     phaseReadiness: autonomousExecution.phaseReadiness,
     blockers,
     openGaps,

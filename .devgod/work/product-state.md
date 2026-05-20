@@ -2,7 +2,7 @@
 
 ## Product Goal
 
-Enable DevGod to continue from requirements through planning, implementation, verification, repair, review, and next-task selection until the product-level goal is complete or a real blocker exists.
+Enable DevGod to operate as the broader autonomous execution and audit system described in `docs/autonomous-execution-redesign.md`: continue from requirements through planning, implementation, verification, repair, review, and next-task selection until required coverage and comprehension thresholds are met or a real blocker exists.
 
 ## Global Acceptance Criteria
 
@@ -37,7 +37,12 @@ Enable DevGod to continue from requirements through planning, implementation, ve
 
 ## Current Milestone
 
-Coverage and release posture hardened
+Broader autonomous-system redesign closeout
+
+## Scope correction
+
+- The previously reported `done` state applied to the narrower runtime-loop and coverage-hardening milestone, not to the full 15-part autonomous-system redesign.
+- On 2026-05-20 the broader goal was reopened after clarifying that `docs/autonomous-execution-redesign.md` is the target, not just the already shipped runtime continuation slices.
 
 ## Completed Milestones
 
@@ -51,18 +56,33 @@ Coverage and release posture hardened
 
 ## Current Task
 
-None. `2026-05-20-coverage-gate-hardening` is complete.
+None. `2026-05-20-autonomous-understanding-and-tracing` is complete.
 
 ## Next Task
 
-None queued.
+`2026-05-20-autonomous-phase-orchestration-and-eval`
 
 ## Blockers
 
-- None currently recorded for the coverage and release posture milestone.
+- No active blocker remains for `2026-05-20-autonomous-understanding-and-tracing`; typed understanding maps, runtime traces, comprehension summaries, artifact checks, and runtime workflow proof all passed on 2026-05-20.
+- The broader autonomous-system product remains incomplete because `2026-05-20-autonomous-phase-orchestration-and-eval` still requires its own execution pass, and this session’s writable scope does not include that slice’s brief/task artifacts.
 
 ## Verification Summary
 
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-check.test.ts` passed on 2026-05-20 after adding inherited-artifact refs, runtime-optional review-export coverage, and queue-validation regression coverage.
+- `node --experimental-strip-types --test tests/install.test.ts tests/admin.test.ts tests/service.test.ts` passed on 2026-05-20 after aligning the repo-local and installed runtime contract guidance.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 and produced authoritative run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 using authoritative runtime proof run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
+- `node --experimental-strip-types --test tests/coverage-ledger.test.ts tests/gap-engine.test.ts tests/progress-proof.test.ts` passed on 2026-05-20 after adding typed coverage-item, gap, and progress-proof validation coverage.
+- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/service.test.ts tests/admin.test.ts` passed on 2026-05-20 after tightening runtime validation, runtime-optional artifact checking, and workflow-check autonomous artifact semantics.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-autonomous-coverage-gap-proof-engine` passed on 2026-05-20 after adding valid coverage and progress-proof artifacts plus explicit release-readiness evidence.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-coverage-gap-proof-engine` passed on 2026-05-20 and produced authoritative run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3`.
+- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --task-id 2026-05-20-autonomous-coverage-gap-proof-engine --run-id b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3` passed on 2026-05-20 with `authorityLabel=runtime_authoritative` and `taskStatus=approved`.
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/admin.test.ts` passed on 2026-05-20 after adding typed understanding-map and runtime-trace validation, rewrite-threshold blocking, and comprehension reporting coverage.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 after repairing stale queue exports and adding runtime-proof citations to the review summaries.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 using authoritative runtime proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-understanding-and-tracing` passed on 2026-05-20 and produced authoritative run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`.
+- `node --experimental-strip-types src/admin/devgod.ts workflow-proof --task-id 2026-05-20-autonomous-understanding-and-tracing --run-id 034705c2-b598-4bbc-8c8d-eb61f5026ed2` passed on 2026-05-20 with `authorityLabel=runtime_authoritative` and `taskStatus=approved`.
 - `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts` passed on 2026-05-20 after refactoring the launcher into injectable helpers that locally cover both runnable and skipped registration paths while preserving the real Windows-only runner in `tests/setup-powershell-smoke-runner.ts`.
 - `node --experimental-strip-types --test tests/release-overlay.test.ts` passed on 2026-05-20 after asserting that `scripts/check-quality.sh` includes `npm run check:coverage`.
 - `node --experimental-strip-types --test tests/setup-powershell-smoke.test.ts tests/postgres-store.test.ts tests/github-dispatch.test.ts tests/qdrant-artifact-index.test.ts tests/release-overlay.test.ts` passed on 2026-05-20 after expanding the hotspot coverage slice and normalizing counted assertion branches.
@@ -148,6 +168,9 @@ None queued.
 
 ## Review Summary
 
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-autonomous-authority-and-artifact-contract`, and authoritative local proof run `d3c134b7-93e8-40a4-9918-0c97afb7bec5` approved the task on 2026-05-20.
+Authoritative runtime review records were seeded for `2026-05-20-autonomous-coverage-gap-proof-engine`, and runtime workflow proof run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3` approved the task on 2026-05-20.
+Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-autonomous-understanding-and-tracing`, and authoritative local proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2` approved the task on 2026-05-20.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-coverage-gate-hardening`, and authoritative local proof run `c7126547-6f14-418d-92c4-2badd3fda9c2` approved the task on 2026-05-20.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-20-managed-runtime-postgres-autostart`.
 Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, and `security_reviewer` for `2026-05-19-readme-prettify`.
@@ -163,7 +186,18 @@ Manager-written review summaries were recorded for `reviewer`, `qa_engineer`, an
 
 ## Active Verification Blocker
 
-Resolved. The restricted-environment harness issues were fixed and the previously blocked runtime-task-advance slice now has passing artifact and live workflow proof.
+- No active verification blocker remains for `2026-05-20-autonomous-authority-and-artifact-contract`; runtime workflow proof, inherited-artifact validation, and queue-schema enforcement all passed on 2026-05-20.
+- No active verification blocker remains for `2026-05-20-autonomous-coverage-gap-proof-engine`; runtime workflow proof run `b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3`, artifact checks, and focused regression suites all passed on 2026-05-20.
+- No active verification blocker remains for `2026-05-20-autonomous-understanding-and-tracing`; runtime workflow proof run `034705c2-b598-4bbc-8c8d-eb61f5026ed2`, artifact checks, and focused runtime/admin/report suites all passed on 2026-05-20.
+
+Supporting evidence:
+
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-check.test.ts` passed on 2026-05-20.
+- `node --experimental-strip-types --test tests/install.test.ts tests/admin.test.ts tests/service.test.ts` passed on 2026-05-20.
+- `node --experimental-strip-types src/admin/devgod.ts seed-workflow-proof --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20 and produced authoritative run `d3c134b7-93e8-40a4-9918-0c97afb7bec5`.
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-20-autonomous-authority-and-artifact-contract` passed on 2026-05-20.
+
+Historical note:
 
 - child `node` CLI parse checks now use exported behavior surfaces where appropriate
 - hosted UI and setup-script health checks no longer require forbidden loopback listeners during tests

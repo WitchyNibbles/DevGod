@@ -286,9 +286,38 @@ async function seedAutonomousState(
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["runtime proof stays blocked until authenticated reviews are present"],
       evidenceRefs: ["src/admin.ts:1"],
       verificationRefs: ["tests/admin.test.ts"],
       lastUpdatedAt: "2026-05-15T12:00:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(runId, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/admin.ts:1"],
+    evidenceRefs: ["tests/admin.test.ts"],
+    updatedAt: "2026-05-15T12:00:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(runId, [
+    {
+      traceId: "trace:admin-runtime",
+      targetId: "service:admin-runtime",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists runtime workflow proof state"],
+      evidenceRefs: ["tests/admin.test.ts"],
+      createdAt: "2026-05-15T12:00:00.000Z"
     }
   ]);
   await service.upsertCoverageGaps(runId, [
@@ -1371,6 +1400,7 @@ test("autonomous admin commands expose coverage, gap, checkpoint, and resume sur
   });
   assert.equal(coverage.report.items.length, 1);
   assert.equal(coverage.report.autonomous.coverageSummary?.criticalItemCoverage, 1);
+  assert.equal(coverage.report.autonomous.comprehensionSummary?.inventoryCompleteness, 1);
 
   const gaps = await executeGapsCommandFromArgs(["--run-id", run.id, "--blocking-only"], {
     getStatusSnapshot(runId) {

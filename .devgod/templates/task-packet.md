@@ -20,6 +20,8 @@ List the specialist roles whose execution must be evidenced before completion.
 
 List the task-type gates that apply, for example:
 
+Only assign file-backed gates when the task can actually produce or update the required artifacts inside its allowed write scope.
+
 - `product_acceptance`
 - `frontend_acceptance`
 - `accessibility_acceptance`
@@ -52,6 +54,22 @@ List the task-type gates that apply, for example:
 ## Progress proof
 
 ## Interrupt checkpoint policy
+
+## Workflow artifact refs
+
+Declare explicit workflow artifact ownership whenever the task inherits a parent brief or plan, or when authenticated runtime review authority is allowed to satisfy completion before markdown review exports exist.
+
+Use repo-relative `key=value` lines:
+
+brief=.devgod/work/briefs/brief-<task-id>.md
+plan=.devgod/work/plans/plan-<task-id>.md
+task=.devgod/work/tasks/task-<task-id>.md
+reviewer=.devgod/work/reviews/review-<task-id>-reviewer.md
+qa_engineer=.devgod/work/reviews/review-<task-id>-qa_engineer.md
+security_reviewer=.devgod/work/reviews/review-<task-id>-security_reviewer.md
+review_exports=required | runtime_optional
+
+When `review_exports=runtime_optional`, the task must run under the runtime workflow contract and still cite release-readiness or other gate evidence in task verification artifacts or exported review summaries.
 
 ## Allowed write scope
 

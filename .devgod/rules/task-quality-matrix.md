@@ -48,6 +48,8 @@ Use task-type quality gates in addition to the generic review trio.
 ### `release_readiness_required`
 
 - use for package, installer, migration, setup, or rollout-sensitive work
+- requires explicit release-readiness evidence in handoffs or review summaries
+- is a mandatory quality gate for release-sensitive work, not an additional review role
 
 ### `performance_check_required`
 

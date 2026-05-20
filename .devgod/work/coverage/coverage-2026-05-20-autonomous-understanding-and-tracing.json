@@ -1,0 +1,15 @@
+{
+  "run_id": "2026-05-20-autonomous-understanding-and-tracing",
+  "profile": "legacy_rewrite",
+  "required_categories": ["services", "tests", "configuration"],
+  "thresholds": {
+    "critical_item_coverage": 0.8,
+    "critical_item_validation": 0.6,
+    "callsite_coverage": 0.85,
+    "runtime_trace_coverage": 0.75,
+    "inventory_completeness": 1,
+    "business_rule_coverage": 0.8,
+    "max_contradiction_gap_count": 0,
+    "max_open_blockers": 0
+  }
+}

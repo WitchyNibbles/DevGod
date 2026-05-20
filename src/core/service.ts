@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { TaskClass, TaskStatus as QueueTaskStatus, TaskQueue } from "../devgod/task-queue.ts";
+import {
+  deriveTaskQueueEvidence,
+  type TaskClass,
+  type TaskStatus as QueueTaskStatus,
+  type TaskQueue
+} from "../devgod/task-queue.ts";
 import {
   validateReviewAction,
   validateHandoff,
@@ -24,6 +29,14 @@ import {
   createAutonomousExecutionState,
   mergeCoverageGaps,
   mergeCoverageItems,
+  mergeRuntimeTraces,
+  mergeUnderstandingMaps,
+  validateCoverageGapRecord,
+  validateCoverageItemRecord,
+  validateCoverageManifestRecord,
+  validateProgressProofRecord,
+  validateRuntimeTraceRecord,
+  validateUnderstandingMapRecord,
   runRequiresAutonomousExecution,
   selectAutonomousNextTarget
 } from "../runtime/autonomous-execution.ts";
@@ -47,6 +60,7 @@ import type {
   PlanInput,
   ProgressProofRecord,
   ProjectRuntimeMetadata,
+  RuntimeTraceRecord,
   RunExecutionPlan,
   RunResumeSnapshot,
   ReviewInput,
@@ -62,7 +76,8 @@ import type {
   SearchMemoryInput,
   SearchMemoryResult,
   TaskPacketInput,
-  TaskRecord
+  TaskRecord,
+  UnderstandingMapRecord
 } from "../domain/types.ts";
 import type { DevgodStore } from "../store/types.ts";
 import { assessTaskPacketReasoning } from "./reasoning-quality.ts";
@@ -183,7 +198,11 @@ function readAutonomousExecutionState(
     return undefined;
   }
 
-  return candidate;
+  return {
+    ...candidate,
+    understandingMaps: candidate.understandingMaps ?? [],
+    runtimeTraces: candidate.runtimeTraces ?? []
+  };
 }
 
 function mapTaskStatusToQueueStatus(status: TaskRecord["status"]): QueueTaskStatus {
@@ -225,7 +244,11 @@ function buildRuntimeTaskQueue(runStatus: RunRecord["status"], tasks: readonly T
       depends_on: [...task.packet.dependencies],
       acceptance_criteria: [...task.packet.acceptanceCriteria],
       verification: [...task.packet.verificationSteps],
-      evidence: [],
+      evidence: deriveTaskQueueEvidence({
+        taskId: task.packet.taskId,
+        verification: task.packet.verificationSteps,
+        qualityGates: task.packet.qualityGates
+      }),
       blocker:
         task.status === "blocked"
           ? "runtime task blocked"
@@ -340,6 +363,12 @@ export class DevgodCoreService {
     }
   ): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
+    if (input.manifest) {
+      const errors = validateCoverageManifestRecord(input.manifest);
+      if (errors.length > 0) {
+        throw new Error(`Invalid coverage manifest: ${errors.join("; ")}`);
+      }
+    }
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => ({
       ...(current ?? createAutonomousExecutionState({
         now,
@@ -356,6 +385,8 @@ export class DevgodCoreService {
       gaps: current?.gaps ?? [],
       checkpoints: current?.checkpoints ?? [],
       progressProofs: current?.progressProofs ?? [],
+      understandingMaps: current?.understandingMaps ?? [],
+      runtimeTraces: current?.runtimeTraces ?? [],
       executionEpoch: current?.executionEpoch ?? 1
     }));
 
@@ -381,6 +412,10 @@ export class DevgodCoreService {
 
   async upsertCoverageItems(runId: string, items: CoverageItemRecord[]): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
+    const errors = items.flatMap((item) => validateCoverageItemRecord(item));
+    if (errors.length > 0) {
+      throw new Error(`Invalid coverage item: ${errors.join("; ")}`);
+    }
     return this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
       return {
@@ -391,8 +426,50 @@ export class DevgodCoreService {
     });
   }
 
+  async upsertUnderstandingMaps(
+    runId: string,
+    maps: UnderstandingMapRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = maps.flatMap((map) => validateUnderstandingMapRecord(map));
+    if (errors.length > 0) {
+      throw new Error(`Invalid understanding map: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        understandingMaps: mergeUnderstandingMaps(base.understandingMaps ?? [], maps)
+      };
+    });
+  }
+
+  async upsertRuntimeTraces(
+    runId: string,
+    traces: RuntimeTraceRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = traces.flatMap((trace) => validateRuntimeTraceRecord(trace));
+    if (errors.length > 0) {
+      throw new Error(`Invalid runtime trace: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        runtimeTraces: mergeRuntimeTraces(base.runtimeTraces ?? [], traces)
+      };
+    });
+  }
+
   async upsertCoverageGaps(runId: string, gaps: CoverageGapRecord[]): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
+    const errors = gaps.flatMap((gap) => validateCoverageGapRecord(gap));
+    if (errors.length > 0) {
+      throw new Error(`Invalid coverage gap: ${errors.join("; ")}`);
+    }
     return this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
       return {
@@ -408,6 +485,10 @@ export class DevgodCoreService {
     proof: ProgressProofRecord
   ): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
+    const errors = validateProgressProofRecord(proof);
+    if (errors.length > 0) {
+      throw new Error(`Invalid progress proof: ${errors.join("; ")}`);
+    }
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
       const progressProofs = [...base.progressProofs, proof].sort((left, right) => left.cycle - right.cycle);

@@ -1,5 +1,5 @@
 {
-  "project_status": "done",
+  "project_status": "in_progress",
   "current_task_id": null,
   "tasks": [
     {
@@ -8,9 +8,16 @@
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
-      "acceptance_criteria": [],
-      "verification": [],
-      "evidence": [],
+      "acceptance_criteria": [
+        "autonomous execution runtime state must exist and block incomplete rewrite proof paths"
+      ],
+      "verification": [
+        "focused runtime and workflow-check regression coverage"
+      ],
+      "evidence": [
+        ".devgod/work/coverage/coverage-2026-05-15-autonomous-execution-redesign.json",
+        ".devgod/work/proofs/progress-2026-05-15-autonomous-execution-redesign.json"
+      ],
       "blocker": null
     },
     {
@@ -19,9 +26,16 @@
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
-      "acceptance_criteria": [],
-      "verification": [],
-      "evidence": [],
+      "acceptance_criteria": [
+        "admin/runtime surfaces must expose the autonomous execution contract"
+      ],
+      "verification": [
+        "focused runtime surface and workflow proof coverage"
+      ],
+      "evidence": [
+        ".devgod/work/proofs/progress-2026-05-15-autonomous-execution-surface-expansion.json",
+        ".devgod/work/checkpoints/checkpoint-2026-05-15-autonomous-execution-surface-expansion.md"
+      ],
       "blocker": null
     },
     {
@@ -30,9 +44,16 @@
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
-      "acceptance_criteria": [],
-      "verification": [],
-      "evidence": [],
+      "acceptance_criteria": [
+        "autonomous continuation must select the next actionable target from runtime evidence"
+      ],
+      "verification": [
+        "runtime next-target routing and workflow-live regression coverage"
+      ],
+      "evidence": [
+        "runtime workflow proof run 5fe2a260-81d0-402c-8d13-c074dd769383",
+        ".devgod/work/proofs/progress-2026-05-15-autonomous-next-target-directives.json"
+      ],
       "blocker": null
     },
     {
@@ -41,10 +62,101 @@
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
-      "acceptance_criteria": [],
-      "verification": [],
-      "evidence": [],
+      "acceptance_criteria": [
+        "release-quality checks must fail closed when aggregate coverage is below threshold"
+      ],
+      "verification": [
+        "quality and release-overlay verification commands"
+      ],
+      "evidence": [
+        ".devgod/work/coverage/coverage-2026-05-20-coverage-gate-hardening.json",
+        "runtime workflow proof run c7126547-6f14-418d-92c4-2badd3fda9c2"
+      ],
       "blocker": null
+    },
+    {
+      "id": "2026-05-20-autonomous-authority-and-artifact-contract",
+      "title": "2026-05-20-autonomous-authority-and-artifact-contract",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "runtime active task must align with the task packet before completion"
+      ],
+      "verification": [
+        "runtime reconciliation required before queue advancement"
+      ],
+      "evidence": [
+        "runtime workflow proof run d3c134b7-93e8-40a4-9918-0c97afb7bec5"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-20-autonomous-coverage-gap-proof-engine",
+      "title": "2026-05-20-autonomous-coverage-gap-proof-engine",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-20-autonomous-authority-and-artifact-contract"
+      ],
+      "acceptance_criteria": [
+        "runtime active task must align with the task packet before completion",
+        "typed coverage, gap, and progress-proof authority must block shallow completion claims"
+      ],
+      "verification": [
+        "runtime reconciliation required before queue advancement",
+        "focused coverage/gap/progress-proof regression coverage"
+      ],
+      "evidence": [
+        "runtime workflow proof run b4137b1b-75f3-47c7-a5cf-4a5a2d2c01b3",
+        ".devgod/work/coverage/coverage-2026-05-20-autonomous-coverage-gap-proof-engine.json",
+        ".devgod/work/proofs/progress-2026-05-20-autonomous-coverage-gap-proof-engine.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-20-autonomous-understanding-and-tracing",
+      "title": "2026-05-20-autonomous-understanding-and-tracing",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-20-autonomous-coverage-gap-proof-engine"
+      ],
+      "acceptance_criteria": [
+        "rewrite-mode readiness must fail closed until repo-understanding thresholds are satisfied",
+        "operator/runtime surfaces must expose comprehension metrics and missing evidence"
+      ],
+      "verification": [
+        "focused runtime/admin/report tests for understanding maps, traces, and rewrite gating",
+        "runtime reconciliation required before queue advancement"
+      ],
+      "evidence": [
+        "task packet and brief exported for runtime-aligned execution",
+        "runtime workflow proof run 034705c2-b598-4bbc-8c8d-eb61f5026ed2"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-20-autonomous-phase-orchestration-and-eval",
+      "title": "2026-05-20-autonomous-phase-orchestration-and-eval",
+      "status": "ready",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-20-autonomous-coverage-gap-proof-engine",
+        "2026-05-20-autonomous-understanding-and-tracing"
+      ],
+      "acceptance_criteria": [
+        "phase-readiness and orchestration evaluation must remain authoritative under runtime state",
+        "false completion, stale checkpoints, and contradiction loops must be covered by regression tests"
+      ],
+      "verification": [
+        "orchestration/eval regression coverage",
+        "runtime reconciliation required before queue advancement"
+      ],
+      "evidence": [
+        ".devgod/work/plans/plan-2026-05-20-autonomous-system-closeout-plan.md"
+      ],
+      "blocker": "next slice cannot start until its brief/task artifacts are added to writable scope"
     }
   ]
 }

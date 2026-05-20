@@ -14,24 +14,23 @@ installer, rules, templates, skills, and agent profiles. Consuming repos own liv
 
 ## Workflow contract
 
-The block below is the canonical repo-local contract for workflow artifacts.
+The block below is the canonical repo-local runtime/export contract.
 
 <!-- devgod-workflow-contract:start -->
 workflow=devgod
-active_file=.devgod/ACTIVE
-brief_file=.devgod/work/briefs/brief-<task-id>.md
-plan_file=.devgod/work/plans/plan-<task-id>.md
-task_file=.devgod/work/tasks/task-<task-id>.md
-review_file=.devgod/work/reviews/review-<task-id>-<role>.md
-brief_template=.devgod/templates/intake-brief.md
-task_template=.devgod/templates/task-packet.md
-review_template=.devgod/templates/review-gate.md
+workflow_runtime=postgres
+active_run_pointer=project_runtime_state.active_run_id
+active_task_pointer=project_runtime_state.active_task_id
+workflow_documents=workflow_documents
+task_queue=project_runtime_state.task_queue
+product_state=project_runtime_state.product_state
 required_review_roles=reviewer,qa_engineer,security_reviewer
-review_aliases=reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer
-workflow_check=bash scripts/check-devgod-workflow.sh --task-id <task-id>
-workflow_check_scope=artifact_contract_only
-review_artifact_trust=manager_summary_evidence_only
-ci_scope=artifact_contract_regression_fixtures_only
+release_candidate_quality_gate=release_readiness_required
+review_authority=runtime_authenticated_only
+workflow_check=node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --task-id <task-id>
+workflow_check_scope=runtime_authority_only
+review_artifact_trust=runtime_records_only
+ci_scope=runtime_contract_and_export_regressions
 local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
 <!-- devgod-workflow-contract:end -->
 
@@ -41,6 +40,8 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - after at most two shallow inspections, either stay on the trivial fast path or delegate bounded investigation
 - create or update `.devgod/ACTIVE` and the matching brief before moving past intake
 - use bounded investigation packets when evidence is needed: owner role, question, read scope, forbidden write scope, evidence required, max output, stop condition
+- require task packets to declare explicit workflow artifact refs whenever they inherit a parent brief or plan, or when runtime authority may satisfy review gates before markdown review exports exist
+- do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses `review_exports=runtime_optional` under runtime authority
 - require a reasoning-quality pass on substantive work: separate facts, assumptions, and guesses; generate plausible alternatives; note counter-evidence; record confidence and remaining uncertainty
 - treat `strict` as the default reasoning mode for substantive work unless a compatibility-only `dual` or `legacy` choice is explicit
 - when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial
@@ -49,6 +50,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - ambiguous or user-flow-heavy asks should involve `product_strategist` before or alongside architecture
 - manager/root may do only trivial mechanical edits outside explicit specialist ownership
 - substantive work completes only after `reviewer`, `qa_engineer`, and `security_reviewer` gates plus the workflow check
+- release-sensitive work also requires `release_readiness_required` quality-gate evidence; this is mandatory evidence, not a fourth review role
 
 ## Autonomy loop
 
@@ -134,6 +136,7 @@ Ask the user before:
 - weak reasoning evidence, unresolved contradictions, or exhausted budgets must be recorded explicitly as warnings or blockers instead of being hidden behind confident prose
 - `bash scripts/check-devgod-workflow.sh --task-id <task-id>` remains the artifact-contract proof
 - `bash scripts/check-devgod-workflow-live.sh --task-id <task-id>` is required before reporting active substantive work complete
+- runtime workflow proof is the completion authority; exported markdown remains evidence and export regression coverage
 - markdown review files are evidence summaries, not reviewer authority
 - trusted reviewer identity and waivers must come from runtime or another authenticated source
 - current task id must align across `.devgod/ACTIVE`, brief, plan/task, and review artifacts
