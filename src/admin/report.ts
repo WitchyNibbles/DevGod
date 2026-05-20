@@ -275,6 +275,31 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     if ((report.autonomous.phaseReadiness?.reasons.length ?? 0) > 0) {
       lines.push(`- readiness reasons: ${report.autonomous.phaseReadiness?.reasons.join("; ")}`);
     }
+    if (report.autonomous.phaseReadiness?.blockerKind) {
+      lines.push(`- readiness blocker kind: ${report.autonomous.phaseReadiness.blockerKind}`);
+    }
+    const readinessGuidance: string[] = [];
+    if (report.autonomous.phaseReadiness?.transition) {
+      readinessGuidance.push(`transition=${report.autonomous.phaseReadiness.transition}`);
+    }
+    if (report.autonomous.phaseReadiness?.nextPhase) {
+      readinessGuidance.push(`next=${report.autonomous.phaseReadiness.nextPhase}`);
+    }
+    if (report.autonomous.phaseReadiness?.fallbackPhase) {
+      readinessGuidance.push(`fallback=${report.autonomous.phaseReadiness.fallbackPhase}`);
+    }
+    if (typeof report.autonomous.phaseReadiness?.continuationScore === "number") {
+      readinessGuidance.push(`continuation-score=${report.autonomous.phaseReadiness.continuationScore}`);
+    }
+    if (report.autonomous.phaseReadiness?.latestCheckpointId) {
+      readinessGuidance.push(`checkpoint=${report.autonomous.phaseReadiness.latestCheckpointId}`);
+    }
+    if (report.autonomous.phaseReadiness?.staleCheckpoint) {
+      readinessGuidance.push("stale-checkpoint=yes");
+    }
+    if (readinessGuidance.length > 0) {
+      lines.push(`- readiness guidance: ${readinessGuidance.join(" ")}`);
+    }
     if (report.autonomous.coverageSummary) {
       lines.push(
         `- coverage: critical=${report.autonomous.coverageSummary.criticalItemCoverage} validation=${report.autonomous.coverageSummary.criticalItemValidation} callsites=${report.autonomous.coverageSummary.callsiteCoverage} runtime-traces=${report.autonomous.coverageSummary.runtimeTraceCoverage}`

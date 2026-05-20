@@ -7,8 +7,13 @@ import {
   type ReviewIdentityBindings
 } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
-import { selectAutonomousNextTarget } from "../src/runtime/autonomous-execution.ts";
+import {
+  buildAutonomousExecutionSnapshot,
+  isCheckpointStale,
+  selectAutonomousNextTarget
+} from "../src/runtime/autonomous-execution.ts";
 import type {
+  AutonomousExecutionState,
   MemoryEntryRecord,
   ReasoningQualityBlock,
   ReviewActionContext,
@@ -2798,7 +2803,7 @@ test("getStatus surfaces autonomous execution coverage and readiness when config
   assert.equal(status.autonomousExecution?.state.profile, "legacy_rewrite");
   assert.equal(status.autonomousExecution?.coverageSummary.criticalItemCoverage, 1);
   assert.equal(status.autonomousExecution?.coverageSummary.runtimeTraceCoverage, 1);
-  assert.equal(status.autonomousExecution?.comprehensionSummary.rewriteReadiness, "ready");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.rewriteReadiness, "ready");
   assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
 });
 
@@ -3196,6 +3201,201 @@ test("selectAutonomousNextTarget falls back to the latest checkpoint when no blo
   assert.deepEqual(target?.nextActions, ["resume the checkpoint target"]);
 });
 
+test("selectAutonomousNextTarget ignores stale checkpoints from older execution epochs", () => {
+  const state: AutonomousExecutionState = {
+    enabled: true,
+    profile: "standard_delivery" as const,
+    phase: "validation" as const,
+    manifest: {
+      runId: "run-1",
+      profile: "standard_delivery" as const,
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    },
+    coverageItems: [],
+    gaps: [],
+    checkpoints: [
+      {
+        runId: "run-1",
+        checkpointId: "cp-stale",
+        authorityLabel: "runtime_authoritative" as const,
+        phase: "inventory" as const,
+        executionEpoch: 1,
+        activeTargets: ["checkpoint:stale"],
+        recentEvidenceRefs: ["tests/service.test.ts"],
+        openGaps: [],
+        nextActions: ["resume stale checkpoint"],
+        compressedContextRef: "memory://cp-stale",
+        createdAt: "2026-05-20T12:00:00.000Z"
+      }
+    ],
+    progressProofs: [],
+    understandingMaps: [],
+    runtimeTraces: [],
+    pendingInvestigations: [],
+    executionEpoch: 3,
+    updatedAt: "2026-05-20T12:10:00.000Z"
+  };
+
+  assert.equal(isCheckpointStale(state, state.checkpoints[0]), true);
+  assert.equal(selectAutonomousNextTarget(state), undefined);
+
+  const snapshot = buildAutonomousExecutionSnapshot(state);
+  assert.equal(snapshot.phaseReadiness.blockerKind, "stale_checkpoint");
+  assert.equal(snapshot.phaseReadiness.staleCheckpoint, true);
+});
+
+test("recordProgressProof advances the execution epoch and checkpointRun persists it", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint epochs",
+    request: "Persist execution epochs across progress transitions."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+
+  const afterProof = await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-epoch-1",
+    phaseBefore: "validation",
+    phaseAfter: "regression_detection",
+    evidenceRefs: ["tests/service.test.ts"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "task:regression-check",
+    whyNext: "regression detection is the next phase",
+    createdAt: "2026-05-20T12:15:00.000Z"
+  });
+
+  assert.equal(afterProof.executionEpoch, 2);
+
+  const afterCheckpoint = await service.checkpointRun(run.id, {
+    checkpointId: "cp-epoch-2",
+    phase: "regression_detection",
+    activeTargets: ["task:regression-check"],
+    recentEvidenceRefs: ["tests/service.test.ts"],
+    openGaps: [],
+    nextActions: ["resume regression detection"],
+    compressedContextRef: "memory://cp-epoch-2",
+    createdAt: "2026-05-20T12:16:00.000Z"
+  });
+
+  assert.equal(afterCheckpoint.checkpoints.at(-1)?.executionEpoch, 2);
+});
+
+test("buildAutonomousExecutionSnapshot exposes fallback guidance for contradiction loops", () => {
+  const snapshot = buildAutonomousExecutionSnapshot({
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: "run-1",
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.8,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    },
+    coverageItems: [
+      {
+        id: "service:rewrite-core",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["src/core/service.ts:1"],
+        callsiteCount: 1,
+        callsitesAnalyzed: 1,
+        runtimeTraced: true,
+        businessRules: ["preserve authenticated proof authority"],
+        evidenceRefs: ["src/core/service.ts:1"],
+        verificationRefs: ["tests/service.test.ts"],
+        lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+      }
+    ],
+    gaps: [
+      {
+        id: "gap:contradiction",
+        targetId: "service:rewrite-core",
+        kind: "contradicting_evidence",
+        severity: "critical",
+        description: "runtime evidence still contradicts the extracted business rules",
+        blocking: true,
+        evidenceRefs: ["tests/service.test.ts"],
+        createdBy: "qa_engineer",
+        suggestedNextActions: ["reopen runtime tracing"],
+        status: "open"
+      }
+    ],
+    checkpoints: [],
+    progressProofs: [],
+    understandingMaps: [
+      "repo_map",
+      "subsystems",
+      "route_map",
+      "model_map",
+      "integration_map",
+      "authz_map",
+      "config_coupling",
+      "runtime_side_effects"
+    ].map((kind) => ({
+      kind,
+      itemCount: 1,
+      analyzedCount: 1,
+      sourceRefs: ["docs/autonomous-execution-redesign.md"],
+      evidenceRefs: ["tests/service.test.ts"],
+      updatedAt: "2026-05-20T12:00:00.000Z"
+    })),
+    runtimeTraces: [
+      {
+        traceId: "trace:rewrite-core",
+        targetId: "service:rewrite-core",
+        kind: "side_effect",
+        risky: true,
+        sideEffects: ["records workflow proof state"],
+        evidenceRefs: ["tests/service.test.ts"],
+        createdAt: "2026-05-20T12:00:00.000Z"
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: "2026-05-20T12:00:00.000Z"
+  });
+
+  assert.equal(snapshot.phaseReadiness.status, "blocked");
+  assert.equal(snapshot.phaseReadiness.blockerKind, "contradiction_loop");
+  assert.equal(snapshot.phaseReadiness.transition, "fallback");
+  assert.equal(snapshot.phaseReadiness.fallbackPhase, "runtime_tracing");
+});
+
 test("recordProgressProof rejects narrative-only progress proofs with no measurable delta", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -3362,7 +3562,7 @@ test("getExecutionPlan returns complete once autonomous execution evidence satis
 
   assert.equal(plan.directive.kind, "complete");
   assert.ok(plan.autonomousExecution);
-  assert.equal(plan.autonomousExecution?.comprehensionSummary.rewriteReadiness, "ready");
+  assert.equal(plan.autonomousExecution?.comprehensionSummary?.rewriteReadiness, "ready");
   assert.equal(plan.autonomousExecution?.phaseReadiness.status, "ready");
 });
 

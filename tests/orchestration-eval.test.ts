@@ -12,9 +12,9 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 test("orchestration baseline passes all seeded cases", async () => {
   const report = await runOrchestrationBaseline();
 
-  assert.equal(report.summary.totalCases, 8);
+  assert.equal(report.summary.totalCases, 14);
   assert.equal(report.summary.failedCases, 0);
-  assert.equal(report.summary.passedCases, 8);
+  assert.equal(report.summary.passedCases, 14);
   assert.equal(report.summary.passRate, 1);
   assert.equal(report.summary.requiredPassRate, 1);
   assert.equal(report.summary.meetsThreshold, true);
@@ -34,7 +34,13 @@ test("orchestration baseline returns deterministic case coverage", async () => {
       "partial_reviews_keep_task_blocked",
       "stale_approved_dependency_reblocked",
       "caller_asserted_review_authority_rejected",
-      "unbound_principal_rejected"
+      "unbound_principal_rejected",
+      "contradiction_loop_forces_backward_transition",
+      "stale_checkpoint_does_not_override_continuation",
+      "fresh_checkpoint_preserves_interrupted_resume",
+      "retry_budget_exhaustion_blocks_readiness",
+      "backlog_not_exhausted_false_completion_rejected",
+      "terminal_tasks_with_autonomous_target_continue_analysis"
     ]
   );
   assert.ok(report.cases.every((testCase) => testCase.authorityLabel === "derived_only"));
@@ -45,7 +51,7 @@ test("orchestration baseline report remains json-serializable", async () => {
   const report = JSON.parse(
     JSON.stringify(await runOrchestrationBaseline())
   ) as Awaited<ReturnType<typeof runOrchestrationBaseline>>;
-  assert.equal(report.summary.totalCases, 8);
+  assert.equal(report.summary.totalCases, 14);
   assert.equal(report.summary.failedCases, 0);
   assert.equal(report.cases[2]?.id, "routing_advisory_owner_dispatch");
 });

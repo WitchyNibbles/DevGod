@@ -221,6 +221,15 @@ export const analysisPhases = [
 export const runProfiles = ["standard_delivery", "legacy_rewrite", "debug_heavy"] as const;
 export const phaseReadinessStatuses = ["ready", "blocked"] as const;
 export const rewriteReadinessStatuses = ["ready", "blocked"] as const;
+export const phaseReadinessTransitions = ["advance", "hold", "fallback", "complete"] as const;
+export const phaseReadinessBlockerKinds = [
+  "none",
+  "missing_evidence",
+  "blocking_gap",
+  "contradiction_loop",
+  "stale_checkpoint",
+  "retry_budget_exhausted"
+] as const;
 
 export type RunStatus = (typeof runStatuses)[number];
 export type TaskStatus = (typeof taskStatuses)[number];
@@ -262,6 +271,8 @@ export type AnalysisPhase = (typeof analysisPhases)[number];
 export type RunProfile = (typeof runProfiles)[number];
 export type PhaseReadinessStatus = (typeof phaseReadinessStatuses)[number];
 export type RewriteReadinessStatus = (typeof rewriteReadinessStatuses)[number];
+export type PhaseReadinessTransition = (typeof phaseReadinessTransitions)[number];
+export type PhaseReadinessBlockerKind = (typeof phaseReadinessBlockerKinds)[number];
 
 export interface RetrievalMetadata {
   retrievalRoles?: RetrievalRole[] | undefined;
@@ -604,7 +615,7 @@ export interface ProgressProofRecord {
 }
 
 export interface UnderstandingMapRecord {
-  kind: UnderstandingMapKind;
+  kind: string;
   itemCount: number;
   analyzedCount?: number | undefined;
   sourceRefs: string[];
@@ -627,6 +638,7 @@ export interface CheckpointRecord {
   checkpointId: string;
   authorityLabel: "runtime_authoritative" | "operator_import";
   phase: AnalysisPhase;
+  executionEpoch?: number | undefined;
   activeTargets: string[];
   recentEvidenceRefs: string[];
   openGaps: string[];
@@ -668,6 +680,15 @@ export interface PhaseReadinessRecord {
   phase: AnalysisPhase;
   status: PhaseReadinessStatus;
   reasons: string[];
+  transition?: PhaseReadinessTransition | undefined;
+  blockerKind?: PhaseReadinessBlockerKind | undefined;
+  nextPhase?: AnalysisPhase | undefined;
+  fallbackPhase?: AnalysisPhase | undefined;
+  continuationScore?: number | undefined;
+  latestCheckpointId?: string | undefined;
+  staleCheckpoint?: boolean | undefined;
+  executionEpoch?: number | undefined;
+  retryBudgetRemaining?: number | undefined;
 }
 
 export interface AutonomousExecutionState {
@@ -679,8 +700,8 @@ export interface AutonomousExecutionState {
   gaps: CoverageGapRecord[];
   checkpoints: CheckpointRecord[];
   progressProofs: ProgressProofRecord[];
-  understandingMaps: UnderstandingMapRecord[];
-  runtimeTraces: RuntimeTraceRecord[];
+  understandingMaps?: UnderstandingMapRecord[] | undefined;
+  runtimeTraces?: RuntimeTraceRecord[] | undefined;
   pendingInvestigations: string[];
   executionEpoch: number;
   lastCheckpointId?: string | undefined;
@@ -694,7 +715,7 @@ export interface AutonomousExecutionState {
 export interface AutonomousExecutionSnapshot {
   state: AutonomousExecutionState;
   coverageSummary: CoverageSummary;
-  comprehensionSummary: ComprehensionSummary;
+  comprehensionSummary?: ComprehensionSummary | undefined;
   phaseReadiness: PhaseReadinessRecord;
   blockingGaps: CoverageGapRecord[];
 }

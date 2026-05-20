@@ -492,12 +492,15 @@ export class DevgodCoreService {
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
       const progressProofs = [...base.progressProofs, proof].sort((left, right) => left.cycle - right.cycle);
+      const nextExecutionEpoch =
+        base.phase !== proof.phaseAfter ? base.executionEpoch + 1 : base.executionEpoch;
       return {
         ...base,
         enabled: true,
         phase: proof.phaseAfter,
         progressProofs,
-        lastProgressProofId: proof.proofId
+        lastProgressProofId: proof.proofId,
+        executionEpoch: nextExecutionEpoch
       };
     });
 
@@ -527,14 +530,17 @@ export class DevgodCoreService {
     } = {}
   ): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
-    const fullCheckpoint: CheckpointRecord = {
-      ...checkpoint,
-      authorityLabel: options.authorityLabel ?? "runtime_authoritative",
-      runId
-    };
+    let fullCheckpoint: CheckpointRecord | undefined;
     const nextState = await this.saveAutonomousExecutionState(run, (current, now) => {
       const base = current ?? createAutonomousExecutionState({ now });
-      const checkpoints = [...base.checkpoints, fullCheckpoint].sort((left, right) =>
+      const storedCheckpoint: CheckpointRecord = {
+        ...checkpoint,
+        authorityLabel: options.authorityLabel ?? "runtime_authoritative",
+        runId,
+        executionEpoch: checkpoint.executionEpoch ?? base.executionEpoch
+      };
+      fullCheckpoint = storedCheckpoint;
+      const checkpoints = [...base.checkpoints, storedCheckpoint].sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt)
       );
       return {
@@ -549,6 +555,10 @@ export class DevgodCoreService {
             : base.lastSuccessfulCheckpointId
       };
     });
+
+    if (!fullCheckpoint) {
+      throw new Error("checkpoint persistence failed to produce a checkpoint record");
+    }
 
     await this.store.saveWorkflowDocument({
       id: randomUUID(),

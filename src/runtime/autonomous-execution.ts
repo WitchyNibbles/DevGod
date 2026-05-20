@@ -1,7 +1,9 @@
+import { understandingMapKinds } from "../domain/types.ts";
 import type {
   AnalysisPhase,
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
+  CheckpointRecord,
   ComprehensionSummary,
   ContinuationAction,
   CoverageGapRecord,
@@ -46,6 +48,36 @@ const rewriteCriticalPhases = new Set<AnalysisPhase>([
   "final_verification",
   "done"
 ]);
+const phaseSequence: readonly AnalysisPhase[] = [
+  "discovery",
+  "inventory",
+  "dependency_mapping",
+  "runtime_tracing",
+  "subsystem_classification",
+  "risk_analysis",
+  "modernization_strategy",
+  "migration_sequencing",
+  "implementation",
+  "validation",
+  "regression_detection",
+  "final_verification",
+  "blocked",
+  "done"
+];
+const fallbackPhaseByPhase: Partial<Record<AnalysisPhase, AnalysisPhase>> = {
+  inventory: "discovery",
+  dependency_mapping: "inventory",
+  runtime_tracing: "dependency_mapping",
+  subsystem_classification: "runtime_tracing",
+  risk_analysis: "subsystem_classification",
+  modernization_strategy: "runtime_tracing",
+  migration_sequencing: "modernization_strategy",
+  implementation: "migration_sequencing",
+  validation: "implementation",
+  regression_detection: "validation",
+  final_verification: "regression_detection",
+  done: "final_verification"
+};
 const requiredUnderstandingKindsByProfile: Record<RunProfile, readonly UnderstandingMapKind[]> = {
   standard_delivery: ["repo_map", "subsystems", "route_map"],
   legacy_rewrite: [
@@ -79,6 +111,60 @@ function ratio(numerator: number, denominator: number): number {
   }
 
   return roundMetric(numerator / denominator);
+}
+
+function clampMetric(value: number): number {
+  return roundMetric(Math.max(0, Math.min(1, value)));
+}
+
+function phaseIndex(phase: AnalysisPhase): number {
+  return phaseSequence.indexOf(phase);
+}
+
+function nextPhaseFor(currentPhase: AnalysisPhase): AnalysisPhase | undefined {
+  const index = phaseIndex(currentPhase);
+  if (index < 0 || index >= phaseSequence.length - 1) {
+    return undefined;
+  }
+
+  for (let candidateIndex = index + 1; candidateIndex < phaseSequence.length; candidateIndex += 1) {
+    const candidate = phaseSequence[candidateIndex];
+    if (candidate !== "blocked") {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function latestCheckpointRecord(checkpoints: readonly CheckpointRecord[]): CheckpointRecord | undefined {
+  return [...checkpoints].sort((left, right) => {
+    const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+    if (createdAtOrder !== 0) {
+      return createdAtOrder;
+    }
+    return right.checkpointId.localeCompare(left.checkpointId);
+  })[0];
+}
+
+export function isCheckpointStale(
+  state: AutonomousExecutionState,
+  checkpoint: CheckpointRecord | undefined
+): boolean {
+  if (!checkpoint) {
+    return false;
+  }
+
+  if (
+    typeof checkpoint.executionEpoch === "number" &&
+    checkpoint.executionEpoch < state.executionEpoch
+  ) {
+    return true;
+  }
+
+  const checkpointPhaseIndex = phaseIndex(checkpoint.phase);
+  const statePhaseIndex = phaseIndex(state.phase);
+  return checkpointPhaseIndex >= 0 && statePhaseIndex >= 0 && checkpointPhaseIndex < statePhaseIndex;
 }
 
 function thresholdFallbackForProfile(profile: RunProfile, key: keyof CoverageManifestRecord["thresholds"]): number {
@@ -261,6 +347,10 @@ export function validateProgressProofRecord(proof: ProgressProofRecord): string[
 export function validateUnderstandingMapRecord(map: UnderstandingMapRecord): string[] {
   const errors: string[] = [];
 
+  if (!understandingMapKinds.includes(map.kind as UnderstandingMapKind)) {
+    errors.push(`understanding map ${map.kind} has an unsupported kind`);
+  }
+
   validateCountMetric(`understanding map ${map.kind} itemCount`, map.itemCount, errors);
 
   if (map.analyzedCount !== undefined) {
@@ -377,7 +467,15 @@ export function computeComprehensionSummary(
   const understandingMaps = state.understandingMaps ?? [];
   const runtimeTraces = state.runtimeTraces ?? [];
   const requiredKinds = requiredUnderstandingKinds(state.profile);
-  const presentKinds = [...new Set(understandingMaps.map((map) => map.kind))].sort();
+  const presentKinds = [
+    ...new Set(
+      understandingMaps
+        .map((map) => map.kind)
+        .filter((kind): kind is UnderstandingMapKind =>
+          understandingMapKinds.includes(kind as UnderstandingMapKind)
+        )
+    )
+  ].sort();
   const missingKinds = requiredKinds.filter((kind) => !presentKinds.includes(kind));
   const inventoryCompleteness = ratio(requiredKinds.length - missingKinds.length, requiredKinds.length);
   const criticalItems = collectCriticalItems(state.coverageItems);
@@ -473,6 +571,8 @@ export function computePhaseReadiness(
   comprehensionSummary: ComprehensionSummary
 ): PhaseReadinessRecord {
   const reasons: string[] = [];
+  const latestCheckpoint = latestCheckpointRecord(state.checkpoints);
+  const staleCheckpoint = isCheckpointStale(state, latestCheckpoint);
 
   if (!state.manifest) {
     reasons.push("coverage manifest missing");
@@ -518,6 +618,16 @@ export function computePhaseReadiness(
     reasons.push("final verification requires at least one checkpoint");
   }
 
+  if (staleCheckpoint && latestCheckpoint) {
+    reasons.push(
+      `latest checkpoint ${latestCheckpoint.checkpointId} is stale for execution epoch ${state.executionEpoch}`
+    );
+  }
+
+  if (state.retryBudgetRemaining !== undefined && state.retryBudgetRemaining <= 0) {
+    reasons.push("retry budget exhausted for the current autonomous phase");
+  }
+
   if (summary.blockingGapCount > 0) {
     reasons.push(`blocking gaps remain open: ${summary.blockingGapCount}`);
   }
@@ -526,10 +636,53 @@ export function computePhaseReadiness(
     reasons.push(...comprehensionSummary.missingEvidence);
   }
 
+  const blockerKind =
+    reasons.length === 0
+      ? "none"
+      : state.retryBudgetRemaining !== undefined && state.retryBudgetRemaining <= 0
+        ? "retry_budget_exhausted"
+        : staleCheckpoint
+          ? "stale_checkpoint"
+          : comprehensionSummary.contradictionGapCount > 0
+            ? "contradiction_loop"
+            : summary.blockingGapCount > 0
+              ? "blocking_gap"
+              : "missing_evidence";
+  const nextPhase = reasons.length === 0 ? nextPhaseFor(state.phase) : undefined;
+  const fallbackPhase =
+    reasons.length > 0 && blockerKind !== "retry_budget_exhausted"
+      ? fallbackPhaseByPhase[state.phase]
+      : undefined;
+  const transition =
+    reasons.length === 0
+      ? state.phase === "done"
+        ? "complete"
+        : nextPhase
+          ? "advance"
+          : "hold"
+      : fallbackPhase
+        ? "fallback"
+        : "hold";
+  const continuationPenalty =
+    (reasons.length > 0 ? 0.25 : 0) +
+    Math.min(summary.blockingGapCount * 0.2, 0.4) +
+    (staleCheckpoint ? 0.15 : 0) +
+    (state.retryBudgetRemaining !== undefined && state.retryBudgetRemaining <= 0 ? 0.2 : 0) +
+    ((state.phase === "final_verification" || state.phase === "done") && state.progressProofs.length === 0 ? 0.1 : 0);
+
   return {
     phase: state.phase,
     status: reasons.length === 0 ? "ready" : "blocked",
-    reasons
+    reasons,
+    transition,
+    blockerKind,
+    nextPhase,
+    fallbackPhase,
+    continuationScore: clampMetric(1 - continuationPenalty),
+    latestCheckpointId: latestCheckpoint?.checkpointId,
+    staleCheckpoint,
+    executionEpoch: state.executionEpoch,
+    retryBudgetRemaining: state.retryBudgetRemaining
   };
 }
 
@@ -587,7 +740,7 @@ export function collectAutonomousExecutionBlockers(
   if (
     state.profile === "legacy_rewrite" &&
     rewriteCriticalPhases.has(state.phase) &&
-    snapshot.comprehensionSummary.rewriteReadiness === "blocked"
+    snapshot.comprehensionSummary?.rewriteReadiness === "blocked"
   ) {
     blockers.push("rewrite recommendation blocked: critical repo-understanding threshold not met");
   }
@@ -727,13 +880,15 @@ export function selectAutonomousNextTarget(
     };
   }
 
-  const latestCheckpoint = [...state.checkpoints].sort((left, right) => {
-    const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
-    if (createdAtOrder !== 0) {
-      return createdAtOrder;
-    }
-    return right.checkpointId.localeCompare(left.checkpointId);
-  })[0];
+  const latestCheckpoint = [...state.checkpoints]
+    .sort((left, right) => {
+      const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+      if (createdAtOrder !== 0) {
+        return createdAtOrder;
+      }
+      return right.checkpointId.localeCompare(left.checkpointId);
+    })
+    .find((checkpoint) => !isCheckpointStale(state, checkpoint));
   const checkpointTarget = latestCheckpoint?.activeTargets[0]?.trim();
   if (latestCheckpoint && checkpointTarget) {
     const nextActions =

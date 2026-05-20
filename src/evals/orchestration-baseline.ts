@@ -2,7 +2,16 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { createReviewActionContextResolver, type AuthenticatedPrincipal, type ReviewIdentityBindings } from "../core/review-context.ts";
 import { DevgodCoreService } from "../core/service.ts";
-import type { ReviewActionContext, ReviewRecord, TaskPacketInput } from "../domain/types.ts";
+import {
+  buildAutonomousExecutionSnapshot,
+  selectAutonomousNextTarget
+} from "../runtime/autonomous-execution.ts";
+import type {
+  AutonomousExecutionState,
+  ReviewActionContext,
+  ReviewRecord,
+  TaskPacketInput
+} from "../domain/types.ts";
 import { MemoryStore } from "../store/memory-store.ts";
 
 type OrchestrationEvalArea = "gate" | "lifecycle" | "state" | "trust";
@@ -300,6 +309,95 @@ function buildResult(input: Omit<OrchestrationEvalCaseResult, "authorityLabel" |
     score,
     threshold,
     authorityLabel: "derived_only"
+  };
+}
+
+function buildLegacyRewriteState(
+  overrides: Partial<AutonomousExecutionState> = {}
+): AutonomousExecutionState {
+  const now = "2026-05-20T12:00:00.000Z";
+  const base: AutonomousExecutionState = {
+    enabled: true,
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: "run-legacy",
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.8,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    },
+    coverageItems: [
+      {
+        id: "service:rewrite-core",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["src/core/service.ts:1"],
+        callsiteCount: 2,
+        callsitesAnalyzed: 2,
+        runtimeTraced: true,
+        businessRules: ["preserve authenticated workflow proof authority"],
+        evidenceRefs: ["src/core/service.ts:1"],
+        verificationRefs: ["tests/orchestration-eval.test.ts"],
+        lastUpdatedAt: now
+      }
+    ],
+    gaps: [],
+    checkpoints: [],
+    progressProofs: [],
+    understandingMaps: [
+      "repo_map",
+      "subsystems",
+      "route_map",
+      "model_map",
+      "integration_map",
+      "authz_map",
+      "config_coupling",
+      "runtime_side_effects"
+    ].map((kind) => ({
+      kind,
+      itemCount: 1,
+      analyzedCount: 1,
+      sourceRefs: ["docs/autonomous-execution-redesign.md"],
+      evidenceRefs: ["tests/orchestration-eval.test.ts"],
+      updatedAt: now
+    })),
+    runtimeTraces: [
+      {
+        traceId: "trace:rewrite-core",
+        targetId: "service:rewrite-core",
+        kind: "side_effect",
+        risky: true,
+        sideEffects: ["records workflow-proof results"],
+        evidenceRefs: ["tests/orchestration-eval.test.ts"],
+        createdAt: now
+      }
+    ],
+    pendingInvestigations: [],
+    executionEpoch: 1,
+    updatedAt: now
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    manifest: overrides.manifest ?? base.manifest,
+    coverageItems: overrides.coverageItems ?? base.coverageItems,
+    gaps: overrides.gaps ?? base.gaps,
+    checkpoints: overrides.checkpoints ?? base.checkpoints,
+    progressProofs: overrides.progressProofs ?? base.progressProofs,
+    understandingMaps: overrides.understandingMaps ?? base.understandingMaps,
+    runtimeTraces: overrides.runtimeTraces ?? base.runtimeTraces,
+    pendingInvestigations: overrides.pendingInvestigations ?? base.pendingInvestigations
   };
 }
 
@@ -606,6 +704,306 @@ export async function runOrchestrationBaseline(): Promise<OrchestrationEvalRepor
         area: "trust",
         passed: message.includes("No review identity binding for github:mallory"),
         details: message
+      })
+    );
+  }
+
+  {
+    const snapshot = buildAutonomousExecutionSnapshot(
+      buildLegacyRewriteState({
+        gaps: [
+          {
+            id: "gap:contradiction",
+            targetId: "service:rewrite-core",
+            kind: "contradicting_evidence",
+            severity: "critical",
+            description: "rewrite traces and business-rule extraction still disagree",
+            blocking: true,
+            evidenceRefs: ["tests/orchestration-eval.test.ts"],
+            createdBy: "qa_engineer",
+            suggestedNextActions: ["reopen runtime tracing before modernization strategy"],
+            status: "open"
+          }
+        ]
+      })
+    );
+
+    cases.push(
+      buildResult({
+        id: "contradiction_loop_forces_backward_transition",
+        area: "state",
+        passed:
+          snapshot.phaseReadiness.status === "blocked" &&
+          snapshot.phaseReadiness.blockerKind === "contradiction_loop" &&
+          snapshot.phaseReadiness.transition === "fallback" &&
+          snapshot.phaseReadiness.fallbackPhase === "runtime_tracing",
+        details: `status=${snapshot.phaseReadiness.status} blocker=${snapshot.phaseReadiness.blockerKind} fallback=${snapshot.phaseReadiness.fallbackPhase ?? "none"}`
+      })
+    );
+  }
+
+  {
+    const state = buildLegacyRewriteState({
+      profile: "standard_delivery",
+      phase: "validation",
+      checkpoints: [
+        {
+          runId: "run-standard",
+          checkpointId: "cp-stale",
+          authorityLabel: "runtime_authoritative",
+          phase: "inventory",
+          executionEpoch: 1,
+          activeTargets: ["checkpoint:stale"],
+          recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+          openGaps: [],
+          nextActions: ["resume from stale checkpoint"],
+          compressedContextRef: "memory://cp-stale",
+          createdAt: "2026-05-20T11:00:00.000Z"
+        }
+      ],
+      understandingMaps: [],
+      runtimeTraces: [],
+      executionEpoch: 3
+    });
+    const snapshot = buildAutonomousExecutionSnapshot(state);
+    const nextTarget = selectAutonomousNextTarget(state);
+
+    cases.push(
+      buildResult({
+        id: "stale_checkpoint_does_not_override_continuation",
+        area: "state",
+        passed:
+          nextTarget === undefined &&
+          snapshot.phaseReadiness.blockerKind === "stale_checkpoint" &&
+          snapshot.phaseReadiness.staleCheckpoint === true,
+        details: `target=${nextTarget?.targetId ?? "none"} blocker=${snapshot.phaseReadiness.blockerKind} stale=${snapshot.phaseReadiness.staleCheckpoint === true ? "yes" : "no"}`
+      })
+    );
+  }
+
+  {
+    const snapshot = buildAutonomousExecutionSnapshot(
+      buildLegacyRewriteState({
+        profile: "standard_delivery",
+        phase: "validation",
+        checkpoints: [
+          {
+            runId: "run-standard",
+            checkpointId: "cp-fresh",
+            authorityLabel: "runtime_authoritative",
+            phase: "validation",
+            executionEpoch: 2,
+            activeTargets: ["checkpoint:fresh"],
+            recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+            openGaps: [],
+            nextActions: ["resume from the fresh checkpoint"],
+            compressedContextRef: "memory://cp-fresh",
+            createdAt: "2026-05-20T12:05:00.000Z"
+          }
+        ],
+        understandingMaps: [],
+        runtimeTraces: [],
+        executionEpoch: 2
+      })
+    );
+    const nextTarget = selectAutonomousNextTarget(snapshot.state);
+
+    cases.push(
+      buildResult({
+        id: "fresh_checkpoint_preserves_interrupted_resume",
+        area: "state",
+        passed:
+          snapshot.phaseReadiness.status === "ready" &&
+          nextTarget?.source === "checkpoint" &&
+          nextTarget.targetId === "checkpoint:fresh",
+        details: `status=${snapshot.phaseReadiness.status} source=${nextTarget?.source ?? "none"} target=${nextTarget?.targetId ?? "none"}`
+      })
+    );
+  }
+
+  {
+    const snapshot = buildAutonomousExecutionSnapshot(
+      buildLegacyRewriteState({
+        profile: "standard_delivery",
+        phase: "validation",
+        checkpoints: [],
+        understandingMaps: [],
+        runtimeTraces: [],
+        retryBudgetRemaining: 0
+      })
+    );
+
+    cases.push(
+      buildResult({
+        id: "retry_budget_exhaustion_blocks_readiness",
+        area: "gate",
+        passed:
+          snapshot.phaseReadiness.status === "blocked" &&
+          snapshot.phaseReadiness.blockerKind === "retry_budget_exhausted" &&
+          snapshot.phaseReadiness.transition === "hold",
+        details: `status=${snapshot.phaseReadiness.status} blocker=${snapshot.phaseReadiness.blockerKind} transition=${snapshot.phaseReadiness.transition ?? "none"}`
+      })
+    );
+  }
+
+  {
+    const { service } = createEvalService();
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Backlog still open",
+      request: "Do not mark the run complete while queued work remains."
+    });
+
+    await service.createTaskGraph(run.id, [
+      taskPacket({ taskId: "plan" }),
+      taskPacket({
+        taskId: "build",
+        dependencies: ["plan"],
+        ownerRole: "backend_engineer",
+        requiredSpecialistRoles: ["backend_engineer"],
+        allowedWriteScope: ["src/core"]
+      })
+    ]);
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "done"
+    });
+
+    const plan = await service.getExecutionPlan(run.id);
+
+    cases.push(
+      buildResult({
+        id: "backlog_not_exhausted_false_completion_rejected",
+        area: "lifecycle",
+        passed: plan.directive.kind === "dispatch_owner",
+        details: `directive=${plan.directive.kind}`
+      })
+    );
+  }
+
+  {
+    const { service } = createEvalService();
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Autonomous continuation",
+      request: "Keep moving from authoritative runtime evidence."
+    });
+
+    await service.createTaskGraph(run.id, [
+      taskPacket({
+        taskId: "rewrite",
+        qualityGates: [
+          "product_acceptance",
+          "coverage_ledger_required",
+          "progress_proof_required",
+          "checkpoint_resume_required"
+        ]
+      })
+    ]);
+    await service.claimTask(run.id, "rewrite", "planner");
+    await submitReadyForReview(service, run.id, "rewrite");
+    await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+      reviewerRole: "reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "final_verification",
+      manifest: {
+        runId: run.id,
+        profile: "legacy_rewrite",
+        requiredCategories: ["services"],
+        thresholds: {
+          criticalItemCoverage: 0.8,
+          criticalItemValidation: 0.6,
+          callsiteCoverage: 0.85,
+          runtimeTraceCoverage: 0.75
+        }
+      }
+    });
+    await service.upsertCoverageItems(run.id, [
+      {
+        id: "service:workflow-proof",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["src/core/service.ts:1"],
+        callsiteCount: 1,
+        callsitesAnalyzed: 1,
+        runtimeTraced: true,
+        evidenceRefs: ["src/core/service.ts:1"],
+        verificationRefs: ["tests/orchestration-eval.test.ts"],
+        lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+      }
+    ]);
+    await service.upsertCoverageGaps(run.id, [
+      {
+        id: "gap:workflow-proof",
+        targetId: "task:workflow-proof",
+        kind: "missing_validation",
+        severity: "high",
+        description: "workflow proof still needs to run",
+        blocking: true,
+        evidenceRefs: ["tests/orchestration-eval.test.ts"],
+        createdBy: "qa_engineer",
+        suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+        status: "open"
+      }
+    ]);
+    await service.recordProgressProof(run.id, {
+      cycle: 1,
+      proofId: "proof-1",
+      phaseBefore: "validation",
+      phaseAfter: "final_verification",
+      evidenceRefs: ["tests/orchestration-eval.test.ts"],
+      coverageDelta: { validated: 1 },
+      blockingGapDelta: { closed: 0, opened: 1 },
+      nextTarget: "task:workflow-proof",
+      whyNext: "authenticated workflow proof remains the next target",
+      createdAt: "2026-05-20T12:01:00.000Z"
+    });
+    await service.checkpointRun(run.id, {
+      checkpointId: "cp-1",
+      phase: "final_verification",
+      activeTargets: ["task:workflow-proof"],
+      recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+      openGaps: ["gap:workflow-proof"],
+      nextActions: ["run workflow-proof after authenticated reviews"],
+      compressedContextRef: "memory://cp-1",
+      createdAt: "2026-05-20T12:02:00.000Z"
+    });
+
+    const plan = await service.getExecutionPlan(run.id);
+
+    cases.push(
+      buildResult({
+        id: "terminal_tasks_with_autonomous_target_continue_analysis",
+        area: "lifecycle",
+        passed:
+          plan.directive.kind === "continue_analysis" &&
+          plan.directive.targetId === "task:workflow-proof",
+        details:
+          plan.directive.kind === "continue_analysis"
+            ? `directive=${plan.directive.kind} target=${plan.directive.targetId} source=${plan.directive.source}`
+            : `directive=${plan.directive.kind}`
       })
     );
   }
