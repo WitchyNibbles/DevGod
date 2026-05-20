@@ -1,5 +1,5 @@
 {
-  "project_status": "approved",
+  "project_status": "complete",
   "current_task_id": null,
   "tasks": [
     {
@@ -22,13 +22,271 @@
         "npm run benchmark:orchestration -- --format markdown"
       ],
       "evidence": [
-        "task packet: 2026-05-20-broader-autonomy-completion-reopen",
-        "verification: node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/runtime-surface.test.ts tests/ops-recovery.test.ts",
-        "verification: npm run check:coverage",
-        "verification: npm run typecheck",
-        "verification: npm run status",
-        "verification: npm run eval:orchestration",
-        "verification: npm run benchmark:orchestration -- --format markdown"
+        "task packet: 2026-05-20-broader-autonomy-completion-reopen"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-analysis-depth-profile-expansion",
+      "title": "Broaden minimum understanding profiles and surface missing understanding kinds",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "status shows missing understanding kinds and narrow-green runs stop implying broad readiness"
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/status-report.test.ts tests/service.test.ts",
+        "npm run status"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-analysis-depth-profile-expansion.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-code-intelligence-inventory-generation",
+      "title": "Generate stronger code-backed inventory and explicit ambiguity gaps",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-analysis-depth-profile-expansion"
+      ],
+      "acceptance_criteria": [
+        "coverage items are generated from code-backed signals and ambiguity becomes explicit"
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts",
+        "npm run status"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-code-intelligence-inventory-generation.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-comprehension-gating-hardening",
+      "title": "Refuse rewrite-style conclusions when understanding thresholds are unmet",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-code-intelligence-inventory-generation"
+      ],
+      "acceptance_criteria": [
+        "insufficient understanding yields continue_analysis, rebuild_inventory, or blocked instead of optimistic completion"
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/orchestration-eval.test.ts tests/report-command.test.ts tests/service.test.ts tests/status-report.test.ts",
+        "npm run eval:orchestration"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-comprehension-gating-hardening.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-runtime-trace-capture",
+      "title": "Capture risky runtime traces with freshness and provenance",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-code-intelligence-inventory-generation"
+      ],
+      "acceptance_criteria": [
+        "risky targets without traces are surfaced deterministically and trace evidence is inspectable"
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/admin.test.ts",
+        "npm run status"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-runtime-trace-capture.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-adversarial-orchestration-evals",
+      "title": "Generate deterministic adversarial orchestration cases",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-runtime-trace-capture"
+      ],
+      "acceptance_criteria": [
+        "wider generated cases catch failures beyond the curated baseline with reproducible seeds"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/orchestration-eval.test.ts",
+        "npm run eval:orchestration"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-adversarial-orchestration-evals.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-installed-repo-bad-path-fixtures",
+      "title": "Exercise consuming-repo style setup and bad-path fixtures",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-runtime-trace-capture"
+      ],
+      "acceptance_criteria": [
+        "missing adapters, bad bindings, stale exports, and incomplete setup fail clearly in fixtures"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/happy-path.test.ts",
+        "npm run verify:setup"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-installed-repo-bad-path-fixtures.json"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-verification-gate-tightening",
+      "title": "Require stronger verification defaults for substantive autonomy work",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "specialist_verified work cannot skip strict reasoning or stronger artifact gates"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/workflow-check.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-verification-gate-tightening",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-verification-gate-tightening"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-verification-gate-tightening.json",
+        "runtime proof: d1fad8ea-a05e-44fc-bc89-cf126c4a262b"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-installed-repo-verification-harness",
+      "title": "Prove the install surface works end to end in a fresh target repo",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-installed-repo-bad-path-fixtures",
+        "2026-05-21-verification-gate-tightening"
+      ],
+      "acceptance_criteria": [
+        "the package proves its install surface end to end and failures identify setup, identity, or runtime causes precisely"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/workflow-scaffold.test.ts",
+        "node --experimental-strip-types --test tests/happy-path.test.ts",
+        "bash scripts/verify-installed-repo-harness.sh",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-installed-repo-verification-harness",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-installed-repo-verification-harness"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-installed-repo-verification-harness.json",
+        "runtime proof: 25dd1926-070b-4279-bd13-7e96b859d68e"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-long-horizon-eval-layer",
+      "title": "Add replayable multi-step evaluation beyond repo-local proofs",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-adversarial-orchestration-evals"
+      ],
+      "acceptance_criteria": [
+        "evaluation output distinguishes repo-local proof from broader replay-grade evidence"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/orchestration-eval.test.ts tests/orchestration-benchmark.test.ts",
+        "npm run eval:orchestration",
+        "npm run benchmark:orchestration -- --format markdown",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-long-horizon-eval-layer",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-long-horizon-eval-layer"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-long-horizon-eval-layer.json",
+        "runtime proof: ad241887-4e66-476e-8297-70e173836d29"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-status-truth-sharpening",
+      "title": "Sharpen status surfaces around authoritative versus derived truth",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-long-horizon-eval-layer"
+      ],
+      "acceptance_criteria": [
+        "operators can tell whether green status is narrow, broad, fresh, or partially derived"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts",
+        "npm run status",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-status-truth-sharpening",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-status-truth-sharpening"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-status-truth-sharpening.json",
+        "runtime proof: 12b534db-a076-404b-856a-be6364d52819"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-docs-runtime-drift-check",
+      "title": "Catch contradictions between docs and live runtime outputs",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-status-truth-sharpening"
+      ],
+      "acceptance_criteria": [
+        "stale benchmark counts, outdated completion claims, and mismatched status notes fail or warn in a controlled way"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/docs-runtime-drift-check.test.ts",
+        "node --experimental-strip-types --test tests/ops-recovery.test.ts",
+        "bash scripts/check-docs-runtime-drift.sh",
+        "npm run verify:workflow",
+        "bash scripts/check-quality.sh",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-docs-runtime-drift-check",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-docs-runtime-drift-check"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-docs-runtime-drift-check.json",
+        "runtime proof: 89f393cd-b6d5-4ad6-a527-2f606b174ca8"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-idle-workflow-clarity",
+      "title": "Make idle workflow behavior clear instead of surprising",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-21-docs-runtime-drift-check"
+      ],
+      "acceptance_criteria": [
+        "idle repos produce a clear informational result or a better explicit-task message"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/workflow-check.test.ts",
+        "node --experimental-strip-types --test tests/install.test.ts",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-idle-workflow-clarity",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-idle-workflow-clarity",
+        "bash scripts/check-devgod-workflow-live.sh"
+      ],
+      "evidence": [
+        "proof: .devgod/work/proofs/progress-2026-05-21-idle-workflow-clarity.json",
+        "runtime proof: 51485fc3-7e2e-4d5f-9b5b-2bd81cb12fde"
       ],
       "blocker": null
     }

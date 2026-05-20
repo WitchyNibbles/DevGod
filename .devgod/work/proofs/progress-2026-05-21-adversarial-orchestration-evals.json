@@ -1,0 +1,20 @@
+{
+  "task_id": "2026-05-21-adversarial-orchestration-evals",
+  "captured_at": "2026-05-20T17:20:00.000Z",
+  "status": "verified",
+  "summary": "DevGod orchestration evals now include four deterministic generated adversarial classes with replay ids, expanding coverage across contradictory, stale, partial, and interrupted state combinations while preserving the curated baseline.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/orchestration-eval.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run eval:orchestration",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Installed-repo bad-path realism still remains a separate slice beyond the in-memory orchestration harness.",
+    "Long-horizon replay beyond this deterministic baseline remains future work."
+  ]
+}

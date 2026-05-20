@@ -333,6 +333,29 @@ async function writeCoverageLedgerArtifacts(targetRoot: string, taskId: string):
   );
 }
 
+async function writeProgressProofArtifact(targetRoot: string, taskId: string): Promise<void> {
+  await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "proofs", `progress-${taskId}.json`),
+    JSON.stringify(
+      {
+        cycle: 1,
+        proof_id: `proof-${taskId}`,
+        phase_before: "inventory",
+        phase_after: "dependency_mapping",
+        evidence_refs: ["scripts/check-devgod-workflow.sh"],
+        coverage_delta: { fully_analyzed: 1 },
+        blocking_gap_delta: { closed: 1, opened: 0 },
+        next_target: "service:workflow-checker",
+        why_next: "exercise specialist verification gate enforcement"
+      },
+      null,
+      2
+    ) + "\n",
+    "utf8"
+  );
+}
+
 async function writeWorkflowReview(
   targetRoot: string,
   taskId: string,
@@ -567,6 +590,23 @@ test("check-devgod-workflow-live accepts CRLF active files", async () => {
     if (stubRoot) {
       await rm(stubRoot, { recursive: true, force: true });
     }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live reports idle repos clearly when no active task exists", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-IDLE-INFO", "devgod-live-idle-info-");
+
+  try {
+    await writeFile(join(targetRoot, ".devgod", "ACTIVE"), "workflow=devgod\nstate=idle\n", "utf8");
+
+    const { stdout } = await execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+      cwd: repoRoot
+    });
+
+    assert.match(stdout, /"status":"idle"/);
+    assert.match(stdout, /Pass --task-id <task-id> to verify a specific task explicitly/);
+  } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
@@ -944,6 +984,122 @@ test("check-devgod-workflow-live accepts strict reasoning tasks with attempt rec
     stubRoot = await attachWorkflowProofStub(targetRoot);
     await writeLiveTaskPacket(targetRoot, taskId, {
       qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningMode: "strict"
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+      cwd: targetRoot
+    });
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects specialist_verified tasks without reasoning_strict_required", async () => {
+  const taskId = "DG-LIVE-SPECIALIST-MISSING-STRICT-GATE";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-specialist-missing-strict-gate-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "specialist_verified",
+      qualityGates: ["product_acceptance", "progress_proof_required"],
+      reasoningMode: "strict"
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /specialist_verified work requires reasoning_strict_required quality gate/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects specialist_verified tasks without strict reasoning mode", async () => {
+  const taskId = "DG-LIVE-SPECIALIST-MISSING-STRICT-MODE";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-specialist-missing-strict-mode-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "specialist_verified",
+      qualityGates: ["product_acceptance", "reasoning_strict_required", "progress_proof_required"]
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /specialist_verified work requires strict reasoning mode/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects specialist_verified tasks without a stronger artifact gate", async () => {
+  const taskId = "DG-LIVE-SPECIALIST-MISSING-ARTIFACT-GATE";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-specialist-missing-artifact-gate-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "specialist_verified",
+      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      reasoningMode: "strict"
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /specialist_verified work requires at least one stronger artifact gate/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live accepts specialist_verified tasks with strict reasoning and stronger artifact gates", async () => {
+  const taskId = "DG-LIVE-SPECIALIST-PASS";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-specialist-pass-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "specialist_verified",
+      qualityGates: ["product_acceptance", "reasoning_strict_required", "progress_proof_required"],
       reasoningMode: "strict"
     });
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
@@ -1520,6 +1676,22 @@ test("check-devgod-workflow rejects specialist_verified tasks without runtime-ve
         "",
         "- `product_acceptance`",
         "- `tdd_required`",
+        "- `reasoning_strict_required`",
+        "- `progress_proof_required`",
+        "",
+        "## Reasoning policy",
+        "",
+        "### Mode",
+        "",
+        "`strict`",
+        "",
+        "### Requirements",
+        "",
+        "- supported verdict recorded",
+        "",
+        "### Max attempts",
+        "",
+        "- 2",
         "",
         "## Acceptance criteria",
         "",
@@ -1541,6 +1713,7 @@ test("check-devgod-workflow rejects specialist_verified tasks without runtime-ve
       ].join("\n"),
       "utf8"
     );
+    await writeProgressProofArtifact(targetRoot, taskId);
 
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
       await writeFile(
@@ -1643,6 +1816,7 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
 
     await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
 
     await writeFile(
@@ -1676,6 +1850,22 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
         "",
         "- `product_acceptance`",
         "- `tdd_required`",
+        "- `reasoning_strict_required`",
+        "- `progress_proof_required`",
+        "",
+        "## Reasoning policy",
+        "",
+        "### Mode",
+        "",
+        "`strict`",
+        "",
+        "### Requirements",
+        "",
+        "- supported verdict recorded",
+        "",
+        "### Max attempts",
+        "",
+        "- 2",
         "",
         "## Acceptance criteria",
         "",
@@ -1697,6 +1887,7 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
       ].join("\n"),
       "utf8"
     );
+    await writeProgressProofArtifact(targetRoot, taskId);
 
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
       await writeFile(
@@ -1799,6 +1990,7 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
 
     await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
 
     await writeFile(
@@ -1832,6 +2024,22 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
         "",
         "- `product_acceptance`",
         "- `tdd_required`",
+        "- `reasoning_strict_required`",
+        "- `progress_proof_required`",
+        "",
+        "## Reasoning policy",
+        "",
+        "### Mode",
+        "",
+        "`strict`",
+        "",
+        "### Requirements",
+        "",
+        "- supported verdict recorded",
+        "",
+        "### Max attempts",
+        "",
+        "- 2",
         "",
         "## Acceptance criteria",
         "",
@@ -1853,6 +2061,7 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
       ].join("\n"),
       "utf8"
     );
+    await writeProgressProofArtifact(targetRoot, taskId);
 
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
       await writeFile(
@@ -1955,6 +2164,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
 
     await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(targetRoot, ".devgod", "work", "proofs"), { recursive: true });
     await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
 
     await writeFile(
@@ -1988,6 +2198,22 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
         "",
         "- `product_acceptance`",
         "- `tdd_required`",
+        "- `reasoning_strict_required`",
+        "- `progress_proof_required`",
+        "",
+        "## Reasoning policy",
+        "",
+        "### Mode",
+        "",
+        "`strict`",
+        "",
+        "### Requirements",
+        "",
+        "- supported verdict recorded",
+        "",
+        "### Max attempts",
+        "",
+        "- 2",
         "",
         "## Acceptance criteria",
         "",
@@ -2009,6 +2235,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
       ].join("\n"),
       "utf8"
     );
+    await writeProgressProofArtifact(targetRoot, taskId);
 
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
       await writeFile(

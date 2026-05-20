@@ -1,0 +1,48 @@
+{
+  "task_id": "2026-05-21-long-horizon-eval-layer",
+  "captured_at": "2026-05-20T19:18:00.000Z",
+  "status": "verified",
+  "summary": "The orchestration eval surface now separates 14 repo-local baseline cases from 4 replay-grade multi-step cases, and the benchmark output states that broader boundary explicitly.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/orchestration-eval.test.ts tests/orchestration-benchmark.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run eval:orchestration",
+      "status": "passed"
+    },
+    {
+      "command": "npm run benchmark:orchestration -- --format markdown",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-long-horizon-eval-layer",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-long-horizon-eval-layer",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/evals/orchestration-baseline.ts",
+    "src/evals/orchestration-benchmark.ts",
+    "tests/orchestration-eval.test.ts",
+    "tests/orchestration-benchmark.test.ts"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "eval:replay-grade-boundary",
+  "why_next": "Make the broader replay-grade proof boundary explicit without conflating it with external certification.",
+  "cycle": 1,
+  "residual_risk": [
+    "Status-surface clarity is still pending, so operators do not yet see the same proof-boundary distinction in `npm run status`.",
+    "Docs/runtime drift automation and idle workflow clarity remain queued follow-on work."
+  ]
+}

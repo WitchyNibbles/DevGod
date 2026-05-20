@@ -1,0 +1,38 @@
+{
+  "task_id": "2026-05-21-verification-gate-tightening",
+  "captured_at": "2026-05-20T18:30:00.000Z",
+  "status": "verified",
+  "summary": "Workflow verification now fails closed for specialist_verified tasks that omit the strict reasoning gate, omit strict reasoning mode, or omit stronger artifact gates, with regression coverage pinning each failure class.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/workflow-check.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-verification-gate-tightening",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-verification-gate-tightening",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "scripts/check-devgod-workflow.sh",
+    "tests/workflow-check.test.ts"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "service:workflow-checker",
+  "why_next": "Verify the active task packet satisfies the tightened specialist verification defaults.",
+  "cycle": 1,
+  "residual_risk": [
+    "Installed-repo verification still needs the dedicated harness slice before package-level green status proves fresh target repos end to end.",
+    "Long-horizon replay and docs/runtime drift automation remain queued follow-on work."
+  ]
+}

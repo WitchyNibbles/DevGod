@@ -1,12 +1,16 @@
+
+> devgod@0.1.0 benchmark:orchestration
+> node --experimental-strip-types src/evals/orchestration-benchmark.ts --format markdown
+
 # Orchestration Benchmark
 
-Generated from `npm run benchmark:orchestration -- --format markdown`.
+Generated: 2026-05-20T17:00:02.381Z
 
-Generated: 2026-05-20T11:50:19.425Z
+Local proof: 14/14 repo-local baseline cases passed (100%).
+Replay-grade proof: 4/4 generated multi-step replay cases passed (100%).
 
-Runtime proof: 14/14 baseline cases passed (100%).
-
-This report mixes repo-verified `devgod` runtime proof with reviewed comparative capability fixtures for adjacent systems. It is a reproducible rubric, not an external lab certification.
+This report mixes repo-verified `devgod` runtime proof with reviewed comparative capability fixtures for adjacent systems. Local proof and replay-grade proof are both repo-local evidence layers, not an external lab certification.
+Replay boundary: Replay-grade cases exercise broader multi-step degradation scenarios and should be read as stronger repo-local evidence, not external certification.
 
 | Rank | System | Score | Governance | Trusted reviews | Observability | Recovery | Evals | Ergonomics | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -25,3 +29,4 @@ This report mixes repo-verified `devgod` runtime proof with reviewed comparative
 - Google ADK: workflow-agent primitives are strong; review trust model is host-owned
 - Mastra: good observability and memory; governance and authenticated review are lighter
 - OpenHands: strong coding harness posture; less explicit governance and review authority
+

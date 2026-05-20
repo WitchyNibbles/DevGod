@@ -1,0 +1,44 @@
+{
+  "task_id": "2026-05-21-status-truth-sharpening",
+  "captured_at": "2026-05-20T19:35:00.000Z",
+  "status": "verified",
+  "summary": "Status and report surfaces now separate repo-local replay-grade evidence from broader evidence and state explicitly that neither changes runtime-authoritative run/task truth.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/status-report.test.ts tests/report-command.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-status-truth-sharpening",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-status-truth-sharpening",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/admin/status.ts",
+    "src/admin/report.ts",
+    "tests/status-report.test.ts",
+    "tests/report-command.test.ts"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "status:proof-boundary-labeling",
+  "why_next": "Surface proof-boundary truth directly where operators look first.",
+  "cycle": 1,
+  "residual_risk": [
+    "Docs/runtime drift automation is still pending and must keep written narratives aligned with the sharpened status surface.",
+    "Idle workflow clarity remains a separate follow-on slice."
+  ]
+}

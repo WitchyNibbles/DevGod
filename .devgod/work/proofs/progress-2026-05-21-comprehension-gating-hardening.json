@@ -1,0 +1,24 @@
+{
+  "task_id": "2026-05-21-comprehension-gating-hardening",
+  "captured_at": "2026-05-20T16:35:00.000Z",
+  "status": "verified",
+  "summary": "DevGod now fails closed on rewrite-phase ambiguity and incomplete comprehension evidence, routing to rebuild-inventory or other non-optimistic directives while explaining withheld readiness in status and report surfaces.",
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/orchestration-eval.test.ts tests/report-command.test.ts tests/service.test.ts tests/status-report.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run eval:orchestration",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Runtime trace freshness is still summary-oriented until the next runtime-trace-capture slice lands.",
+    "Installed-repo bad-path validation remains a later slice, so these gates are still package-repo local."
+  ]
+}

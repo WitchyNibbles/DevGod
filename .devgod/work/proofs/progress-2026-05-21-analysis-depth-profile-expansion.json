@@ -1,0 +1,32 @@
+{
+  "task_id": "2026-05-21-analysis-depth-profile-expansion",
+  "captured_at": "2026-05-20T15:40:00.000Z",
+  "status": "verified",
+  "summary": "DevGod now requires broader understanding kinds for delivery profiles and explicitly marks task-scoped green states as profile-limited instead of implying broad rewrite readiness.",
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/status-report.test.ts tests/service.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/report-command.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-analysis-depth-profile-expansion",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Repo inventory generation is still heuristic and file-path oriented until the next slice lands.",
+    "Broad rewrite readiness still depends on deeper code-backed discovery and later comprehension gates."
+  ]
+}

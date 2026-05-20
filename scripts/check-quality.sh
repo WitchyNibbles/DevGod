@@ -20,6 +20,9 @@ npm run eval:orchestration
 echo "orchestration benchmark"
 npm run benchmark:orchestration >/dev/null
 
+echo "docs/runtime drift"
+bash scripts/check-docs-runtime-drift.sh
+
 echo "audit"
 npm audit --omit=dev
 

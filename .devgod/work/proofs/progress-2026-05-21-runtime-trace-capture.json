@@ -1,0 +1,24 @@
+{
+  "task_id": "2026-05-21-runtime-trace-capture",
+  "captured_at": "2026-05-20T16:55:00.000Z",
+  "status": "verified",
+  "summary": "DevGod runtime traces now have first-class capture/import semantics that mark targets traced, close missing-trace gaps when evidence lands, and surface freshness/provenance through status and report outputs.",
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/admin.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Adversarial contradictory and interrupted orchestration combinations are still covered only by the curated baseline until the next slice lands.",
+    "Installed-repo bad-path realism remains a later verification slice."
+  ]
+}

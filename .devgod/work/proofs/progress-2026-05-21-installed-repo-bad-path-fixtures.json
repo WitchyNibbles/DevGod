@@ -1,0 +1,20 @@
+{
+  "task_id": "2026-05-21-installed-repo-bad-path-fixtures",
+  "captured_at": "2026-05-20T17:40:00.000Z",
+  "status": "verified",
+  "summary": "DevGod install-style fixture checks now fail clearly on missing adapter scaffolds, malformed bindings exports, stale managed workflow exports, and incomplete setup wiring while preserving the synthetic happy path.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/happy-path.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run verify:setup",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "The full fresh-target installed-repo harness remains a later slice beyond these fixture-local failures.",
+    "Workflow gate tightening still remains separate from these fixture diagnostics."
+  ]
+}

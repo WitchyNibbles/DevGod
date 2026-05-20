@@ -1,0 +1,48 @@
+{
+  "task_id": "2026-05-21-installed-repo-verification-harness",
+  "captured_at": "2026-05-20T19:05:00.000Z",
+  "status": "verified",
+  "summary": "Installed-repo verification is now reproducible end to end in a fresh target repo through the public consumer scripts, with regression coverage for polluted environment leakage and scaffold/live-proof completeness.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/workflow-scaffold.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/happy-path.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/verify-installed-repo-harness.sh",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-21-installed-repo-verification-harness",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-21-installed-repo-verification-harness",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/install/cli.ts",
+    "scripts/verify-installed-repo-harness.sh",
+    "tests/workflow-scaffold.test.ts",
+    "tests/happy-path.test.ts"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "verification:installed-consumer-harness",
+  "why_next": "Prove the installed package surface reaches authoritative status and workflow proof without leaking package-repo state.",
+  "cycle": 1,
+  "residual_risk": [
+    "Long-horizon replay and multi-step degradation scoring remain outside this slice and still need the dedicated eval-layer task.",
+    "Idle workflow behavior and docs/runtime drift automation remain separate follow-on slices."
+  ]
+}

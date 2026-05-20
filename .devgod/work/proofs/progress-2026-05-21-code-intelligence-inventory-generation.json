@@ -1,0 +1,24 @@
+{
+  "task_id": "2026-05-21-code-intelligence-inventory-generation",
+  "captured_at": "2026-05-20T16:45:00.000Z",
+  "status": "verified",
+  "summary": "DevGod now generates code-signal-derived route, service, integration, configuration, authentication, authorization, and runtime-side-effect inventory surfaces, and emits explicit ambiguity gaps instead of silently hiding dynamic discovery limits.",
+  "verification": [
+    {
+      "command": "npm run typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Rewrite and strategy gating still need to consume the richer inventory evidence before optimistic directives are fully blocked.",
+    "Runtime trace freshness and installed-repo realism remain later slices in the roadmap."
+  ]
+}

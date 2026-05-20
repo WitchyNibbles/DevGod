@@ -1031,6 +1031,38 @@ fi
 
 if [[ -f "$task_file" ]]; then
   mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
+  task_reasoning_mode="legacy"
+  if grep -Fq "## Reasoning policy" "$task_file"; then
+    task_reasoning_mode_raw="$(extract_section_value "### Mode" "$task_file")"
+    if [[ -n "$task_reasoning_mode_raw" ]]; then
+      task_reasoning_mode="$(normalize_value "$task_reasoning_mode_raw")"
+      require_allowed_value "$task_reasoning_mode" "$task_file" "legacy" "dual" "strict"
+    fi
+  fi
+
+  if [[ "$task_completion_standard" == "specialist_verified" ]]; then
+    has_reasoning_strict_gate=0
+    has_stronger_artifact_gate=0
+
+    for gate in "${task_quality_gates[@]}"; do
+      case "$gate" in
+        reasoning_strict_required)
+          has_reasoning_strict_gate=1
+          ;;
+        coverage_ledger_required|progress_proof_required|checkpoint_resume_required|memory_compaction_required)
+          has_stronger_artifact_gate=1
+          ;;
+      esac
+    done
+
+    [[ "$has_reasoning_strict_gate" -eq 1 ]] ||
+      fail "specialist_verified work requires reasoning_strict_required quality gate in ${task_file#"$repo_root"/}"
+    [[ "$task_reasoning_mode" == "strict" ]] ||
+      fail "specialist_verified work requires strict reasoning mode in ${task_file#"$repo_root"/}"
+    [[ "$has_stronger_artifact_gate" -eq 1 ]] ||
+      fail "specialist_verified work requires at least one stronger artifact gate (coverage_ledger_required, progress_proof_required, checkpoint_resume_required, or memory_compaction_required) in ${task_file#"$repo_root"/}"
+  fi
+
   coverage_manifest_file="$repo_root/.devgod/work/coverage/coverage-${artifact_task_id}.json"
   coverage_items_file="$repo_root/.devgod/work/coverage/items-${artifact_task_id}.json"
   coverage_gaps_file="$repo_root/.devgod/work/coverage/gaps-${artifact_task_id}.json"
