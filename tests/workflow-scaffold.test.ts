@@ -78,6 +78,7 @@ test("scaffold-workflow creates canonical starter artifacts", async () => {
     assert.match(brief, new RegExp(`\\\`${taskId}\\\``));
     assert.match(task, /## Owner role\n\n`planner`/);
     assert.match(task, /## Completion standard\n\n`artifact_complete`/);
+    assert.match(task, /## Reasoning policy\n\n### Mode\n\n`strict`/);
     assert.match(reviewerGate, /## Review state\n\n`pending`/);
     assert.match(reviewerGate, /## Decision\n\n`blocked`/);
     assert.match(reviewerGate, /Pending reviewer handoff\./);

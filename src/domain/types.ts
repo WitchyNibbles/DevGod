@@ -207,6 +207,7 @@ export const understandingMapKinds = [
   "runtime_side_effects"
 ] as const;
 export const runtimeTraceKinds = ["route", "job", "integration", "auth", "side_effect"] as const;
+export const runtimeTraceAuthorityLabels = ["runtime_capture", "operator_import"] as const;
 export const analysisPhases = [
   "discovery",
   "inventory",
@@ -225,7 +226,8 @@ export const analysisPhases = [
 ] as const;
 export const runProfiles = ["standard_delivery", "legacy_rewrite", "debug_heavy"] as const;
 export const phaseReadinessStatuses = ["ready", "blocked"] as const;
-export const rewriteReadinessStatuses = ["ready", "blocked"] as const;
+export const rewriteReadinessStatuses = ["ready", "blocked", "profile_limited"] as const;
+export const comprehensionReadinessScopes = ["broad", "profile_limited"] as const;
 export const phaseReadinessTransitions = ["advance", "hold", "fallback", "complete"] as const;
 export const phaseReadinessBlockerKinds = [
   "none",
@@ -272,10 +274,12 @@ export type GapSeverity = (typeof gapSeverities)[number];
 export type GapStatus = (typeof gapStatuses)[number];
 export type UnderstandingMapKind = (typeof understandingMapKinds)[number];
 export type RuntimeTraceKind = (typeof runtimeTraceKinds)[number];
+export type RuntimeTraceAuthorityLabel = (typeof runtimeTraceAuthorityLabels)[number];
 export type AnalysisPhase = (typeof analysisPhases)[number];
 export type RunProfile = (typeof runProfiles)[number];
 export type PhaseReadinessStatus = (typeof phaseReadinessStatuses)[number];
 export type RewriteReadinessStatus = (typeof rewriteReadinessStatuses)[number];
+export type ComprehensionReadinessScope = (typeof comprehensionReadinessScopes)[number];
 export type PhaseReadinessTransition = (typeof phaseReadinessTransitions)[number];
 export type PhaseReadinessBlockerKind = (typeof phaseReadinessBlockerKinds)[number];
 
@@ -628,6 +632,16 @@ export interface UnderstandingMapRecord {
   updatedAt: string;
 }
 
+export interface RuntimeTraceCaptureInput {
+  traceId?: string | undefined;
+  targetId: string;
+  kind: RuntimeTraceKind;
+  risky: boolean;
+  sideEffects: string[];
+  evidenceRefs: string[];
+  createdAt?: string | undefined;
+}
+
 export interface RuntimeTraceRecord {
   traceId: string;
   targetId: string;
@@ -636,6 +650,7 @@ export interface RuntimeTraceRecord {
   sideEffects: string[];
   evidenceRefs: string[];
   createdAt: string;
+  authorityLabel?: RuntimeTraceAuthorityLabel | undefined;
 }
 
 export interface RuntimeTraceRegistryTargetSummary {
@@ -644,6 +659,9 @@ export interface RuntimeTraceRegistryTargetSummary {
   kinds: RuntimeTraceKind[];
   riskyTraceCount: number;
   latestCreatedAt: string;
+  authorityLabels: RuntimeTraceAuthorityLabel[];
+  latestAuthorityLabel: RuntimeTraceAuthorityLabel;
+  freshness: "fresh" | "stale";
   sideEffects: string[];
   evidenceRefs: string[];
 }
@@ -652,6 +670,10 @@ export interface RuntimeTraceRegistrySummary {
   totalTraces: number;
   riskyTraceCount: number;
   tracedTargetCount: number;
+  freshnessWindowHours: number;
+  referenceNow: string;
+  staleTargetIds: string[];
+  operatorImportTargetIds: string[];
   openMissingTraceGapIds: string[];
   riskyTargetsMissingTrace: string[];
   targets: RuntimeTraceRegistryTargetSummary[];
@@ -724,7 +746,9 @@ export interface ComprehensionSummary {
   presentUnderstandingKinds: UnderstandingMapKind[];
   missingUnderstandingKinds: UnderstandingMapKind[];
   runtimeTraceCount: number;
+  readinessScope: ComprehensionReadinessScope;
   rewriteReadiness: RewriteReadinessStatus;
+  profileLimitations: string[];
   missingEvidence: string[];
 }
 

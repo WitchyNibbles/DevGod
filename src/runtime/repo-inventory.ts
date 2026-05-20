@@ -1,7 +1,8 @@
-import { readdir, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type {
   CoverageCriticality,
+  CoverageGapRecord,
   CoverageItemCategory,
   CoverageItemRecord,
   UnderstandingMapKind,
@@ -20,25 +21,50 @@ export interface GenerateRepoInventoryInput {
 export interface RepoInventoryResult {
   coverageItems: CoverageItemRecord[];
   understandingMaps: UnderstandingMapRecord[];
+  gaps: CoverageGapRecord[];
+}
+
+interface RepoCodeFile {
+  relativePath: string;
+  content: string;
+}
+
+interface SurfaceSignal {
+  key: string;
+  category: CoverageItemCategory;
+  mapKind?: UnderstandingMapKind | undefined;
+  method: string;
+  summary: string;
+  confidence: number;
+  sideEffects?: string[] | undefined;
+}
+
+interface AmbiguitySignal {
+  method: string;
+  description: string;
 }
 
 export async function generateRepoInventory(input: GenerateRepoInventoryInput): Promise<RepoInventoryResult> {
   const repoRoot = await realpath(input.repoRoot);
   const include = input.include && input.include.length > 0 ? input.include : DEFAULT_CODE_INCLUDE_PATHS;
   const now = input.now ?? new Date().toISOString();
-  const relativePaths = await collectCodeFiles(repoRoot, include);
+  const files = await collectCodeFiles(repoRoot, include);
 
-  const coverageItems = relativePaths.map((relativePath) => buildCoverageItem(relativePath, now));
-  const understandingMaps = buildUnderstandingMaps(relativePaths, now);
+  const fileCoverageItems = files.map((file) => buildFileCoverageItem(file, now));
+  const discoveredSignals = files.flatMap((file) => buildSignalCoverageItems(file, now));
+  const coverageItems = dedupeCoverageItems([...fileCoverageItems, ...discoveredSignals]);
+  const understandingMaps = buildUnderstandingMaps(files, discoveredSignals, now);
+  const gaps = dedupeCoverageGaps(files.flatMap((file) => buildAmbiguityGaps(file)));
 
   return {
     coverageItems,
-    understandingMaps
+    understandingMaps,
+    gaps
   };
 }
 
-async function collectCodeFiles(repoRoot: string, includePaths: readonly string[]): Promise<string[]> {
-  const results = new Set<string>();
+async function collectCodeFiles(repoRoot: string, includePaths: readonly string[]): Promise<RepoCodeFile[]> {
+  const results = new Map<string, RepoCodeFile>();
 
   for (const includePath of includePaths) {
     const absolutePath = path.resolve(repoRoot, includePath);
@@ -50,22 +76,25 @@ async function collectCodeFiles(repoRoot: string, includePaths: readonly string[
     if (kind === "file") {
       const relativePath = normalizeRelativePath(repoRoot, absolutePath);
       if (isAllowedCodeFile(relativePath)) {
-        results.add(relativePath);
+        results.set(relativePath, {
+          relativePath,
+          content: await safeReadText(absolutePath)
+        });
       }
       continue;
     }
 
-    for (const nestedPath of await walkCodeFiles(repoRoot, absolutePath)) {
-      results.add(nestedPath);
+    for (const file of await walkCodeFiles(repoRoot, absolutePath)) {
+      results.set(file.relativePath, file);
     }
   }
 
-  return [...results].sort();
+  return [...results.values()].sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
-async function walkCodeFiles(repoRoot: string, directory: string): Promise<string[]> {
+async function walkCodeFiles(repoRoot: string, directory: string): Promise<RepoCodeFile[]> {
   const entries = await readdir(directory, { withFileTypes: true });
-  const results: string[] = [];
+  const results: RepoCodeFile[] = [];
 
   for (const entry of entries) {
     const absolutePath = path.join(directory, entry.name);
@@ -81,7 +110,10 @@ async function walkCodeFiles(repoRoot: string, directory: string): Promise<strin
     }
 
     if ((entry.isFile() || entry.isSymbolicLink()) && isAllowedCodeFile(relativePath)) {
-      results.push(relativePath);
+      results.push({
+        relativePath,
+        content: await safeReadText(absolutePath)
+      });
     }
   }
 
@@ -101,14 +133,22 @@ function isAllowedCodeFile(relativePath: string): boolean {
   );
 }
 
-function buildCoverageItem(relativePath: string, now: string): CoverageItemRecord {
+function buildFileCoverageItem(file: RepoCodeFile, now: string): CoverageItemRecord {
+  const ambiguities = detectAmbiguitySignals(file);
   return {
-    id: `file:${relativePath}`,
-    category: inferCoverageCategory(relativePath),
-    state: inferCoverageState(relativePath),
-    criticality: inferCriticality(relativePath),
-    sources: [relativePath],
-    evidenceRefs: [relativePath],
+    id: `file:${file.relativePath}`,
+    category: inferCoverageCategory(file.relativePath),
+    state: inferCoverageState(file.relativePath),
+    criticality: inferCriticality(file.relativePath),
+    sources: [file.relativePath],
+    evidenceRefs: [
+      file.relativePath,
+      ...ambiguities.map((ambiguity) => `ambiguity://${ambiguity.method}`)
+    ],
+    openQuestions:
+      ambiguities.length > 0
+        ? ambiguities.map((ambiguity) => ambiguity.description)
+        : undefined,
     lastUpdatedAt: now
   };
 }
@@ -169,85 +209,342 @@ function inferCriticality(relativePath: string): CoverageCriticality {
   return "low";
 }
 
-function buildUnderstandingMaps(relativePaths: readonly string[], now: string): UnderstandingMapRecord[] {
-  const topLevelSubsystems = new Set<string>();
-  const routeFiles: string[] = [];
-  const modelFiles: string[] = [];
-  const integrationFiles: string[] = [];
-  const authzFiles: string[] = [];
-  const configFiles: string[] = [];
-  const runtimeSideEffectFiles: string[] = [];
+function buildSignalCoverageItems(file: RepoCodeFile, now: string): CoverageItemRecord[] {
+  const ambiguities = detectAmbiguitySignals(file);
+  const signals = detectSurfaceSignals(file);
+  return signals.map((signal) => {
+    const evidenceRefs = uniqueStrings([
+      file.relativePath,
+      `signal://${signal.method}`,
+      ...ambiguities.map((ambiguity) => `ambiguity://${ambiguity.method}`)
+    ]);
+    const openQuestions = ambiguities.map((ambiguity) => ambiguity.description);
+    const summary =
+      ambiguities.length > 0
+        ? `${signal.summary}; follow-up required for ${ambiguities.map((ambiguity) => ambiguity.method).join(", ")}`
+        : signal.summary;
 
+    return {
+      id: `${signal.key}:${file.relativePath}`,
+      category: signal.category,
+      state: ambiguities.length > 0 ? "partially_analyzed" : "fully_analyzed",
+      criticality: inferCriticality(file.relativePath),
+      sources: [file.relativePath],
+      entryPoints: signal.category === "routes" || signal.category === "runtime_side_effects" ? [file.relativePath] : undefined,
+      behaviorSummary: summary,
+      sideEffects: signal.sideEffects,
+      openQuestions: openQuestions.length > 0 ? openQuestions : undefined,
+      evidenceRefs,
+      confidence: signal.confidence,
+      lastUpdatedAt: now
+    };
+  });
+}
+
+function detectSurfaceSignals(file: RepoCodeFile): SurfaceSignal[] {
+  const relativePath = file.relativePath;
+  const content = file.content;
+  const signals: SurfaceSignal[] = [];
+
+  const addSignal = (signal: SurfaceSignal, predicate: boolean) => {
+    if (!predicate || signals.some((existing) => existing.key === signal.key)) {
+      return;
+    }
+    signals.push(signal);
+  };
+
+  addSignal(
+    {
+      key: "route",
+      category: "routes",
+      mapKind: "route_map",
+      method: relativePath.startsWith("src/admin/") ? "path:src-admin" : "content:command-dispatch",
+      summary: "generated route surface from command or router entrypoint signals",
+      confidence: relativePath.startsWith("src/admin/") ? 0.82 : 0.74
+    },
+    relativePath.startsWith("src/admin/") || /\bif\s*\(\s*command\s*===|\bswitch\s*\(\s*command\s*\)|\b(?:router|app)\.(?:get|post|put|delete|patch|use)\s*\(/.test(content)
+  );
+
+  addSignal(
+    {
+      key: "service",
+      category: "services",
+      method: relativePath.startsWith("src/core/") || relativePath.startsWith("src/runtime/") ? "path:core-runtime" : "content:service-symbol",
+      summary: "generated service surface from core/runtime ownership or service-like exported symbols",
+      confidence: relativePath.startsWith("src/core/") || relativePath.startsWith("src/runtime/") ? 0.86 : 0.68
+    },
+    relativePath.startsWith("src/core/") ||
+      relativePath.startsWith("src/runtime/") ||
+      /\bclass\s+\w+Service\b|\b(?:export\s+)?(?:async\s+)?function\s+\w+Service\b/.test(content)
+  );
+
+  addSignal(
+    {
+      key: "integration",
+      category: "external_integrations",
+      mapKind: "integration_map",
+      method: relativePath.startsWith("src/mcp/") || relativePath.startsWith("src/store/") || relativePath.startsWith("src/install/") ? "path:integration-surface" : "content:external-io",
+      summary: "generated external integration surface from MCP, store, install, or outbound I/O signals",
+      confidence: relativePath.startsWith("src/mcp/") || relativePath.startsWith("src/store/") || relativePath.startsWith("src/install/") ? 0.83 : 0.7
+    },
+    relativePath.startsWith("src/mcp/") ||
+      relativePath.startsWith("src/store/") ||
+      relativePath.startsWith("src/install/") ||
+      /\bfetch\s*\(|from\s+["']pg["']|from\s+["']openai["']/.test(content)
+  );
+
+  addSignal(
+    {
+      key: "configuration",
+      category: "configuration",
+      mapKind: "config_coupling",
+      method:
+        relativePath === "package.json" || relativePath === "tsconfig.json"
+          ? "path:manifest-file"
+          : "content:configuration-coupling",
+      summary: "generated configuration surface from manifest files or environment/config coupling",
+      confidence:
+        relativePath === "package.json" || relativePath === "tsconfig.json" ? 0.92 : 0.72
+    },
+    relativePath === "package.json" ||
+      relativePath === "tsconfig.json" ||
+      /process\.env\.[A-Z0-9_]+|\bconfig\b|\benv\b/i.test(content) ||
+      relativePath.includes("config")
+  );
+
+  addSignal(
+    {
+      key: "authentication",
+      category: "authentication",
+      mapKind: "authz_map",
+      method: "content:authentication-keywords",
+      summary: "generated authentication surface from principal, token, credential, or login signals",
+      confidence: 0.66
+    },
+    /\bauthentication\b|\blogin\b|\bprincipal\b|\bcredential\b|\btoken\b/i.test(content)
+  );
+
+  addSignal(
+    {
+      key: "authorization",
+      category: "authorization",
+      mapKind: "authz_map",
+      method: "content:authorization-keywords",
+      summary: "generated authorization surface from policy, permission, waiver, or review-identity signals",
+      confidence: 0.72
+    },
+    /\bauthoriz|\bpermission\b|\bpolicy\b|review[-_ ]identity|\bwaiver\b/i.test(content)
+  );
+
+  addSignal(
+    {
+      key: "runtime-side-effects",
+      category: "runtime_side_effects",
+      mapKind: "runtime_side_effects",
+      method:
+        relativePath.startsWith("scripts/") || relativePath.startsWith("src/runtime/")
+          ? "path:runtime-side-effects"
+          : "content:filesystem-or-process-io",
+      summary: "generated runtime-side-effect surface from script ownership or filesystem/process I/O signals",
+      confidence:
+        relativePath.startsWith("scripts/") || relativePath.startsWith("src/runtime/") ? 0.85 : 0.69,
+      sideEffects: inferSideEffects(content)
+    },
+    relativePath.startsWith("scripts/") ||
+      relativePath.startsWith("src/runtime/") ||
+      relativePath === "src/core/service.ts" ||
+      /\b(?:writeFile|mkdir|rm|spawn|exec|saveProjectRuntimeState|saveRunArtifact)\b/.test(content)
+  );
+
+  return signals;
+}
+
+function inferSideEffects(content: string): string[] | undefined {
+  const effects: string[] = [];
+  if (/\bwriteFile\b/.test(content)) {
+    effects.push("writes files");
+  }
+  if (/\bmkdir\b/.test(content) || /\brm\b/.test(content)) {
+    effects.push("changes filesystem layout");
+  }
+  if (/\bspawn\b|\bexec\b/.test(content)) {
+    effects.push("executes subprocesses");
+  }
+  if (/\bsaveProjectRuntimeState\b|\bsaveRunArtifact\b/.test(content)) {
+    effects.push("persists runtime state");
+  }
+  return effects.length > 0 ? effects : undefined;
+}
+
+function buildUnderstandingMaps(
+  files: readonly RepoCodeFile[],
+  signalItems: readonly CoverageItemRecord[],
+  now: string
+): UnderstandingMapRecord[] {
+  const relativePaths = files.map((file) => file.relativePath);
+  const topLevelSubsystems = new Set<string>();
   for (const relativePath of relativePaths) {
     const srcMatch = relativePath.match(/^src\/([^/]+)\//);
     if (srcMatch?.[1]) {
       topLevelSubsystems.add(srcMatch[1]);
     }
-
-    if (relativePath.startsWith("src/admin/") || /route|server/i.test(relativePath)) {
-      routeFiles.push(relativePath);
-    }
-    if (relativePath.startsWith("src/domain/")) {
-      modelFiles.push(relativePath);
-    }
-    if (
-      relativePath.startsWith("src/mcp/") ||
-      relativePath.startsWith("src/store/") ||
-      relativePath.startsWith("src/install/")
-    ) {
-      integrationFiles.push(relativePath);
-    }
-    if (/auth|policy|review|identity/i.test(relativePath)) {
-      authzFiles.push(relativePath);
-    }
-    if (
-      relativePath === "package.json" ||
-      relativePath === "tsconfig.json" ||
-      /config|install|env/i.test(relativePath)
-    ) {
-      configFiles.push(relativePath);
-    }
-    if (relativePath.startsWith("scripts/") || relativePath.startsWith("src/runtime/") || relativePath === "src/core/service.ts") {
-      runtimeSideEffectFiles.push(relativePath);
-    }
   }
 
+  const routeFiles = signalSourceRefs(signalItems, ["routes"], ["src/admin/"]);
+  const modelFiles = relativePaths.filter((relativePath) => relativePath.startsWith("src/domain/"));
+  const integrationFiles = signalSourceRefs(signalItems, ["external_integrations"], ["src/mcp/", "src/store/", "src/install/"]);
+  const authzFiles = signalSourceRefs(signalItems, ["authentication", "authorization", "permissions"]);
+  const configFiles = signalSourceRefs(signalItems, ["configuration"], ["package.json", "tsconfig.json"]);
+  const runtimeSideEffectFiles = signalSourceRefs(signalItems, ["runtime_side_effects"], ["scripts/", "src/runtime/", "src/core/service.ts"]);
+
   return [
-    buildUnderstandingMap("repo_map", relativePaths, now),
-    buildUnderstandingMap("subsystems", [...topLevelSubsystems], now),
-    buildUnderstandingMap("route_map", routeFiles, now),
-    buildUnderstandingMap("model_map", modelFiles, now),
-    buildUnderstandingMap("integration_map", integrationFiles, now),
-    buildUnderstandingMap("authz_map", authzFiles, now),
-    buildUnderstandingMap("config_coupling", configFiles, now),
-    buildUnderstandingMap("runtime_side_effects", runtimeSideEffectFiles, now)
+    buildUnderstandingMap("repo_map", relativePaths, [relativePaths[0] ?? "repo://none"], now),
+    buildUnderstandingMap("subsystems", [...topLevelSubsystems], [...topLevelSubsystems], now),
+    buildUnderstandingMap("route_map", routeFiles, evidenceRefsForSources(signalItems, routeFiles), now),
+    buildUnderstandingMap("model_map", modelFiles, modelFiles, now),
+    buildUnderstandingMap("integration_map", integrationFiles, evidenceRefsForSources(signalItems, integrationFiles), now),
+    buildUnderstandingMap("authz_map", authzFiles, evidenceRefsForSources(signalItems, authzFiles), now),
+    buildUnderstandingMap("config_coupling", configFiles, evidenceRefsForSources(signalItems, configFiles), now),
+    buildUnderstandingMap(
+      "runtime_side_effects",
+      runtimeSideEffectFiles,
+      evidenceRefsForSources(signalItems, runtimeSideEffectFiles),
+      now
+    )
   ];
+}
+
+function signalSourceRefs(
+  signalItems: readonly CoverageItemRecord[],
+  categories: readonly CoverageItemCategory[],
+  pathPrefixes: readonly string[] = []
+): string[] {
+  const sources = signalItems
+    .filter((item) => categories.includes(item.category))
+    .flatMap((item) => item.sources);
+  for (const prefix of pathPrefixes) {
+    if (prefix.includes(".")) {
+      sources.push(prefix);
+    }
+  }
+  return uniqueStrings(sources);
+}
+
+function evidenceRefsForSources(signalItems: readonly CoverageItemRecord[], sourceRefs: readonly string[]): string[] {
+  const refs = signalItems
+    .filter((item) => item.sources.some((source) => sourceRefs.includes(source)))
+    .flatMap((item) => item.evidenceRefs);
+  return uniqueStrings(refs.length > 0 ? refs : [...sourceRefs]);
 }
 
 function buildUnderstandingMap(
   kind: UnderstandingMapKind,
   sourceRefs: readonly string[],
+  evidenceRefs: readonly string[],
   now: string
 ): UnderstandingMapRecord {
-  const refs = sourceRefs.length > 0 ? [...sourceRefs] : ["repo://none"];
+  const normalizedSourceRefs = sourceRefs.length > 0 ? uniqueStrings(sourceRefs) : ["repo://none"];
+  const normalizedEvidenceRefs = evidenceRefs.length > 0 ? uniqueStrings(evidenceRefs).slice(0, 10) : [normalizedSourceRefs[0]];
   return {
     kind,
     itemCount: sourceRefs.length,
     analyzedCount: sourceRefs.length,
-    sourceRefs: refs,
-    evidenceRefs: refs.slice(0, 10),
+    sourceRefs: normalizedSourceRefs,
+    evidenceRefs: normalizedEvidenceRefs,
     updatedAt: now
   };
+}
+
+function buildAmbiguityGaps(file: RepoCodeFile): CoverageGapRecord[] {
+  if (file.relativePath.startsWith("tests/")) {
+    return [];
+  }
+
+  const ambiguities = detectAmbiguitySignals(file);
+  if (ambiguities.length === 0) {
+    return [];
+  }
+
+  const blocking = ["high", "critical"].includes(inferCriticality(file.relativePath));
+  return [
+    {
+      id: `gap:inventory:${slugify(file.relativePath)}:dynamic-discovery`,
+      targetId: `file:${file.relativePath}`,
+      kind: "missing_inventory",
+      severity: blocking ? "high" : "medium",
+      description: `dynamic discovery signals in ${file.relativePath} require manual follow-up before the surface can be treated as fully understood`,
+      blocking,
+      evidenceRefs: [
+        file.relativePath,
+        ...ambiguities.map((ambiguity) => `ambiguity://${ambiguity.method}`)
+      ],
+      createdBy: "repo_inventory",
+      suggestedNextActions: ambiguities.map(
+        (ambiguity) => `inspect ${file.relativePath} for ${ambiguity.method} and record the concrete route, auth, or config surface explicitly`
+      ),
+      status: "open"
+    }
+  ];
+}
+
+function detectAmbiguitySignals(file: RepoCodeFile): AmbiguitySignal[] {
+  const content = file.content;
+  const ambiguities: AmbiguitySignal[] = [];
+  if (/\b(?:handlers?|commands?|routes?)\s*\[[^\]]+\]/.test(content)) {
+    ambiguities.push({
+      method: "computed-dispatch-table",
+      description: "computed dispatch table hides the concrete handler surface from static inventory heuristics"
+    });
+  }
+  if (/\b(?:router|app)\s*\[[^\]]+\]\s*\(/.test(content)) {
+    ambiguities.push({
+      method: "computed-route-method",
+      description: "computed route method prevents deterministic route classification"
+    });
+  }
+  if (/process\.env\[[^\]]+\]/.test(content)) {
+    ambiguities.push({
+      method: "computed-env-key",
+      description: "computed environment keys hide configuration coupling that should be reviewed explicitly"
+    });
+  }
+  return ambiguities;
+}
+
+function dedupeCoverageItems(items: readonly CoverageItemRecord[]): CoverageItemRecord[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function dedupeCoverageGaps(gaps: readonly CoverageGapRecord[]): CoverageGapRecord[] {
+  const byId = new Map(gaps.map((gap) => [gap.id, gap]));
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function slugify(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
 
 function normalizeRelativePath(repoRoot: string, targetPath: string): string {
   return path.relative(repoRoot, targetPath).split(path.sep).join("/");
 }
 
+async function safeReadText(targetPath: string): Promise<string> {
+  try {
+    return await readFile(targetPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 async function safeStatKind(targetPath: string): Promise<"file" | "directory" | null> {
   try {
     const resolved = await realpath(targetPath);
-    const stats = await import("node:fs/promises").then(({ stat }) => stat(resolved));
+    const stats = await stat(resolved);
     if (stats.isFile()) {
       return "file";
     }

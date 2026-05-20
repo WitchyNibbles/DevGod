@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SEARCH_MEMORY_STALE_AFTER_DAYS } from "../src/core/policy.ts";
@@ -2811,6 +2813,91 @@ test("getStatus surfaces autonomous execution coverage and readiness when config
   assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
 });
 
+test("getStatus marks standard_delivery readiness as profile_limited even when task-scoped evidence is complete", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Task-scoped readiness",
+    request: "Do not confuse standard delivery coverage with broad rewrite readiness."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "delivery",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:delivery-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["delivery sequencing must preserve runtime authority"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "integration_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:delivery-core",
+      targetId: "service:delivery-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists task-scoped delivery evidence"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.profile, "standard_delivery");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.readinessScope, "profile_limited");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.rewriteReadiness, "profile_limited");
+  assert.match(
+    status.autonomousExecution?.comprehensionSummary?.profileLimitations.join(" | ") ?? "",
+    /does not establish broad rewrite readiness/
+  );
+});
+
 test("exportCoverageLedger emits the richer exported ledger artifact set from runtime state", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -2827,6 +2914,37 @@ test("exportCoverageLedger emits the richer exported ledger artifact set from ru
       qualityGates: ["product_acceptance", "coverage_ledger_required"]
     })
   ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous execution artifacts recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",
     phase: "validation",
@@ -2950,6 +3068,117 @@ test("generateRepoInventory persists code-backed coverage items and understandin
   assert.ok(state.understandingMaps?.some((map) => map.kind === "runtime_side_effects"));
 });
 
+test("generateRepoInventory derives code-backed surfaces and explicit ambiguity gaps", async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), "devgod-code-inventory-"));
+  try {
+    await mkdir(resolve(fixtureRoot, "src", "admin"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "core"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "mcp"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "policy"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "domain"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "config"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "scripts"), { recursive: true });
+
+    await writeFile(resolve(fixtureRoot, "package.json"), '{"name":"fixture","version":"1.0.0"}\n', "utf8");
+    await writeFile(
+      resolve(fixtureRoot, "src", "admin", "router.ts"),
+      'export function handle(command: string) { if (command === "status") return "ok"; return "missing"; }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "admin", "dynamic.ts"),
+      'export function run(command: string, handlers: Record<string, () => string>) { const handler = handlers[command]; return handler?.() ?? "missing"; }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "core", "service.ts"),
+      'export class BillingService { run() { return "ok"; } }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "mcp", "client.ts"),
+      'export async function syncRemote() { return fetch("https://example.com/health"); }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "policy", "access.ts"),
+      'export function authorizeUser(token: string, permission: string) { return token.length > 0 && permission === "read"; }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "domain", "model.ts"),
+      'export interface RecordModel { id: string; }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "config", "runtime.ts"),
+      'export const apiUrl = process.env.API_URL ?? "https://example.com";\n',
+      "utf8"
+    );
+    await writeFile(resolve(fixtureRoot, "scripts", "sync.sh"), 'echo sync\n', "utf8");
+
+    const { service } = createService();
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Code-backed inventory",
+      request: "Generate signal-derived repo understanding with explicit ambiguity gaps."
+    });
+
+    await service.createTaskGraph(run.id, [
+      taskPacket({
+        taskId: "inventory",
+        qualityGates: ["product_acceptance", "coverage_ledger_required"]
+      })
+    ]);
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "inventory",
+      manifest: {
+        runId: run.id,
+        profile: "legacy_rewrite",
+        requiredCategories: ["services", "external_integrations", "configuration", "authorization"],
+        thresholds: {
+          criticalItemCoverage: 0.8,
+          criticalItemValidation: 0.6,
+          callsiteCoverage: 0.85,
+          runtimeTraceCoverage: 0.75,
+          inventoryCompleteness: 1
+        }
+      }
+    });
+
+    const state = await service.generateRepoInventory(run.id, {
+      repoRoot: fixtureRoot,
+      now: "2026-05-20T16:00:00.000Z"
+    });
+
+    const routeItem = state.coverageItems.find((item) => item.id === "route:src/admin/router.ts");
+    const serviceItem = state.coverageItems.find((item) => item.id === "service:src/core/service.ts");
+    const integrationItem = state.coverageItems.find((item) => item.id === "integration:src/mcp/client.ts");
+    const configItem = state.coverageItems.find((item) => item.id === "configuration:src/config/runtime.ts");
+    const authzItem = state.coverageItems.find((item) => item.id === "authorization:src/policy/access.ts");
+    const ambiguityGap = state.gaps.find((gap) => gap.targetId === "file:src/admin/dynamic.ts");
+
+    assert.ok(routeItem);
+    assert.ok(routeItem?.evidenceRefs.includes("signal://path:src-admin"));
+    assert.ok(serviceItem?.evidenceRefs.includes("signal://path:core-runtime"));
+    assert.ok(integrationItem?.evidenceRefs.includes("signal://path:integration-surface"));
+    assert.ok(configItem?.evidenceRefs.includes("signal://content:configuration-coupling"));
+    assert.ok(authzItem?.evidenceRefs.includes("signal://content:authorization-keywords"));
+    assert.ok(ambiguityGap);
+    assert.equal(ambiguityGap?.kind, "missing_inventory");
+    assert.ok(ambiguityGap?.evidenceRefs.includes("ambiguity://computed-dispatch-table"));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "route_map" && map.sourceRefs.includes("src/admin/router.ts")));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "integration_map" && map.sourceRefs.includes("src/mcp/client.ts")));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "config_coupling" && map.sourceRefs.includes("src/config/runtime.ts")));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "authz_map" && map.sourceRefs.includes("src/policy/access.ts")));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("getExecutionPlan returns rebuild_inventory when repo-understanding thresholds are unmet", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -3047,9 +3276,7 @@ test("getExecutionPlan returns rebuild_inventory when repo-understanding thresho
       "config_coupling",
       "runtime_side_effects"
     ]);
-    assert.ok(
-      plan.directive.blockers.includes("rewrite recommendation blocked: critical repo-understanding threshold not met")
-    );
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("understanding map missing: repo_map")));
     assert.ok(plan.directive.nextActions.some((action) => action.includes("rebuild understanding map: repo_map")));
   }
 });
@@ -3113,6 +3340,147 @@ test("getExecutionPlan returns checkpoint when autonomous execution evidence is 
   if (plan.directive.kind === "checkpoint") {
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("progress proof")));
     assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("checkpoint")));
+  }
+});
+
+test("getExecutionPlan rebuilds inventory when rewrite-phase ambiguity gaps remain open", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite ambiguity gating",
+    request: "Do not continue rewrite planning while inventory ambiguity remains open."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "rewrite", "planner");
+  await service.submitHandoff(run.id, "rewrite", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: [".devgod/work/tasks/task-rewrite.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous execution artifacts recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 1,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 1
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:rewrite-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["rewrite planning must require grounded repo comprehension"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:rewrite-core",
+      targetId: "service:rewrite-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists rewrite planning state"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:rewrite-ambiguity",
+      targetId: "file:src/admin/dynamic.ts",
+      kind: "missing_inventory",
+      severity: "medium",
+      description: "dynamic discovery signals in src/admin/dynamic.ts require manual follow-up before rewrite planning is safe",
+      blocking: false,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["inspect src/admin/dynamic.ts and record the concrete handler surface"],
+      status: "open"
+    }
+  ]);
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "rebuild_inventory");
+  if (plan.directive.kind === "rebuild_inventory") {
+    assert.ok(
+      plan.directive.blockers.some((blocker) => blocker.includes("dynamic discovery signals in src/admin/dynamic.ts"))
+    );
+    assert.ok(
+      plan.directive.missingEvidence.some((evidence) => evidence.includes("inventory gap open: dynamic discovery signals in src/admin/dynamic.ts"))
+    );
+    assert.ok(
+      plan.directive.nextActions.some((action) => action.includes("inspect src/admin/dynamic.ts and record the concrete handler surface"))
+    );
   }
 });
 
@@ -3319,11 +3687,29 @@ test("getExecutionPlan returns trace_runtime when risky trace evidence is still 
       callsiteCount: 1,
       callsitesAnalyzed: 1,
       runtimeTraced: true,
+      businessRules: ["risky runtime traces must be recorded before final verification"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: new Date().toISOString()
     }
   ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
   await service.recordProgressProof(run.id, {
     cycle: 1,
     proofId: "proof-1",
@@ -3434,11 +3820,29 @@ test("getExecutionPlan returns checkpoint and executeDirectiveStep preserves the
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["checkpoint and progress proof evidence must exist before completion"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: new Date().toISOString()
     }
   ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
   await service.upsertRuntimeTraces(run.id, [
     {
       traceId: "trace:checkpoint-ready-side-effect",
@@ -3821,6 +4225,9 @@ test("selectAutonomousNextTarget ignores stale checkpoints from older execution 
   const snapshot = buildAutonomousExecutionSnapshot(state);
   assert.equal(snapshot.phaseReadiness.blockerKind, "stale_checkpoint");
   assert.equal(snapshot.phaseReadiness.staleCheckpoint, true);
+  assert.ok(snapshot.comprehensionSummary?.missingUnderstandingKinds.includes("integration_map"));
+  assert.ok(snapshot.comprehensionSummary?.missingUnderstandingKinds.includes("config_coupling"));
+  assert.ok(snapshot.comprehensionSummary?.missingUnderstandingKinds.includes("runtime_side_effects"));
 });
 
 test("recordProgressProof advances the execution epoch and checkpointRun persists it", async () => {
@@ -4246,7 +4653,6 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       sources: ["src/core/service.ts:1"],
       callsiteCount: 2,
       callsitesAnalyzed: 2,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: "2026-05-20T13:00:00.000Z"
@@ -4259,7 +4665,6 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       sources: ["src/core/service.ts:1"],
       callsiteCount: 1,
       callsitesAnalyzed: 1,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: "2026-05-20T13:00:00.000Z"
@@ -4277,27 +4682,19 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       lastUpdatedAt: "2026-05-20T13:00:00.000Z"
     }
   ]);
-  await service.upsertRuntimeTraces(run.id, [
-    {
-      traceId: "trace:workflow-proof-auth",
-      targetId: "service:workflow-proof",
-      kind: "auth",
-      risky: false,
-      sideEffects: [],
-      evidenceRefs: ["tests/service.test.ts"],
-      createdAt: "2026-05-20T13:01:00.000Z"
-    },
-    {
-      traceId: "trace:workflow-proof-side-effect",
-      targetId: "service:workflow-proof",
-      kind: "side_effect",
-      risky: true,
-      sideEffects: ["records workflow proof completion"],
-      evidenceRefs: ["tests/service.test.ts"],
-      createdAt: "2026-05-20T13:02:00.000Z"
-    }
-  ]);
   await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:core-loop-trace",
+      targetId: "service:core-loop",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Core loop still lacks a recorded risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record core loop runtime trace"],
+      status: "open"
+    },
     {
       id: "gap:payments-trace",
       targetId: "integration:payments",
@@ -4311,26 +4708,59 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       status: "open"
     }
   ]);
+  await service.captureRuntimeTrace(run.id, {
+    traceId: "trace:workflow-proof-auth",
+    targetId: "service:workflow-proof",
+    kind: "auth",
+    risky: false,
+    sideEffects: [],
+    evidenceRefs: ["tests/service.test.ts"],
+    createdAt: "2026-05-20T13:01:00.000Z"
+  });
+  await service.captureRuntimeTrace(run.id, {
+    traceId: "trace:workflow-proof-side-effect",
+    targetId: "service:workflow-proof",
+    kind: "side_effect",
+    risky: true,
+    sideEffects: ["records workflow proof completion"],
+    evidenceRefs: ["tests/service.test.ts"],
+    createdAt: "2026-05-20T13:02:00.000Z"
+  });
+  await service.importRuntimeTrace(run.id, {
+    traceId: "trace:payments-import",
+    targetId: "integration:payments",
+    kind: "integration",
+    risky: true,
+    sideEffects: ["submits a payment provider charge"],
+    evidenceRefs: ["tests/service.test.ts"],
+    createdAt: "2026-05-18T13:03:00.000Z"
+  });
 
   const registry = await service.getRuntimeTraceRegistry(run.id);
-
-  assert.equal(registry.totalTraces, 2);
-  assert.equal(registry.riskyTraceCount, 1);
-  assert.equal(registry.tracedTargetCount, 1);
-  assert.deepEqual(registry.riskyTargetsMissingTrace, [
-    "integration:payments",
-    "service:core-loop"
-  ]);
-  assert.deepEqual(registry.openMissingTraceGapIds, ["gap:payments-trace"]);
-  assert.deepEqual(
-    registry.targets.map((target) => target.targetId),
-    ["service:workflow-proof"]
+  const snapshot = await service.getStatus(run.id);
+  const paymentsGap = snapshot.autonomousExecution?.state.gaps.find((gap) => gap.id === "gap:payments-trace");
+  const paymentsItem = snapshot.autonomousExecution?.state.coverageItems.find(
+    (item) => item.id === "integration:payments"
   );
-  assert.deepEqual(registry.targets[0]?.traceIds, [
-    "trace:workflow-proof-auth",
-    "trace:workflow-proof-side-effect"
+
+  assert.equal(registry.totalTraces, 3);
+  assert.equal(registry.riskyTraceCount, 2);
+  assert.equal(registry.tracedTargetCount, 2);
+  assert.deepEqual(registry.riskyTargetsMissingTrace, ["service:core-loop"]);
+  assert.deepEqual(registry.openMissingTraceGapIds, ["gap:core-loop-trace"]);
+  assert.deepEqual(registry.operatorImportTargetIds, ["integration:payments"]);
+  assert.deepEqual(registry.targets.map((target) => target.targetId), [
+    "integration:payments",
+    "service:workflow-proof"
   ]);
-  assert.deepEqual(registry.targets[0]?.kinds, ["auth", "side_effect"]);
+  assert.equal(registry.targets[0]?.latestAuthorityLabel, "operator_import");
+  assert.deepEqual(registry.targets[0]?.authorityLabels, ["operator_import"]);
+  assert.equal(registry.targets[0]?.freshness, "stale");
+  assert.equal(registry.targets[1]?.latestAuthorityLabel, "runtime_capture");
+  assert.deepEqual(registry.targets[1]?.authorityLabels, ["runtime_capture"]);
+  assert.equal(registry.targets[1]?.freshness, "fresh");
+  assert.equal(paymentsGap?.status, "closed");
+  assert.equal(paymentsItem?.runtimeTraced, true);
 });
 
 test("upsertExternalEvals and upsertSensitiveActionControls persist explicit runtime evidence", async () => {

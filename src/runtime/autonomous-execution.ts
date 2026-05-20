@@ -82,7 +82,14 @@ const fallbackPhaseByPhase: Partial<Record<AnalysisPhase, AnalysisPhase>> = {
   done: "final_verification"
 };
 const requiredUnderstandingKindsByProfile: Record<RunProfile, readonly UnderstandingMapKind[]> = {
-  standard_delivery: ["repo_map", "subsystems", "route_map"],
+  standard_delivery: [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "integration_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ],
   legacy_rewrite: [
     "repo_map",
     "subsystems",
@@ -93,7 +100,7 @@ const requiredUnderstandingKindsByProfile: Record<RunProfile, readonly Understan
     "config_coupling",
     "runtime_side_effects"
   ],
-  debug_heavy: ["repo_map", "runtime_side_effects"]
+  debug_heavy: ["repo_map", "subsystems", "route_map", "runtime_side_effects"]
 };
 
 function isFiniteMetric(value: number | undefined): value is number {
@@ -544,9 +551,14 @@ export function computeComprehensionSummary(
   const contradictionGapCount = state.gaps.filter(
     (gap) => gap.status === "open" && gap.kind === "contradicting_evidence"
   ).length;
+  const openInventoryGaps = state.gaps.filter(
+    (gap) => gap.status === "open" && gap.kind === "missing_inventory"
+  );
   const openBlockerCount = coverageSummary.blockingGapCount;
   const riskyTraceCount = traceRegistry.riskyTraceCount;
   const missingEvidence: string[] = [];
+  const readinessScope = state.profile === "legacy_rewrite" ? "broad" : "profile_limited";
+  const profileLimitations: string[] = [];
   const inventoryThreshold = thresholdValue(
     state.manifest,
     "inventoryCompleteness",
@@ -619,6 +631,29 @@ export function computeComprehensionSummary(
     missingEvidence.push(`open blocker count ${openBlockerCount} exceeds threshold ${maxOpenBlockers}`);
   }
 
+  if (
+    state.profile === "legacy_rewrite" &&
+    (state.phase === "modernization_strategy" || state.phase === "migration_sequencing")
+  ) {
+    for (const gap of openInventoryGaps) {
+      missingEvidence.push(`inventory gap open: ${gap.description}`);
+    }
+  }
+
+  if (readinessScope === "profile_limited") {
+    profileLimitations.push(
+      `profile ${state.profile} is task-scoped and does not establish broad rewrite readiness`
+    );
+    missingEvidence.push(...profileLimitations);
+  }
+
+  const rewriteReadiness =
+    missingEvidence.length === 0
+      ? "ready"
+      : missingEvidence.every((evidence) => profileLimitations.includes(evidence))
+        ? "profile_limited"
+        : "blocked";
+
   return {
     inventoryCompleteness,
     businessRuleCoverage,
@@ -628,7 +663,9 @@ export function computeComprehensionSummary(
     presentUnderstandingKinds: presentKinds,
     missingUnderstandingKinds: missingKinds,
     runtimeTraceCount: runtimeTraces.length,
-    rewriteReadiness: missingEvidence.length === 0 ? "ready" : "blocked",
+    readinessScope,
+    rewriteReadiness,
+    profileLimitations,
     missingEvidence
   };
 }

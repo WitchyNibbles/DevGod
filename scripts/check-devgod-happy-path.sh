@@ -90,6 +90,34 @@ for role in reviewer qa_engineer security_reviewer; do
   fi
 done
 
+bindings_file="$repo_root/.devgod/review-identity-bindings.json"
+adapter_file="$repo_root/devgod/review-identity-adapter.ts"
+workflow_export_file="$repo_root/scripts/check-devgod-workflow.sh"
+package_file="$repo_root/package.json"
+
+[[ -f "$bindings_file" ]] || {
+  printf 'bad review identity bindings export: missing %s\n' "${bindings_file#"$repo_root"/}" >&2
+  exit 1
+}
+require_contains "$bindings_file" 'replace-with-authenticated-user-id'
+
+[[ -f "$adapter_file" ]] || {
+  printf 'missing review identity adapter scaffold: %s\n' "${adapter_file#"$repo_root"/}" >&2
+  exit 1
+}
+require_contains "$adapter_file" 'Implement devgod/review-identity-adapter.ts'
+
+[[ -f "$workflow_export_file" ]] || {
+  printf 'stale install export missing: %s\n' "${workflow_export_file#"$repo_root"/}" >&2
+  exit 1
+}
+
+require_contains "$package_file" 'devgod:check:happy-path'
+if ! grep -Fq 'devgod:verify:setup' "$package_file"; then
+  printf 'incomplete devgod setup: package.json lacks devgod:verify:setup\n' >&2
+  exit 1
+fi
+
 printf 'retrieval advisory smoke (derived, non-authoritative)\n'
 retrieval_eval="$repo_root/src/evals/retrieval-memory-baseline.ts"
 if [[ ! -f "$retrieval_eval" ]]; then

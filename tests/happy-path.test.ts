@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -255,4 +255,109 @@ test("check-devgod-happy-path fails when a required review gate is missing", asy
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
+});
+
+
+test("check-devgod-happy-path fails clearly when the review identity adapter scaffold is missing", async () => {
+  const taskId = "fixture-happy-path-missing-adapter";
+  const targetRoot = await createHappyPathFixture(taskId);
+
+  try {
+    await rm(join(targetRoot, "devgod", "review-identity-adapter.ts"), { force: true });
+
+    await assert.rejects(
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+        { cwd: repoRoot }
+      ),
+      /missing review identity adapter scaffold: devgod\/review-identity-adapter\.ts/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-happy-path fails clearly on malformed review identity bindings exports", async () => {
+  const taskId = "fixture-happy-path-bad-bindings";
+  const targetRoot = await createHappyPathFixture(taskId);
+
+  try {
+    await writeFile(join(targetRoot, ".devgod", "review-identity-bindings.json"), '{"bindings":[]}' + "\n", "utf8");
+
+    await assert.rejects(
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+        { cwd: repoRoot }
+      ),
+      /fixture check failed: expected replace-with-authenticated-user-id in \.devgod\/review-identity-bindings\.json/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-happy-path fails clearly when a managed workflow export is stale or missing", async () => {
+  const taskId = "fixture-happy-path-stale-export";
+  const targetRoot = await createHappyPathFixture(taskId);
+
+  try {
+    await rm(join(targetRoot, "scripts", "check-devgod-workflow.sh"), { force: true });
+
+    await assert.rejects(
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+        { cwd: repoRoot }
+      ),
+      /stale install export missing: scripts\/check-devgod-workflow\.sh/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-happy-path fails clearly when installed setup wiring is incomplete", async () => {
+  const taskId = "fixture-happy-path-incomplete-setup";
+  const targetRoot = await createHappyPathFixture(taskId);
+
+  try {
+    const packageJsonPath = join(targetRoot, "package.json");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      name: string;
+      private: boolean;
+      scripts?: Record<string, string>;
+    };
+    delete packageJson.scripts?.["devgod:verify:setup"];
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+
+    await assert.rejects(
+      execFileAsync(
+        "bash",
+        ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+        { cwd: repoRoot }
+      ),
+      /incomplete devgod setup: package\.json lacks devgod:verify:setup/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("verify-installed-repo-harness isolates fresh target repo context and reaches authoritative workflow proof", async () => {
+  const { stdout } = await execFileAsync("bash", ["scripts/verify-installed-repo-harness.sh"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      DEVGOD_WORKSPACE_SLUG: "wrong-workspace",
+      DEVGOD_PROJECT_SLUG: "wrong-project"
+    }
+  });
+
+  assert.match(stdout, /installed repo harness passed/);
+  assert.match(stdout, /workspace: default/);
+  assert.match(stdout, /project: devgod-installed-harness-/);
+  assert.match(stdout, /task: harness-proof/);
 });

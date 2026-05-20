@@ -72,6 +72,8 @@ import type {
   PlanInput,
   ProgressProofRecord,
   ProjectRuntimeMetadata,
+  RuntimeTraceAuthorityLabel,
+  RuntimeTraceCaptureInput,
   RuntimeTraceRecord,
   RuntimeTraceRegistrySummary,
   RunExecutionPlan,
@@ -155,6 +157,75 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
+function normalizeRuntimeTraceAuthorityLabel(
+  authorityLabel: RuntimeTraceAuthorityLabel | undefined
+): RuntimeTraceAuthorityLabel {
+  return authorityLabel ?? "runtime_capture";
+}
+
+function prepareRuntimeTraceRecord(
+  trace: RuntimeTraceRecord,
+  defaultAuthorityLabel: RuntimeTraceAuthorityLabel
+): RuntimeTraceRecord {
+  return {
+    ...trace,
+    authorityLabel: normalizeRuntimeTraceAuthorityLabel(trace.authorityLabel ?? defaultAuthorityLabel),
+    sideEffects: uniqueStrings(trace.sideEffects),
+    evidenceRefs: uniqueStrings(trace.evidenceRefs)
+  };
+}
+
+function mergeTraceEvidenceIntoCoverageItems(
+  items: readonly CoverageItemRecord[],
+  traces: readonly RuntimeTraceRecord[]
+): CoverageItemRecord[] {
+  const byTarget = new Map<string, { evidenceRefs: string[]; latestCreatedAt: string }>();
+  for (const trace of traces) {
+    const existing = byTarget.get(trace.targetId);
+    if (!existing) {
+      byTarget.set(trace.targetId, {
+        evidenceRefs: [...trace.evidenceRefs],
+        latestCreatedAt: trace.createdAt
+      });
+      continue;
+    }
+
+    existing.evidenceRefs = uniqueStrings([...existing.evidenceRefs, ...trace.evidenceRefs]);
+    if (existing.latestCreatedAt.localeCompare(trace.createdAt) < 0) {
+      existing.latestCreatedAt = trace.createdAt;
+    }
+  }
+
+  return items.map((item) => {
+    const traceEvidence = byTarget.get(item.id);
+    if (!traceEvidence) {
+      return item;
+    }
+
+    return {
+      ...item,
+      runtimeTraced: true,
+      evidenceRefs: uniqueStrings([...item.evidenceRefs, ...traceEvidence.evidenceRefs]),
+      lastUpdatedAt:
+        item.lastUpdatedAt.localeCompare(traceEvidence.latestCreatedAt) >= 0
+          ? item.lastUpdatedAt
+          : traceEvidence.latestCreatedAt
+    };
+  });
+}
+
+function closeMissingRuntimeTraceGaps(
+  gaps: readonly CoverageGapRecord[],
+  traces: readonly RuntimeTraceRecord[]
+): CoverageGapRecord[] {
+  const tracedTargetIds = new Set(traces.map((trace) => trace.targetId));
+  return gaps.map((gap) =>
+    gap.kind === "missing_runtime_trace" && gap.status === "open" && tracedTargetIds.has(gap.targetId)
+      ? { ...gap, status: "closed" }
+      : gap
+  );
+}
+
 function deriveNativeAutonomousDirective(input: {
   autonomousExecution: AutonomousExecutionSnapshot;
   blockers: readonly string[];
@@ -168,12 +239,21 @@ function deriveNativeAutonomousDirective(input: {
     : "no owner-dispatch task is available, and autonomous execution still requires native runtime remediation";
 
   const inventoryThreshold = manifestThresholds?.inventoryCompleteness;
-  const inventoryBlockers = uniqueStrings(
-    blockers.filter((blocker) => /understanding map missing|repo-understanding/i.test(blocker))
-  );
+  const rewriteClaimPhase =
+    state.profile === "legacy_rewrite" &&
+    (state.phase === "modernization_strategy" || state.phase === "migration_sequencing");
+  const openInventoryGaps = rewriteClaimPhase
+    ? state.gaps.filter((gap) => gap.status === "open" && gap.kind === "missing_inventory")
+    : [];
+  const inventoryBlockers = uniqueStrings([
+    ...blockers.filter(
+      (blocker) => /inventory completeness|understanding map missing|inventory gap open|dynamic discovery/i.test(blocker)
+    ),
+    ...openInventoryGaps.map((gap) => gap.description)
+  ]);
   const needsInventoryRebuild =
-    typeof inventoryThreshold === "number" &&
-    ((comprehensionSummary?.inventoryCompleteness ?? 0) < inventoryThreshold ||
+    ((typeof inventoryThreshold === "number" &&
+      (comprehensionSummary?.inventoryCompleteness ?? 0) < inventoryThreshold) ||
       inventoryBlockers.length > 0);
   if (needsInventoryRebuild) {
     const missingUnderstandingKinds = comprehensionSummary?.missingUnderstandingKinds ?? [];
@@ -193,6 +273,7 @@ function deriveNativeAutonomousDirective(input: {
             : ["repo inventory remains incomplete for autonomous execution"],
       nextActions: uniqueStrings([
         ...missingUnderstandingKinds.map((kind) => `rebuild understanding map: ${kind}`),
+        ...openInventoryGaps.flatMap((gap) => gap.suggestedNextActions),
         ...missingEvidence,
         ...state.pendingInvestigations
       ]),
@@ -638,12 +719,51 @@ export class DevgodCoreService {
     });
   }
 
+  async captureRuntimeTrace(
+    runId: string,
+    trace: RuntimeTraceCaptureInput
+  ): Promise<AutonomousExecutionState> {
+    const now = timestamp();
+    return this.upsertRuntimeTraces(runId, [
+      {
+        traceId: trace.traceId?.trim() || `trace:${randomUUID()}`,
+        targetId: trace.targetId,
+        kind: trace.kind,
+        risky: trace.risky,
+        sideEffects: [...trace.sideEffects],
+        evidenceRefs: [...trace.evidenceRefs],
+        createdAt: trace.createdAt ?? now,
+        authorityLabel: "runtime_capture"
+      }
+    ]);
+  }
+
+  async importRuntimeTrace(
+    runId: string,
+    trace: RuntimeTraceCaptureInput
+  ): Promise<AutonomousExecutionState> {
+    const now = timestamp();
+    return this.upsertRuntimeTraces(runId, [
+      {
+        traceId: trace.traceId?.trim() || `trace:${randomUUID()}`,
+        targetId: trace.targetId,
+        kind: trace.kind,
+        risky: trace.risky,
+        sideEffects: [...trace.sideEffects],
+        evidenceRefs: [...trace.evidenceRefs],
+        createdAt: trace.createdAt ?? now,
+        authorityLabel: "operator_import"
+      }
+    ]);
+  }
+
   async upsertRuntimeTraces(
     runId: string,
     traces: RuntimeTraceRecord[]
   ): Promise<AutonomousExecutionState> {
     const run = await this.requireRun(runId);
-    const errors = traces.flatMap((trace) => validateRuntimeTraceRecord(trace));
+    const preparedTraces = traces.map((trace) => prepareRuntimeTraceRecord(trace, "runtime_capture"));
+    const errors = preparedTraces.flatMap((trace) => validateRuntimeTraceRecord(trace));
     if (errors.length > 0) {
       throw new Error(`Invalid runtime trace: ${errors.join("; ")}`);
     }
@@ -652,7 +772,9 @@ export class DevgodCoreService {
       return {
         ...base,
         enabled: true,
-        runtimeTraces: mergeRuntimeTraces(base.runtimeTraces ?? [], traces)
+        coverageItems: mergeTraceEvidenceIntoCoverageItems(base.coverageItems, preparedTraces),
+        gaps: closeMissingRuntimeTraceGaps(base.gaps, preparedTraces),
+        runtimeTraces: mergeRuntimeTraces(base.runtimeTraces ?? [], preparedTraces)
       };
     });
   }
@@ -864,6 +986,7 @@ export class DevgodCoreService {
         ...base,
         enabled: true,
         coverageItems: mergeCoverageItems(base.coverageItems, generated.coverageItems),
+        gaps: mergeCoverageGaps(base.gaps, generated.gaps),
         understandingMaps: mergeUnderstandingMaps(base.understandingMaps ?? [], generated.understandingMaps)
       };
     });
