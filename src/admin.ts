@@ -3818,7 +3818,7 @@ export function createSupportedContinuationExecutor(options: {
             phaseAfter: autonomousState.phase,
             evidenceRefs: [evidenceRef],
             coverageDelta: {},
-            blockingGapDelta: { closed: 0, opened: 0 },
+            blockingGapDelta: { closed: 1, opened: 0 },
             nextTarget: "   ",
             whyNext,
             createdAt

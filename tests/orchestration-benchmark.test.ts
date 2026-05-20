@@ -15,8 +15,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 test("orchestration benchmark ranks devgod first with repo-verified runtime proof", async () => {
   const report = await runOrchestrationBenchmark();
 
-  assert.equal(report.runtimeProof.totalCases, 8);
-  assert.equal(report.runtimeProof.passedCases, 8);
+  assert.equal(report.runtimeProof.totalCases, 14);
+  assert.equal(report.runtimeProof.passedCases, 14);
   assert.equal(report.ranking[0]?.id, "devgod");
   assert.equal(report.ranking[0]?.evidenceModel, "repo_verified");
 });

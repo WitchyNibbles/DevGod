@@ -320,6 +320,8 @@ export function hasMeaningfulProgressDelta(proof: ProgressProofRecord): boolean 
 
 export function validateProgressProofRecord(proof: ProgressProofRecord): string[] {
   const errors: string[] = [];
+  const nextTarget = proof.nextTarget.trim();
+  const whyNext = (proof.whyNext ?? "").trim();
 
   if (!Number.isInteger(proof.cycle) || proof.cycle <= 0) {
     errors.push(`progress proof ${proof.proofId} cycle must be a positive integer`);
@@ -329,11 +331,7 @@ export function validateProgressProofRecord(proof: ProgressProofRecord): string[
     errors.push(`progress proof ${proof.proofId} must include evidenceRefs`);
   }
 
-  if (proof.nextTarget.trim().length === 0) {
-    errors.push(`progress proof ${proof.proofId} must include nextTarget`);
-  }
-
-  if ((proof.whyNext ?? "").trim().length === 0) {
+  if (nextTarget.length > 0 && whyNext.length === 0) {
     errors.push(`progress proof ${proof.proofId} must include whyNext`);
   }
 

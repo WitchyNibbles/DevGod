@@ -1655,6 +1655,7 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
   return replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
     .replace("`artifact_complete | specialist_verified`", "`artifact_complete`")
+    .replace("review_exports=required | runtime_optional", "review_exports=required")
     .replace(
       [
         "List the specialist roles whose execution must be evidenced before completion.",
@@ -1662,6 +1663,8 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
         "## Quality gates",
         "",
         "List the task-type gates that apply, for example:",
+        "",
+        "Only assign file-backed gates when the task can actually produce or update the required artifacts inside its allowed write scope.",
         "",
         "- `product_acceptance`",
         "- `frontend_acceptance`",

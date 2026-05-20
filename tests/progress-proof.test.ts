@@ -42,6 +42,23 @@ test("validateProgressProofRecord requires measurable deltas and next-target rat
   assert.match(errors.join(" "), /whyNext/i);
 });
 
+test("validateProgressProofRecord allows terminal proofs with measurable deltas and no next target", () => {
+  const errors = validateProgressProofRecord({
+    cycle: 2,
+    proofId: "proof-terminal",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 1, opened: 0 },
+    nextTarget: "   ",
+    whyNext: "",
+    createdAt: "2026-05-20T10:05:00.000Z"
+  });
+
+  assert.deepEqual(errors, []);
+});
+
 test("selectAutonomousNextTarget ignores invalid progress proofs and falls back to the latest checkpoint", () => {
   const target = selectAutonomousNextTarget({
     enabled: true,

@@ -1035,6 +1035,7 @@ test("executeOpsCommandFromArgs surfaces continue_analysis guidance when autonom
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["workflow proof completion remains gated by authenticated reviews"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/ops-recovery.test.ts"],
       lastUpdatedAt: new Date().toISOString()
@@ -1155,6 +1156,7 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["workflow proof completion remains gated by authenticated reviews"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/ops-recovery.test.ts"],
       lastUpdatedAt: new Date().toISOString()
@@ -1561,9 +1563,38 @@ test("executeLoopCommandFromArgs executes supported continue_analysis workflow-p
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["workflow proof completion remains gated by authenticated reviews"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/ops-recovery.test.ts"],
       lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/ops-recovery.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:ops-recovery-workflow-proof-gap",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["approves runtime workflow proof"],
+      evidenceRefs: ["tests/ops-recovery.test.ts"],
+      createdAt: new Date().toISOString()
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -1724,9 +1755,38 @@ test("executeLoopCommandFromArgs resolves task-target blocking gaps through work
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      businessRules: ["workflow proof completion remains gated by authenticated reviews"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/ops-recovery.test.ts"],
       lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/ops-recovery.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:ops-recovery-workflow-proof-inference",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["approves runtime workflow proof"],
+      evidenceRefs: ["tests/ops-recovery.test.ts"],
+      createdAt: new Date().toISOString()
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
