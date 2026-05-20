@@ -39,6 +39,12 @@ authoritative completion proof is run \`d141baef-0f7a-40df-9aec-ac60ad9235f7\`
 `;
 const redesignState = `package-level remediation described by this redesign is now shipped
 `;
+const readmeState = `# DevGod
+
+As of \`2026-05-20\`, DevGod is runtime-proven at the package level.
+
+Command families include \`coverage\`, \`gaps\`, and \`report\`.
+`;
 
 test("check-docs-runtime-drift passes when benchmark and historical docs are aligned", async () => {
   const fixtureRoot = await createFixture();
@@ -54,6 +60,7 @@ test("check-docs-runtime-drift passes when benchmark and historical docs are ali
     await writeFile(path.join(fixtureRoot, "docs", "devgod-goal-gap-audit.md"), goalGapHistorical, "utf8");
     await writeFile(path.join(fixtureRoot, "docs", "current-state.md"), currentState, "utf8");
     await writeFile(path.join(fixtureRoot, "docs", "autonomous-execution-redesign.md"), redesignState, "utf8");
+    await writeFile(path.join(fixtureRoot, "README.md"), readmeState, "utf8");
 
     const { stdout } = await execFileAsync(
       "bash",
@@ -90,6 +97,7 @@ autonomous.configured=false
     );
     await writeFile(path.join(fixtureRoot, "docs", "current-state.md"), currentState, "utf8");
     await writeFile(path.join(fixtureRoot, "docs", "autonomous-execution-redesign.md"), redesignState, "utf8");
+    await writeFile(path.join(fixtureRoot, "README.md"), readmeState, "utf8");
 
     await assert.rejects(
       execFileAsync(
