@@ -726,6 +726,99 @@ test("executeReportCommandFromArgs surfaces generated code-backed inventory in t
   assert.match(markdown, /comprehension: inventory=/);
 });
 
+test("executeReportCommandFromArgs surfaces generated inventory gaps from ambiguous repo code", async () => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "devgod-report-inventory-"));
+  const { service, store } = createService();
+
+  try {
+    await mkdir(path.join(fixtureRoot, "src", "admin"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "core"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "mcp"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "policy"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "domain"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "config"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "scripts"), { recursive: true });
+
+    await writeFile(path.join(fixtureRoot, "package.json"), '{"name":"fixture","version":"1.0.0"}\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "admin", "router.ts"), 'export function handle(command: string) { if (command === "status") return "ok"; return "missing"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "admin", "dynamic.ts"), 'export function run(command: string, handlers: Record<string, () => string>) { const handler = handlers[command]; return handler?.() ?? "missing"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "core", "service.ts"), 'export class BillingService { run() { return "ok"; } }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "mcp", "client.ts"), 'export async function syncRemote() { return fetch("https://example.com/health"); }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "policy", "access.ts"), 'export function authorizeUser(token: string, permission: string) { return token.length > 0 && permission === "read"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "domain", "model.ts"), 'export interface RecordModel { id: string; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "config", "runtime.ts"), 'export const apiUrl = process.env.API_URL ?? "https://example.com";\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "scripts", "sync.sh"), 'echo sync\n', "utf8");
+
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Ambiguous inventory command report",
+      request: "Expose generated inventory gaps through the report command."
+    });
+
+    await service.createTaskGraph(run.id, [
+      taskPacket({
+        taskId: "inventory",
+        qualityGates: ["product_acceptance", "coverage_ledger_required"]
+      })
+    ]);
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "inventory",
+      manifest: {
+        runId: run.id,
+        profile: "legacy_rewrite",
+        requiredCategories: ["services", "external_integrations", "configuration", "authorization"],
+        thresholds: {
+          criticalItemCoverage: 0.8,
+          criticalItemValidation: 0.6,
+          callsiteCoverage: 0.85,
+          runtimeTraceCoverage: 0.75,
+          inventoryCompleteness: 1
+        }
+      }
+    });
+    await service.generateRepoInventory(run.id, {
+      repoRoot: fixtureRoot,
+      now: "2026-05-20T16:03:00.000Z"
+    });
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.ok(result.report.autonomous.openGaps.some((gap) => gap.targetId === "file:src/admin/dynamic.ts"));
+    assert.ok(result.report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("route_map"));
+    assert.ok(result.report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("integration_map"));
+
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /gaps: open=/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("executeReportCommandFromArgs includes runtime trace registry summaries and missing risky targets", async () => {
   const { service, store } = createService();
   const run = await service.intakeRequest({
@@ -748,7 +841,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
     manifest: {
       runId: run.id,
       profile: "legacy_rewrite",
-      requiredCategories: ["services"],
+      requiredCategories: ["services", "external_integrations"],
       thresholds: {
         criticalItemCoverage: 0.8,
         criticalItemValidation: 0.6,
@@ -766,7 +859,6 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       sources: ["src/core/service.ts:1"],
       callsiteCount: 2,
       callsitesAnalyzed: 2,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/report-command.test.ts"],
       lastUpdatedAt: "2026-05-20T13:20:00.000Z"
@@ -779,21 +871,21 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       sources: ["src/core/service.ts:1"],
       callsiteCount: 1,
       callsitesAnalyzed: 1,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/report-command.test.ts"],
       lastUpdatedAt: "2026-05-20T13:20:00.000Z"
-    }
-  ]);
-  await service.upsertRuntimeTraces(run.id, [
+    },
     {
-      traceId: "trace:workflow-proof-side-effect",
-      targetId: "service:workflow-proof",
-      kind: "side_effect",
-      risky: true,
-      sideEffects: ["records workflow proof completion"],
-      evidenceRefs: ["tests/report-command.test.ts"],
-      createdAt: "2026-05-20T13:21:00.000Z"
+      id: "integration:payments",
+      category: "external_integrations",
+      state: "fully_analyzed",
+      criticality: "high",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -808,8 +900,38 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       createdBy: "qa_engineer",
       suggestedNextActions: ["record core loop runtime trace"],
       status: "open"
+    },
+    {
+      id: "gap:payments-trace",
+      targetId: "integration:payments",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Payment integration still lacks a risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record payment runtime trace"],
+      status: "open"
     }
   ]);
+  await service.captureRuntimeTrace(run.id, {
+    traceId: "trace:workflow-proof-side-effect",
+    targetId: "service:workflow-proof",
+    kind: "side_effect",
+    risky: true,
+    sideEffects: ["records workflow proof completion"],
+    evidenceRefs: ["tests/report-command.test.ts"],
+    createdAt: "2026-05-20T13:21:00.000Z"
+  });
+  await service.importRuntimeTrace(run.id, {
+    traceId: "trace:payments-import",
+    targetId: "integration:payments",
+    kind: "integration",
+    risky: true,
+    sideEffects: ["submits a payment provider charge"],
+    evidenceRefs: ["tests/report-command.test.ts"],
+    createdAt: "2026-05-20T13:21:30.000Z"
+  });
 
   const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
     getStatusSnapshot(runId) {
@@ -835,14 +957,24 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
     }
   });
 
-  assert.equal(result.report.traceRegistry?.riskyTraceCount, 1);
+  assert.equal(result.report.traceRegistry?.riskyTraceCount, 2);
   assert.deepEqual(result.report.traceRegistry?.riskyTargetsMissingTrace, ["service:core-loop"]);
   assert.deepEqual(result.report.traceRegistry?.openMissingTraceGapIds, ["gap:core-loop-trace"]);
+  assert.deepEqual(result.report.traceRegistry?.operatorImportTargetIds, ["integration:payments"]);
+  assert.equal(
+    result.report.traceRegistry?.targets.find((target) => target.targetId === "integration:payments")
+      ?.latestAuthorityLabel,
+    "operator_import"
+  );
 
   const markdown = formatRunEvidenceReportMarkdown(result.report);
   assert.match(markdown, /## Runtime Trace Registry/);
+  assert.match(markdown, /freshness window: 24h reference=/);
   assert.match(markdown, /missing risky targets: service:core-loop/);
+  assert.match(markdown, /operator-import trace targets: integration:payments/);
   assert.match(markdown, /open missing-trace gaps: gap:core-loop-trace/);
+  assert.match(markdown, /service:workflow-proof\[trace:workflow-proof-side-effect\]\{freshness=fresh provenance=runtime_capture\}/);
+  assert.match(markdown, /integration:payments\[trace:payments-import\]\{freshness=fresh provenance=operator_import\}/);
 });
 
 test("executeReportCommandFromArgs includes checkpoint compaction evidence and self-referential checkpoint resume guidance", async () => {
@@ -919,6 +1051,239 @@ test("executeReportCommandFromArgs includes checkpoint compaction evidence and s
   assert.match(markdown, /summary: phase=validation; targets=checkpoint:cp-generated; open-gaps=none/);
 });
 
+test("executeReportCommandFromArgs carries profile-limited readiness for standard delivery runs", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Profile-limited report",
+    request: "Surface task-scoped readiness without pretending it is broad rewrite proof."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "delivery",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:delivery-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["delivery sequencing must preserve runtime authority"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-20T15:02:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "integration_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/report-command.test.ts"],
+    updatedAt: "2026-05-20T15:02:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:delivery-core",
+      targetId: "service:delivery-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists task-scoped delivery evidence"],
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T15:02:00.000Z"
+    }
+  ]);
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.autonomous.comprehensionSummary?.readinessScope, "profile_limited");
+  assert.equal(result.report.autonomous.comprehensionSummary?.rewriteReadiness, "profile_limited");
+  assert.match(
+    result.report.autonomous.comprehensionSummary?.profileLimitations.join(" | ") ?? "",
+    /does not establish broad rewrite readiness/
+  );
+});
+
+test("executeReportCommandFromArgs explains withheld rewrite readiness when inventory ambiguity remains open", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite gating command report",
+    request: "Explain why rewrite readiness was withheld in the report command."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 1,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 1
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:rewrite-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["rewrite planning must require grounded repo comprehension"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/report-command.test.ts"],
+      lastUpdatedAt: "2026-05-20T16:22:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/report-command.test.ts"],
+    updatedAt: "2026-05-20T16:22:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:rewrite-core",
+      targetId: "service:rewrite-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists rewrite planning state"],
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T16:22:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:rewrite-ambiguity",
+      targetId: "file:src/admin/dynamic.ts",
+      kind: "missing_inventory",
+      severity: "medium",
+      description: "dynamic discovery signals in src/admin/dynamic.ts require manual follow-up before rewrite planning is safe",
+      blocking: false,
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["inspect src/admin/dynamic.ts and record the concrete handler surface"],
+      status: "open"
+    }
+  ]);
+
+  const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getExecutionPlan(runId, staleAfterHours) {
+      return service.getExecutionPlan(runId, { staleAfterHours });
+    },
+    getRoutingReport(runId) {
+      return service.recommendRouting(runId);
+    },
+    inspectRecovery(runId, staleAfterHours) {
+      return service.inspectRecovery(runId, { staleAfterHours });
+    },
+    getHandoffs(runId, taskId) {
+      return store.getHandoffs(runId, taskId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.report.autonomous.comprehensionSummary?.rewriteReadiness, "blocked");
+  assert.match(
+    result.report.autonomous.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
+    /inventory gap open: dynamic discovery signals in src\/admin\/dynamic.ts require manual follow-up/
+  );
+  const markdown = formatRunEvidenceReportMarkdown(result.report);
+  assert.match(markdown, /rewrite=blocked/);
+});
+
 test("executeReportCommandFromArgs includes eval posture and review controls sections", async () => {
   const { service, store } = createService();
   const run = await service.intakeRequest({
@@ -945,6 +1310,15 @@ test("executeReportCommandFromArgs includes eval posture and review controls sec
     }
   });
   await service.upsertExternalEvals(run.id, [
+    {
+      evalId: "eval:orchestration-replay",
+      label: "Replay-grade orchestration baseline",
+      scope: "repo_local",
+      harness: "replay_grade_orchestration",
+      artifactRef: "replay://orchestration/generated-baseline",
+      evidenceRefs: ["tests/report-command.test.ts"],
+      createdAt: "2026-05-20T14:04:00.000Z"
+    },
     {
       evalId: "eval:agent-evals",
       label: "OpenAI agent eval sample",
@@ -991,11 +1365,16 @@ test("executeReportCommandFromArgs includes eval posture and review controls sec
   });
 
   assert.equal(result.report.status.evalPosture.status, "external_ready");
+  assert.deepEqual(result.report.status.evalPosture.repoLocalLabels, ["Replay-grade orchestration baseline"]);
+  assert.deepEqual(result.report.status.evalPosture.broaderEvidenceLabels, ["OpenAI agent eval sample"]);
+  assert.match(result.report.status.evalPosture.boundarySummary, /Repo-local eval evidence and broader replay-grade or external evidence are both present/);
   assert.equal(result.report.status.reviewControls.status, "explicit");
 
   const markdown = formatRunEvidenceReportMarkdown(result.report);
   assert.match(markdown, /## Eval Posture/);
-  assert.match(markdown, /OpenAI agent eval sample/);
+  assert.match(markdown, /boundary:/);
+  assert.match(markdown, /repo-local labels: Replay-grade orchestration baseline/);
+  assert.match(markdown, /broader evidence labels: OpenAI agent eval sample/);
   assert.match(markdown, /## Review Controls/);
   assert.match(markdown, /control:security-waiver-blocked: action=waiver enforcement=waiver_blocked/);
 });

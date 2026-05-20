@@ -38,6 +38,14 @@ export interface OrchestrationBenchmarkReport {
     passedCases: number;
     totalCases: number;
     passRate: number;
+    evidenceScope: "repo_local";
+  };
+  replayGradeProof: {
+    passedCases: number;
+    totalCases: number;
+    passRate: number;
+    evidenceScope: "replay_grade";
+    boundaryNote: string;
   };
   ranking: OrchestrationBenchmarkEntry[];
 }
@@ -128,8 +136,15 @@ function scoreProfile(profile: CapabilityProfile): number {
   return rubricCategories.reduce((total, category) => total + profile.categories[category], 0);
 }
 
-function benchmarkDevgodProfile(runtimePassRate: number): CapabilityProfile {
-  const evalRigor = runtimePassRate === 1 ? 5 : runtimePassRate >= 0.8 ? 4 : runtimePassRate >= 0.6 ? 3 : 2;
+function benchmarkDevgodProfile(runtimePassRate: number, replayPassRate: number): CapabilityProfile {
+  const evalRigor =
+    runtimePassRate === 1 && replayPassRate === 1
+      ? 5
+      : runtimePassRate === 1 && replayPassRate >= 0.75
+        ? 4
+        : runtimePassRate >= 0.8
+          ? 3
+          : 2;
 
   return {
     id: "devgod",
@@ -152,7 +167,10 @@ function benchmarkDevgodProfile(runtimePassRate: number): CapabilityProfile {
 
 export async function runOrchestrationBenchmark(): Promise<OrchestrationBenchmarkReport> {
   const baseline = await runOrchestrationBaseline();
-  const profiles = [benchmarkDevgodProfile(baseline.summary.passRate), ...reviewedFixtureProfiles];
+  const repoLocalCases = baseline.cases.filter((testCase) => testCase.evidenceScope === "repo_local");
+  const repoLocalPassedCases = repoLocalCases.filter((testCase) => testCase.passed).length;
+  const repoLocalPassRate = repoLocalCases.length === 0 ? 0 : repoLocalPassedCases / repoLocalCases.length;
+  const profiles = [benchmarkDevgodProfile(repoLocalPassRate, baseline.replayLayer.passRate), ...reviewedFixtureProfiles];
   const maxScore = rubricCategories.length * 5;
   const ranking = profiles
     .map((profile) => ({
@@ -173,9 +191,17 @@ export async function runOrchestrationBenchmark(): Promise<OrchestrationBenchmar
       categories: [...rubricCategories]
     },
     runtimeProof: {
-      passedCases: baseline.summary.passedCases,
-      totalCases: baseline.summary.totalCases,
-      passRate: baseline.summary.passRate
+      passedCases: repoLocalPassedCases,
+      totalCases: repoLocalCases.length,
+      passRate: repoLocalPassRate,
+      evidenceScope: "repo_local"
+    },
+    replayGradeProof: {
+      passedCases: baseline.replayLayer.passedCases,
+      totalCases: baseline.replayLayer.totalCases,
+      passRate: baseline.replayLayer.passRate,
+      evidenceScope: "replay_grade",
+      boundaryNote: baseline.replayLayer.boundaryNote
     },
     ranking
   };
@@ -188,11 +214,17 @@ export function renderOrchestrationBenchmarkMarkdown(report: OrchestrationBenchm
   lines.push(`Generated: ${report.generatedAt}`);
   lines.push("");
   lines.push(
-    `Runtime proof: ${report.runtimeProof.passedCases}/${report.runtimeProof.totalCases} baseline cases passed (${Math.round(report.runtimeProof.passRate * 100)}%).`
+    `Local proof: ${report.runtimeProof.passedCases}/${report.runtimeProof.totalCases} repo-local baseline cases passed (${Math.round(report.runtimeProof.passRate * 100)}%).`
+  );
+  lines.push(
+    `Replay-grade proof: ${report.replayGradeProof.passedCases}/${report.replayGradeProof.totalCases} generated multi-step replay cases passed (${Math.round(report.replayGradeProof.passRate * 100)}%).`
   );
   lines.push("");
   lines.push(
-    "This report mixes repo-verified `devgod` runtime proof with reviewed comparative capability fixtures for adjacent systems. It is a reproducible rubric, not an external lab certification."
+    "This report mixes repo-verified `devgod` runtime proof with reviewed comparative capability fixtures for adjacent systems. Local proof and replay-grade proof are both repo-local evidence layers, not an external lab certification."
+  );
+  lines.push(
+    `Replay boundary: ${report.replayGradeProof.boundaryNote}`
   );
   lines.push("");
   lines.push("| Rank | System | Score | Governance | Trusted reviews | Observability | Recovery | Evals | Ergonomics | Evidence |");

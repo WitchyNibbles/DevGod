@@ -176,7 +176,10 @@ export interface OperatorStatusReport {
     authorityLabel: "runtime_authoritative";
     status: "missing" | "repo_local_only" | "semi_external_ready" | "external_ready";
     labels: string[];
+    repoLocalLabels: string[];
+    broaderEvidenceLabels: string[];
     artifactRefs: string[];
+    boundarySummary: string;
   };
   reviewControls: {
     authorityLabel: "runtime_authoritative";
@@ -233,10 +236,24 @@ export function buildOperatorStatusReport(input: {
 }): OperatorStatusReport {
   const byStatus = emptyTaskBuckets();
   const traceRegistrySummary = input.snapshot.autonomousExecution
-    ? buildRuntimeTraceRegistry(input.snapshot.autonomousExecution.state)
+    ? buildRuntimeTraceRegistry(input.snapshot.autonomousExecution.state, { now: input.now })
     : undefined;
   const latestCheckpoint = input.snapshot.autonomousExecution?.state.checkpoints.at(-1);
   const externalEvals = input.snapshot.autonomousExecution?.state.externalEvals ?? [];
+  const repoLocalEvalLabels = externalEvals
+    .filter((record) => record.scope === "repo_local")
+    .map((record) => record.label);
+  const broaderEvalLabels = externalEvals
+    .filter((record) => record.scope !== "repo_local")
+    .map((record) => record.label);
+  const evalBoundarySummary =
+    externalEvals.length === 0
+      ? "No eval evidence is recorded."
+      : repoLocalEvalLabels.length > 0 && broaderEvalLabels.length > 0
+        ? "Repo-local eval evidence and broader replay-grade or external evidence are both present; neither changes runtime-authoritative run/task truth."
+        : repoLocalEvalLabels.length > 0
+          ? "Repo-local eval evidence is present; treat it as derived repo-local proof, not runtime authority."
+          : "Only broader replay-grade or external evidence is present; keep it separate from runtime-authoritative run/task truth.";
   const sensitiveActionControls = input.snapshot.autonomousExecution?.state.sensitiveActionControls ?? [];
 
   for (const task of input.snapshot.tasks) {
@@ -307,7 +324,10 @@ export function buildOperatorStatusReport(input: {
               ? "repo_local_only"
               : "missing",
       labels: externalEvals.map((record) => record.label),
-      artifactRefs: externalEvals.map((record) => record.artifactRef)
+      repoLocalLabels: repoLocalEvalLabels,
+      broaderEvidenceLabels: broaderEvalLabels,
+      artifactRefs: externalEvals.map((record) => record.artifactRef),
+      boundarySummary: evalBoundarySummary
     },
     reviewControls: {
       authorityLabel: "runtime_authoritative",

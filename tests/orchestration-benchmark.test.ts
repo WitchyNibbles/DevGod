@@ -17,6 +17,8 @@ test("orchestration benchmark ranks devgod first with repo-verified runtime proo
 
   assert.equal(report.runtimeProof.totalCases, 14);
   assert.equal(report.runtimeProof.passedCases, 14);
+  assert.equal(report.replayGradeProof.totalCases, 4);
+  assert.equal(report.replayGradeProof.passedCases, 4);
   assert.equal(report.ranking[0]?.id, "devgod");
   assert.equal(report.ranking[0]?.evidenceModel, "repo_verified");
 });
@@ -26,6 +28,9 @@ test("orchestration benchmark markdown renders a publishable comparison table", 
   const markdown = renderOrchestrationBenchmarkMarkdown(report);
 
   assert.match(markdown, /# Orchestration Benchmark/);
+  assert.match(markdown, /Local proof:/);
+  assert.match(markdown, /Replay-grade proof:/);
+  assert.match(markdown, /Replay boundary:/);
   assert.match(markdown, /\| Rank \| System \| Score \|/);
   assert.match(markdown, /\| 1 \| devgod \|/);
 });
@@ -35,6 +40,7 @@ test("orchestration benchmark report remains json-serializable and markdown-rend
     JSON.stringify(await runOrchestrationBenchmark())
   ) as Awaited<ReturnType<typeof runOrchestrationBenchmark>>;
   assert.equal(jsonReport.ranking[0]?.id, "devgod");
+  assert.equal(jsonReport.replayGradeProof.totalCases, 4);
 
   const markdownStdout = renderOrchestrationBenchmarkMarkdown(await runOrchestrationBenchmark());
   assert.match(markdownStdout, /# Orchestration Benchmark/);

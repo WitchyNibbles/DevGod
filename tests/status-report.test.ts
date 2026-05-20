@@ -399,10 +399,171 @@ test("buildOperatorStatusReport reflects generated code-backed understanding inv
     now: "2026-05-20T12:32:00.000Z"
   });
 
-  assert.ok(report.autonomous.openGaps.length === 0);
   assert.ok((report.autonomous.comprehensionSummary?.inventoryCompleteness ?? 0) > 0);
   assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("repo_map"));
   assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("runtime_side_effects"));
+});
+
+test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguous repo code", async () => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "devgod-status-inventory-"));
+  const service = new DevgodCoreService(new MemoryStore());
+
+  try {
+    await mkdir(path.join(fixtureRoot, "src", "admin"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "core"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "mcp"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "policy"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "domain"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "src", "config"), { recursive: true });
+    await mkdir(path.join(fixtureRoot, "scripts"), { recursive: true });
+
+    await writeFile(path.join(fixtureRoot, "package.json"), '{"name":"fixture","version":"1.0.0"}\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "admin", "router.ts"), 'export function handle(command: string) { if (command === "status") return "ok"; return "missing"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "admin", "dynamic.ts"), 'export function run(command: string, handlers: Record<string, () => string>) { const handler = handlers[command]; return handler?.() ?? "missing"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "core", "service.ts"), 'export class BillingService { run() { return "ok"; } }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "mcp", "client.ts"), 'export async function syncRemote() { return fetch("https://example.com/health"); }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "policy", "access.ts"), 'export function authorizeUser(token: string, permission: string) { return token.length > 0 && permission === "read"; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "domain", "model.ts"), 'export interface RecordModel { id: string; }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "config", "runtime.ts"), 'export const apiUrl = process.env.API_URL ?? "https://example.com";\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "scripts", "sync.sh"), 'echo sync\n', "utf8");
+
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Ambiguous inventory report",
+      request: "Expose code-backed discovery gaps in operator status."
+    });
+
+    await service.createTaskGraph(run.id, [
+      taskPacket({
+        taskId: "inventory",
+        qualityGates: ["product_acceptance", "coverage_ledger_required"]
+      })
+    ]);
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "inventory",
+      manifest: {
+        runId: run.id,
+        profile: "legacy_rewrite",
+        requiredCategories: ["services", "external_integrations", "configuration", "authorization"],
+        thresholds: {
+          criticalItemCoverage: 0.8,
+          criticalItemValidation: 0.6,
+          callsiteCoverage: 0.85,
+          runtimeTraceCoverage: 0.75,
+          inventoryCompleteness: 1
+        }
+      }
+    });
+    await service.generateRepoInventory(run.id, {
+      repoRoot: fixtureRoot,
+      now: "2026-05-20T16:01:00.000Z"
+    });
+
+    const snapshot = await service.getStatus(run.id);
+    const report = buildOperatorStatusReport({
+      snapshot,
+      reviewIdentity: {
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      },
+      gitNexus: gitNexusObservation(),
+      staleAfterDays: 1,
+      now: "2026-05-20T16:02:00.000Z"
+    });
+
+    assert.ok(report.autonomous.openGaps.some((gap) => gap.targetId === "file:src/admin/dynamic.ts"));
+    assert.ok(report.autonomous.openGaps.some((gap) => /manual follow-up/.test(gap.description)));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("route_map"));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("integration_map"));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("config_coupling"));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("authz_map"));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildOperatorStatusReport makes expanded standard-delivery gaps and profile limitations explicit", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Standard delivery scope",
+    request: "Show that standard delivery is task-scoped and missing deeper understanding."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "delivery",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    updatedAt: "2026-05-20T15:00:00.000Z"
+  })));
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-20T15:01:00.000Z"
+  });
+
+  assert.equal(report.autonomous.comprehensionSummary?.readinessScope, "profile_limited");
+  assert.equal(report.autonomous.comprehensionSummary?.rewriteReadiness, "blocked");
+  assert.ok(report.autonomous.comprehensionSummary?.missingUnderstandingKinds.includes("integration_map"));
+  assert.ok(report.autonomous.comprehensionSummary?.missingUnderstandingKinds.includes("config_coupling"));
+  assert.ok(report.autonomous.comprehensionSummary?.missingUnderstandingKinds.includes("runtime_side_effects"));
+  assert.match(
+    report.autonomous.comprehensionSummary?.profileLimitations.join(" | ") ?? "",
+    /does not establish broad rewrite readiness/
+  );
 });
 
 test("buildOperatorStatusReport surfaces runtime trace registry summaries and missing risky targets", async () => {
@@ -427,7 +588,7 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
     manifest: {
       runId: run.id,
       profile: "legacy_rewrite",
-      requiredCategories: ["services"],
+      requiredCategories: ["services", "external_integrations"],
       thresholds: {
         criticalItemCoverage: 0.8,
         criticalItemValidation: 0.6,
@@ -445,7 +606,6 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
       sources: ["src/core/service.ts:1"],
       callsiteCount: 2,
       callsitesAnalyzed: 2,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/status-report.test.ts"],
       lastUpdatedAt: "2026-05-20T13:10:00.000Z"
@@ -458,21 +618,21 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
       sources: ["src/core/service.ts:1"],
       callsiteCount: 1,
       callsitesAnalyzed: 1,
-      runtimeTraced: true,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/status-report.test.ts"],
       lastUpdatedAt: "2026-05-20T13:10:00.000Z"
-    }
-  ]);
-  await service.upsertRuntimeTraces(run.id, [
+    },
     {
-      traceId: "trace:workflow-proof-side-effect",
-      targetId: "service:workflow-proof",
-      kind: "side_effect",
-      risky: true,
-      sideEffects: ["records workflow proof completion"],
-      evidenceRefs: ["tests/status-report.test.ts"],
-      createdAt: "2026-05-20T13:11:00.000Z"
+      id: "integration:payments",
+      category: "external_integrations",
+      state: "fully_analyzed",
+      criticality: "high",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-20T13:10:00.000Z"
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -487,8 +647,38 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
       createdBy: "qa_engineer",
       suggestedNextActions: ["record core loop runtime trace"],
       status: "open"
+    },
+    {
+      id: "gap:payments-trace",
+      targetId: "integration:payments",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Payment integration still lacks a recorded risky runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record payment runtime trace"],
+      status: "open"
     }
   ]);
+  await service.captureRuntimeTrace(run.id, {
+    traceId: "trace:workflow-proof-side-effect",
+    targetId: "service:workflow-proof",
+    kind: "side_effect",
+    risky: true,
+    sideEffects: ["records workflow proof completion"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    createdAt: "2026-05-20T13:11:00.000Z"
+  });
+  await service.importRuntimeTrace(run.id, {
+    traceId: "trace:payments-import",
+    targetId: "integration:payments",
+    kind: "integration",
+    risky: true,
+    sideEffects: ["submits a payment provider charge"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    createdAt: "2026-05-18T13:09:00.000Z"
+  });
 
   const snapshot = await service.getStatus(run.id);
   const report = buildOperatorStatusReport({
@@ -509,13 +699,146 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
   });
 
   assert.equal(report.traceRegistry.authorityLabel, "derived_only");
-  assert.equal(report.traceRegistry.summary?.riskyTraceCount, 1);
+  assert.equal(report.traceRegistry.summary?.riskyTraceCount, 2);
   assert.deepEqual(report.traceRegistry.summary?.riskyTargetsMissingTrace, ["service:core-loop"]);
   assert.deepEqual(report.traceRegistry.summary?.openMissingTraceGapIds, ["gap:core-loop-trace"]);
+  assert.deepEqual(report.traceRegistry.summary?.operatorImportTargetIds, ["integration:payments"]);
+  assert.deepEqual(report.traceRegistry.summary?.staleTargetIds, ["integration:payments"]);
+  assert.equal(
+    report.traceRegistry.summary?.targets.find((target) => target.targetId === "service:workflow-proof")
+      ?.latestAuthorityLabel,
+    "runtime_capture"
+  );
+  assert.equal(
+    report.traceRegistry.summary?.targets.find((target) => target.targetId === "integration:payments")
+      ?.freshness,
+    "stale"
+  );
   assert.match(
     report.autonomous.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
     /runtime trace missing for risky target: service:core-loop/
   );
+});
+
+test("buildOperatorStatusReport explains withheld rewrite readiness when inventory ambiguity remains open", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Rewrite gating report",
+    request: "Explain why rewrite readiness was withheld."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 1,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 1
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:rewrite-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["rewrite planning must require grounded repo comprehension"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-20T16:20:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    updatedAt: "2026-05-20T16:20:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:rewrite-core",
+      targetId: "service:rewrite-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists rewrite planning state"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-20T16:20:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:rewrite-ambiguity",
+      targetId: "file:src/admin/dynamic.ts",
+      kind: "missing_inventory",
+      severity: "medium",
+      description: "dynamic discovery signals in src/admin/dynamic.ts require manual follow-up before rewrite planning is safe",
+      blocking: false,
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["inspect src/admin/dynamic.ts and record the concrete handler surface"],
+      status: "open"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-20T16:21:00.000Z"
+  });
+
+  assert.equal(report.autonomous.comprehensionSummary?.rewriteReadiness, "blocked");
+  assert.match(
+    report.autonomous.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
+    /inventory gap open: dynamic discovery signals in src\/admin\/dynamic.ts require manual follow-up/
+  );
+  assert.equal(report.autonomous.phaseReadiness?.status, "blocked");
 });
 
 test("buildOperatorStatusReport surfaces operational checkpoint compaction and self-referential checkpoint resume guidance", async () => {
@@ -615,6 +938,15 @@ test("buildOperatorStatusReport surfaces external eval posture and explicit revi
   });
   await service.upsertExternalEvals(run.id, [
     {
+      evalId: "eval:orchestration-replay",
+      label: "Replay-grade orchestration baseline",
+      scope: "repo_local",
+      harness: "replay_grade_orchestration",
+      artifactRef: "replay://orchestration/generated-baseline",
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-20T14:01:00.000Z"
+    },
+    {
       evalId: "eval:swe-bench",
       label: "SWE-bench verified sample",
       scope: "semi_external",
@@ -654,7 +986,10 @@ test("buildOperatorStatusReport surfaces external eval posture and explicit revi
   });
 
   assert.equal(report.evalPosture.status, "semi_external_ready");
-  assert.deepEqual(report.evalPosture.labels, ["SWE-bench verified sample"]);
+  assert.deepEqual(report.evalPosture.repoLocalLabels, ["Replay-grade orchestration baseline"]);
+  assert.deepEqual(report.evalPosture.broaderEvidenceLabels, ["SWE-bench verified sample"]);
+  assert.match(report.evalPosture.boundarySummary, /Repo-local eval evidence and broader replay-grade or external evidence are both present/);
+  assert.deepEqual(report.evalPosture.labels, ["Replay-grade orchestration baseline", "SWE-bench verified sample"]);
   assert.equal(report.reviewControls.status, "explicit");
   assert.deepEqual(report.reviewControls.controls.map((control) => control.controlId), [
     "control:workflow-proof-auth"

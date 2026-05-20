@@ -16,14 +16,17 @@ import { MemoryStore } from "../store/memory-store.ts";
 
 type OrchestrationEvalArea = "gate" | "lifecycle" | "state" | "trust";
 type EvalAuthorityLabel = "derived_only";
+type EvalEvidenceScope = "repo_local" | "replay_grade";
 
 export interface OrchestrationEvalCaseResult {
   id: string;
+  replayId?: string;
   area: OrchestrationEvalArea;
   passed: boolean;
   score: number;
   threshold: number;
   authorityLabel: EvalAuthorityLabel;
+  evidenceScope: EvalEvidenceScope;
   details: string;
 }
 
@@ -37,9 +40,22 @@ export interface OrchestrationEvalSummary {
   authorityLabel: EvalAuthorityLabel;
 }
 
+export interface OrchestrationReplayLayerSummary {
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  passRate: number;
+  requiredPassRate: number;
+  meetsThreshold: boolean;
+  authorityLabel: EvalAuthorityLabel;
+  evidenceScope: "replay_grade";
+  boundaryNote: string;
+}
+
 export interface OrchestrationEvalReport {
   cases: OrchestrationEvalCaseResult[];
   summary: OrchestrationEvalSummary;
+  replayLayer: OrchestrationReplayLayerSummary;
 }
 
 const orchestrationRequiredPassRate = 1;
@@ -297,9 +313,10 @@ async function submitReadyForReview(service: DevgodCoreService, runId: string, t
   });
 }
 
-function buildResult(input: Omit<OrchestrationEvalCaseResult, "authorityLabel" | "score" | "threshold"> & {
+function buildResult(input: Omit<OrchestrationEvalCaseResult, "authorityLabel" | "score" | "threshold" | "evidenceScope"> & {
   score?: number;
   threshold?: number;
+  evidenceScope?: EvalEvidenceScope;
 }): OrchestrationEvalCaseResult {
   const score = input.score ?? (input.passed ? 1 : 0);
   const threshold = input.threshold ?? 1;
@@ -308,7 +325,8 @@ function buildResult(input: Omit<OrchestrationEvalCaseResult, "authorityLabel" |
     ...input,
     score,
     threshold,
-    authorityLabel: "derived_only"
+    authorityLabel: "derived_only",
+    evidenceScope: input.evidenceScope ?? (input.replayId ? "replay_grade" : "repo_local")
   };
 }
 
@@ -399,6 +417,395 @@ function buildLegacyRewriteState(
     runtimeTraces: overrides.runtimeTraces ?? base.runtimeTraces,
     pendingInvestigations: overrides.pendingInvestigations ?? base.pendingInvestigations
   };
+}
+
+
+type GeneratedAdversarialClass = "contradictory" | "stale" | "partial" | "interrupted";
+
+interface GeneratedAdversarialCaseSpec {
+  classId: GeneratedAdversarialClass;
+  variantId: string;
+  area: OrchestrationEvalArea;
+  execute: () => Promise<{ passed: boolean; details: string }>;
+}
+
+function generatedReplayId(classId: GeneratedAdversarialClass, variantId: string): string {
+  return `replay://orchestration/${classId}/${variantId}`;
+}
+
+async function runGeneratedAdversarialCases(): Promise<OrchestrationEvalCaseResult[]> {
+  const specs: GeneratedAdversarialCaseSpec[] = [
+    {
+      classId: "contradictory",
+      variantId: "fallback-over-noisy-checkpoint",
+      area: "state",
+      async execute() {
+        const snapshot = buildAutonomousExecutionSnapshot(
+          buildLegacyRewriteState({
+            phase: "migration_sequencing",
+            checkpoints: [
+              {
+                runId: "run-legacy",
+                checkpointId: "cp-generated-fresh",
+                authorityLabel: "runtime_authoritative",
+                phase: "migration_sequencing",
+                executionEpoch: 1,
+                activeTargets: ["checkpoint:generated-fresh"],
+                recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+                openGaps: ["gap:generated-contradiction"],
+                nextActions: ["re-run migration sequencing after reconciling contradictory evidence"],
+                compressedContextRef: "memory://generated/contradictory/fresh",
+                createdAt: "2026-05-20T12:04:00.000Z"
+              }
+            ],
+            gaps: [
+              {
+                id: "gap:generated-contradiction",
+                targetId: "service:rewrite-core",
+                kind: "contradicting_evidence",
+                severity: "critical",
+                description: "generated contradictory evidence remains unresolved",
+                blocking: true,
+                evidenceRefs: ["tests/orchestration-eval.test.ts"],
+                createdBy: "qa_engineer",
+                suggestedNextActions: ["re-run runtime tracing before sequencing"],
+                status: "open"
+              },
+              {
+                id: "gap:generated-noisy-inventory",
+                targetId: "service:rewrite-core",
+                kind: "missing_inventory",
+                severity: "low",
+                description: "generated inventory note remains open but non-authoritative for this combination",
+                blocking: false,
+                evidenceRefs: ["tests/orchestration-eval.test.ts"],
+                createdBy: "reviewer",
+                suggestedNextActions: ["document the generated inventory note"],
+                status: "open"
+              }
+            ]
+          })
+        );
+
+        return {
+          passed:
+            snapshot.phaseReadiness.blockerKind === "contradiction_loop" &&
+            snapshot.phaseReadiness.transition === "fallback" &&
+            snapshot.phaseReadiness.fallbackPhase === "modernization_strategy",
+          details:
+            `blocker=${snapshot.phaseReadiness.blockerKind} transition=${snapshot.phaseReadiness.transition ?? "none"} fallback=${snapshot.phaseReadiness.fallbackPhase ?? "none"}`
+        };
+      }
+    },
+    {
+      classId: "stale",
+      variantId: "checkpoint-still-blocks-with-progress-proof",
+      area: "state",
+      async execute() {
+        const snapshot = buildAutonomousExecutionSnapshot(
+          buildLegacyRewriteState({
+            profile: "standard_delivery",
+            phase: "validation",
+            checkpoints: [
+              {
+                runId: "run-standard",
+                checkpointId: "cp-generated-stale",
+                authorityLabel: "runtime_authoritative",
+                phase: "inventory",
+                executionEpoch: 1,
+                activeTargets: ["checkpoint:generated-stale"],
+                recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+                openGaps: [],
+                nextActions: ["resume from generated stale checkpoint"],
+                compressedContextRef: "memory://generated/stale/checkpoint",
+                createdAt: "2026-05-20T11:00:00.000Z"
+              }
+            ],
+            progressProofs: [
+              {
+                cycle: 1,
+                proofId: "proof-generated-stale",
+                phaseBefore: "risk_analysis",
+                phaseAfter: "validation",
+                evidenceRefs: ["tests/orchestration-eval.test.ts"],
+                coverageDelta: { validated: 1 },
+                blockingGapDelta: { closed: 0, opened: 0 },
+                nextTarget: "task:generated-proof-target",
+                whyNext: "generated progress proof still points at a follow-up target",
+                createdAt: "2026-05-20T11:30:00.000Z"
+              }
+            ],
+            understandingMaps: [],
+            runtimeTraces: [],
+            executionEpoch: 4
+          })
+        );
+
+        return {
+          passed:
+            snapshot.phaseReadiness.blockerKind === "stale_checkpoint" &&
+            snapshot.phaseReadiness.staleCheckpoint === true,
+          details:
+            `blocker=${snapshot.phaseReadiness.blockerKind} stale=${snapshot.phaseReadiness.staleCheckpoint === true ? "yes" : "no"} latest=${snapshot.phaseReadiness.latestCheckpointId ?? "none"}`
+        };
+      }
+    },
+    {
+      classId: "partial",
+      variantId: "review-dispatch-overrides-autonomous-continuation",
+      area: "gate",
+      async execute() {
+        const { service } = createEvalService();
+        const run = await service.intakeRequest({
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          actor: "ceo",
+          title: "Generated partial review case",
+          request: "Do not continue autonomously before the remaining reviews pass."
+        });
+
+        await service.createTaskGraph(run.id, [
+          taskPacket({
+            taskId: "rewrite",
+            qualityGates: [
+              "product_acceptance",
+              "coverage_ledger_required",
+              "progress_proof_required",
+              "checkpoint_resume_required"
+            ]
+          })
+        ]);
+        await service.claimTask(run.id, "rewrite", "planner");
+        await submitReadyForReview(service, run.id, "rewrite");
+        await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+          reviewerRole: "reviewer",
+          state: "passed",
+          severity: "low",
+          findings: []
+        });
+        await service.configureAutonomousExecution(run.id, {
+          profile: "legacy_rewrite",
+          phase: "runtime_tracing",
+          manifest: {
+            runId: run.id,
+            profile: "legacy_rewrite",
+            requiredCategories: ["services"],
+            thresholds: {
+              criticalItemCoverage: 0.8,
+              criticalItemValidation: 0.6,
+              callsiteCoverage: 0.85,
+              runtimeTraceCoverage: 0.75
+            }
+          }
+        });
+        await service.upsertCoverageItems(run.id, [
+          {
+            id: "service:workflow-proof",
+            category: "services",
+            state: "validated",
+            criticality: "critical",
+            sources: ["src/core/service.ts:1"],
+            callsiteCount: 1,
+            callsitesAnalyzed: 1,
+            runtimeTraced: true,
+            evidenceRefs: ["src/core/service.ts:1"],
+            verificationRefs: ["tests/orchestration-eval.test.ts"],
+            lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+          }
+        ]);
+        await service.upsertCoverageGaps(run.id, [
+          {
+            id: "gap:generated-workflow-proof",
+            targetId: "task:workflow-proof",
+            kind: "missing_validation",
+            severity: "high",
+            description: "generated workflow proof still needs to run",
+            blocking: true,
+            evidenceRefs: ["tests/orchestration-eval.test.ts"],
+            createdBy: "qa_engineer",
+            suggestedNextActions: ["run generated workflow proof after authenticated reviews"],
+            status: "open"
+          }
+        ]);
+        await service.recordProgressProof(run.id, {
+          cycle: 1,
+          proofId: "proof-generated-partial",
+          phaseBefore: "validation",
+          phaseAfter: "runtime_tracing",
+          evidenceRefs: ["tests/orchestration-eval.test.ts"],
+          coverageDelta: { validated: 1 },
+          blockingGapDelta: { closed: 0, opened: 1 },
+          nextTarget: "task:workflow-proof",
+          whyNext: "generated workflow proof remains the next target",
+          createdAt: "2026-05-20T12:01:00.000Z"
+        });
+        await service.checkpointRun(run.id, {
+          checkpointId: "cp-generated-partial",
+          phase: "final_verification",
+          activeTargets: ["task:workflow-proof"],
+          recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+          openGaps: ["gap:generated-workflow-proof"],
+          nextActions: ["run generated workflow proof after authenticated reviews"],
+          compressedContextRef: "memory://generated/partial/checkpoint",
+          createdAt: "2026-05-20T12:02:00.000Z"
+        });
+
+        const plan = await service.getExecutionPlan(run.id);
+        const reviewTargets =
+          plan.directive.kind === "dispatch_reviews"
+            ? plan.directive.recommendations.map((recommendation) => recommendation.targetReviewRole ?? "none")
+            : [];
+
+        return {
+          passed:
+            plan.directive.kind === "dispatch_reviews" &&
+            reviewTargets.includes("security_reviewer") &&
+            reviewTargets.includes("qa_engineer"),
+          details:
+            `directive=${plan.directive.kind} reviews=${reviewTargets.join(",") || "none"}`
+        };
+      }
+    },
+    {
+      classId: "interrupted",
+      variantId: "fresh-checkpoint-keeps-continuation-target",
+      area: "lifecycle",
+      async execute() {
+        const { service } = createEvalService();
+        const run = await service.intakeRequest({
+          workspaceSlug: "team",
+          projectSlug: "devgod",
+          actor: "ceo",
+          title: "Generated interrupted trace case",
+          request: "Prefer runtime tracing over a fresh checkpoint when risky traces are still missing."
+        });
+
+        await service.createTaskGraph(run.id, [
+          taskPacket({
+            taskId: "rewrite",
+            qualityGates: [
+              "product_acceptance",
+              "coverage_ledger_required",
+              "progress_proof_required",
+              "checkpoint_resume_required"
+            ]
+          })
+        ]);
+        await service.claimTask(run.id, "rewrite", "planner");
+        await submitReadyForReview(service, run.id, "rewrite");
+        await service.recordReview(run.id, "rewrite", reviewContext("reviewer").actor, {
+          reviewerRole: "reviewer",
+          state: "passed",
+          severity: "low",
+          findings: []
+        });
+        await service.recordReview(run.id, "rewrite", reviewContext("security_reviewer").actor, {
+          reviewerRole: "security_reviewer",
+          state: "passed",
+          severity: "low",
+          findings: []
+        });
+        await service.recordReview(run.id, "rewrite", reviewContext("qa_engineer").actor, {
+          reviewerRole: "qa_engineer",
+          state: "passed",
+          severity: "low",
+          findings: []
+        });
+        await service.configureAutonomousExecution(run.id, {
+          profile: "legacy_rewrite",
+          phase: "runtime_tracing",
+          manifest: {
+            runId: run.id,
+            profile: "legacy_rewrite",
+            requiredCategories: ["services"],
+            thresholds: {
+              criticalItemCoverage: 0.8,
+              criticalItemValidation: 0.6,
+              callsiteCoverage: 0.85,
+              runtimeTraceCoverage: 0.75
+            }
+          }
+        });
+        await service.upsertCoverageItems(run.id, [
+          {
+            id: "service:generated-runtime-gap",
+            category: "services",
+            state: "validated",
+            criticality: "critical",
+            sources: ["src/core/service.ts:1"],
+            callsiteCount: 1,
+            callsitesAnalyzed: 1,
+            evidenceRefs: ["src/core/service.ts:1"],
+            verificationRefs: ["tests/orchestration-eval.test.ts"],
+            lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+          }
+        ]);
+        await service.upsertCoverageGaps(run.id, [
+          {
+            id: "gap:generated-runtime-gap",
+            targetId: "service:generated-runtime-gap",
+            kind: "missing_runtime_trace",
+            severity: "high",
+            description: "generated risky runtime trace is still missing",
+            blocking: true,
+            evidenceRefs: ["tests/orchestration-eval.test.ts"],
+            createdBy: "qa_engineer",
+            suggestedNextActions: ["record generated runtime trace"],
+            status: "open"
+          }
+        ]);
+        await service.recordProgressProof(run.id, {
+          cycle: 1,
+          proofId: "proof-generated-interrupted",
+          phaseBefore: "validation",
+          phaseAfter: "runtime_tracing",
+          evidenceRefs: ["tests/orchestration-eval.test.ts"],
+          coverageDelta: { validated: 1 },
+          blockingGapDelta: { closed: 0, opened: 1 },
+          nextTarget: "checkpoint:generated-fresh",
+          whyNext: "generated checkpoint exists but risky trace evidence is still missing",
+          createdAt: "2026-05-20T12:03:00.000Z"
+        });
+        await service.checkpointRun(run.id, {
+          checkpointId: "cp-generated-fresh",
+          phase: "runtime_tracing",
+          activeTargets: ["checkpoint:generated-fresh"],
+          recentEvidenceRefs: ["tests/orchestration-eval.test.ts"],
+          openGaps: ["gap:generated-runtime-gap"],
+          nextActions: ["resume from generated fresh checkpoint"],
+          compressedContextRef: "memory://generated/interrupted/checkpoint",
+          createdAt: "2026-05-20T12:04:00.000Z"
+        });
+
+        const plan = await service.getExecutionPlan(run.id);
+
+        return {
+          passed: plan.directive.kind === "continue_analysis",
+          details:
+            plan.directive.kind === "continue_analysis"
+              ? `directive=${plan.directive.kind} target=${plan.directive.targetId} source=${plan.directive.source}`
+              : `directive=${plan.directive.kind}`
+        };
+      }
+    }
+  ];
+
+  const results: OrchestrationEvalCaseResult[] = [];
+  for (const spec of specs) {
+    const outcome = await spec.execute();
+    const replayId = generatedReplayId(spec.classId, spec.variantId);
+    results.push(
+      buildResult({
+        id: `generated:${spec.classId}:${spec.variantId}`,
+        replayId,
+        area: spec.area,
+        passed: outcome.passed,
+        details: `replay=${replayId} ${outcome.details}`
+      })
+    );
+  }
+
+  return results;
 }
 
 export async function runOrchestrationBaseline(): Promise<OrchestrationEvalReport> {
@@ -1008,10 +1415,17 @@ export async function runOrchestrationBaseline(): Promise<OrchestrationEvalRepor
     );
   }
 
+  cases.push(...(await runGeneratedAdversarialCases()));
+
   const passedCases = cases.filter((testCase) => testCase.passed).length;
   const totalCases = cases.length;
   const failedCases = totalCases - passedCases;
   const passRate = totalCases === 0 ? 0 : passedCases / totalCases;
+  const replayCases = cases.filter((testCase) => testCase.evidenceScope === "replay_grade");
+  const replayPassedCases = replayCases.filter((testCase) => testCase.passed).length;
+  const replayTotalCases = replayCases.length;
+  const replayFailedCases = replayTotalCases - replayPassedCases;
+  const replayPassRate = replayTotalCases === 0 ? 0 : replayPassedCases / replayTotalCases;
 
   return {
     cases,
@@ -1023,6 +1437,18 @@ export async function runOrchestrationBaseline(): Promise<OrchestrationEvalRepor
       requiredPassRate: orchestrationRequiredPassRate,
       meetsThreshold: passRate >= orchestrationRequiredPassRate,
       authorityLabel: "derived_only"
+    },
+    replayLayer: {
+      totalCases: replayTotalCases,
+      passedCases: replayPassedCases,
+      failedCases: replayFailedCases,
+      passRate: replayPassRate,
+      requiredPassRate: orchestrationRequiredPassRate,
+      meetsThreshold: replayPassRate >= orchestrationRequiredPassRate,
+      authorityLabel: "derived_only",
+      evidenceScope: "replay_grade",
+      boundaryNote:
+        "Replay-grade cases exercise broader multi-step degradation scenarios and should be read as stronger repo-local evidence, not external certification."
     }
   };
 }

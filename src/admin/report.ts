@@ -418,8 +418,15 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   lines.push(`## Eval Posture`);
   lines.push("");
   lines.push(`- status: ${report.status.evalPosture.status}`);
+  lines.push(`- boundary: ${report.status.evalPosture.boundarySummary}`);
+  if (report.status.evalPosture.repoLocalLabels.length > 0) {
+    lines.push(`- repo-local labels: ${report.status.evalPosture.repoLocalLabels.join("; ")}`);
+  }
+  if (report.status.evalPosture.broaderEvidenceLabels.length > 0) {
+    lines.push(`- broader evidence labels: ${report.status.evalPosture.broaderEvidenceLabels.join("; ")}`);
+  }
   if (report.status.evalPosture.labels.length > 0) {
-    lines.push(`- labels: ${report.status.evalPosture.labels.join("; ")}`);
+    lines.push(`- all labels: ${report.status.evalPosture.labels.join("; ")}`);
   }
   if (report.status.evalPosture.artifactRefs.length > 0) {
     lines.push(`- artifact refs: ${report.status.evalPosture.artifactRefs.join("; ")}`);
@@ -446,9 +453,20 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     lines.push(
       `- traces: total=${report.traceRegistry.totalTraces} risky=${report.traceRegistry.riskyTraceCount} traced-targets=${report.traceRegistry.tracedTargetCount}`
     );
+    lines.push(
+      `- freshness window: ${report.traceRegistry.freshnessWindowHours}h reference=${report.traceRegistry.referenceNow}`
+    );
     if (report.traceRegistry.riskyTargetsMissingTrace.length > 0) {
       lines.push(
         `- missing risky targets: ${report.traceRegistry.riskyTargetsMissingTrace.join("; ")}`
+      );
+    }
+    if (report.traceRegistry.staleTargetIds.length > 0) {
+      lines.push(`- stale trace targets: ${report.traceRegistry.staleTargetIds.join("; ")}`);
+    }
+    if (report.traceRegistry.operatorImportTargetIds.length > 0) {
+      lines.push(
+        `- operator-import trace targets: ${report.traceRegistry.operatorImportTargetIds.join("; ")}`
       );
     }
     if (report.traceRegistry.openMissingTraceGapIds.length > 0) {
@@ -459,7 +477,10 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     if (report.traceRegistry.targets.length > 0) {
       lines.push(
         `- traced targets: ${report.traceRegistry.targets
-          .map((target) => `${target.targetId}[${target.traceIds.join(",")}]`)
+          .map(
+            (target) =>
+              `${target.targetId}[${target.traceIds.join(",")}]{freshness=${target.freshness} provenance=${target.authorityLabels.join("|")}}`
+          )
           .join("; ")}`
       );
     }
