@@ -37,6 +37,8 @@ As of `2026-05-21`, this repo is the package source of truth for DevGod. It ship
 
 This repo proves the package behavior. It does not prove that every consuming repo is fully operational after install. Installed repos still need their own runtime registration, review identity wiring, and repo-local evidence.
 
+This package is still an `opt-in overlay` with `production-oriented package checks`, not a blanket certification that every consuming repo is production-ready after installation.
+
 ## Current State Summary
 
 The most important package-level milestones now shipped in this repo are:
