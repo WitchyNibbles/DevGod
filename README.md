@@ -17,10 +17,14 @@
 ```text
 user ask
    ↓
+clarify direction when needed
+   ↓
 intake
    ↓
 brief → plan → task packet → execution → reviews → workflow proof → next task
 ```
+
+For a new substantive request, DevGod now biases toward a short clarification pass before planning or implementation. The default target is up to four questions covering intended outcome, primary user or operator, constraints or non-goals, and concrete done criteria. If the request is already clear enough, DevGod should record explicit operating assumptions instead of asking unnecessary questions.
 
 ## What It Is Right Now
 
@@ -48,6 +52,7 @@ The most important package-level milestones now shipped in this repo are:
 - modernization-mode evidence for cartography, invariants, duplicate families, architecture decisions, migration ledgers, and parity requirements
 - installed-repo proof that a fresh target repo can reach modernization readiness without leaking package-repo runtime state
 - hook-side hardening so stale `.devgod/ACTIVE` state and missing successor packet scope do not stall valid continuation
+- clarification-first intake steering for new substantive requests, with runtime-visible clarifying questions and explicit assumptions
 
 For the plain-language snapshot, see [docs/current-state.md](docs/current-state.md).
 
@@ -166,6 +171,8 @@ Shipped through:
 - `plugins/devgod/scripts/`
 
 This layer governs intake, planning, execution expectations, review gates, write-scope enforcement, continuation, and stop conditions.
+
+At intake, the managed control layer should ask concise direction-setting questions before planning whenever the request is substantive and still ambiguous. Trivial mechanical work can still stay on the fast path.
 
 ### Operator and inspection layer
 

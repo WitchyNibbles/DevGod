@@ -40,6 +40,7 @@ ${workflowContractBlock}
 - root Codex thread acts as engineering manager on first contact
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
+- on the first substantive user requirement, ask up to four targeted clarifying questions about intended outcome, user, constraints/non-goals, and done criteria before planning or implementation unless explicit assumptions are sufficient
 - task packets that inherit a brief or plan must carry explicit workflow artifact refs; only use \`review_exports=runtime_optional\` when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner

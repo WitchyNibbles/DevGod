@@ -96,12 +96,13 @@ function deriveStopGo(summary: Omit<IntakeSummary, "stopGo">): StopGoDecision {
   const hardStopRisk = summary.risks.some((risk) =>
     /(payment|production data|delete|credential|authz|deploy|security-sensitive)/i.test(risk)
   );
+  const pendingClarifications = (summary.clarifyingQuestions?.length ?? 0) > 0;
 
   if (hardStopRisk) {
     return "needs_review";
   }
 
-  if (summary.unknowns.length > 0) {
+  if (summary.unknowns.length > 0 || pendingClarifications) {
     return "needs_review";
   }
 
@@ -144,6 +145,59 @@ function duplicateTrimmedItems(values: readonly string[] | undefined): string[] 
   }
 
   return [...duplicates];
+}
+
+function isBroadDirectionRequest(input: IntakeRequestInput): boolean {
+  const text = [input.title, input.goal, input.request].filter((value): value is string => Boolean(value)).join(" ");
+  return /\b(build|create|implement|design|redesign|improve|refactor|rewrite|migrate|workflow|platform|system|onboarding)\b/i.test(
+    text
+  );
+}
+
+function deriveClarifyingQuestions(
+  input: IntakeRequestInput,
+  summaryBase: Omit<IntakeSummary, "stopGo" | "clarifyingQuestions" | "assumptions">
+): string[] {
+  if (input.clarifyingQuestions) {
+    return uniqueTrimmedItems(input.clarifyingQuestions);
+  }
+
+  if (summaryBase.unknowns.length === 0) {
+    return [];
+  }
+
+  const questions: string[] = [];
+  const broadDirection = isBroadDirectionRequest(input);
+  const missingOutcome = !input.goal?.trim() || (input.successCriteria?.length ?? 0) === 0;
+  const missingAudience = (input.audience?.length ?? 0) === 0;
+  const missingGuardrails = (input.constraints?.length ?? 0) === 0 && (input.outOfScope?.length ?? 0) === 0;
+
+  if (missingOutcome) {
+    questions.push("What concrete outcome should count as done for this request?");
+  }
+  if (broadDirection && missingAudience) {
+    questions.push("Who is the primary user or operator this work should optimize for?");
+  }
+  if (missingGuardrails) {
+    questions.push("What constraints or non-goals must remain fixed while DevGod implements this?");
+  }
+  if (broadDirection) {
+    questions.push("Which slice should DevGod deliver first if the request needs to stay narrowly scoped?");
+  }
+
+  return questions.slice(0, 4);
+}
+
+function deriveAssumptions(input: IntakeRequestInput, clarifyingQuestions: readonly string[]): string[] {
+  if (input.assumptions) {
+    return uniqueTrimmedItems(input.assumptions);
+  }
+
+  if (clarifyingQuestions.length > 0) {
+    return [];
+  }
+
+  return ["No additional operating assumptions were recorded during intake."];
 }
 
 export function isRetrievalRole(value: string): value is RetrievalRole {
@@ -353,10 +407,18 @@ export function normalizeIntakeRequest(input: IntakeRequestInput): IntakeSummary
     destructiveActions: nonEmptyItems(input.destructiveActions),
     externalIntegrations: nonEmptyItems(input.externalIntegrations)
   };
+  const clarifyingQuestions = deriveClarifyingQuestions(input, summaryBase);
+  const assumptions = deriveAssumptions(input, clarifyingQuestions);
 
   return {
     ...summaryBase,
-    stopGo: deriveStopGo(summaryBase)
+    clarifyingQuestions,
+    assumptions,
+    stopGo: deriveStopGo({
+      ...summaryBase,
+      clarifyingQuestions,
+      assumptions
+    })
   };
 }
 

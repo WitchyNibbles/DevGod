@@ -205,10 +205,10 @@ test("session-start hook emits compact context when an active task is present", 
   );
 });
 
-test("user-prompt-submit hook stays silent when no active task context exists", () => {
+test("user-prompt-submit hook stays silent for non-substantive prompts without active task context", () => {
   const parsed = evaluateUserPromptSubmit(
     {
-      prompt: "Refactor the runtime layer."
+      prompt: "What's the current devgod status?"
     },
     {
       repoRoot: "/tmp/devgod-hook-test",
@@ -219,6 +219,28 @@ test("user-prompt-submit hook stays silent when no active task context exists", 
   );
 
   assert.equal(parsed, undefined);
+});
+
+test("user-prompt-submit hook steers initial substantive prompts into clarification-first intake", () => {
+  const parsed = evaluateUserPromptSubmit(
+    {
+      prompt: "Build a new onboarding workflow for repository setup and team handoff."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /new substantive devgod request/i);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /ask up to 4 targeted clarifying questions/i);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /intended outcome/i);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /constraints or non-goals/i);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /explicit operating assumptions/i);
 });
 
 test("user-prompt-submit hook emits compact scope context when active task state exists", () => {

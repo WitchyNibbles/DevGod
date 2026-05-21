@@ -40,6 +40,20 @@ test("normalizeIntakeRequest returns required intake fields", () => {
   assert.equal(summary.stopGo, "needs_review");
 });
 
+test("normalizeIntakeRequest derives clarification questions for broad initial requirements", () => {
+  const summary = normalizeIntakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "New onboarding flow",
+    request: "Build a new onboarding workflow for repository setup and team handoff."
+  });
+
+  assert.ok(summary.clarifyingQuestions?.length);
+  assert.match(summary.clarifyingQuestions?.join("\n") ?? "", /done|outcome|constraints|non-goals/i);
+  assert.equal(summary.stopGo, "needs_review");
+});
+
 test("normalizeIntakeRequest derives goal and go stopGo from explicit safe inputs", () => {
   const summary = normalizeIntakeRequest({
     workspaceSlug: "team",
@@ -48,12 +62,30 @@ test("normalizeIntakeRequest derives goal and go stopGo from explicit safe input
     title: "   ",
     request: "   Capture the final docs wording.   ",
     goal: "  polish docs  ",
+    clarifyingQuestions: [],
+    assumptions: ["Docs wording only; do not change runtime behavior."],
     risks: ["minor doc drift"],
     unknowns: []
   });
 
   assert.equal(summary.goal, "polish docs");
+  assert.deepEqual(summary.clarifyingQuestions, []);
+  assert.deepEqual(summary.assumptions, ["Docs wording only; do not change runtime behavior."]);
   assert.equal(summary.stopGo, "go");
+});
+
+test("normalizeIntakeRequest keeps stopGo in needs_review when clarification questions are still pending", () => {
+  const summary = normalizeIntakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Docs plus rollout note",
+    request: "Refresh the docs and rollout note.",
+    unknowns: [],
+    clarifyingQuestions: ["Should this include the operator migration guide or only the README?"]
+  });
+
+  assert.equal(summary.stopGo, "needs_review");
 });
 
 test("validateTaskPacket rejects missing operational controls", () => {

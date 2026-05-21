@@ -10,6 +10,8 @@ This is the plain-language snapshot of what `devgod` is today. If another docume
 
 It installs into repositories, adds a reusable control layer, stores workflow/runtime state, and pushes work toward evidence-backed completion instead of loose chat summaries.
 
+For new substantive asks, the current control layer now prefers a short clarification step before planning so the final implementation tracks the user’s intended direction instead of inferred defaults.
+
 ## Mission
 
 The mission is to make AI-assisted engineering work:
@@ -54,6 +56,7 @@ What it currently tracks:
 
 - projects and workspaces
 - runs
+- intake summaries, including clarifying questions and explicit assumptions when they exist
 - tasks and dependencies
 - reviews and approvals
 - checkpoints and resumable state
@@ -113,6 +116,7 @@ Current capabilities:
 - queue-vs-`.devgod/ACTIVE` authority mismatch visibility
 - explicit successor task-packet handoff scope
 - stop-hook behavior that recognizes structured control-layer mismatch instead of only matching prose
+- first-prompt steering that tells DevGod to ask up to four targeted clarification questions for substantive requests before planning
 
 This closed the blocker that previously let stale scope and stale task authority stall autonomous continuation across slices.
 

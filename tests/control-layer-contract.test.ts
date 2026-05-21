@@ -13,7 +13,7 @@ async function read(relativePath: string): Promise<string> {
 test("devgod intake guidance requires clarification and explicit assumptions", async () => {
   const skill = await read(".agents/skills/devgod-intake/SKILL.md");
 
-  assert.match(skill, /Ask concise clarifying questions before planning/i);
+  assert.match(skill, /Ask (1-4 )?concise clarifying questions before planning/i);
   assert.match(skill, /state the operating assumptions explicitly/i);
   assert.match(skill, /Treat refactors as behavior-preserving improvement work/i);
 });

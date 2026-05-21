@@ -338,6 +338,8 @@ export interface IntakeRequestInput extends ProjectRef {
   constraints?: string[] | undefined;
   risks?: string[] | undefined;
   unknowns?: string[] | undefined;
+  clarifyingQuestions?: string[] | undefined;
+  assumptions?: string[] | undefined;
   successCriteria?: string[] | undefined;
   outOfScope?: string[] | undefined;
   trustBoundaries?: string[] | undefined;
@@ -351,6 +353,8 @@ export interface IntakeSummary {
   constraints: string[];
   risks: string[];
   unknowns: string[];
+  clarifyingQuestions?: string[] | undefined;
+  assumptions?: string[] | undefined;
   successCriteria: string[];
   outOfScope: string[];
   trustBoundaries: string[];

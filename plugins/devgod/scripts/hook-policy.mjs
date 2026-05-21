@@ -15,6 +15,35 @@ import {
   shouldHoldStop
 } from "./hook-utils.mjs";
 
+function isLikelySubstantiveInitialPrompt(prompt) {
+  const normalized = typeof prompt === "string" ? prompt.trim() : "";
+  if (normalized.length < 24) {
+    return false;
+  }
+
+  if (
+    /^(what|why|how|when|where|which|who|show|list)\b/i.test(normalized) &&
+    !/\b(build|create|implement|design|fix|refactor|migrate|workflow|feature|system|api)\b/i.test(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    /\b(build|create|implement|add|fix|refactor|rewrite|design|redesign|update|change|migrate|integrate|set up|setup|remove|replace|improve|optimize|ship|scaffold)\b/i.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    /\b(i want|we need|need to|let'?s)\b/i.test(normalized) &&
+    /\b(feature|workflow|system|app|page|dashboard|api|cli|integration|auth|repo|repository|installer|tool|agent|devgod)\b/i.test(
+      normalized
+    )
+  );
+}
+
 function isAllowedTaskTarget(target, context) {
   if (isAllowedPath(target, context.allowedWriteScope)) {
     return true;
@@ -142,6 +171,19 @@ export function evaluateSessionStart(payload, context) {
 }
 
 export function evaluateUserPromptSubmit(payload, context) {
+  const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
+  if (!context.activeTaskId && isLikelySubstantiveInitialPrompt(prompt)) {
+    return buildAdditionalContext(
+      "UserPromptSubmit",
+      [
+        "new substantive devgod request: run intake first",
+        "ask up to 4 targeted clarifying questions before planning or implementation",
+        "cover intended outcome, primary user or operator, constraints or non-goals, and acceptance criteria",
+        "if clarification is not required, state explicit operating assumptions"
+      ].join("; ")
+    );
+  }
+
   const lines = [];
   if (context.activeTaskId) {
     lines.push(`active devgod task: ${context.activeTaskId}`);

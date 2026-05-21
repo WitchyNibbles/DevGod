@@ -30,6 +30,8 @@ npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
 
 A repo that installs devgod gets a local overlay and local workflow state.
 
+For a new substantive user request, that installed overlay is expected to start with brief clarification when direction is still ambiguous. The default shape is up to four targeted questions about intended outcome, user or operator, constraints/non-goals, and done criteria, or explicit operating assumptions when the request is already clear.
+
 Typical consuming-repo commands there:
 
 ```bash
