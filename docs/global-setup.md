@@ -23,6 +23,7 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
 ```
 
 ### Consuming repo
@@ -38,7 +39,11 @@ npm run devgod:setup:local
 npm run devgod:doctor
 npm run devgod:verify:setup
 npm run devgod:status
+npm run devgod:coverage
+npm run devgod:gaps
 npm run devgod:ops
+npm run devgod:report
+npm run devgod:loop
 ```
 
 Keep repo-specific live state in the consuming repo:
@@ -75,12 +80,15 @@ That path is the intended "make the repo operational" route when you want the pa
 Useful extra commands in consuming repos:
 
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for synthetic install-proof only
+- `npm run devgod:seed-modernization-proof -- --task-id <task-id>` for local modernization-mode proof seeding
 - `npm run devgod:recover -- --run-id <run-id>` for recovery inspection
 - `npm run devgod:export-docs -- "summarize what we worked on today"` for Obsidian-style export
 - `npm run devgod:verify:review-identity` to replay local adapter fixtures
 
 The happy-path fixture command is not live workflow proof.
 It does not make `.devgod/ACTIVE` authoritative and it does not replace authenticated review evidence.
+
+The modernization proof seed is also not a substitute for real authenticated review evidence in a target repo. It is an installed-package proof path for modernization-mode surfaces.
 
 ## Review identity
 

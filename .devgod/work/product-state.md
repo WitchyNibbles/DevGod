@@ -2,35 +2,34 @@
 
 ## Product Goal
 
-Prevent control-layer stalls during autonomous continuation by making hook authority resolution explicit and by giving task packets a safe, typed way to hand off direct successor task files without broadening normal write scope.
+Refresh the package docs so README and supporting docs accurately describe the shipped `2026-05-21` DevGod state, the current command surface, and the distinction between package-source and installed-repo behavior.
 
 ## Global Acceptance Criteria
 
-- hook context detects and surfaces runtime, queue, and `.devgod/ACTIVE` authority drift explicitly
-- stop-hook behavior no longer depends only on parsing blocker prose when structured control-layer mismatch is already known
-- active task packets can authorize exactly the successor task-packet writes needed for autonomous continuation without widening their normal edit scope
-- focused hook regressions prove both the allowed handoff path and the denied out-of-scope path
+- `README.md` reflects the current package mission, current shipped capabilities, and the actual source-repo command surface
+- `docs/current-state.md` reflects the `2026-05-21` package state, including modernization mode and hook hardening
+- `docs/global-setup.md` matches the current source-repo versus installed-repo command split without stale script names
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| authority mismatch detection in hook context | done | `plugins/devgod/scripts/hook-utils.mjs`, `tests/hooks.test.ts` |
-| explicit stop-hook handling for structured control-layer mismatches | done | `plugins/devgod/scripts/hook-policy.mjs`, `tests/hooks.test.ts` |
-| typed successor task-packet handoff scope | done | `plugins/devgod/scripts/hook-utils.mjs`, `plugins/devgod/scripts/hook-policy.mjs`, `tests/hooks.test.ts` |
-| write-scope rule guidance for autonomous handoff packets | done | `.devgod/rules/write-scope.md`, `.devgod/work/tasks/task-2026-05-21-hook-autonomy-handoff-hardening.md` |
+| README reflects current package state and commands | done | `README.md` |
+| current-state snapshot reflects shipped 2026-05-21 capabilities | done | `docs/current-state.md` |
+| setup docs reflect current source-vs-installed command split | done | `docs/global-setup.md` |
 
 ## Current Milestone
 
-Hook autonomy handoff hardening
+Documentation current-state refresh
 
 ## Completed Milestones
 
 - modernization mode rollout
+- hook autonomy handoff hardening
 
 ## Current Task
 
-`2026-05-21-hook-autonomy-handoff-hardening`
+`2026-05-21-docs-current-state-refresh`
 
 ## Next Task
 
@@ -42,17 +41,18 @@ Hook autonomy handoff hardening
 
 ## Reasoning Debt
 
-- current task packets still need authors to declare successor handoff scope explicitly; this slice now enforces and documents that requirement instead of inferring arbitrary future scope
-- stop-hook payloads still do not carry rich runtime state directly, so structured mismatch handling must come from locally readable workflow exports
+- docs that describe runtime-complete redesign claims still need to be kept synchronized with the actual package surface rather than milestone-local workflow snapshots
+- source-repo and installed-repo command names diverge intentionally, so docs must continue to call that out explicitly
 
 ## Verification Summary
 
-- verified with `node --experimental-strip-types --test tests/hooks.test.ts`
-- verified with `npm run typecheck`
+- reviewed `README.md`, `docs/current-state.md`, and `docs/global-setup.md` against `package.json` scripts
+- reviewed command and capability descriptions against `src/admin/devgod.ts` and `src/install/merge.ts`
 
 ## Review Summary
 
-- focused hook regressions now cover queue-vs-ACTIVE mismatch visibility, structured stop-hook mismatch exits, and explicit successor task-packet handoff scope
+- docs now describe the `2026-05-21` shipped package state instead of the older `2026-05-20` snapshot
+- source-repo and installed-repo command surfaces are now separated using the actual script names that ship today
 
 ## Last Updated
 

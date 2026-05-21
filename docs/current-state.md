@@ -1,15 +1,14 @@
 # Devgod Current State
 
-Status date: `2026-05-20`
+Status date: `2026-05-21`
 
-This document is the plain-language snapshot of what `devgod` is today.
-If another doc sounds bigger, older, or more visionary than this one, treat this file and the repo itself as the current truth.
+This is the plain-language snapshot of what `devgod` is today. If another document sounds broader, older, or more aspirational than this one, treat this file plus the repo itself as the current truth.
 
 ## One-sentence definition
 
 `devgod` is a manager-led workflow controller and shared runtime for Codex-based software work.
 
-It installs into repositories, adds a reusable control layer, stores workflow/runtime state, and tries to move work from intake through verification without relying on vague chat summaries.
+It installs into repositories, adds a reusable control layer, stores workflow/runtime state, and pushes work toward evidence-backed completion instead of loose chat summaries.
 
 ## Mission
 
@@ -20,7 +19,7 @@ The mission is to make AI-assisted engineering work:
 - more reviewable
 - less likely to claim completion without evidence
 
-Devgod is trying to close the gap between "an LLM answered" and "an engineering task was actually driven to a verifiable stop condition."
+The core gap DevGod is trying to close is the one between "the model answered" and "the engineering work actually reached a verifiable stop condition."
 
 ## What is shipped right now
 
@@ -38,9 +37,9 @@ What it does:
 - installs managed `AGENTS.md` guidance
 - installs repo-local `.codex/agents/`
 - installs repo-local `.agents/skills/devgod-*`
-- copies `.devgod/rules/` and `.devgod/templates/`
-- adds target-repo scripts like `devgod:doctor`, `devgod:ops`, and `devgod:setup:local`
-- preserves unrelated local config where possible instead of brute-force replacing it
+- installs `.devgod/rules/` and `.devgod/templates/`
+- writes target-repo `devgod:*` scripts
+- preserves unrelated local config where possible instead of brute-force replacement
 
 ### 2. Runtime-backed workflow state
 
@@ -57,23 +56,23 @@ What it currently tracks:
 - runs
 - tasks and dependencies
 - reviews and approvals
-- checkpoints
-- progress proof
+- checkpoints and resumable state
 - runtime project registrations
 - memory entries and embedding jobs
 
-This means devgod is not only a set of markdown templates anymore.
-It has a real backing store and runtime authority model.
+This means DevGod is no longer just a set of markdown templates. It has a real backing store and runtime authority model.
 
-### 3. Autonomous execution surfaces
+### 3. Autonomous execution and operator surfaces
 
 Shipped through:
 
 - `src/admin/devgod.ts`
-- `src/admin/runtime-surface.ts`
 - `src/admin/status.ts`
 - `src/admin/ops.ts`
+- `src/admin/report.ts`
 - `src/devgod/task-queue.ts`
+- `src/ui/server.ts`
+- `src/mcp/server.ts`
 
 Current capabilities:
 
@@ -83,10 +82,41 @@ Current capabilities:
 - bounded recovery helpers
 - operator-facing status and report views
 - continuation guidance driven by runtime state
+- MCP and UI inspection surfaces
 
-This is the part of the project that is trying to turn "continue" into a structured loop instead of an open-ended conversational habit.
+### 4. Modernization-mode autonomous profile
 
-### 4. Retrieval and export
+Shipped through:
+
+- `src/runtime/autonomous-execution.ts`
+- `src/runtime/coverage-ledger.ts`
+- `src/core/service.ts`
+- `src/admin.ts`
+
+Current capabilities:
+
+- `modernization_program` profile with stricter rewrite readiness gates
+- explicit cartography, invariant, duplicate-family, architecture-decision, migration-ledger, and parity evidence classes
+- installed-repo proof through `seed-modernization-proof` and the installed modernization harness
+
+This is the current package answer to large brownfield rewrite work: do not claim modernization readiness until the required evidence classes are present.
+
+### 5. Control-layer hook hardening
+
+Shipped through:
+
+- `plugins/devgod/scripts/hook-utils.mjs`
+- `plugins/devgod/scripts/hook-policy.mjs`
+
+Current capabilities:
+
+- queue-vs-`.devgod/ACTIVE` authority mismatch visibility
+- explicit successor task-packet handoff scope
+- stop-hook behavior that recognizes structured control-layer mismatch instead of only matching prose
+
+This closed the blocker that previously let stale scope and stale task authority stall autonomous continuation across slices.
+
+### 6. Retrieval and export
 
 Shipped through:
 
@@ -100,19 +130,7 @@ Current capabilities:
 - repo markdown indexing
 - embedding job execution
 - Qdrant-backed artifact indexing
-- Obsidian-friendly doc export from runtime worklogs and natural-language export requests
-
-### 5. Tooling surfaces
-
-Shipped through:
-
-- `src/mcp/server.ts`
-- `src/ui/server.ts`
-
-Current capabilities:
-
-- MCP server exposure for status, ops, loop, report, and planning context surfaces
-- a lightweight hosted operator UI for local inspection
+- Obsidian-friendly docs export from runtime worklogs and export requests
 
 ## What this repo is for
 
@@ -122,22 +140,9 @@ It owns:
 
 - reusable runtime code under `src/`
 - installer and setup flows under `scripts/` and `src/install/`
-- reusable agent/skill/control assets under `.codex/`, `.agents/`, `.devgod/rules/`, and `.devgod/templates/`
+- reusable agent, skill, rule, template, and hook assets under `.codex/`, `.agents/`, `.devgod/rules/`, `.devgod/templates/`, and `plugins/`
 
-It also currently contains package-maintainer workflow state under `.devgod/work/`, but that is package-maintainer state, not something intended to be copied wholesale into consuming repos.
-
-## What a consuming repo gets
-
-After installation, a target repo gets:
-
-- the managed devgod guidance block in `AGENTS.md`
-- repo-local devgod skills and agent profiles
-- workflow templates and rules
-- helper scripts and verification checks
-- `devgod:*` package scripts
-- the option to bootstrap a local runtime path
-
-That target repo then owns its own:
+Installed consuming repos own their own:
 
 - `.env.devgod`
 - `.devgod/work/`
@@ -147,11 +152,10 @@ That target repo then owns its own:
 
 ## Source repo command surface
 
-In this package repo, common commands are:
+Common commands in this package repo are:
 
 ```bash
 npm run devgod -- help
-npm run install:project -- init --apply --target /absolute/path/to/project
 npm run setup:local
 npm run doctor
 npm run status
@@ -159,13 +163,25 @@ npm run ops
 npm run devgod -- report --run-id latest
 npm run devgod -- coverage --run-id latest --format text
 npm run devgod -- gaps --run-id latest --format text
+npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
+npm run devgod -- serve-ui
 npm run mcp
-npm run ui
 ```
+
+Other important source-repo scripts:
+
+- `npm run install:project -- init --apply --target /absolute/path/to/project`
+- `npm run scaffold:workflow`
+- `npm run seed:happy-path-fixture`
+- `npm run verify:setup`
+- `npm run verify:workflow`
+- `npm run verify:release-overlay`
+- `npm run verify:migrations:live`
+- `npm run export:docs`
 
 ## Installed repo command surface
 
-In a consuming repo, the installed script names are usually:
+A consuming repo gets repo-local `devgod:*` scripts such as:
 
 ```bash
 npm run devgod:setup:git-guard
@@ -180,48 +196,47 @@ npm run devgod:ops
 npm run devgod:report
 npm run devgod:loop
 npm run devgod:supervisor
+npm run devgod:seed-workflow-proof
+npm run devgod:seed-modernization-proof
 npm run devgod:verify:review-identity
-npm run devgod:export-docs -- "summarize what we worked on today"
 ```
 
-The installed surface is broader than the sample above. Notable additional scripts include `devgod:checkpoint`, `devgod:resume`, `devgod:reconcile`, `devgod:sync-runtime-exports`, `devgod:refresh-retrieval`, `devgod:mcp`, `devgod:ui`, `devgod:record-review`, and the workflow scaffolding helpers.
+The installed surface is broader than the sample above. Notable additional scripts include:
 
-## Important nuance: current truth vs roadmap
+- `devgod:checkpoint`
+- `devgod:resume`
+- `devgod:advance-active-task`
+- `devgod:reconcile`
+- `devgod:sync-runtime-exports`
+- `devgod:refresh-retrieval`
+- `devgod:autopilot-status`
+- `devgod:mcp`
+- `devgod:ui`
+- `devgod:record-review`
+- `devgod:scaffold-workflow`
+- `devgod:upgrade-reasoning-workflow`
+- `devgod:seed-happy-path-fixture`
 
-Some parts of the repo are clearly current and shipped.
-Some parts are intentionally aspirational.
+## Important nuance: shipped truth vs consuming-repo truth
 
-Current and shipped:
+Current and shipped in this package:
 
 - installer overlay
 - runtime-backed task/review/run storage
 - workflow proof and review recording surfaces
-- daemon/supervisor/operator surfaces
-- retrieval refresh and docs export
-- MCP server and hosted UI
+- daemon, supervisor, operator, MCP, and UI surfaces
+- modernization-mode readiness gates and installed-repo proof
+- hook hardening for continuation handoff and authority mismatch
 
-Still evolving:
+Still repo-specific after install:
 
-- consuming repos still need their own runtime registrations, authenticated reviews, and project-specific evidence after installation
-- the long-term authority boundary between markdown artifacts and runtime state across every repo mode can still be tightened further
-- future redesign work can extend the system, but the broader package-level redesign claim in this repo is now shipped and runtime-proven
+- runtime registration in the target repo
+- authenticated review identity wiring
+- project-local workflow state and evidence
+- target-repo rewrite readiness
 
 ## Working description
 
-If someone asks, "What is devgod right now?", the most honest answer is:
+If someone asks, "What is DevGod right now?", the most honest answer is:
 
-> Devgod is a reusable package that tries to make Codex work like a small engineering organization instead of a single chat session. It installs workflow rules and operator tools into a repo, stores runtime state in a database, exposes status and recovery surfaces, and pushes work toward evidence-backed completion.
-
-## Important boundary: broader package goal is now runtime-proven
-
-The 2026-05-20 remediation wave closed the package-level redesign gaps that had blocked an honest completion claim:
-
-- richer coverage-ledger exports
-- code-backed inventory generation
-- runtime trace registry/reporting
-- compaction artifact generation
-- explicit eval posture and sensitive-action review controls
-- redesign-native runtime directives including `dispatch_subagents`, `trace_runtime`, `rebuild_inventory`, `checkpoint`, and `replan_migration`
-- a live default authoritative run that is autonomy-configured
-
-The current authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`, which is `approved`, reports `autonomous.configured=true`, and reconciles to runtime directive `complete`.
+> DevGod is a reusable package that tries to make Codex work more like a small engineering organization than a single chat session. It installs workflow rules and operator tools into a repo, stores runtime state in a database, exposes status and recovery surfaces, and pushes work toward evidence-backed completion.

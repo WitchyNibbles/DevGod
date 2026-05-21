@@ -3,25 +3,24 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-21-hook-autonomy-handoff-hardening",
-      "title": "Harden hook authority sync and successor task handoff scope",
+      "id": "2026-05-21-docs-current-state-refresh",
+      "title": "Refresh README and current-state docs to match shipped package behavior",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "hook context reports authority mismatches between runtime, queue, and .devgod/ACTIVE",
-        "stop hook accepts structured authority mismatch as a real blocker",
-        "successor task-packet writes are allowed only when explicitly listed in the current packet"
+        "README reflects current package mission, shipped capabilities, and actual command surface",
+        "docs/current-state.md reflects 2026-05-21 package reality including modernization mode and hook hardening",
+        "docs/global-setup.md accurately distinguishes source-repo and installed-repo commands"
       ],
       "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/hooks.test.ts"
+        "manual diff review against package.json scripts and shipped docs"
       ],
       "evidence": [
-        "brief: brief-2026-05-21-hook-autonomy-handoff-hardening",
-        "task packet: 2026-05-21-hook-autonomy-handoff-hardening",
-        "verification: node --experimental-strip-types --test tests/hooks.test.ts",
-        "verification: npm run typecheck"
+        "brief: brief-2026-05-21-docs-current-state-refresh",
+        "task packet: 2026-05-21-docs-current-state-refresh",
+        "verification: manual diff review against package.json scripts",
+        "verification: manual capability review against src/admin/devgod.ts and src/install/merge.ts"
       ],
       "blocker": null
     }
