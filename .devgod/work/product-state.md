@@ -2,45 +2,35 @@
 
 ## Product Goal
 
-Add a modernization-grade DevGod execution mode for large brownfield repositories so the system can:
-
-- map how critical repo pieces actually connect before rewrite claims
-- reconstruct business rules and invariants explicitly
-- identify duplicate capability families and centralization candidates
-- choose architecture from bounded-context and consistency evidence
-- sequence DB migration with expand/contract discipline
-- execute incrementally with parity verification and continuation until the program is complete or explicitly stopped
+Prevent control-layer stalls during autonomous continuation by making hook authority resolution explicit and by giving task packets a safe, typed way to hand off direct successor task files without broadening normal write scope.
 
 ## Global Acceptance Criteria
 
-- rewrite and modernization recommendations are blocked until modernization-grade understanding thresholds are satisfied
-- runtime state can carry cartography, invariants, duplicate-family, architecture-decision, migration-ledger, and parity evidence
-- continuation prioritizes unresolved modernization risk rather than stopping after individual task completion
-- installed-repo verification proves the modernization mode works in a consuming brownfield-style repo
+- hook context detects and surfaces runtime, queue, and `.devgod/ACTIVE` authority drift explicitly
+- stop-hook behavior no longer depends only on parsing blocker prose when structured control-layer mismatch is already known
+- active task packets can authorize exactly the successor task-packet writes needed for autonomous continuation without widening their normal edit scope
+- focused hook regressions prove both the allowed handoff path and the denied out-of-scope path
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| modernization profile and readiness gates | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `tests/status-report.test.ts`, `tests/service.test.ts`, `tests/report-command.test.ts` |
-| cartography artifacts beyond heuristic file inventory | done | `src/runtime/repo-inventory.ts`, `src/runtime/coverage-ledger.ts`, `tests/service.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts`, `tests/coverage-ledger.test.ts` |
-| invariant and business-rule ledgers | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/runtime/coverage-ledger.ts`, `tests/service.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts` |
-| duplicate-family detection and reporting | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/runtime/coverage-ledger.ts`, `src/core/service.ts`, `tests/service.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts` |
-| architecture-fit comparison and ADR support | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/runtime/coverage-ledger.ts`, `src/core/service.ts`, `tests/service.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts` |
-| DB migration ledger and parity sequencing | done | `src/domain/types.ts`, `src/runtime/autonomous-execution.ts`, `src/runtime/coverage-ledger.ts`, `src/core/service.ts`, `tests/service.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts` |
-| installed-repo modernization harness coverage | done | `src/admin.ts`, `scripts/verify-installed-repo-harness.sh`, `tests/admin.test.ts`, `tests/happy-path.test.ts`, `tests/install.test.ts` |
+| authority mismatch detection in hook context | done | `plugins/devgod/scripts/hook-utils.mjs`, `tests/hooks.test.ts` |
+| explicit stop-hook handling for structured control-layer mismatches | done | `plugins/devgod/scripts/hook-policy.mjs`, `tests/hooks.test.ts` |
+| typed successor task-packet handoff scope | done | `plugins/devgod/scripts/hook-utils.mjs`, `plugins/devgod/scripts/hook-policy.mjs`, `tests/hooks.test.ts` |
+| write-scope rule guidance for autonomous handoff packets | done | `.devgod/rules/write-scope.md`, `.devgod/work/tasks/task-2026-05-21-hook-autonomy-handoff-hardening.md` |
 
 ## Current Milestone
 
-Modernization mode rollout
+Hook autonomy handoff hardening
 
 ## Completed Milestones
 
-- four-pillar analysis-depth, verification, and autonomy-honesty hardening
+- modernization mode rollout
 
 ## Current Task
 
-`2026-05-21-modernization-mode-slice-06-installed-repo-harness`
+`2026-05-21-hook-autonomy-handoff-hardening`
 
 ## Next Task
 
@@ -48,39 +38,21 @@ Modernization mode rollout
 
 ## Blockers
 
-- none; the modernization-mode rollout is complete in this repo
+- none
 
 ## Reasoning Debt
 
-- first release is expected to optimize for TypeScript/JavaScript targets
-- static call/dependency mapping must expose uncertainty instead of claiming exactness in dynamic code paths
-- installed-repo proof currently uses a self-contained in-memory runtime harness instead of depending on local Postgres availability
+- current task packets still need authors to declare successor handoff scope explicitly; this slice now enforces and documents that requirement instead of inferring arbitrary future scope
+- stop-hook payloads still do not carry rich runtime state directly, so structured mismatch handling must come from locally readable workflow exports
 
 ## Verification Summary
 
-- research/design captured in `docs/large-repo-modernization-mode.md`
-- intake brief captured in `.devgod/work/briefs/brief-2026-05-21-large-repo-modernization-mode.md`
-- roadmap captured in `.devgod/work/plans/plan-2026-05-21-large-repo-modernization-mode.md`
-- slice 1 verified with `npm run typecheck`
-- slice 1 verified with `node --experimental-strip-types --test tests/status-report.test.ts tests/service.test.ts tests/report-command.test.ts`
-- slice 2 verified with `npm run typecheck`
-- slice 2 verified with `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/coverage-ledger.test.ts`
-- slice 3 verified with `npm run typecheck`
-- slice 3 verified with `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts`
-- slice 4 verified with `npm run typecheck`
-- slice 4 verified with `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts`
-- slice 5 verified with `npm run typecheck`
-- slice 5 verified with `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts`
-- slice 6 verified with `npm run typecheck`
-- slice 6 verified with `node --experimental-strip-types --test tests/admin.test.ts tests/happy-path.test.ts tests/install.test.ts`
-- slice 6 verified with `bash scripts/verify-installed-repo-harness.sh`
+- verified with `node --experimental-strip-types --test tests/hooks.test.ts`
+- verified with `npm run typecheck`
 
 ## Review Summary
 
-- slice 3 verification proved invariant-only evidence satisfies modernization comprehension and coverage ledger export paths
-- slice 4 verification proved duplicate capability families, centralization candidates, and parity requirements persist in runtime and exported ledger state
-- slice 5 verification proved architecture decisions, migration ledgers, and parity matrices persist in runtime state and exported ledger artifacts
-- slice 6 verification proved a fresh installed repo can seed modernization_program evidence and surface ready rewrite-readiness without leaking package-repo runtime state
+- focused hook regressions now cover queue-vs-ACTIVE mismatch visibility, structured stop-hook mismatch exits, and explicit successor task-packet handoff scope
 
 ## Last Updated
 

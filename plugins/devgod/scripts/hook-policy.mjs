@@ -9,10 +9,23 @@ import {
   isAllowedPath,
   isDestructiveCommand,
   isManagedPath,
+  isTaskPacketPath,
   isVerificationCommand,
   parseApplyPatchTargets,
   shouldHoldStop
 } from "./hook-utils.mjs";
+
+function isAllowedTaskTarget(target, context) {
+  if (isAllowedPath(target, context.allowedWriteScope)) {
+    return true;
+  }
+
+  return (
+    isTaskPacketPath(target) &&
+    Array.isArray(context.allowedTaskHandoffScope) &&
+    context.allowedTaskHandoffScope.some((scope) => target === scope)
+  );
+}
 
 export function evaluatePreToolUse(payload, context) {
   const toolName = payload?.tool_name;
@@ -20,13 +33,16 @@ export function evaluatePreToolUse(payload, context) {
 
   if (toolName === "apply_patch") {
     const targets = parseApplyPatchTargets(command);
-    const outOfScope = targets.find((target) => !isAllowedPath(target, context.allowedWriteScope));
+    const outOfScope = targets.find((target) => !isAllowedTaskTarget(target, context));
     if (outOfScope && context.allowedWriteScope.length > 0) {
-      return buildPreToolDeny(`apply_patch target ${outOfScope} is outside the active devgod task write scope`);
+      const detail = isTaskPacketPath(outOfScope)
+        ? `successor task packet ${outOfScope} is not listed in the active devgod task handoff scope`
+        : `apply_patch target ${outOfScope} is outside the active devgod task write scope`;
+      return buildPreToolDeny(detail);
     }
 
     const managedTarget = targets.find(
-      (target) => isManagedPath(target) && !isAllowedPath(target, context.allowedWriteScope)
+      (target) => isManagedPath(target) && !isAllowedTaskTarget(target, context)
     );
     if (managedTarget) {
       return buildPreToolDeny(
@@ -108,6 +124,12 @@ export function evaluateSessionStart(payload, context) {
   if (context.allowedWriteScope.length > 0) {
     lines.push(`allowed write scope: ${context.allowedWriteScope.join(", ")}`);
   }
+  if (Array.isArray(context.allowedTaskHandoffScope) && context.allowedTaskHandoffScope.length > 0) {
+    lines.push(`allowed successor task scope: ${context.allowedTaskHandoffScope.join(", ")}`);
+  }
+  if (Array.isArray(context.authorityMismatches) && context.authorityMismatches.length > 0) {
+    lines.push(`authority mismatch: ${context.authorityMismatches.map((entry) => entry.kind).join(", ")}`);
+  }
   if (payload?.source === "resume" && lines.length > 0) {
     lines.push("this is a resumed session; prefer continuing from the active devgod task and queue state");
   }
@@ -127,6 +149,9 @@ export function evaluateUserPromptSubmit(payload, context) {
   if (context.allowedWriteScope.length > 0) {
     lines.push(`keep edits within: ${context.allowedWriteScope.join(", ")}`);
   }
+  if (Array.isArray(context.authorityMismatches) && context.authorityMismatches.length > 0) {
+    lines.push(`authority mismatch present: ${context.authorityMismatches.map((entry) => entry.kind).join(", ")}`);
+  }
 
   if (lines.length === 0) {
     return undefined;
@@ -138,6 +163,10 @@ export function evaluateUserPromptSubmit(payload, context) {
 export function evaluateStop(payload, context) {
   const lastAssistantMessage =
     typeof payload?.last_assistant_message === "string" ? payload.last_assistant_message : "";
+
+  if (Array.isArray(context.authorityMismatches) && context.authorityMismatches.length > 0) {
+    return undefined;
+  }
 
   if ((context.activeTaskId || context.queueCurrentTaskId) && shouldHoldStop(lastAssistantMessage)) {
     const taskId = context.activeTaskId ?? context.queueCurrentTaskId;

@@ -214,7 +214,9 @@ export async function readActiveTaskContext(options = {}) {
     repoRoot: resolvedRepoRoot,
     activeTaskId: undefined,
     allowedWriteScope: [],
-    queueCurrentTaskId: undefined
+    allowedTaskHandoffScope: [],
+    queueCurrentTaskId: undefined,
+    authorityMismatches: []
   };
   const runtimeContext = await readRuntimeAuthorityContext(resolvedRepoRoot);
   let activeFileTaskId;
@@ -284,6 +286,33 @@ export async function readActiveTaskContext(options = {}) {
     }
   }
 
+  if (
+    activeFileTaskId &&
+    activeFileState === "active" &&
+    queueHasAuthoritativePointer &&
+    context.queueCurrentTaskId !== undefined &&
+    activeFileTaskId !== context.queueCurrentTaskId
+  ) {
+    context.authorityMismatches.push({
+      kind: "active_file_conflicts_with_queue",
+      activeFileTaskId,
+      queueCurrentTaskId: context.queueCurrentTaskId
+    });
+  }
+
+  if (
+    runtimeContext &&
+    runtimeContext.activeTaskId !== undefined &&
+    runtimeContext.queueCurrentTaskId !== undefined &&
+    runtimeContext.activeTaskId !== runtimeContext.queueCurrentTaskId
+  ) {
+    context.authorityMismatches.push({
+      kind: "runtime_conflicts_with_queue",
+      runtimeActiveTaskId: runtimeContext.activeTaskId,
+      queueCurrentTaskId: runtimeContext.queueCurrentTaskId
+    });
+  }
+
   if (!context.activeTaskId) {
     return context;
   }
@@ -296,6 +325,7 @@ export async function readActiveTaskContext(options = {}) {
   }
 
   context.allowedWriteScope = parseAllowedWriteScopeSection(taskMarkdown);
+  context.allowedTaskHandoffScope = parseAllowedTaskHandoffScopeSection(taskMarkdown);
   return context;
 }
 
@@ -338,6 +368,15 @@ function parseAllowedWriteScopeSection(markdown) {
   );
 }
 
+function parseAllowedTaskHandoffScopeSection(markdown) {
+  return parseMarkdownListSection(markdown, "## Allowed successor task scope").flatMap((value) =>
+    value
+      .split(/\s*,\s*|\s*;\s*|\s+\band\b\s+/i)
+      .map((entry) => entry.trim().replace(/^and\s+/i, "").replace(/[.:;]+$/g, ""))
+      .filter(Boolean)
+  );
+}
+
 function normalizePath(value) {
   return value.replace(/\\/g, "/").replace(/^\.\//, "");
 }
@@ -363,6 +402,11 @@ export function isAllowedPath(relativePath, allowedWriteScope) {
       normalizedScope === "."
     );
   });
+}
+
+export function isTaskPacketPath(relativePath) {
+  const normalized = normalizePath(relativePath);
+  return normalized.startsWith(".devgod/work/tasks/task-") && normalized.endsWith(".md");
 }
 
 export function parseApplyPatchTargets(command) {

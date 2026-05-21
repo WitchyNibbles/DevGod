@@ -166,14 +166,22 @@ test("session-start hook stays silent when it would only repeat generic devgod p
 });
 
 test("session-start entrypoint exits cleanly when no additional context is available", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-session-start-empty-"));
   const { stdout, stderr } = await execFileAsync(
     "bash",
     ["-lc", `${JSON.stringify(process.execPath)} plugins/devgod/scripts/session-start.mjs < /dev/null`],
-    { cwd: process.cwd() }
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PLUGIN_ROOT: join(repoRoot, "plugins", "devgod")
+      }
+    }
   );
 
   assert.equal(stdout, "");
   assert.equal(stderr, "");
+  await rm(repoRoot, { recursive: true, force: true });
 });
 
 test("session-start hook emits compact context when an active task is present", () => {
@@ -318,6 +326,180 @@ test("hook context loads write scope from the queue-selected task instead of sta
     assert.equal(context.activeTaskId, "task-authoritative");
     assert.equal(context.queueCurrentTaskId, "task-authoritative");
     assert.deepEqual(context.allowedWriteScope, ["src/runtime", "tests"]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("hook context reports authority mismatch when queue and ACTIVE disagree", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-authority-mismatch-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-authoritative",
+          tasks: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-authoritative.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-authoritative");
+    assert.equal(context.queueCurrentTaskId, "task-authoritative");
+    assert.deepEqual(context.authorityMismatches, [
+      {
+        kind: "active_file_conflicts_with_queue",
+        activeFileTaskId: "task-stale",
+        queueCurrentTaskId: "task-authoritative"
+      }
+    ]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("stop hook allows exit when hook context already proves an authority mismatch blocker", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "I cannot continue until the control layer is repaired."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-mismatch",
+      allowedWriteScope: ["src/core"],
+      allowedTaskHandoffScope: [],
+      queueCurrentTaskId: "task-authoritative",
+      authorityMismatches: [
+        {
+          kind: "active_file_conflicts_with_queue",
+          activeFileTaskId: "task-hook-mismatch",
+          queueCurrentTaskId: "task-authoritative"
+        }
+      ]
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("pre-tool-use hook allows explicitly listed successor task packet handoff writes", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "apply_patch",
+      tool_input: {
+        command: [
+          "*** Begin Patch",
+          "*** Update File: .devgod/work/task-queue.json",
+          "+updated",
+          "*** Add File: .devgod/work/tasks/task-next-slice.md",
+          "+# Task Packet",
+          "*** End Patch"
+        ].join("\n")
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-handoff",
+      allowedWriteScope: [".devgod/work/task-queue.json"],
+      allowedTaskHandoffScope: [".devgod/work/tasks/task-next-slice.md"],
+      authorityMismatches: [],
+      queueCurrentTaskId: "task-hook-handoff"
+    }
+  );
+
+  if (parsed) {
+    assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
+    assert.notEqual(parsed.hookSpecificOutput.permissionDecision, "deny");
+  }
+});
+
+test("pre-tool-use hook denies successor task packet writes that are not explicitly listed", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "apply_patch",
+      tool_input: {
+        command: [
+          "*** Begin Patch",
+          "*** Update File: .devgod/work/task-queue.json",
+          "+updated",
+          "*** Add File: .devgod/work/tasks/task-next-slice.md",
+          "+# Task Packet",
+          "*** End Patch"
+        ].join("\n")
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-handoff-deny",
+      allowedWriteScope: [".devgod/work/task-queue.json"],
+      allowedTaskHandoffScope: [],
+      authorityMismatches: [],
+      queueCurrentTaskId: "task-hook-handoff-deny"
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /task-next-slice\.md|successor task/i);
+});
+
+test("hook context parses explicitly listed successor task-packet handoff scope", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-handoff-scope-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-handoff\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-handoff.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `.devgod/work/task-queue.json`",
+        "",
+        "## Allowed successor task scope",
+        "",
+        "- `.devgod/work/tasks/task-next-slice.md`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-handoff");
+    assert.deepEqual(context.allowedTaskHandoffScope, [".devgod/work/tasks/task-next-slice.md"]);
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
   }

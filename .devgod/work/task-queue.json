@@ -3,140 +3,25 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-21-modernization-mode-slice-01-contracts",
-      "title": "Add modernization profile, readiness gates, and operator status surfacing",
+      "id": "2026-05-21-hook-autonomy-handoff-hardening",
+      "title": "Harden hook authority sync and successor task handoff scope",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "modernization runs expose missing artifact classes and stricter rewrite readiness semantics",
-        "a modernization-grade profile exists separately from lighter delivery profiles"
+        "hook context reports authority mismatches between runtime, queue, and .devgod/ACTIVE",
+        "stop hook accepts structured authority mismatch as a real blocker",
+        "successor task-packet writes are allowed only when explicitly listed in the current packet"
       ],
       "verification": [
         "npm run typecheck",
-        "node --experimental-strip-types --test tests/status-report.test.ts tests/service.test.ts tests/report-command.test.ts"
+        "node --experimental-strip-types --test tests/hooks.test.ts"
       ],
       "evidence": [
-        "task packet: 2026-05-21-modernization-mode-slice-01-contracts",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/status-report.test.ts tests/service.test.ts tests/report-command.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-21-modernization-mode-slice-02-cartography",
-      "title": "Generate symbol, call, dependency, and domain cartography artifacts",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-05-21-modernization-mode-slice-01-contracts"
-      ],
-      "acceptance_criteria": [
-        "inventory generation emits cartography artifacts beyond path heuristics",
-        "uncertain or approximate edges are surfaced explicitly"
-      ],
-      "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/coverage-ledger.test.ts"
-      ],
-      "evidence": [
-        "task packet: 2026-05-21-modernization-mode-slice-02-cartography",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts tests/coverage-ledger.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-21-modernization-mode-slice-03-runtime-and-invariants",
-      "title": "Attach runtime evidence and invariant or business-rule ledgers",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-05-21-modernization-mode-slice-02-cartography"
-      ],
-      "acceptance_criteria": [
-        "modernization-grade business-rule and invariant evidence is represented explicitly",
-        "high-risk modernization paths can require trace-backed evidence"
-      ],
-      "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts"
-      ],
-      "evidence": [
-        "task packet: 2026-05-21-modernization-mode-slice-03-runtime-and-invariants",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-21-modernization-mode-slice-04-duplicates",
-      "title": "Add duplicate capability-family detection and reporting",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-05-21-modernization-mode-slice-03-runtime-and-invariants"
-      ],
-      "acceptance_criteria": [
-        "duplicate functionality families are modeled explicitly with intentional and accidental divergence",
-        "centralization candidates include parity requirements"
-      ],
-      "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/service.test.ts tests/report-command.test.ts tests/status-report.test.ts"
-      ],
-      "evidence": [
-        "task packet: 2026-05-21-modernization-mode-slice-04-duplicates",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-21-modernization-mode-slice-05-architecture-and-migration",
-      "title": "Add architecture-fit decisions, migration ledgers, and parity sequencing",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-05-21-modernization-mode-slice-04-duplicates"
-      ],
-      "acceptance_criteria": [
-        "architecture recommendations compare candidates using bounded-context and consistency evidence",
-        "DB modernization work requires migration-ledger and parity evidence"
-      ],
-      "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/service.test.ts tests/report-command.test.ts tests/status-report.test.ts tests/admin.test.ts"
-      ],
-      "evidence": [
-        "task packet path could not be created because the control-layer scope stayed pinned to slice 4 in this turn",
-        "implementation landed under the carried-forward runtime scope from slice 4",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/report-command.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-21-modernization-mode-slice-06-installed-repo-harness",
-      "title": "Prove modernization mode in an installed-repo style fixture",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-05-21-modernization-mode-slice-05-architecture-and-migration"
-      ],
-      "acceptance_criteria": [
-        "installed-repo fixtures can exercise modernization-mode gates and reports",
-        "verification harness covers consuming-repo style modernization workflows"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/workflow-scaffold.test.ts tests/happy-path.test.ts",
-        "bash scripts/verify-installed-repo-harness.sh"
-      ],
-      "evidence": [
-        "task packet: 2026-05-21-modernization-mode-slice-06-installed-repo-harness",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/admin.test.ts tests/happy-path.test.ts tests/install.test.ts",
-        "verification: bash scripts/verify-installed-repo-harness.sh"
+        "brief: brief-2026-05-21-hook-autonomy-handoff-hardening",
+        "task packet: 2026-05-21-hook-autonomy-handoff-hardening",
+        "verification: node --experimental-strip-types --test tests/hooks.test.ts",
+        "verification: npm run typecheck"
       ],
       "blocker": null
     }
