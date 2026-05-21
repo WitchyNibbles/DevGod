@@ -1,2 +1,3 @@
-workflow=devgod
-state=idle
+task_id=2026-05-21-modernization-mode-slice-06-installed-repo-harness
+state=complete
+brief=.devgod/work/briefs/brief-2026-05-21-large-repo-modernization-mode.md
