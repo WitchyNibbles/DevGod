@@ -199,6 +199,18 @@ Important boundaries that still apply:
 - the package can ship modernization-mode logic and proofs, but rewrite readiness in a target repo still depends on that repo's own evidence
 - redesign docs describe the operating model and roadmap, not a guarantee that every installed repo already satisfies it
 
+## Release Posture
+
+Devgod still ships a careful `repo-local release posture`.
+
+Use the package checks here as evidence about the package itself:
+
+- `npm run verify:release-overlay`
+- `npm run verify:migrations:live`
+
+Do not treat those checks alone as `any claim that a consuming repo is fit for production use`.
+That still depends on the target repo, its runtime wiring, its review identity setup, and its own operational decisions.
+
 ## Docs Map
 
 - [docs/current-state.md](docs/current-state.md): plain-language snapshot of what DevGod is today
