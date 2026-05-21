@@ -279,6 +279,7 @@ export function mergePackageJson(
   scripts["devgod:checkpoint"] = `${devgodEntry} checkpoint --format text`;
   scripts["devgod:resume"] = `${devgodEntry} resume --format text`;
   scripts["devgod:seed-workflow-proof"] = `${devgodEntry} seed-workflow-proof`;
+  scripts["devgod:seed-modernization-proof"] = `${devgodEntry} seed-modernization-proof`;
   scripts["devgod:advance-active-task"] = `${devgodEntry} advance-active-task --format text`;
   scripts["devgod:reconcile"] = `${devgodEntry} reconcile-runtime-state --apply --format text`;
   scripts["devgod:sync-runtime-exports"] = `${devgodEntry} sync-runtime-exports --format text`;

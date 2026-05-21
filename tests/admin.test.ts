@@ -20,6 +20,7 @@ import {
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs,
   executeResumeCommandFromArgs,
+  executeSeedModernizationProofCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
   executeSyncRuntimeExportsCommandFromArgs,
   executeSupervisorCommandFromArgs,
@@ -1044,6 +1045,148 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     assert.equal(exportedActive, "task_id=active-proof-task\nworkflow=devgod\nstate=active\n");
     assert.equal(exportedQueue.project_status, "in_progress");
     assert.equal(exportedQueue.current_task_id, "active-proof-task");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSeedModernizationProofCommandFromArgs seeds a ready modernization run from the active task", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "devgod-local-seed", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "devgod-local-seed",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-modernization-seed-export-"));
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: undefined,
+    activeTaskId: "active-modernization-task",
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    const result = await executeSeedModernizationProofCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod"],
+      {
+        cwd: exportCwd,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        intakeRequest(input) {
+          return service.intakeRequest(input);
+        },
+        createTaskGraph(runId, taskPackets) {
+          return service.createTaskGraph(runId, taskPackets);
+        },
+        claimTask(runId, taskId, actor) {
+          return service.claimTask(runId, taskId, actor);
+        },
+        submitHandoff(runId, taskId, handoff) {
+          return service.submitHandoff(runId, taskId, handoff);
+        },
+        recordReview(runId, taskId, actor, review) {
+          return service.recordReview(runId, taskId, actor, review);
+        },
+        configureAutonomousExecution(runId, input) {
+          return service.configureAutonomousExecution(runId, input);
+        },
+        upsertCoverageItems(runId, items) {
+          return service.upsertCoverageItems(runId, items);
+        },
+        upsertUnderstandingMaps(runId, maps) {
+          return service.upsertUnderstandingMaps(runId, maps);
+        },
+        upsertRuntimeTraces(runId, traces) {
+          return service.upsertRuntimeTraces(runId, traces);
+        },
+        upsertDuplicateFamilies(runId, records) {
+          return service.upsertDuplicateFamilies(runId, records);
+        },
+        upsertArchitectureDecisions(runId, records) {
+          return service.upsertArchitectureDecisions(runId, records);
+        },
+        upsertMigrationLedgerEntries(runId, records) {
+          return service.upsertMigrationLedgerEntries(runId, records);
+        },
+        upsertParityRequirements(runId, records) {
+          return service.upsertParityRequirements(runId, records);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.mode, "local_modernization_proof_seed");
+    assert.equal(result.taskId, "active-modernization-task");
+    assert.equal(result.autonomous.profile, "modernization_program");
+    assert.equal(result.autonomous.phase, "modernization_strategy");
+    assert.equal(result.autonomous.readinessScope, "broad");
+    assert.equal(result.autonomous.rewriteReadiness, "ready");
+    assert.deepEqual(result.autonomous.missingArtifactKinds, []);
+    assert.equal(result.autonomous.duplicateFamilyCount, 1);
+    assert.equal(result.autonomous.architectureDecisionCount, 1);
+    assert.equal(result.autonomous.migrationLedgerCount, 1);
+    assert.equal(result.autonomous.parityRequirementCount, 1);
+
+    const latestRun = await store.findLatestRun({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.equal(latestRun?.id, result.runId);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, "active-modernization-task");
+    assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    assert.equal(exportedActive, "task_id=active-modernization-task\nworkflow=devgod\nstate=active\n");
   } finally {
     await rm(exportCwd, { recursive: true, force: true });
   }

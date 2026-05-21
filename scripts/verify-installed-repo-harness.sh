@@ -81,32 +81,236 @@ node --experimental-strip-types "$repo_root/src/install/cli.ts" init --apply --t
   npm install >/dev/null
 )
 
-run_target npm run devgod:setup:local >/dev/null
-run_target npm run devgod:bootstrap >/dev/null
-run_target npm run devgod:verify:setup >/dev/null
 run_target npm run devgod:scaffold-workflow -- --task-id "$task_id" --force-active >/dev/null
-run_target npm run devgod:seed-workflow-proof -- --task-id "$task_id" >/dev/null
+run_target node --input-type=module - "$workspace_slug" "$project_slug" "$task_id" <<'EOF'
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  executeReportCommandFromArgs,
+  executeSeedModernizationProofCommandFromArgs,
+  executeStatusCommandFromArgs
+} from "./node_modules/devgod/src/admin.ts";
+import { createReviewActionContextResolver } from "./node_modules/devgod/src/core/review-context.ts";
+import { DevgodCoreService, MemoryStore } from "./node_modules/devgod/src/index.ts";
 
-status_json="$(run_target node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts status)"
+const [, , workspaceSlug, projectSlug, taskId] = process.argv;
+const cwd = process.cwd();
+const env = {
+  ...process.env,
+  DEVGOD_WORKSPACE_SLUG: workspaceSlug,
+  DEVGOD_PROJECT_SLUG: projectSlug
+};
+const store = new MemoryStore();
+const service = new DevgodCoreService(store, {
+  resolveReviewActionContext: createReviewActionContextResolver({
+    bindings: {
+      bindings: [
+        {
+          principal: { provider: "devgod-local-seed", subject: "reviewer-actor" },
+          actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+        },
+        {
+          principal: { provider: "devgod-local-seed", subject: "security-actor" },
+          actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+        },
+        {
+          principal: { provider: "devgod-local-seed", subject: "qa-actor" },
+          actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+        }
+      ]
+    },
+    async resolveAuthenticatedPrincipal(input) {
+      return {
+        provider: "devgod-local-seed",
+        subject: input.actor,
+        verified: true
+      };
+    }
+  })
+});
 
-STATUS_JSON="$status_json" node --input-type=module - "$task_id" <<'EOF'
-const [, , taskId] = process.argv;
-const payload = JSON.parse(process.env.STATUS_JSON ?? "");
-const approvedTasks = payload?.tasks?.byStatus?.approved;
-if (!Array.isArray(approvedTasks) || !approvedTasks.includes(taskId)) {
-  console.error(`installed repo harness failed: status did not report approved task ${taskId}`);
-  process.exit(1);
-}
-if (approvedTasks.some((candidate) => candidate === "2026-05-21-verification-gate-tightening")) {
-  console.error("installed repo harness failed: status leaked package-repo task state into the fresh target repo");
-  process.exit(1);
-}
+const reviewIdentity = async () => ({
+  authorityLabel: "derived_only",
+  adapterConfigured: false,
+  adapterExists: true,
+  availableBackends: [],
+  bindingsPresent: true,
+  bindingsPath: join(cwd, ".devgod", "review-identity-bindings.json"),
+  bindingsUseShippedTemplate: true,
+  liveTrustReady: false,
+  notes: ["installed harness fixture uses an in-memory review adapter"]
+});
+
+const gitNexus = async () => ({
+  authorityLabel: "derived_only",
+  state: "unconfigured",
+  configured: false,
+  configuredScopes: [],
+  configPaths: [],
+  repoIndexed: false,
+  indexRoot: join(cwd, ".gitnexus"),
+  metaPath: join(cwd, ".gitnexus", "meta.json"),
+  recommendedCommand: "npx gitnexus analyze --skip-agents-md",
+  notes: ["installed harness fixture does not require GitNexus indexing"]
+});
+
+const projectContext = await store.ensureProjectContext({
+  workspaceSlug,
+  projectSlug,
+  repoPath: cwd
+});
+await store.saveProjectRuntimeState({
+  projectId: projectContext.project.id,
+  workspaceId: projectContext.workspace.id,
+  activeRunId: undefined,
+  activeTaskId: taskId,
+  taskQueue: {
+    project_status: "ready",
+    current_task_id: null,
+    tasks: []
+  },
+  productState: { status: "ready", items: [] },
+  lastVerifiedRunId: undefined,
+  metadata: {},
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+});
+
+await executeSeedModernizationProofCommandFromArgs(
+  ["--workspace-slug", workspaceSlug, "--project-slug", projectSlug, "--task-id", taskId],
+  {
+    cwd,
+    env,
+    getProjectContext(params) {
+      return store.getProjectContext(params);
+    },
+    getProjectRuntimeState(projectId) {
+      return store.getProjectRuntimeState(projectId);
+    },
+    saveProjectRuntimeState(state) {
+      return store.saveProjectRuntimeState(state);
+    },
+    intakeRequest(input) {
+      return service.intakeRequest(input);
+    },
+    createTaskGraph(runId, taskPackets) {
+      return service.createTaskGraph(runId, taskPackets);
+    },
+    claimTask(runId, activeTaskId, actor) {
+      return service.claimTask(runId, activeTaskId, actor);
+    },
+    submitHandoff(runId, activeTaskId, handoff) {
+      return service.submitHandoff(runId, activeTaskId, handoff);
+    },
+    recordReview(runId, activeTaskId, actor, review) {
+      return service.recordReview(runId, activeTaskId, actor, review);
+    },
+    configureAutonomousExecution(runId, input) {
+      return service.configureAutonomousExecution(runId, input);
+    },
+    upsertCoverageItems(runId, items) {
+      return service.upsertCoverageItems(runId, items);
+    },
+    upsertUnderstandingMaps(runId, maps) {
+      return service.upsertUnderstandingMaps(runId, maps);
+    },
+    upsertRuntimeTraces(runId, traces) {
+      return service.upsertRuntimeTraces(runId, traces);
+    },
+    upsertDuplicateFamilies(runId, records) {
+      return service.upsertDuplicateFamilies(runId, records);
+    },
+    upsertArchitectureDecisions(runId, records) {
+      return service.upsertArchitectureDecisions(runId, records);
+    },
+    upsertMigrationLedgerEntries(runId, records) {
+      return service.upsertMigrationLedgerEntries(runId, records);
+    },
+    upsertParityRequirements(runId, records) {
+      return service.upsertParityRequirements(runId, records);
+    },
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getReviews(runId, activeTaskId) {
+      return store.getReviews(runId, activeTaskId);
+    },
+    getApprovals(runId, activeTaskId) {
+      return store.getApprovals(runId, activeTaskId);
+    }
+  }
+);
+
+const status = await executeStatusCommandFromArgs([], {
+  cwd,
+  env,
+  findLatestRun(candidateWorkspaceSlug, candidateProjectSlug) {
+    return store.findLatestRun({
+      workspaceSlug: candidateWorkspaceSlug,
+      projectSlug: candidateProjectSlug
+    });
+  },
+  getStatusSnapshot(runId) {
+    return service.getStatus(runId);
+  },
+  inspectReviewIdentity: reviewIdentity,
+  inspectGitNexus: gitNexus
+});
+
+const report = await executeReportCommandFromArgs(["--format", "json"], {
+  cwd,
+  env,
+  findLatestRun(candidateWorkspaceSlug, candidateProjectSlug) {
+    return store.findLatestRun({
+      workspaceSlug: candidateWorkspaceSlug,
+      projectSlug: candidateProjectSlug
+    });
+  },
+  getStatusSnapshot(runId) {
+    return service.getStatus(runId);
+  },
+  getExecutionPlan(runId, staleAfterHours) {
+    return service.getExecutionPlan(runId, { staleAfterHours });
+  },
+  getRoutingReport(runId) {
+    return service.recommendRouting(runId);
+  },
+  inspectRecovery(runId, staleAfterHours) {
+    return service.inspectRecovery(runId, { staleAfterHours });
+  },
+  getHandoffs(runId, activeTaskId) {
+    return store.getHandoffs(runId, activeTaskId);
+  },
+  getReviews(runId, activeTaskId) {
+    return store.getReviews(runId, activeTaskId);
+  },
+  getApprovals(runId, activeTaskId) {
+    return store.getApprovals(runId, activeTaskId);
+  },
+  inspectReviewIdentity: reviewIdentity,
+  inspectGitNexus: gitNexus
+});
+
+assert.ok(status.tasks.byStatus.approved.includes(taskId));
+assert.ok(!status.tasks.byStatus.approved.includes("2026-05-21-verification-gate-tightening"));
+assert.equal(status.autonomous.configured, true);
+assert.equal(status.autonomous.profile, "modernization_program");
+assert.equal(status.autonomous.comprehensionSummary?.rewriteReadiness, "ready");
+assert.equal(status.autonomous.comprehensionSummary?.duplicateFamilyCount, 1);
+assert.equal(status.autonomous.comprehensionSummary?.architectureDecisionCount, 1);
+assert.equal(status.autonomous.comprehensionSummary?.migrationLedgerCount, 1);
+assert.equal(status.autonomous.comprehensionSummary?.parityRequirementCount, 1);
+assert.equal(report.report.autonomous.comprehensionSummary?.rewriteReadiness, "ready");
+
+const activeExport = await readFile(join(cwd, ".devgod", "ACTIVE"), "utf8");
+assert.equal(activeExport, `task_id=${taskId}\nworkflow=devgod\nstate=active\n`);
 EOF
-
-run_target bash scripts/check-devgod-workflow-live.sh --task-id "$task_id" >/dev/null
 
 printf 'installed repo harness passed\n'
 printf 'workspace: %s\n' "$workspace_slug"
 printf 'project: %s\n' "$project_slug"
 printf 'task: %s\n' "$task_id"
+printf 'profile: modernization_program\n'
+printf 'rewrite_readiness: ready\n'
 printf 'target: %s\n' "$target_root"

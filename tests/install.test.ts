@@ -239,6 +239,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-workflow-proof"
   );
   assert.equal(
+    merged.scripts["devgod:seed-modernization-proof"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-modernization-proof"
+  );
+  assert.equal(
     merged.scripts["devgod:advance-active-task"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts advance-active-task --format text"
   );
@@ -1494,6 +1498,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(
     targetPackageJson.scripts["devgod:seed-workflow-proof"],
     /node_modules\/devgod\/src\/admin\/devgod\.ts seed-workflow-proof/
+  );
+  assert.match(
+    targetPackageJson.scripts["devgod:seed-modernization-proof"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-modernization-proof/
   );
   assert.match(targetPackageJson.scripts.devgod, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
   assert.match(

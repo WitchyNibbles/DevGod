@@ -360,4 +360,6 @@ test("verify-installed-repo-harness isolates fresh target repo context and reach
   assert.match(stdout, /workspace: default/);
   assert.match(stdout, /project: devgod-installed-harness-/);
   assert.match(stdout, /task: harness-proof/);
+  assert.match(stdout, /profile: modernization_program/);
+  assert.match(stdout, /rewrite_readiness: ready/);
 });
