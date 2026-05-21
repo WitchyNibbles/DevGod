@@ -27,16 +27,24 @@ import {
   buildAutonomousExecutionSnapshot,
   collectAutonomousExecutionBlockers,
   createAutonomousExecutionState,
+  mergeArchitectureDecisions,
+  mergeDuplicateFamilies,
   mergeExternalEvalRecords,
   mergeCoverageGaps,
   mergeCoverageItems,
+  mergeMigrationLedgerEntries,
+  mergeParityRequirements,
   mergeRuntimeTraces,
   mergeSensitiveActionControls,
   mergeUnderstandingMaps,
+  validateArchitectureDecisionRecord,
+  validateDuplicateFamilyRecord,
   validateExternalEvalRecord,
   validateCoverageGapRecord,
   validateCoverageItemRecord,
   validateCoverageManifestRecord,
+  validateMigrationLedgerEntryRecord,
+  validateParityRequirementRecord,
   validateProgressProofRecord,
   validateRuntimeTraceRecord,
   validateSensitiveActionControlRecord,
@@ -57,17 +65,21 @@ import type {
 } from "./review-context.ts";
 import type {
   AnalysisPhase,
+  ArchitectureDecisionRecord,
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
   CheckpointRecord,
   CoverageGapRecord,
   CoverageItemRecord,
   CoverageManifestRecord,
+  DuplicateFamilyRecord,
   ExternalEvalRecord,
   HandoffInput,
   IntakeRequestInput,
   LockRecord,
   MemoryPromotionInput,
+  MigrationLedgerEntryRecord,
+  ParityRequirementRecord,
   PlanArtifact,
   PlanInput,
   ProgressProofRecord,
@@ -157,6 +169,10 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
+function profileHasBroadRewriteScope(profile: AutonomousExecutionState["profile"]): boolean {
+  return profile === "legacy_rewrite" || profile === "modernization_program";
+}
+
 function normalizeRuntimeTraceAuthorityLabel(
   authorityLabel: RuntimeTraceAuthorityLabel | undefined
 ): RuntimeTraceAuthorityLabel {
@@ -240,14 +256,15 @@ function deriveNativeAutonomousDirective(input: {
 
   const inventoryThreshold = manifestThresholds?.inventoryCompleteness;
   const rewriteClaimPhase =
-    state.profile === "legacy_rewrite" &&
+    profileHasBroadRewriteScope(state.profile) &&
     (state.phase === "modernization_strategy" || state.phase === "migration_sequencing");
   const openInventoryGaps = rewriteClaimPhase
     ? state.gaps.filter((gap) => gap.status === "open" && gap.kind === "missing_inventory")
     : [];
   const inventoryBlockers = uniqueStrings([
     ...blockers.filter(
-      (blocker) => /inventory completeness|understanding map missing|inventory gap open|dynamic discovery/i.test(blocker)
+      (blocker) =>
+        /inventory completeness|understanding map missing|modernization artifact missing|inventory gap open|dynamic discovery/i.test(blocker)
     ),
     ...openInventoryGaps.map((gap) => gap.description)
   ]);
@@ -474,6 +491,10 @@ function readAutonomousExecutionState(
     ...candidate,
     understandingMaps: candidate.understandingMaps ?? [],
     runtimeTraces: candidate.runtimeTraces ?? [],
+    duplicateFamilies: candidate.duplicateFamilies ?? [],
+    architectureDecisions: candidate.architectureDecisions ?? [],
+    migrationLedger: candidate.migrationLedger ?? [],
+    parityMatrix: candidate.parityMatrix ?? [],
     externalEvals: candidate.externalEvals ?? [],
     sensitiveActionControls: candidate.sensitiveActionControls ?? []
   };
@@ -661,6 +682,12 @@ export class DevgodCoreService {
       progressProofs: current?.progressProofs ?? [],
       understandingMaps: current?.understandingMaps ?? [],
       runtimeTraces: current?.runtimeTraces ?? [],
+      duplicateFamilies: current?.duplicateFamilies ?? [],
+      architectureDecisions: current?.architectureDecisions ?? [],
+      migrationLedger: current?.migrationLedger ?? [],
+      parityMatrix: current?.parityMatrix ?? [],
+      externalEvals: current?.externalEvals ?? [],
+      sensitiveActionControls: current?.sensitiveActionControls ?? [],
       executionEpoch: current?.executionEpoch ?? 1
     }));
 
@@ -775,6 +802,82 @@ export class DevgodCoreService {
         coverageItems: mergeTraceEvidenceIntoCoverageItems(base.coverageItems, preparedTraces),
         gaps: closeMissingRuntimeTraceGaps(base.gaps, preparedTraces),
         runtimeTraces: mergeRuntimeTraces(base.runtimeTraces ?? [], preparedTraces)
+      };
+    });
+  }
+
+  async upsertDuplicateFamilies(
+    runId: string,
+    records: DuplicateFamilyRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateDuplicateFamilyRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid duplicate family: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        duplicateFamilies: mergeDuplicateFamilies(base.duplicateFamilies ?? [], records)
+      };
+    });
+  }
+
+  async upsertArchitectureDecisions(
+    runId: string,
+    records: ArchitectureDecisionRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateArchitectureDecisionRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid architecture decision: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        architectureDecisions: mergeArchitectureDecisions(base.architectureDecisions ?? [], records)
+      };
+    });
+  }
+
+  async upsertMigrationLedgerEntries(
+    runId: string,
+    records: MigrationLedgerEntryRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateMigrationLedgerEntryRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid migration ledger entry: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        migrationLedger: mergeMigrationLedgerEntries(base.migrationLedger ?? [], records)
+      };
+    });
+  }
+
+  async upsertParityRequirements(
+    runId: string,
+    records: ParityRequirementRecord[]
+  ): Promise<AutonomousExecutionState> {
+    const run = await this.requireRun(runId);
+    const errors = records.flatMap((record) => validateParityRequirementRecord(record));
+    if (errors.length > 0) {
+      throw new Error(`Invalid parity requirement: ${errors.join("; ")}`);
+    }
+    return this.saveAutonomousExecutionState(run, (current, now) => {
+      const base = current ?? createAutonomousExecutionState({ now });
+      return {
+        ...base,
+        enabled: true,
+        parityMatrix: mergeParityRequirements(base.parityMatrix ?? [], records)
       };
     });
   }

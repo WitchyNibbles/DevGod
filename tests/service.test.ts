@@ -2898,6 +2898,198 @@ test("getStatus marks standard_delivery readiness as profile_limited even when t
   );
 });
 
+test("getStatus blocks modernization_program until modernization artifact classes are present", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Modernization gating",
+    request: "Require modernization-only artifact classes before broad modernization readiness."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "modernize",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:modernization-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["modernization planning must stay blocked until artifact coverage is complete"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:modernization-core",
+      targetId: "service:modernization-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists modernization readiness evidence"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.profile, "modernization_program");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.readinessScope, "broad");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.rewriteReadiness, "blocked");
+  assert.ok(status.autonomousExecution?.comprehensionSummary?.missingArtifactKinds.includes("domain_map"));
+  assert.ok(status.autonomousExecution?.comprehensionSummary?.missingArtifactKinds.includes("migration_ledger"));
+  assert.ok(status.autonomousExecution?.comprehensionSummary?.missingArtifactKinds.includes("parity_matrix"));
+  assert.match(
+    status.autonomousExecution?.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
+    /modernization artifact missing: domain_map/
+  );
+});
+
+test("getStatus marks modernization_program ready when modernization artifact classes are present", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Modernization ready",
+    request: "Mark modernization readiness ready only when modernization artifact classes are present."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "modernize",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:modernization-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["modernization planning must preserve all validated invariants"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects",
+    "domain_map",
+    "symbol_graph",
+    "call_graph",
+    "dependency_graph",
+    "invariant_ledger",
+    "duplicate_families",
+    "architecture_decisions",
+    "migration_ledger",
+    "parity_matrix"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/service.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:modernization-core",
+      targetId: "service:modernization-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists modernization artifact evidence"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.profile, "modernization_program");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.readinessScope, "broad");
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.rewriteReadiness, "ready");
+  assert.deepEqual(status.autonomousExecution?.comprehensionSummary?.missingArtifactKinds, []);
+  assert.equal(status.autonomousExecution?.phaseReadiness.status, "ready");
+});
+
 test("exportCoverageLedger emits the richer exported ledger artifact set from runtime state", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -2971,6 +3163,7 @@ test("exportCoverageLedger emits the richer exported ledger artifact set from ru
       callsiteCount: 2,
       callsitesAnalyzed: 2,
       runtimeTraced: true,
+      invariants: ["workflow proof must only close after authenticated live validation"],
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
       lastUpdatedAt: "2026-05-20T12:00:00.000Z"
@@ -3010,12 +3203,108 @@ test("exportCoverageLedger emits the richer exported ledger artifact set from ru
       createdAt: "2026-05-20T12:02:00.000Z"
     }
   ]);
+  await service.upsertDuplicateFamilies(run.id, [
+    {
+      familyId: "duplicate:workflow-proof",
+      capability: "workflow proof orchestration",
+      members: [
+        {
+          itemId: "service:workflow-proof",
+          kind: "shared_core",
+          role: "runtime orchestrator"
+        },
+        {
+          itemId: "test:workflow-proof",
+          kind: "intentional_variant",
+          role: "verification harness"
+        }
+      ],
+      sharedAbstraction: "WorkflowProofAdapter",
+      intentionalVariants: ["test harness keeps extra diagnostics hooks"],
+      accidentalDivergences: [],
+      centralizationCandidate: "centralize workflow proof lifecycle behind WorkflowProofAdapter",
+      parityRequirements: ["prove runtime and harness variants emit equivalent workflow-proof milestones"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:03:00.000Z"
+    }
+  ]);
+  await service.upsertArchitectureDecisions(run.id, [
+    {
+      decisionId: "adr:workflow-proof-boundary",
+      title: "Workflow proof stays behind a shared adapter boundary",
+      status: "accepted",
+      options: ["inline service orchestration", "shared adapter boundary"],
+      chosenOption: "shared adapter boundary",
+      boundedContexts: ["workflow-proof", "operator-reporting"],
+      consistencyNeeds: ["shared proof semantics", "single authz gate"],
+      rationale: ["shared boundary reduces proof drift across callers"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:04:00.000Z"
+    }
+  ]);
+  await service.upsertMigrationLedgerEntries(run.id, [
+    {
+      entryId: "migration:workflow-proof-status",
+      boundedContext: "workflow-proof",
+      sourceModels: ["legacy_workflow_proofs"],
+      targetModels: ["workflow_proof_records"],
+      strategy: "expand_contract",
+      consistencyClass: "strong",
+      ownership: "backend_engineer",
+      rolloutSteps: ["add new proof table", "backfill legacy rows", "cut reads to new table"],
+      rollbackPlan: ["restore reads to legacy table", "leave additive schema in place"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:05:00.000Z"
+    }
+  ]);
+  await service.upsertParityRequirements(run.id, [
+    {
+      requirementId: "parity:workflow-proof-lifecycle",
+      capability: "workflow proof lifecycle",
+      status: "planned",
+      legacyRefs: ["legacy_workflow_proofs.status"],
+      targetRefs: ["workflow_proof_records.status"],
+      acceptanceChecks: ["prove both paths expose the same terminal workflow-proof states"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:06:00.000Z"
+    }
+  ]);
 
   const artifacts = await service.exportCoverageLedger(run.id);
 
   assert.equal(artifacts.manifest.run_id, run.id);
   assert.equal(artifacts.items.length, 2);
   assert.equal(artifacts.gaps.length, 1);
+  assert.ok(Array.isArray(artifacts.understanding_maps));
+  assert.equal(artifacts.invariants.length, 1);
+  assert.equal(artifacts.invariants[0]?.target_id, "service:workflow-proof");
+  assert.deepEqual(artifacts.invariants[0]?.invariants, [
+    "workflow proof must only close after authenticated live validation"
+  ]);
+  assert.deepEqual(artifacts.invariants[0]?.business_rules, []);
+  assert.ok(artifacts.invariants[0]?.evidence_refs.includes("src/core/service.ts:1"));
+  assert.ok(artifacts.invariants[0]?.evidence_refs.includes("tests/service.test.ts:1"));
+  assert.deepEqual(artifacts.invariants[0]?.verification_refs, ["tests/service.test.ts"]);
+  assert.equal(artifacts.invariants[0]?.last_updated_at, "2026-05-20T12:02:00.000Z");
+  assert.equal(artifacts.duplicate_families.length, 1);
+  assert.equal(artifacts.duplicate_families[0]?.family_id, "duplicate:workflow-proof");
+  assert.equal(
+    artifacts.duplicate_families[0]?.centralization_candidate,
+    "centralize workflow proof lifecycle behind WorkflowProofAdapter"
+  );
+  assert.deepEqual(artifacts.duplicate_families[0]?.parity_requirements, [
+    "prove runtime and harness variants emit equivalent workflow-proof milestones"
+  ]);
+  assert.equal(artifacts.architecture_decisions.length, 1);
+  assert.equal(artifacts.architecture_decisions[0]?.decision_id, "adr:workflow-proof-boundary");
+  assert.equal(artifacts.migration_ledger.length, 1);
+  assert.equal(artifacts.migration_ledger[0]?.entry_id, "migration:workflow-proof-status");
+  assert.equal(artifacts.parity_matrix.length, 1);
+  assert.equal(artifacts.parity_matrix[0]?.requirement_id, "parity:workflow-proof-lifecycle");
   assert.equal(artifacts.traces.length, 1);
   assert.ok(
     artifacts.dependency_graph.edges.some(
@@ -3066,6 +3355,9 @@ test("generateRepoInventory persists code-backed coverage items and understandin
   assert.ok(state.coverageItems.some((item) => item.category === "tests"));
   assert.ok(state.understandingMaps?.some((map) => map.kind === "repo_map"));
   assert.ok(state.understandingMaps?.some((map) => map.kind === "runtime_side_effects"));
+  assert.ok(state.understandingMaps?.some((map) => map.kind === "domain_map"));
+  assert.ok(state.understandingMaps?.some((map) => map.kind === "symbol_graph"));
+  assert.ok(state.understandingMaps?.some((map) => map.kind === "dependency_graph"));
 });
 
 test("generateRepoInventory derives code-backed surfaces and explicit ambiguity gaps", async () => {
@@ -3092,7 +3384,7 @@ test("generateRepoInventory derives code-backed surfaces and explicit ambiguity 
     );
     await writeFile(
       resolve(fixtureRoot, "src", "core", "service.ts"),
-      'export class BillingService { run() { return "ok"; } }\n',
+      'import { RecordModel } from "../domain/model"; export class BillingService { run(model: RecordModel) { return model.id; } }\n',
       "utf8"
     );
     await writeFile(
@@ -3174,6 +3466,9 @@ test("generateRepoInventory derives code-backed surfaces and explicit ambiguity 
     assert.ok(state.understandingMaps?.some((map) => map.kind === "integration_map" && map.sourceRefs.includes("src/mcp/client.ts")));
     assert.ok(state.understandingMaps?.some((map) => map.kind === "config_coupling" && map.sourceRefs.includes("src/config/runtime.ts")));
     assert.ok(state.understandingMaps?.some((map) => map.kind === "authz_map" && map.sourceRefs.includes("src/policy/access.ts")));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "domain_map" && map.sourceRefs.includes("domain:core")));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "symbol_graph" && map.sourceRefs.some((ref) => ref.includes("src/core/service.ts#BillingService"))));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "dependency_graph" && map.sourceRefs.some((ref) => ref.includes("src/core/service.ts->src/domain/model.ts"))));
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
@@ -4817,6 +5112,148 @@ test("upsertExternalEvals and upsertSensitiveActionControls persist explicit run
     status.autonomousExecution?.state.sensitiveActionControls?.[0]?.enforcement,
     "authenticated_runtime"
   );
+});
+
+test("upsertDuplicateFamilies persists centralization candidates and parity requirements", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Duplicate family evidence",
+    request: "Persist duplicate-family centralization evidence."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertDuplicateFamilies(run.id, [
+    {
+      familyId: "duplicate:access-policy",
+      capability: "access policy enforcement",
+      members: [
+        { itemId: "service:access-policy", kind: "shared_core", role: "backend policy service" },
+        { itemId: "route:access-policy", kind: "accidental_divergence", role: "route-level override" }
+      ],
+      sharedAbstraction: "AccessPolicyEngine",
+      intentionalVariants: [],
+      accidentalDivergences: ["route layer skips one audit branch"],
+      centralizationCandidate: "move route policy checks behind AccessPolicyEngine",
+      parityRequirements: ["prove route and service checks deny identical unauthorized requests"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:15:00.000Z"
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.duplicateFamilies?.length, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.duplicateFamilyCount, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.centralizationCandidateCount, 1);
+  assert.deepEqual(status.autonomousExecution?.state.duplicateFamilies?.[0]?.parityRequirements, [
+    "prove route and service checks deny identical unauthorized requests"
+  ]);
+});
+
+test("upsertArchitectureAndMigrationEvidence persists decisions ledgers and parity requirements", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Architecture and migration evidence",
+    request: "Persist architecture-fit, migration-ledger, and parity evidence."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "migration_sequencing",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertArchitectureDecisions(run.id, [
+    {
+      decisionId: "adr:auth-boundary",
+      title: "Keep auth policy in a modular monolith boundary first",
+      status: "accepted",
+      options: ["extract auth service now", "stabilize auth boundary inside modular monolith"],
+      chosenOption: "stabilize auth boundary inside modular monolith",
+      boundedContexts: ["auth", "workflow-proof"],
+      consistencyNeeds: ["strong authorization decisions", "low-latency proof checks"],
+      rationale: ["tight consistency beats premature extraction during the first migration wave"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:40:00.000Z"
+    }
+  ]);
+  await service.upsertMigrationLedgerEntries(run.id, [
+    {
+      entryId: "migration:auth-policies",
+      boundedContext: "auth",
+      sourceModels: ["legacy_policy_rules"],
+      targetModels: ["policy_rule_snapshots"],
+      strategy: "expand_contract",
+      consistencyClass: "strong",
+      ownership: "backend_engineer",
+      rolloutSteps: ["add snapshot table", "dual-write policy changes", "cut reads after parity pass"],
+      rollbackPlan: ["stop reads from snapshot table", "keep dual-write flag disabled"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:41:00.000Z"
+    }
+  ]);
+  await service.upsertParityRequirements(run.id, [
+    {
+      requirementId: "parity:auth-policies",
+      capability: "auth policy evaluation",
+      status: "planned",
+      legacyRefs: ["legacy_policy_rules"],
+      targetRefs: ["policy_rule_snapshots"],
+      acceptanceChecks: ["prove legacy and snapshot-backed decisions match for the seeded policy corpus"],
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:42:00.000Z"
+    }
+  ]);
+
+  const status = await service.getStatus(run.id);
+
+  assert.equal(status.autonomousExecution?.state.architectureDecisions?.length, 1);
+  assert.equal(status.autonomousExecution?.state.migrationLedger?.length, 1);
+  assert.equal(status.autonomousExecution?.state.parityMatrix?.length, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.architectureDecisionCount, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.migrationLedgerCount, 1);
+  assert.equal(status.autonomousExecution?.comprehensionSummary?.parityRequirementCount, 1);
 });
 
 test("searchMemory can retrieve runtime workflow documents generated by intake and planning", async () => {

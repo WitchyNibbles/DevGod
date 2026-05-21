@@ -102,6 +102,24 @@ test("buildCoverageLedgerArtifacts emits manifest, items, dependency graph, gaps
     ],
     checkpoints: [],
     progressProofs: [],
+    understandingMaps: [
+      {
+        kind: "repo_map",
+        itemCount: 2,
+        analyzedCount: 2,
+        sourceRefs: ["src/core/service.ts:1", "tests/coverage-ledger.test.ts:1"],
+        evidenceRefs: ["tests/coverage-ledger.test.ts:1"],
+        updatedAt: "2026-05-20T10:02:30.000Z"
+      },
+      {
+        kind: "symbol_graph",
+        itemCount: 2,
+        analyzedCount: 2,
+        sourceRefs: ["symbol:src/core/service.ts#workflowProof", "symbol:tests/coverage-ledger.test.ts#proofTest"],
+        evidenceRefs: ["src/core/service.ts:1", "tests/coverage-ledger.test.ts:1"],
+        updatedAt: "2026-05-20T10:02:30.000Z"
+      }
+    ],
     runtimeTraces: [
       {
         traceId: "trace:proof",
@@ -121,7 +139,9 @@ test("buildCoverageLedgerArtifacts emits manifest, items, dependency graph, gaps
   assert.equal(artifacts.manifest.run_id, "run-1");
   assert.equal(artifacts.items.length, 2);
   assert.equal(artifacts.gaps.length, 1);
+  assert.equal(artifacts.understanding_maps.length, 2);
   assert.equal(artifacts.traces.length, 1);
+  assert.ok(artifacts.understanding_maps.some((map) => map.kind === "symbol_graph"));
   assert.ok(artifacts.dependency_graph.nodes.some((node) => node.id === "service:proof"));
   assert.ok(
     artifacts.dependency_graph.edges.some(

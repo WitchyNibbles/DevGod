@@ -204,10 +204,29 @@ export const understandingMapKinds = [
   "integration_map",
   "authz_map",
   "config_coupling",
-  "runtime_side_effects"
+  "runtime_side_effects",
+  "domain_map",
+  "symbol_graph",
+  "call_graph",
+  "dependency_graph",
+  "invariant_ledger",
+  "duplicate_families",
+  "architecture_decisions",
+  "migration_ledger",
+  "parity_matrix"
 ] as const;
 export const runtimeTraceKinds = ["route", "job", "integration", "auth", "side_effect"] as const;
 export const runtimeTraceAuthorityLabels = ["runtime_capture", "operator_import"] as const;
+export const duplicateFamilyMemberKinds = [
+  "shared_core",
+  "intentional_variant",
+  "accidental_divergence",
+  "unknown"
+] as const;
+export const architectureDecisionStatuses = ["proposed", "accepted", "superseded"] as const;
+export const migrationStrategies = ["expand_contract", "dual_write", "backfill_then_cutover"] as const;
+export const migrationConsistencyClasses = ["strong", "eventual", "mixed"] as const;
+export const parityRequirementStatuses = ["planned", "verified", "waived"] as const;
 export const analysisPhases = [
   "discovery",
   "inventory",
@@ -224,7 +243,7 @@ export const analysisPhases = [
   "blocked",
   "done"
 ] as const;
-export const runProfiles = ["standard_delivery", "legacy_rewrite", "debug_heavy"] as const;
+export const runProfiles = ["standard_delivery", "legacy_rewrite", "modernization_program", "debug_heavy"] as const;
 export const phaseReadinessStatuses = ["ready", "blocked"] as const;
 export const rewriteReadinessStatuses = ["ready", "blocked", "profile_limited"] as const;
 export const comprehensionReadinessScopes = ["broad", "profile_limited"] as const;
@@ -275,6 +294,11 @@ export type GapStatus = (typeof gapStatuses)[number];
 export type UnderstandingMapKind = (typeof understandingMapKinds)[number];
 export type RuntimeTraceKind = (typeof runtimeTraceKinds)[number];
 export type RuntimeTraceAuthorityLabel = (typeof runtimeTraceAuthorityLabels)[number];
+export type DuplicateFamilyMemberKind = (typeof duplicateFamilyMemberKinds)[number];
+export type ArchitectureDecisionStatus = (typeof architectureDecisionStatuses)[number];
+export type MigrationStrategy = (typeof migrationStrategies)[number];
+export type MigrationConsistencyClass = (typeof migrationConsistencyClasses)[number];
+export type ParityRequirementStatus = (typeof parityRequirementStatuses)[number];
 export type AnalysisPhase = (typeof analysisPhases)[number];
 export type RunProfile = (typeof runProfiles)[number];
 export type PhaseReadinessStatus = (typeof phaseReadinessStatuses)[number];
@@ -584,6 +608,7 @@ export interface CoverageItemRecord {
   callsitesAnalyzed?: number | undefined;
   runtimeTraced?: boolean | undefined;
   behaviorSummary?: string | undefined;
+  invariants?: string[] | undefined;
   businessRules?: string[] | undefined;
   sideEffects?: string[] | undefined;
   openQuestions?: string[] | undefined;
@@ -679,6 +704,68 @@ export interface RuntimeTraceRegistrySummary {
   targets: RuntimeTraceRegistryTargetSummary[];
 }
 
+export interface DuplicateFamilyMemberRecord {
+  itemId: string;
+  kind: DuplicateFamilyMemberKind;
+  role?: string | undefined;
+  notes?: string | undefined;
+}
+
+export interface DuplicateFamilyRecord {
+  familyId: string;
+  capability: string;
+  members: DuplicateFamilyMemberRecord[];
+  sharedAbstraction?: string | undefined;
+  intentionalVariants: string[];
+  accidentalDivergences: string[];
+  centralizationCandidate?: string | undefined;
+  parityRequirements: string[];
+  evidenceRefs: string[];
+  verificationRefs?: string[] | undefined;
+  lastUpdatedAt: string;
+}
+
+export interface ArchitectureDecisionRecord {
+  decisionId: string;
+  title: string;
+  status: ArchitectureDecisionStatus;
+  options: string[];
+  chosenOption: string;
+  boundedContexts: string[];
+  consistencyNeeds: string[];
+  rationale: string[];
+  evidenceRefs: string[];
+  verificationRefs?: string[] | undefined;
+  lastUpdatedAt: string;
+}
+
+export interface MigrationLedgerEntryRecord {
+  entryId: string;
+  boundedContext: string;
+  sourceModels: string[];
+  targetModels: string[];
+  strategy: MigrationStrategy;
+  consistencyClass: MigrationConsistencyClass;
+  ownership: string;
+  rolloutSteps: string[];
+  rollbackPlan: string[];
+  evidenceRefs: string[];
+  verificationRefs?: string[] | undefined;
+  lastUpdatedAt: string;
+}
+
+export interface ParityRequirementRecord {
+  requirementId: string;
+  capability: string;
+  status: ParityRequirementStatus;
+  legacyRefs: string[];
+  targetRefs: string[];
+  acceptanceChecks: string[];
+  evidenceRefs: string[];
+  verificationRefs?: string[] | undefined;
+  lastUpdatedAt: string;
+}
+
 export interface ExternalEvalRecord {
   evalId: string;
   label: string;
@@ -740,11 +827,20 @@ export interface CoverageSummary {
 export interface ComprehensionSummary {
   inventoryCompleteness: number;
   businessRuleCoverage: number;
+  duplicateFamilyCount: number;
+  duplicateFamilyMemberCount: number;
+  centralizationCandidateCount: number;
+  architectureDecisionCount: number;
+  migrationLedgerCount: number;
+  parityRequirementCount: number;
   contradictionGapCount: number;
   openBlockerCount: number;
   requiredUnderstandingKinds: UnderstandingMapKind[];
   presentUnderstandingKinds: UnderstandingMapKind[];
   missingUnderstandingKinds: UnderstandingMapKind[];
+  requiredArtifactKinds: UnderstandingMapKind[];
+  presentArtifactKinds: UnderstandingMapKind[];
+  missingArtifactKinds: UnderstandingMapKind[];
   runtimeTraceCount: number;
   readinessScope: ComprehensionReadinessScope;
   rewriteReadiness: RewriteReadinessStatus;
@@ -778,6 +874,10 @@ export interface AutonomousExecutionState {
   progressProofs: ProgressProofRecord[];
   understandingMaps?: UnderstandingMapRecord[] | undefined;
   runtimeTraces?: RuntimeTraceRecord[] | undefined;
+  duplicateFamilies?: DuplicateFamilyRecord[] | undefined;
+  architectureDecisions?: ArchitectureDecisionRecord[] | undefined;
+  migrationLedger?: MigrationLedgerEntryRecord[] | undefined;
+  parityMatrix?: ParityRequirementRecord[] | undefined;
   externalEvals?: ExternalEvalRecord[] | undefined;
   sensitiveActionControls?: SensitiveActionControlRecord[] | undefined;
   pendingInvestigations: string[];

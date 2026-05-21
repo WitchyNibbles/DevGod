@@ -1,6 +1,15 @@
-import { understandingMapKinds } from "../domain/types.ts";
+import {
+  architectureDecisionStatuses,
+  duplicateFamilyMemberKinds,
+  migrationConsistencyClasses,
+  migrationStrategies,
+  parityRequirementStatuses,
+  understandingMapKinds
+} from "../domain/types.ts";
 import type {
   AnalysisPhase,
+  ArchitectureDecisionRecord,
+  ArchitectureDecisionStatus,
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
   CheckpointRecord,
@@ -10,7 +19,14 @@ import type {
   CoverageManifestRecord,
   CoverageSummary,
   CoverageItemRecord,
+  DuplicateFamilyMemberKind,
+  DuplicateFamilyRecord,
   ExternalEvalRecord,
+  MigrationConsistencyClass,
+  MigrationLedgerEntryRecord,
+  MigrationStrategy,
+  ParityRequirementRecord,
+  ParityRequirementStatus,
   PhaseReadinessRecord,
   ProgressProofRecord,
   RuntimeTraceRecord,
@@ -100,8 +116,35 @@ const requiredUnderstandingKindsByProfile: Record<RunProfile, readonly Understan
     "config_coupling",
     "runtime_side_effects"
   ],
+  modernization_program: [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects",
+    "domain_map",
+    "symbol_graph",
+    "call_graph",
+    "dependency_graph",
+    "invariant_ledger",
+    "duplicate_families",
+    "architecture_decisions",
+    "migration_ledger",
+    "parity_matrix"
+  ],
   debug_heavy: ["repo_map", "subsystems", "route_map", "runtime_side_effects"]
 };
+
+function profileHasBroadRewriteScope(profile: RunProfile): boolean {
+  return profile === "legacy_rewrite" || profile === "modernization_program";
+}
+
+function profileRequiresModernizationArtifacts(profile: RunProfile): boolean {
+  return profile === "modernization_program";
+}
 
 function isFiniteMetric(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -190,21 +233,21 @@ export function isCheckpointStale(
 function thresholdFallbackForProfile(profile: RunProfile, key: keyof CoverageManifestRecord["thresholds"]): number {
   switch (key) {
     case "inventoryCompleteness":
-      return profile === "legacy_rewrite" ? 1 : 0.5;
+      return profileHasBroadRewriteScope(profile) ? 1 : 0.5;
     case "businessRuleCoverage":
-      return profile === "legacy_rewrite" ? 0.8 : 0.3;
+      return profile === "modernization_program" ? 0.9 : profile === "legacy_rewrite" ? 0.8 : 0.3;
     case "maxContradictionGapCount":
-      return profile === "legacy_rewrite" ? 0 : 1;
+      return profileHasBroadRewriteScope(profile) ? 0 : 1;
     case "maxOpenBlockers":
       return 0;
     case "criticalItemCoverage":
-      return 0.8;
+      return profile === "modernization_program" ? 0.9 : 0.8;
     case "criticalItemValidation":
-      return 0.6;
+      return profile === "modernization_program" ? 0.75 : 0.6;
     case "callsiteCoverage":
-      return 0.85;
+      return profile === "modernization_program" ? 0.9 : 0.85;
     case "runtimeTraceCoverage":
-      return 0.75;
+      return profile === "modernization_program" ? 0.85 : 0.75;
   }
 }
 
@@ -411,6 +454,181 @@ export function validateRuntimeTraceRecord(trace: RuntimeTraceRecord): string[] 
   return errors;
 }
 
+export function validateDuplicateFamilyRecord(record: DuplicateFamilyRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.familyId.trim().length === 0) {
+    errors.push("duplicate family must include familyId");
+  }
+
+  if (record.capability.trim().length === 0) {
+    errors.push(`duplicate family ${record.familyId} must include capability`);
+  }
+
+  if (!Array.isArray(record.members) || record.members.length === 0) {
+    errors.push(`duplicate family ${record.familyId} must include at least one member`);
+  } else {
+    const memberIds = new Set<string>();
+    for (const member of record.members) {
+      if (member.itemId.trim().length === 0) {
+        errors.push(`duplicate family ${record.familyId} has a member without itemId`);
+        continue;
+      }
+      if (memberIds.has(member.itemId)) {
+        errors.push(`duplicate family ${record.familyId} contains duplicate member ${member.itemId}`);
+      }
+      memberIds.add(member.itemId);
+      if (!duplicateFamilyMemberKinds.includes(member.kind as DuplicateFamilyMemberKind)) {
+        errors.push(
+          `duplicate family ${record.familyId} member ${member.itemId} has unsupported kind ${String(member.kind)}`
+        );
+      }
+    }
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`duplicate family ${record.familyId} must include evidenceRefs`);
+  }
+
+  if (record.centralizationCandidate?.trim() && !hasNonEmptyStrings(record.parityRequirements)) {
+    errors.push(
+      `duplicate family ${record.familyId} must include parityRequirements when a centralizationCandidate is present`
+    );
+  }
+
+  return errors;
+}
+
+export function validateArchitectureDecisionRecord(record: ArchitectureDecisionRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.decisionId.trim().length === 0) {
+    errors.push("architecture decision must include decisionId");
+  }
+
+  if (record.title.trim().length === 0) {
+    errors.push(`architecture decision ${record.decisionId} must include title`);
+  }
+
+  if (!architectureDecisionStatuses.includes(record.status as ArchitectureDecisionStatus)) {
+    errors.push(
+      `architecture decision ${record.decisionId} has unsupported status ${String(record.status)}`
+    );
+  }
+
+  if (!hasNonEmptyStrings(record.options)) {
+    errors.push(`architecture decision ${record.decisionId} must include options`);
+  }
+
+  if (record.chosenOption.trim().length === 0) {
+    errors.push(`architecture decision ${record.decisionId} must include chosenOption`);
+  }
+
+  if (!hasNonEmptyStrings(record.boundedContexts)) {
+    errors.push(`architecture decision ${record.decisionId} must include boundedContexts`);
+  }
+
+  if (!hasNonEmptyStrings(record.consistencyNeeds)) {
+    errors.push(`architecture decision ${record.decisionId} must include consistencyNeeds`);
+  }
+
+  if (!hasNonEmptyStrings(record.rationale)) {
+    errors.push(`architecture decision ${record.decisionId} must include rationale`);
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`architecture decision ${record.decisionId} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
+export function validateMigrationLedgerEntryRecord(record: MigrationLedgerEntryRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.entryId.trim().length === 0) {
+    errors.push("migration ledger entry must include entryId");
+  }
+
+  if (record.boundedContext.trim().length === 0) {
+    errors.push(`migration ledger entry ${record.entryId} must include boundedContext`);
+  }
+
+  if (!hasNonEmptyStrings(record.sourceModels)) {
+    errors.push(`migration ledger entry ${record.entryId} must include sourceModels`);
+  }
+
+  if (!hasNonEmptyStrings(record.targetModels)) {
+    errors.push(`migration ledger entry ${record.entryId} must include targetModels`);
+  }
+
+  if (!migrationStrategies.includes(record.strategy as MigrationStrategy)) {
+    errors.push(
+      `migration ledger entry ${record.entryId} has unsupported strategy ${String(record.strategy)}`
+    );
+  }
+
+  if (!migrationConsistencyClasses.includes(record.consistencyClass as MigrationConsistencyClass)) {
+    errors.push(
+      `migration ledger entry ${record.entryId} has unsupported consistencyClass ${String(record.consistencyClass)}`
+    );
+  }
+
+  if (record.ownership.trim().length === 0) {
+    errors.push(`migration ledger entry ${record.entryId} must include ownership`);
+  }
+
+  if (!hasNonEmptyStrings(record.rolloutSteps)) {
+    errors.push(`migration ledger entry ${record.entryId} must include rolloutSteps`);
+  }
+
+  if (!hasNonEmptyStrings(record.rollbackPlan)) {
+    errors.push(`migration ledger entry ${record.entryId} must include rollbackPlan`);
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`migration ledger entry ${record.entryId} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
+export function validateParityRequirementRecord(record: ParityRequirementRecord): string[] {
+  const errors: string[] = [];
+
+  if (record.requirementId.trim().length === 0) {
+    errors.push("parity requirement must include requirementId");
+  }
+
+  if (record.capability.trim().length === 0) {
+    errors.push(`parity requirement ${record.requirementId} must include capability`);
+  }
+
+  if (!parityRequirementStatuses.includes(record.status as ParityRequirementStatus)) {
+    errors.push(
+      `parity requirement ${record.requirementId} has unsupported status ${String(record.status)}`
+    );
+  }
+
+  if (!hasNonEmptyStrings(record.legacyRefs)) {
+    errors.push(`parity requirement ${record.requirementId} must include legacyRefs`);
+  }
+
+  if (!hasNonEmptyStrings(record.targetRefs)) {
+    errors.push(`parity requirement ${record.requirementId} must include targetRefs`);
+  }
+
+  if (!hasNonEmptyStrings(record.acceptanceChecks)) {
+    errors.push(`parity requirement ${record.requirementId} must include acceptanceChecks`);
+  }
+
+  if (!hasNonEmptyStrings(record.evidenceRefs)) {
+    errors.push(`parity requirement ${record.requirementId} must include evidenceRefs`);
+  }
+
+  return errors;
+}
+
 export function validateExternalEvalRecord(record: ExternalEvalRecord): string[] {
   const errors: string[] = [];
 
@@ -476,6 +694,10 @@ export function createAutonomousExecutionState(input: {
     progressProofs: [],
     understandingMaps: [],
     runtimeTraces: [],
+    duplicateFamilies: [],
+    architectureDecisions: [],
+    migrationLedger: [],
+    parityMatrix: [],
     externalEvals: [],
     sensitiveActionControls: [],
     pendingInvestigations: [],
@@ -531,6 +753,10 @@ export function computeComprehensionSummary(
   const understandingMaps = state.understandingMaps ?? [];
   const traceRegistry = buildRuntimeTraceRegistry(state);
   const runtimeTraces = state.runtimeTraces ?? [];
+  const duplicateFamilies = state.duplicateFamilies ?? [];
+  const architectureDecisions = state.architectureDecisions ?? [];
+  const migrationLedger = state.migrationLedger ?? [];
+  const parityMatrix = state.parityMatrix ?? [];
   const requiredKinds = requiredUnderstandingKinds(state.profile);
   const presentKinds = [
     ...new Set(
@@ -545,9 +771,20 @@ export function computeComprehensionSummary(
   const inventoryCompleteness = ratio(requiredKinds.length - missingKinds.length, requiredKinds.length);
   const criticalItems = collectCriticalItems(state.coverageItems);
   const businessRuleCoverage = ratio(
-    criticalItems.filter((item) => hasNonEmptyStrings(item.businessRules)).length,
+    criticalItems.filter((item) => hasNonEmptyStrings(item.businessRules) || hasNonEmptyStrings(item.invariants)).length,
     criticalItems.length
   );
+  const duplicateFamilyCount = duplicateFamilies.length;
+  const duplicateFamilyMemberCount = duplicateFamilies.reduce(
+    (sum, family) => sum + family.members.length,
+    0
+  );
+  const centralizationCandidateCount = duplicateFamilies.filter(
+    (family) => (family.centralizationCandidate?.trim().length ?? 0) > 0
+  ).length;
+  const architectureDecisionCount = architectureDecisions.length;
+  const migrationLedgerCount = migrationLedger.length;
+  const parityRequirementCount = parityMatrix.length;
   const contradictionGapCount = state.gaps.filter(
     (gap) => gap.status === "open" && gap.kind === "contradicting_evidence"
   ).length;
@@ -557,7 +794,7 @@ export function computeComprehensionSummary(
   const openBlockerCount = coverageSummary.blockingGapCount;
   const riskyTraceCount = traceRegistry.riskyTraceCount;
   const missingEvidence: string[] = [];
-  const readinessScope = state.profile === "legacy_rewrite" ? "broad" : "profile_limited";
+  const readinessScope = profileHasBroadRewriteScope(state.profile) ? "broad" : "profile_limited";
   const profileLimitations: string[] = [];
   const inventoryThreshold = thresholdValue(
     state.manifest,
@@ -592,12 +829,16 @@ export function computeComprehensionSummary(
   }
 
   for (const kind of missingKinds) {
-    missingEvidence.push(`understanding map missing: ${kind}`);
+    missingEvidence.push(
+      profileRequiresModernizationArtifacts(state.profile)
+        ? `modernization artifact missing: ${kind}`
+        : `understanding map missing: ${kind}`
+    );
   }
 
   if (businessRuleCoverage < businessRuleThreshold) {
     missingEvidence.push(
-      `business rule coverage ${businessRuleCoverage} is below threshold ${businessRuleThreshold}`
+      `business rule or invariant coverage ${businessRuleCoverage} is below threshold ${businessRuleThreshold}`
     );
   }
 
@@ -632,7 +873,7 @@ export function computeComprehensionSummary(
   }
 
   if (
-    state.profile === "legacy_rewrite" &&
+    profileHasBroadRewriteScope(state.profile) &&
     (state.phase === "modernization_strategy" || state.phase === "migration_sequencing")
   ) {
     for (const gap of openInventoryGaps) {
@@ -657,11 +898,20 @@ export function computeComprehensionSummary(
   return {
     inventoryCompleteness,
     businessRuleCoverage,
+    duplicateFamilyCount,
+    duplicateFamilyMemberCount,
+    centralizationCandidateCount,
+    architectureDecisionCount,
+    migrationLedgerCount,
+    parityRequirementCount,
     contradictionGapCount,
     openBlockerCount,
     requiredUnderstandingKinds: requiredKinds,
     presentUnderstandingKinds: presentKinds,
     missingUnderstandingKinds: missingKinds,
+    requiredArtifactKinds: requiredKinds,
+    presentArtifactKinds: presentKinds,
+    missingArtifactKinds: missingKinds,
     runtimeTraceCount: runtimeTraces.length,
     readinessScope,
     rewriteReadiness,
@@ -737,7 +987,7 @@ export function computePhaseReadiness(
     reasons.push(`blocking gaps remain open: ${summary.blockingGapCount}`);
   }
 
-  if (state.profile === "legacy_rewrite" && rewriteCriticalPhases.has(state.phase)) {
+  if (profileHasBroadRewriteScope(state.profile) && rewriteCriticalPhases.has(state.phase)) {
     reasons.push(...comprehensionSummary.missingEvidence);
   }
 
@@ -847,7 +1097,7 @@ export function collectAutonomousExecutionBlockers(
   }
 
   if (
-    state.profile === "legacy_rewrite" &&
+    profileHasBroadRewriteScope(state.profile) &&
     rewriteCriticalPhases.has(state.phase) &&
     snapshot.comprehensionSummary?.rewriteReadiness === "blocked"
   ) {
@@ -899,6 +1149,52 @@ export function mergeRuntimeTraces(
     byId.set(trace.traceId, trace);
   }
   return [...byId.values()].sort((left, right) => left.traceId.localeCompare(right.traceId));
+}
+
+export function mergeDuplicateFamilies(
+  existing: readonly DuplicateFamilyRecord[],
+  updates: readonly DuplicateFamilyRecord[]
+): DuplicateFamilyRecord[] {
+  const byId = new Map(existing.map((record) => [record.familyId, record]));
+  for (const record of updates) {
+    byId.set(record.familyId, record);
+  }
+  return [...byId.values()].sort((left, right) => left.familyId.localeCompare(right.familyId));
+}
+
+export function mergeArchitectureDecisions(
+  existing: readonly ArchitectureDecisionRecord[],
+  updates: readonly ArchitectureDecisionRecord[]
+): ArchitectureDecisionRecord[] {
+  const byId = new Map(existing.map((record) => [record.decisionId, record]));
+  for (const record of updates) {
+    byId.set(record.decisionId, record);
+  }
+  return [...byId.values()].sort((left, right) => left.decisionId.localeCompare(right.decisionId));
+}
+
+export function mergeMigrationLedgerEntries(
+  existing: readonly MigrationLedgerEntryRecord[],
+  updates: readonly MigrationLedgerEntryRecord[]
+): MigrationLedgerEntryRecord[] {
+  const byId = new Map(existing.map((record) => [record.entryId, record]));
+  for (const record of updates) {
+    byId.set(record.entryId, record);
+  }
+  return [...byId.values()].sort((left, right) => left.entryId.localeCompare(right.entryId));
+}
+
+export function mergeParityRequirements(
+  existing: readonly ParityRequirementRecord[],
+  updates: readonly ParityRequirementRecord[]
+): ParityRequirementRecord[] {
+  const byId = new Map(existing.map((record) => [record.requirementId, record]));
+  for (const record of updates) {
+    byId.set(record.requirementId, record);
+  }
+  return [...byId.values()].sort((left, right) =>
+    left.requirementId.localeCompare(right.requirementId)
+  );
 }
 
 export function mergeExternalEvalRecords(

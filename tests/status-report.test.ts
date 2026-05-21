@@ -402,6 +402,9 @@ test("buildOperatorStatusReport reflects generated code-backed understanding inv
   assert.ok((report.autonomous.comprehensionSummary?.inventoryCompleteness ?? 0) > 0);
   assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("repo_map"));
   assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("runtime_side_effects"));
+  assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("domain_map"));
+  assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("symbol_graph"));
+  assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("dependency_graph"));
 });
 
 test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguous repo code", async () => {
@@ -420,7 +423,7 @@ test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguo
     await writeFile(path.join(fixtureRoot, "package.json"), '{"name":"fixture","version":"1.0.0"}\n', "utf8");
     await writeFile(path.join(fixtureRoot, "src", "admin", "router.ts"), 'export function handle(command: string) { if (command === "status") return "ok"; return "missing"; }\n', "utf8");
     await writeFile(path.join(fixtureRoot, "src", "admin", "dynamic.ts"), 'export function run(command: string, handlers: Record<string, () => string>) { const handler = handlers[command]; return handler?.() ?? "missing"; }\n', "utf8");
-    await writeFile(path.join(fixtureRoot, "src", "core", "service.ts"), 'export class BillingService { run() { return "ok"; } }\n', "utf8");
+    await writeFile(path.join(fixtureRoot, "src", "core", "service.ts"), 'import { RecordModel } from "../domain/model"; export class BillingService { run(model: RecordModel) { return model.id; } }\n', "utf8");
     await writeFile(path.join(fixtureRoot, "src", "mcp", "client.ts"), 'export async function syncRemote() { return fetch("https://example.com/health"); }\n', "utf8");
     await writeFile(path.join(fixtureRoot, "src", "policy", "access.ts"), 'export function authorizeUser(token: string, permission: string) { return token.length > 0 && permission === "read"; }\n', "utf8");
     await writeFile(path.join(fixtureRoot, "src", "domain", "model.ts"), 'export interface RecordModel { id: string; }\n', "utf8");
@@ -487,6 +490,8 @@ test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguo
     assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("integration_map"));
     assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("config_coupling"));
     assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("authz_map"));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("domain_map"));
+    assert.ok(report.autonomous.comprehensionSummary?.presentUnderstandingKinds.includes("dependency_graph"));
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
@@ -839,6 +844,396 @@ test("buildOperatorStatusReport explains withheld rewrite readiness when invento
     /inventory gap open: dynamic discovery signals in src\/admin\/dynamic.ts require manual follow-up/
   );
   assert.equal(report.autonomous.phaseReadiness?.status, "blocked");
+});
+
+test("buildOperatorStatusReport counts invariants toward rewrite comprehension coverage", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Invariant-backed rewrite report",
+    request: "Treat invariants as semantic evidence in operator status."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "rewrite",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 1,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:rewrite-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      invariants: ["authenticated review authority must hold before rewrite completion"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:00:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    updatedAt: "2026-05-21T11:00:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:rewrite-core",
+      targetId: "service:rewrite-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists rewrite gating evidence"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-21T11:00:00.000Z"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-21T11:01:00.000Z"
+  });
+
+  assert.equal(report.autonomous.comprehensionSummary?.businessRuleCoverage, 1);
+  assert.equal(report.autonomous.comprehensionSummary?.rewriteReadiness, "ready");
+  assert.equal(
+    report.autonomous.comprehensionSummary?.missingEvidence.some((entry) =>
+      /business rule or invariant coverage/.test(entry)
+    ),
+    false
+  );
+});
+
+test("buildOperatorStatusReport exposes duplicate family counts and centralization candidates", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Duplicate family report",
+    request: "Surface duplicate-family centralization evidence in operator status."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertDuplicateFamilies(run.id, [
+    {
+      familyId: "duplicate:approval-policy",
+      capability: "approval policy evaluation",
+      members: [
+        { itemId: "service:approval-policy", kind: "shared_core", role: "service policy engine" },
+        { itemId: "route:approval-policy", kind: "intentional_variant", role: "route adapter" }
+      ],
+      sharedAbstraction: "ApprovalPolicyEngine",
+      intentionalVariants: ["route adapter emits extra audit metadata"],
+      accidentalDivergences: [],
+      centralizationCandidate: "route approval checks through ApprovalPolicyEngine",
+      parityRequirements: ["prove both variants reach identical approval decisions for matching claims"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:20:00.000Z"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-21T11:21:00.000Z"
+  });
+
+  assert.equal(report.autonomous.comprehensionSummary?.duplicateFamilyCount, 1);
+  assert.equal(report.autonomous.comprehensionSummary?.duplicateFamilyMemberCount, 2);
+  assert.equal(report.autonomous.comprehensionSummary?.centralizationCandidateCount, 1);
+});
+
+test("buildOperatorStatusReport exposes architecture and migration evidence counts", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Architecture and migration report",
+    request: "Surface architecture-fit and migration evidence counts in operator status."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "migration_sequencing",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertArchitectureDecisions(run.id, [
+    {
+      decisionId: "adr:auth-boundary",
+      title: "Keep auth policy in a modular monolith boundary first",
+      status: "accepted",
+      options: ["extract auth service now", "stabilize auth boundary inside modular monolith"],
+      chosenOption: "stabilize auth boundary inside modular monolith",
+      boundedContexts: ["auth", "workflow-proof"],
+      consistencyNeeds: ["strong authorization decisions", "low-latency proof checks"],
+      rationale: ["tight consistency beats premature extraction during the first migration wave"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:45:00.000Z"
+    }
+  ]);
+  await service.upsertMigrationLedgerEntries(run.id, [
+    {
+      entryId: "migration:auth-policies",
+      boundedContext: "auth",
+      sourceModels: ["legacy_policy_rules"],
+      targetModels: ["policy_rule_snapshots"],
+      strategy: "expand_contract",
+      consistencyClass: "strong",
+      ownership: "backend_engineer",
+      rolloutSteps: ["add snapshot table", "dual-write policy changes", "cut reads after parity pass"],
+      rollbackPlan: ["stop reads from snapshot table", "keep dual-write flag disabled"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:46:00.000Z"
+    }
+  ]);
+  await service.upsertParityRequirements(run.id, [
+    {
+      requirementId: "parity:auth-policies",
+      capability: "auth policy evaluation",
+      status: "planned",
+      legacyRefs: ["legacy_policy_rules"],
+      targetRefs: ["policy_rule_snapshots"],
+      acceptanceChecks: ["prove legacy and snapshot-backed decisions match for the seeded policy corpus"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T11:47:00.000Z"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-21T11:48:00.000Z"
+  });
+
+  assert.equal(report.autonomous.comprehensionSummary?.architectureDecisionCount, 1);
+  assert.equal(report.autonomous.comprehensionSummary?.migrationLedgerCount, 1);
+  assert.equal(report.autonomous.comprehensionSummary?.parityRequirementCount, 1);
+});
+
+test("buildOperatorStatusReport surfaces missing modernization artifact classes for modernization_program", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Modernization artifact visibility",
+    request: "Surface missing modernization artifact classes in operator status."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "modernize",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.configureAutonomousExecution(run.id, {
+    profile: "modernization_program",
+    phase: "modernization_strategy",
+    manifest: {
+      runId: run.id,
+      profile: "modernization_program",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.9,
+        runtimeTraceCoverage: 0.85,
+        inventoryCompleteness: 1,
+        businessRuleCoverage: 0.9,
+        maxContradictionGapCount: 0,
+        maxOpenBlockers: 0
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:modernization-core",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      businessRules: ["modernization planning must stay blocked until modernization artifacts exist"],
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/status-report.test.ts"],
+      lastUpdatedAt: "2026-05-21T10:00:00.000Z"
+    }
+  ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/status-report.test.ts"],
+    updatedAt: "2026-05-21T10:00:00.000Z"
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:modernization-core",
+      targetId: "service:modernization-core",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists modernization readiness evidence"],
+      evidenceRefs: ["tests/status-report.test.ts"],
+      createdAt: "2026-05-21T10:00:00.000Z"
+    }
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const report = buildOperatorStatusReport({
+    snapshot,
+    reviewIdentity: {
+      authorityLabel: "derived_only",
+      adapterConfigured: true,
+      adapterExists: true,
+      availableBackends: [],
+      bindingsPresent: true,
+      bindingsPath: "/repo/.devgod/review-identity-bindings.json",
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    },
+    gitNexus: gitNexusObservation(),
+    staleAfterDays: 1,
+    now: "2026-05-21T10:01:00.000Z"
+  });
+
+  assert.equal(report.autonomous.profile, "modernization_program");
+  assert.equal(report.autonomous.comprehensionSummary?.readinessScope, "broad");
+  assert.equal(report.autonomous.comprehensionSummary?.rewriteReadiness, "blocked");
+  assert.ok(report.autonomous.comprehensionSummary?.missingArtifactKinds.includes("domain_map"));
+  assert.ok(report.autonomous.comprehensionSummary?.missingArtifactKinds.includes("duplicate_families"));
+  assert.ok(report.autonomous.comprehensionSummary?.missingArtifactKinds.includes("architecture_decisions"));
+  assert.match(
+    report.autonomous.comprehensionSummary?.missingEvidence.join(" | ") ?? "",
+    /modernization artifact missing: architecture_decisions/
+  );
 });
 
 test("buildOperatorStatusReport surfaces operational checkpoint compaction and self-referential checkpoint resume guidance", async () => {

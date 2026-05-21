@@ -24,6 +24,28 @@ export interface RepoInventoryResult {
   gaps: CoverageGapRecord[];
 }
 
+interface RepoDependencyEdge {
+  from: string;
+  to: string;
+  via?: string | undefined;
+  kind: "import" | "call";
+}
+
+interface RepoCartography {
+  dependencyEdges: RepoDependencyEdge[];
+  callEdges: RepoDependencyEdge[];
+  exportedSymbols: Array<{
+    file: string;
+    name: string;
+  }>;
+  domainContexts: Array<{
+    name: string;
+    files: string[];
+  }>;
+  dependenciesByFile: Map<string, string[]>;
+  dependentsByFile: Map<string, string[]>;
+}
+
 interface RepoCodeFile {
   relativePath: string;
   content: string;
@@ -49,11 +71,12 @@ export async function generateRepoInventory(input: GenerateRepoInventoryInput): 
   const include = input.include && input.include.length > 0 ? input.include : DEFAULT_CODE_INCLUDE_PATHS;
   const now = input.now ?? new Date().toISOString();
   const files = await collectCodeFiles(repoRoot, include);
+  const cartography = buildRepoCartography(files);
 
-  const fileCoverageItems = files.map((file) => buildFileCoverageItem(file, now));
+  const fileCoverageItems = files.map((file) => buildFileCoverageItem(file, now, cartography));
   const discoveredSignals = files.flatMap((file) => buildSignalCoverageItems(file, now));
   const coverageItems = dedupeCoverageItems([...fileCoverageItems, ...discoveredSignals]);
-  const understandingMaps = buildUnderstandingMaps(files, discoveredSignals, now);
+  const understandingMaps = buildUnderstandingMaps(files, discoveredSignals, cartography, now);
   const gaps = dedupeCoverageGaps(files.flatMap((file) => buildAmbiguityGaps(file)));
 
   return {
@@ -133,16 +156,25 @@ function isAllowedCodeFile(relativePath: string): boolean {
   );
 }
 
-function buildFileCoverageItem(file: RepoCodeFile, now: string): CoverageItemRecord {
+function buildFileCoverageItem(file: RepoCodeFile, now: string, cartography: RepoCartography): CoverageItemRecord {
   const ambiguities = detectAmbiguitySignals(file);
+  const dependencies = cartography.dependenciesByFile.get(file.relativePath);
+  const dependents = cartography.dependentsByFile.get(file.relativePath);
+  const cartographyRefs = [
+    ...(dependencies ?? []).map((dependency) => `dependency://${file.relativePath}->${dependency}`),
+    ...(dependents ?? []).map((dependent) => `dependent://${dependent}->${file.relativePath}`)
+  ];
   return {
     id: `file:${file.relativePath}`,
     category: inferCoverageCategory(file.relativePath),
     state: inferCoverageState(file.relativePath),
     criticality: inferCriticality(file.relativePath),
     sources: [file.relativePath],
+    dependencies,
+    dependents,
     evidenceRefs: [
       file.relativePath,
+      ...cartographyRefs,
       ...ambiguities.map((ambiguity) => `ambiguity://${ambiguity.method}`)
     ],
     openQuestions:
@@ -379,6 +411,7 @@ function inferSideEffects(content: string): string[] | undefined {
 function buildUnderstandingMaps(
   files: readonly RepoCodeFile[],
   signalItems: readonly CoverageItemRecord[],
+  cartography: RepoCartography,
   now: string
 ): UnderstandingMapRecord[] {
   const relativePaths = files.map((file) => file.relativePath);
@@ -396,6 +429,10 @@ function buildUnderstandingMaps(
   const authzFiles = signalSourceRefs(signalItems, ["authentication", "authorization", "permissions"]);
   const configFiles = signalSourceRefs(signalItems, ["configuration"], ["package.json", "tsconfig.json"]);
   const runtimeSideEffectFiles = signalSourceRefs(signalItems, ["runtime_side_effects"], ["scripts/", "src/runtime/", "src/core/service.ts"]);
+  const domainRefs = cartography.domainContexts.map((context) => `domain:${context.name}`);
+  const symbolRefs = cartography.exportedSymbols.map((symbol) => `symbol:${symbol.file}#${symbol.name}`);
+  const callRefs = cartography.callEdges.map((edge) => `call:${edge.from}->${edge.to}${edge.via ? `#${edge.via}` : ""}`);
+  const dependencyRefs = cartography.dependencyEdges.map((edge) => `dependency:${edge.from}->${edge.to}`);
 
   return [
     buildUnderstandingMap("repo_map", relativePaths, [relativePaths[0] ?? "repo://none"], now),
@@ -410,8 +447,45 @@ function buildUnderstandingMaps(
       runtimeSideEffectFiles,
       evidenceRefsForSources(signalItems, runtimeSideEffectFiles),
       now
+    ),
+    buildUnderstandingMap("domain_map", domainRefs, evidenceRefsForCartography(domainRefs, cartography, relativePaths), now),
+    buildUnderstandingMap(
+      "symbol_graph",
+      symbolRefs,
+      evidenceRefsForCartography(symbolRefs, cartography, relativePaths),
+      now
+    ),
+    buildUnderstandingMap(
+      "call_graph",
+      callRefs,
+      evidenceRefsForCartography(callRefs, cartography, relativePaths),
+      now
+    ),
+    buildUnderstandingMap(
+      "dependency_graph",
+      dependencyRefs,
+      evidenceRefsForCartography(dependencyRefs, cartography, relativePaths),
+      now
     )
   ];
+}
+
+function evidenceRefsForCartography(
+  sourceRefs: readonly string[],
+  cartography: RepoCartography,
+  fallbackRefs: readonly string[]
+): string[] {
+  if (sourceRefs.length === 0) {
+    return uniqueStrings(fallbackRefs.slice(0, 10));
+  }
+
+  const supportingFiles = uniqueStrings([
+    ...cartography.domainContexts.flatMap((context) => context.files),
+    ...cartography.exportedSymbols.map((symbol) => symbol.file),
+    ...cartography.callEdges.flatMap((edge) => [edge.from, edge.to]),
+    ...cartography.dependencyEdges.flatMap((edge) => [edge.from, edge.to])
+  ]);
+  return uniqueStrings([...sourceRefs.slice(0, 10), ...supportingFiles.slice(0, 10)]);
 }
 
 function signalSourceRefs(
@@ -521,8 +595,219 @@ function dedupeCoverageGaps(gaps: readonly CoverageGapRecord[]): CoverageGapReco
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function buildRepoCartography(files: readonly RepoCodeFile[]): RepoCartography {
+  const fileSet = new Set(files.map((file) => file.relativePath));
+  const dependencyEdges: RepoDependencyEdge[] = [];
+  const callEdges: RepoDependencyEdge[] = [];
+  const exportedSymbols: RepoCartography["exportedSymbols"] = [];
+  const domainContexts = new Map<string, string[]>();
+  const dependenciesByFile = new Map<string, string[]>();
+  const dependentsByFile = new Map<string, string[]>();
+
+  for (const file of files) {
+    const srcMatch = file.relativePath.match(/^src\/([^/]+)\//);
+    if (srcMatch?.[1]) {
+      const existing = domainContexts.get(srcMatch[1]) ?? [];
+      existing.push(file.relativePath);
+      domainContexts.set(srcMatch[1], existing);
+    }
+
+    const imports = parseRelativeImports(file, fileSet);
+    for (const importRecord of imports) {
+      dependencyEdges.push({
+        from: file.relativePath,
+        to: importRecord.target,
+        kind: "import"
+      });
+      addMapValue(dependenciesByFile, file.relativePath, importRecord.target);
+      addMapValue(dependentsByFile, importRecord.target, file.relativePath);
+
+      for (const binding of importRecord.bindings) {
+        if (new RegExp(`\\b(?:new\\s+)?${escapeForRegex(binding)}\\s*\\(`).test(file.content)) {
+          callEdges.push({
+            from: file.relativePath,
+            to: importRecord.target,
+            via: binding,
+            kind: "call"
+          });
+        }
+      }
+    }
+
+    for (const symbol of parseExportedSymbols(file.content)) {
+      exportedSymbols.push({
+        file: file.relativePath,
+        name: symbol
+      });
+    }
+  }
+
+  return {
+    dependencyEdges: dedupeEdges(dependencyEdges),
+    callEdges: dedupeEdges(callEdges),
+    exportedSymbols: dedupeSymbols(exportedSymbols),
+    domainContexts: [...domainContexts.entries()]
+      .map(([name, contextFiles]) => ({
+        name,
+        files: [...new Set(contextFiles)].sort()
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    dependenciesByFile,
+    dependentsByFile
+  };
+}
+
+function parseRelativeImports(
+  file: RepoCodeFile,
+  fileSet: ReadonlySet<string>
+): Array<{ target: string; bindings: string[] }> {
+  const imports: Array<{ target: string; bindings: string[] }> = [];
+  const importRegex =
+    /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?([^;\n]*?)\s*from\s*["']([^"']+)["']/g;
+  for (const match of file.content.matchAll(importRegex)) {
+    const clause = match[1]?.trim() ?? "";
+    const specifier = match[2]?.trim() ?? "";
+    if (!specifier.startsWith(".")) {
+      continue;
+    }
+    const target = resolveRelativeModule(file.relativePath, specifier, fileSet);
+    if (!target) {
+      continue;
+    }
+    imports.push({
+      target,
+      bindings: parseImportedBindings(clause)
+    });
+  }
+  return imports;
+}
+
+function parseImportedBindings(clause: string): string[] {
+  const bindings: string[] = [];
+  const trimmed = clause.trim();
+  if (trimmed.length === 0) {
+    return bindings;
+  }
+
+  const namedMatch = trimmed.match(/\{([^}]+)\}/);
+  if (namedMatch?.[1]) {
+    for (const entry of namedMatch[1].split(",")) {
+      const part = entry.trim();
+      if (!part) {
+        continue;
+      }
+      const aliasMatch = part.match(/\bas\s+([A-Za-z0-9_$]+)/);
+      bindings.push(aliasMatch?.[1] ?? part.replace(/\bas\s+.*/, "").trim());
+    }
+  }
+
+  const namespaceMatch = trimmed.match(/\*\s+as\s+([A-Za-z0-9_$]+)/);
+  if (namespaceMatch?.[1]) {
+    bindings.push(namespaceMatch[1]);
+  }
+
+  const leading = trimmed.split(",")[0]?.trim() ?? "";
+  if (
+    leading.length > 0 &&
+    !leading.startsWith("{") &&
+    !leading.startsWith("*") &&
+    /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(leading)
+  ) {
+    bindings.push(leading);
+  }
+
+  return uniqueStrings(bindings);
+}
+
+function parseExportedSymbols(content: string): string[] {
+  const symbols: string[] = [];
+  const declarationRegex =
+    /export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  for (const match of content.matchAll(declarationRegex)) {
+    if (match[1]) {
+      symbols.push(match[1]);
+    }
+  }
+
+  const namedExportRegex = /export\s*\{([^}]+)\}/g;
+  for (const match of content.matchAll(namedExportRegex)) {
+    const block = match[1] ?? "";
+    for (const entry of block.split(",")) {
+      const part = entry.trim();
+      if (!part) {
+        continue;
+      }
+      const aliasMatch = part.match(/\bas\s+([A-Za-z0-9_$]+)/);
+      symbols.push(aliasMatch?.[1] ?? part.replace(/\bas\s+.*/, "").trim());
+    }
+  }
+
+  return uniqueStrings(symbols);
+}
+
+function resolveRelativeModule(
+  fromRelativePath: string,
+  specifier: string,
+  fileSet: ReadonlySet<string>
+): string | undefined {
+  const fromDirectory = path.posix.dirname(fromRelativePath);
+  const resolvedBase = path.posix.normalize(path.posix.join(fromDirectory, specifier));
+  const candidates = [
+    resolvedBase,
+    `${resolvedBase}.ts`,
+    `${resolvedBase}.tsx`,
+    `${resolvedBase}.js`,
+    `${resolvedBase}.mjs`,
+    `${resolvedBase}.cjs`,
+    path.posix.join(resolvedBase, "index.ts"),
+    path.posix.join(resolvedBase, "index.tsx"),
+    path.posix.join(resolvedBase, "index.js"),
+    path.posix.join(resolvedBase, "index.mjs"),
+    path.posix.join(resolvedBase, "index.cjs")
+  ];
+  return candidates.find((candidate) => fileSet.has(candidate));
+}
+
+function addMapValue(map: Map<string, string[]>, key: string, value: string): void {
+  const existing = map.get(key) ?? [];
+  existing.push(value);
+  map.set(key, uniqueStrings(existing).sort());
+}
+
+function dedupeEdges(edges: readonly RepoDependencyEdge[]): RepoDependencyEdge[] {
+  const byKey = new Map<string, RepoDependencyEdge>();
+  for (const edge of edges) {
+    byKey.set(`${edge.kind}:${edge.from}:${edge.to}:${edge.via ?? ""}`, edge);
+  }
+  return [...byKey.values()].sort(
+    (left, right) =>
+      left.from.localeCompare(right.from) ||
+      left.to.localeCompare(right.to) ||
+      (left.via ?? "").localeCompare(right.via ?? "")
+  );
+}
+
+function dedupeSymbols(
+  symbols: ReadonlyArray<{
+    file: string;
+    name: string;
+  }>
+): Array<{ file: string; name: string }> {
+  const byKey = new Map<string, { file: string; name: string }>();
+  for (const symbol of symbols) {
+    byKey.set(`${symbol.file}:${symbol.name}`, symbol);
+  }
+  return [...byKey.values()].sort(
+    (left, right) => left.file.localeCompare(right.file) || left.name.localeCompare(right.name)
+  );
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function slugify(value: string): string {
