@@ -28,6 +28,10 @@ import { MemoryStore } from "../src/store/memory-store.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+function isoHoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
     taskId: overrides.taskId ?? "task-1",
@@ -4950,7 +4954,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       callsitesAnalyzed: 2,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     },
     {
       id: "service:core-loop",
@@ -4962,7 +4966,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       callsitesAnalyzed: 1,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     },
     {
       id: "integration:payments",
@@ -4974,7 +4978,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
       callsitesAnalyzed: 1,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/service.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:00:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -5010,7 +5014,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
     risky: false,
     sideEffects: [],
     evidenceRefs: ["tests/service.test.ts"],
-    createdAt: "2026-05-20T13:01:00.000Z"
+    createdAt: isoHoursAgo(2)
   });
   await service.captureRuntimeTrace(run.id, {
     traceId: "trace:workflow-proof-side-effect",
@@ -5019,7 +5023,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
     risky: true,
     sideEffects: ["records workflow proof completion"],
     evidenceRefs: ["tests/service.test.ts"],
-    createdAt: "2026-05-20T13:02:00.000Z"
+    createdAt: isoHoursAgo(1)
   });
   await service.importRuntimeTrace(run.id, {
     traceId: "trace:payments-import",
@@ -5028,7 +5032,7 @@ test("getRuntimeTraceRegistry summarizes risky traces and missing risky targets"
     risky: true,
     sideEffects: ["submits a payment provider charge"],
     evidenceRefs: ["tests/service.test.ts"],
-    createdAt: "2026-05-18T13:03:00.000Z"
+    createdAt: isoHoursAgo(49)
   });
 
   const registry = await service.getRuntimeTraceRegistry(run.id);

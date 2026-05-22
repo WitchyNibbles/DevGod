@@ -17,6 +17,10 @@ import { formatRunEvidenceReportMarkdown } from "../src/admin/report.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function isoHoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   return {
     taskId: overrides.taskId ?? "task-1",
@@ -866,7 +870,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       callsitesAnalyzed: 2,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/report-command.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     },
     {
       id: "service:core-loop",
@@ -878,7 +882,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       callsitesAnalyzed: 1,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/report-command.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     },
     {
       id: "integration:payments",
@@ -890,7 +894,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
       callsitesAnalyzed: 1,
       evidenceRefs: ["src/core/service.ts:1"],
       verificationRefs: ["tests/report-command.test.ts"],
-      lastUpdatedAt: "2026-05-20T13:20:00.000Z"
+      lastUpdatedAt: isoHoursAgo(2)
     }
   ]);
   await service.upsertCoverageGaps(run.id, [
@@ -926,7 +930,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
     risky: true,
     sideEffects: ["records workflow proof completion"],
     evidenceRefs: ["tests/report-command.test.ts"],
-    createdAt: "2026-05-20T13:21:00.000Z"
+    createdAt: isoHoursAgo(1)
   });
   await service.importRuntimeTrace(run.id, {
     traceId: "trace:payments-import",
@@ -935,7 +939,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
     risky: true,
     sideEffects: ["submits a payment provider charge"],
     evidenceRefs: ["tests/report-command.test.ts"],
-    createdAt: "2026-05-20T13:21:30.000Z"
+    createdAt: isoHoursAgo(49)
   });
 
   const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
@@ -979,7 +983,7 @@ test("executeReportCommandFromArgs includes runtime trace registry summaries and
   assert.match(markdown, /operator-import trace targets: integration:payments/);
   assert.match(markdown, /open missing-trace gaps: gap:core-loop-trace/);
   assert.match(markdown, /service:workflow-proof\[trace:workflow-proof-side-effect\]\{freshness=fresh provenance=runtime_capture\}/);
-  assert.match(markdown, /integration:payments\[trace:payments-import\]\{freshness=fresh provenance=operator_import\}/);
+  assert.match(markdown, /integration:payments\[trace:payments-import\]\{freshness=stale provenance=operator_import\}/);
 });
 
 test("executeReportCommandFromArgs includes checkpoint compaction evidence and self-referential checkpoint resume guidance", async () => {
