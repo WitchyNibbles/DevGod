@@ -46,6 +46,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - treat `strict` as the default reasoning mode for substantive work unless a compatibility-only `dual` or `legacy` choice is explicit
 - when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial
 - use explicit bounded budgets for research, debugging, review, and tool retries so skepticism stays finite
+- scale, latency, or item volume are not blockers by themselves when the work can be chunked, checkpointed, and resumed
 - evidence first, then `solution_architect`, then `planner`, then explicit task packets, then specialist execution
 - ambiguous or user-flow-heavy asks should involve `product_strategist` before or alongside architecture
 - manager/root may do only trivial mechanical edits outside explicit specialist ownership
@@ -62,6 +63,8 @@ The manager must not stop after intake, architecture, planning, or one implement
 - a real blocker requires user input
 - verification cannot proceed after documented repair attempts
 - or the user explicitly requested planning only
+
+Long-running but tractable work must checkpoint concrete progress and continue. Partial coverage plus a summary like "too many remain" is not a stop condition unless the agent has exhausted documented chunking, verification, and research routes.
 
 After each completed task, the manager must:
 

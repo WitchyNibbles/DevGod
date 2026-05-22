@@ -1,5 +1,5 @@
 {
-  "project_status": "complete",
+  "project_status": "done",
   "current_task_id": null,
   "tasks": [
     {
@@ -21,6 +21,61 @@
         "task packet: 2026-05-21-docs-current-state-refresh",
         "verification: manual diff review against package.json scripts",
         "verification: manual capability review against src/admin/devgod.ts and src/install/merge.ts"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-21-upgrade-configure-installed-repos",
+      "title": "Upgrade and fully configure installed sibling repos under ../",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "../GII, ../GII2, and ../jump_refactored are upgraded to the current managed DevGod surface",
+        "required local DevGod setup and verification complete in each target repo or exact blockers are recorded",
+        "unrelated uncommitted repo-specific work remains intact"
+      ],
+      "verification": [
+        "managed installer dry-run and apply output per repo",
+        "repo-local DevGod setup and verification commands per repo"
+      ],
+      "evidence": [
+        "brief: brief-2026-05-21-upgrade-configure-installed-repos",
+        "verification: upgrade --dry-run in GII, GII2, and jump_refactored with conflicts=0 and orphans=0",
+        "verification: upgrade --apply in GII, GII2, and jump_refactored",
+        "verification: devgod:setup:git-guard and devgod:verify:git-guard passed in all three repos",
+        "verification: devgod:setup:local passed in all three repos",
+        "verification: devgod:verify:setup passed in all three repos",
+        "verification: devgod:doctor passed in all three repos",
+        "verification: devgod:verify:review-identity passed in all three repos",
+        "verification: devgod:bootstrap repaired runtime registration in GII2 and jump_refactored and refreshed GII runtime mode"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-22-long-running-autonomy-completion-hardening",
+      "title": "Persist durable progress for long-running autonomous tasks so DevGod continues instead of stopping early",
+      "status": "done",
+      "class": "release_candidate",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "daemon no-progress detection treats structured checkpoint persistence as real progress",
+        "shared prompts and installed-repo instructions say scale, latency, or item volume are not blockers when the task can be chunked and resumed",
+        "regression tests prove vague no-progress turns still block while durable long-running progress keeps the daemon running"
+      ],
+      "verification": [
+        "focused daemon/admin test coverage for stagnation, checkpoint persistence, and resumed prompt context",
+        "typecheck for touched sources",
+        "runtime workflow proof for authenticated reviewer, security, and qa approvals"
+      ],
+      "evidence": [
+        "brief: brief-2026-05-22-long-running-autonomy-completion-hardening",
+        "plan: plan-2026-05-22-long-running-autonomy-completion-hardening",
+        "task packet: task-2026-05-22-long-running-autonomy-completion-hardening",
+        "verification: node --experimental-strip-types --test tests/admin.test.ts",
+        "verification: npm run typecheck",
+        "verification: node --experimental-strip-types ./src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening",
+        "verification: node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening"
       ],
       "blocker": null
     }

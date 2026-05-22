@@ -45,6 +45,10 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
    - verification passes
    - a real blocker exists
    - or the bounded repair budget is exhausted
+10a. If the work is long-running but still tractable, checkpoint concrete progress and continue.
+   - scale, latency, or item volume are not blockers by themselves
+   - partial progress must be persisted as resumable context instead of being summarized as a stop
+   - only stop when chunking, repair, or research routes are exhausted or a real blocker needs user input
 11. Record review evidence according to task class:
    - `prototype_slice`: reviewer and QA evidence, plus security evidence when trust boundaries changed
    - `security_sensitive`: reviewer, QA, and security evidence are mandatory
@@ -70,6 +74,7 @@ If `product-state.md` or `task-queue.json` is missing, initialize it from `.devg
 - never mark work done without verification evidence
 - never treat a refactor as complete if touched-scope correctness, regression, or safety risks remain unaddressed without an explicit blocker
 - never stop after a single passing command when other required unit, integration, E2E, negative-case, or review evidence is still missing
+- never treat "this is taking too long", "there are many left", or "the query is slow" as a blocker when the remaining work can be chunked and resumed
 - never invent successful test results
 - stop only when:
   - all product-level acceptance criteria are complete

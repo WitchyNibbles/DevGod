@@ -27,7 +27,7 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - treat substantive requests as devgod work by default unless the user opts out
 - use \`devgod-intake\` as the default first skill for substantive work
 - keep canonical workflow state in runtime records, not repo markdown files
-- if devgod is not configured yet, use the setup path before relying on it
+- if devgod is not configured yet, run setup first
 
 ## Workflow contract
 
@@ -40,19 +40,21 @@ ${workflowContractBlock}
 - root Codex thread acts as engineering manager on first contact
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
-- on the first substantive user requirement, ask up to four targeted clarifying questions about intended outcome, user, constraints/non-goals, and done criteria before planning or implementation unless explicit assumptions are sufficient
+- on the first substantive ask, clarify outcome, user, constraints/non-goals, and done criteria unless explicit assumptions are enough
 - task packets that inherit a brief or plan must carry explicit workflow artifact refs; only use \`review_exports=runtime_optional\` when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
-- runtime-backed devgod commands should be used for proof, status, and task advancement
+- use runtime-backed devgod commands for proof, status, and task advancement
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
 
 ## Autonomy Loop
 
 - for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
-- the manager must not stop after intake, architecture, planning, or one implementation slice unless product-level acceptance is complete, a real blocker requires user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
+- the manager must not stop after intake, planning, or one implementation slice unless product-level acceptance is complete, a real blocker needs user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
+- scale, latency, or item volume are not blockers by themselves when the work can be chunked, checkpointed, and resumed
 - do not wait for the user to say continue between internal tasks; keep executing until the product-level stop condition is met
+- long-running but tractable work must persist concrete progress and continue instead of stopping with a partial-summary handoff
 - after each completed task, update runtime product state, update runtime task queue, advance the active task pointer, select the next unblocked task, and continue execution
 - a completed phase is not a completed product
 

@@ -2,34 +2,35 @@
 
 ## Product Goal
 
-Refresh the package docs so README and supporting docs accurately describe the shipped `2026-05-21` DevGod state, the current command surface, and the distinction between package-source and installed-repo behavior.
+Harden DevGod so long-running but tractable autonomous tasks do not stop early just because work volume or query latency requires multiple turns; the shared package must persist progress, resume cleanly, and only stop for real blockers or exhausted documented repair paths.
 
 ## Global Acceptance Criteria
 
-- `README.md` reflects the current package mission, current shipped capabilities, and the actual source-repo command surface
-- `docs/current-state.md` reflects the `2026-05-21` package state, including modernization mode and hook hardening
-- `docs/global-setup.md` matches the current source-repo versus installed-repo command split without stale script names
+- daemon/runtime continuation treats durable in-progress checkpoints as real progress instead of stagnation
+- worker prompts and shipped repo instructions explicitly forbid treating scale, latency, or item count as blockers when the work can be chunked
+- regression coverage proves vague no-progress turns still block, while structured long-running progress keeps the daemon moving
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| README reflects current package state and commands | done | `README.md` |
-| current-state snapshot reflects shipped 2026-05-21 capabilities | done | `docs/current-state.md` |
-| setup docs reflect current source-vs-installed command split | done | `docs/global-setup.md` |
+| Identify the control-layer cause of premature stopping on long-running work | done | daemon loop inspection, prior stagnation hardening task, runtime prompt/schema audit |
+| Persist structured in-progress checkpoints during daemon turns | done | `src/admin.ts`, `tests/admin.test.ts` |
+| Ship shared autonomy guidance that consuming repos inherit | done | `AGENTS.md`, `src/install/merge.ts`, runtime-aligned skill guidance |
+| Verify long-running progress continues without weakening blocker handling | done | `node --experimental-strip-types --test tests/admin.test.ts`, `npm run typecheck`, `node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening` |
 
 ## Current Milestone
 
-Documentation current-state refresh
+none
 
 ## Completed Milestones
 
-- modernization mode rollout
-- hook autonomy handoff hardening
+- installed repo upgrade and setup
+- long-running autonomy completion hardening
 
 ## Current Task
 
-`2026-05-21-docs-current-state-refresh`
+`none`
 
 ## Next Task
 
@@ -41,19 +42,20 @@ Documentation current-state refresh
 
 ## Reasoning Debt
 
-- docs that describe runtime-complete redesign claims still need to be kept synchronized with the actual package surface rather than milestone-local workflow snapshots
-- source-repo and installed-repo command names diverge intentionally, so docs must continue to call that out explicitly
+- prior daemon stagnation hardening intentionally treated unchanged runtime state as no progress; that safety rule now needs a durable-progress exception so legitimate multi-turn analytical work can continue without reopening infinite loops
 
 ## Verification Summary
 
-- reviewed `README.md`, `docs/current-state.md`, and `docs/global-setup.md` against `package.json` scripts
-- reviewed command and capability descriptions against `src/admin/devgod.ts` and `src/install/merge.ts`
+- `node --experimental-strip-types --test tests/admin.test.ts` passed
+- `npm run typecheck` passed
+- `node --experimental-strip-types ./src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening` produced authenticated runtime review and approval records
+- `node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening` passed
 
 ## Review Summary
 
-- docs now describe the `2026-05-21` shipped package state instead of the older `2026-05-20` snapshot
-- source-repo and installed-repo command surfaces are now separated using the actual script names that ship today
+- runtime-authoritative `reviewer`, `security_reviewer`, and `qa_engineer` approvals were recorded for `2026-05-22-long-running-autonomy-completion-hardening`
+- package code, tests, install guidance, and the shared autopilot skill all align on checkpointing and continuing long-running tractable work
 
 ## Last Updated
 
-2026-05-21
+2026-05-22

@@ -277,6 +277,8 @@ test("buildDaemonTaskPrompt keeps full bootstrap details on first turn and uses 
 
   assert.match(compactPrompt, /Compressed context: phase=implementation; targets=task:task-owner; open-gaps=none/);
   assert.match(compactPrompt, /Compressed context ref: memory:\/\/checkpoint\/cp-1\/compressed-context/);
+  assert.match(compactPrompt, /Scale, latency, or item volume are not blockers by themselves/);
+  assert.match(compactPrompt, /return status needs_followup and include checkpoint\.evidence_refs/);
   assert.match(compactPrompt, /Previously bootstrapped task requirements remain in force/);
   assert.doesNotMatch(compactPrompt, /Acceptance criteria:/);
   assert.doesNotMatch(compactPrompt, /Verification steps:/);
@@ -2884,6 +2886,140 @@ test("executeDaemonCommandFromArgs blocks after two consecutive no-progress owne
     assert.equal(daemonMetadata?.stagnation?.count, 2);
     assert.equal(daemonMetadata?.stagnation?.taskId, "task-owner");
     assert.equal(daemonMetadata?.stagnation?.directiveKind, "dispatch_owner");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeDaemonCommandFromArgs treats checkpointed long-running progress as real progress and reuses checkpoint context", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Long-running tractable analysis",
+    request: "Continue a large but tractable analytical task across multiple turns."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "task-owner",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"]
+    })
+  ]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-owner",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-owner",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-checkpoint-progress-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const prompts: string[] = [];
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "2", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn(input) {
+          prompts.push(input.prompt);
+          return {
+            sessionId: "thread-checkpoint-1",
+            finalMessage: JSON.stringify({
+              summary: "Processed the first registry-email batch and the remaining work is chunked for the next turn.",
+              status: "needs_followup",
+              blockers: [],
+              checkpoint: {
+                evidence_refs: ["runtime://artifact/registry-batch-1"],
+                next_actions: ["continue with registry batch 2"],
+                compressed_context_summary: "batch 1 complete; next start offset 50; subject patterns A and B confirmed",
+                compressed_context_source_refs: ["runtime://artifact/registry-batch-1"]
+              }
+            }),
+            stdout: "",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "max_cycles_reached");
+    assert.equal(result.result.cycles.length, 2);
+    assert.equal(result.result.cycles[0]?.action, "run_codex_owner");
+    assert.equal(result.result.cycles[1]?.action, "run_codex_owner");
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1] ?? "", /Compressed context: batch 1 complete; next start offset 50; subject patterns A and B confirmed/);
+
+    const refreshedStatus = await service.getStatus(run.id);
+    assert.equal(refreshedStatus.autonomousExecution?.state.checkpoints.length, 2);
+    assert.equal(refreshedStatus.autonomousExecution?.state.lastCheckpointId?.startsWith("cp-daemon-task-owner-"), true);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+    const daemonMetadata = runtimeState?.metadata.devgodDaemon as {
+      stagnation?: { count?: number };
+    } | undefined;
+    assert.equal(daemonMetadata?.stagnation?.count, undefined);
   } finally {
     await rm(daemonCwd, { recursive: true, force: true });
   }

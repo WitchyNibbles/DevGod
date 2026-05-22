@@ -1256,6 +1256,15 @@ interface ParsedDaemonTurnMessage {
   summary: string;
   status: "completed" | "blocked" | "needs_review" | "needs_followup";
   blockers: string[];
+  checkpoint?: {
+    evidenceRefs: string[];
+    nextActions: string[];
+    activeTargets: string[];
+    openGaps: string[];
+    compressedContextSummary?: string | undefined;
+    compressedContextRef?: string | undefined;
+    compressedContextSourceRefs: string[];
+  } | undefined;
   scopeRequest?: {
     blockedPaths: string[];
     requestedWriteScope: string[];
@@ -1285,6 +1294,13 @@ interface ExecuteDaemonCommandOptions extends ExecuteAdvanceActiveTaskCommandOpt
   env?: EnvShape | undefined;
   runCodexTurn?: ((input: RunCodexTurnInput) => Promise<RunCodexTurnResult>) | undefined;
   upsertCoverageGaps?: ((runId: string, gaps: CoverageGapRecord[]) => Promise<unknown>) | undefined;
+  checkpointRun?: ((
+    runId: string,
+    checkpoint: Omit<CheckpointRecord, "runId" | "authorityLabel">,
+    options?: {
+      authorityLabel?: CheckpointRecord["authorityLabel"] | undefined;
+    }
+  ) => Promise<unknown>) | undefined;
   now?: (() => Date) | undefined;
 }
 
@@ -1962,6 +1978,55 @@ function parseDaemonTurnMessage(message: string | undefined): ParsedDaemonTurnMe
           (value): value is string => typeof value === "string" && value.trim().length > 0
         )
       : [];
+    const checkpointCandidate =
+      parsed.checkpoint && typeof parsed.checkpoint === "object" && !Array.isArray(parsed.checkpoint)
+        ? (parsed.checkpoint as Record<string, unknown>)
+        : undefined;
+    const checkpointEvidenceRefs = Array.isArray(checkpointCandidate?.evidence_refs)
+      ? checkpointCandidate.evidence_refs.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const checkpointNextActions = Array.isArray(checkpointCandidate?.next_actions)
+      ? checkpointCandidate.next_actions.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const checkpointActiveTargets = Array.isArray(checkpointCandidate?.active_targets)
+      ? checkpointCandidate.active_targets.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const checkpointOpenGaps = Array.isArray(checkpointCandidate?.open_gaps)
+      ? checkpointCandidate.open_gaps.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const checkpointCompressedContextSourceRefs = Array.isArray(checkpointCandidate?.compressed_context_source_refs)
+      ? checkpointCandidate.compressed_context_source_refs.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const checkpoint =
+      checkpointCandidate && checkpointEvidenceRefs.length > 0
+        ? {
+            evidenceRefs: checkpointEvidenceRefs,
+            nextActions: checkpointNextActions,
+            activeTargets: checkpointActiveTargets,
+            openGaps: checkpointOpenGaps,
+            compressedContextSummary:
+              typeof checkpointCandidate.compressed_context_summary === "string" &&
+                checkpointCandidate.compressed_context_summary.trim().length > 0
+                ? checkpointCandidate.compressed_context_summary.trim()
+                : undefined,
+            compressedContextRef:
+              typeof checkpointCandidate.compressed_context_ref === "string" &&
+                checkpointCandidate.compressed_context_ref.trim().length > 0
+                ? checkpointCandidate.compressed_context_ref.trim()
+                : undefined,
+            compressedContextSourceRefs: checkpointCompressedContextSourceRefs
+          }
+        : undefined;
     const scopeRequest =
       blockedPaths.length > 0 || requestedWriteScope.length > 0
         ? {
@@ -1982,6 +2047,7 @@ function parseDaemonTurnMessage(message: string | undefined): ParsedDaemonTurnMe
       summary,
       status,
       blockers,
+      checkpoint,
       scopeRequest
     };
   } catch {
@@ -2091,8 +2157,58 @@ function buildDaemonProgressKey(input: {
     runStatus: input.snapshot.run.status,
     activeTaskStatus: activeTask?.status ?? null,
     activeTaskUpdatedAt: activeTask?.updatedAt ?? null,
+    autonomousUpdatedAt: input.snapshot.autonomousExecution?.state.updatedAt ?? null,
+    lastCheckpointId: input.snapshot.autonomousExecution?.state.lastCheckpointId ?? null,
+    lastProgressProofId: input.snapshot.autonomousExecution?.state.lastProgressProofId ?? null,
     directive: buildDirectiveProgressFingerprint(input.directive)
   });
+}
+
+async function persistDaemonTurnCheckpoint(input: {
+  runId: string;
+  taskId: string;
+  snapshot: RunStatusSnapshot;
+  message: ParsedDaemonTurnMessage | undefined;
+  checkpointRun?: ExecuteDaemonCommandOptions["checkpointRun"];
+  now: () => Date;
+}): Promise<string | undefined> {
+  if (
+    !input.message?.checkpoint ||
+    !input.checkpointRun ||
+    (input.message.status !== "needs_followup" && input.message.status !== "needs_review")
+  ) {
+    return undefined;
+  }
+
+  const createdAt = input.now().toISOString();
+  const checkpointId = `cp-daemon-${input.taskId}-${createdAt.replace(/[:.]/g, "-")}`;
+  const phase: CheckpointRecord["phase"] = input.snapshot.autonomousExecution?.state.phase ?? "implementation";
+  const checkpoint = input.message.checkpoint;
+
+  await input.checkpointRun(
+    input.runId,
+    {
+      checkpointId,
+      phase,
+      activeTargets: [...checkpoint.activeTargets],
+      recentEvidenceRefs: [...checkpoint.evidenceRefs],
+      openGaps: [...checkpoint.openGaps],
+      nextActions:
+        checkpoint.nextActions.length > 0 ? [...checkpoint.nextActions] : [`continue ${input.taskId}`],
+      compressedContextRef: checkpoint.compressedContextRef,
+      compressedContextSummary: checkpoint.compressedContextSummary ?? input.message.summary,
+      compressedContextSourceRefs:
+        checkpoint.compressedContextSourceRefs.length > 0
+          ? [...checkpoint.compressedContextSourceRefs]
+          : [...checkpoint.evidenceRefs],
+      createdAt
+    },
+    {
+      authorityLabel: "runtime_authoritative"
+    }
+  );
+
+  return checkpointId;
 }
 
 function daemonMessageHasScopeConflict(message: ParsedDaemonTurnMessage | undefined): boolean {
@@ -2145,6 +2261,35 @@ async function runCodexTurnViaCli(input: RunCodexTurnInput): Promise<RunCodexTur
           blockers: {
             type: "array",
             items: { type: "string" }
+          },
+          checkpoint: {
+            type: "object",
+            properties: {
+              evidence_refs: {
+                type: "array",
+                items: { type: "string" }
+              },
+              next_actions: {
+                type: "array",
+                items: { type: "string" }
+              },
+              active_targets: {
+                type: "array",
+                items: { type: "string" }
+              },
+              open_gaps: {
+                type: "array",
+                items: { type: "string" }
+              },
+              compressed_context_summary: { type: "string" },
+              compressed_context_ref: { type: "string" },
+              compressed_context_source_refs: {
+                type: "array",
+                items: { type: "string" }
+              }
+            },
+            required: ["evidence_refs"],
+            additionalProperties: false
           },
           scope_request: {
             type: "object",
@@ -2323,6 +2468,8 @@ export function buildDaemonTaskPrompt(input: {
   const guidanceLines = [
     "Follow the repository AGENTS.md and the devgod workflow.",
     "Use runtime-backed devgod commands when they are needed for proof, status, or advancement.",
+    "Scale, latency, or item volume are not blockers by themselves when the task can be chunked and resumed.",
+    "If you make tractable progress without finishing, return status needs_followup and include checkpoint.evidence_refs plus a compressed checkpoint summary so the daemon can persist progress and continue.",
     input.promptMode === "delta"
       ? "If scope blocks the next required edit, stop immediately and return the minimum safe scope_request delta."
       : "If a required edit falls outside the allowed write scope, stop immediately, name the exact blocked paths, and include a scope_request with blocked_paths, requested_write_scope, and a short reason describing the minimum safe scope expansion.",
@@ -7745,11 +7892,11 @@ export async function executeDaemonCommandFromArgs(
           packet: taskRecord.packet,
           operatorNotes: input.operatorNotes,
           compressedContextSummary:
-            promptMode === "delta" && input.directive.kind === "continue_analysis"
+            promptMode === "delta"
               ? latestCheckpoint?.compressedContextSummary
               : undefined,
           compressedContextRef:
-            promptMode === "delta" && input.directive.kind === "continue_analysis"
+            promptMode === "delta"
               ? latestCheckpoint?.compressedContextRef
               : undefined
         });
@@ -7763,6 +7910,14 @@ export async function executeDaemonCommandFromArgs(
 
         latestSessionId = codexTurn.sessionId ?? latestSessionId;
         const parsedTurnMessage = parseDaemonTurnMessage(codexTurn.finalMessage);
+        await persistDaemonTurnCheckpoint({
+          runId: input.activeRunId,
+          taskId: input.activeTaskId,
+          snapshot,
+          message: parsedTurnMessage,
+          checkpointRun: options.checkpointRun,
+          now
+        });
         const refreshedProjectRuntimeState = await options.getProjectRuntimeState(projectContext.project.id);
         const refreshedSnapshot = await options.getStatusSnapshot(input.activeRunId);
         const refreshedPlan = await options.getExecutionPlan(input.activeRunId, staleAfterHours);
@@ -9304,6 +9459,9 @@ async function daemonCommand(args: readonly string[]) {
         upsertCoverageGaps(runId, gaps) {
           return service.upsertCoverageGaps(runId, gaps);
         },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        },
         getReviews(runId, taskId) {
           return store.getReviews(runId, taskId);
         },
@@ -9457,6 +9615,9 @@ async function supervisorCommand(args: readonly string[]) {
         },
         upsertCoverageGaps(runId, gaps) {
           return service.upsertCoverageGaps(runId, gaps);
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
         },
         getReviews(runId, taskId) {
           return store.getReviews(runId, taskId);
