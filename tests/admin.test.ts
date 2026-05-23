@@ -5099,7 +5099,8 @@ test("executeSupervisorCommandFromArgs materializes a resumable CLI scheduler re
     metadata: {
       ...(existingRuntimeState?.metadata ?? {}),
       devgodDaemon: {
-        sessionId: "session-cli-resume"
+        sessionId: "session-cli-resume",
+        updatedAt: new Date().toISOString()
       }
     },
     createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
