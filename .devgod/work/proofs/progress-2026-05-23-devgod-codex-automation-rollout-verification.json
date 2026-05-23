@@ -1,0 +1,48 @@
+{
+  "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
+  "captured_at": "2026-05-23T19:15:00.000Z",
+  "status": "verified",
+  "summary": "The Codex automation continuation envelope, app automation handoff, and CLI scheduler handoff slices now pass the broad local regression bundle, and the rollout verification task packet has been repaired to satisfy the live workflow contract before PR publication.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "git --git-dir=/home/eimi/projects/devgod/.git --work-tree=/home/eimi/projects/devgod diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/admin.ts",
+    "src/admin/status.ts",
+    "src/admin/ops.ts",
+    "src/admin/report.ts",
+    "tests/admin.test.ts",
+    "tests/status-report.test.ts",
+    "tests/runtime-surface.test.ts",
+    "tests/ops-recovery.test.ts",
+    "tests/report-command.test.ts",
+    "tests/hooks.test.ts",
+    ".devgod/work/tasks/task-2026-05-23-devgod-codex-automation-rollout-verification.md"
+  ],
+  "coverage_delta": {
+    "validated": 3,
+    "fully_analyzed": 3
+  },
+  "blocking_gap_delta": {
+    "closed": 2,
+    "opened": 0
+  },
+  "next_target": "release:github-pr-green",
+  "why_next": "Local automation integration, regression coverage, and workflow-packet compliance are now in place, so the remaining rollout target is PR publication and hosted CI closure against main.",
+  "cycle": 1,
+  "residual_risk": [
+    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally.",
+    "The rollout task remains incomplete until the PR exists and required hosted checks finish green."
+  ]
+}

@@ -1606,6 +1606,8 @@ test("executeStatusCommandFromArgs marks advisory continuation as operator-requi
   });
 
   assert.equal(report.autonomous.resume.executionMode, "operator_required");
+  assert.equal(report.autonomous.resume.provider, "codex_cli_exec_scheduler");
+  assert.equal(report.autonomous.resume.wakeOwner, "operator");
   assert.match(
     report.autonomous.resume.executionSummary,
     /operator input is required for advisory continuation target artifact:resume/
@@ -1672,7 +1674,9 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
           directiveKind: "continue_analysis",
           nextActions: ["consult operator evidence before resuming the artifact target"],
           detailFiles: {
-            continuationStatus: ".devgod/work/daemon/continuation-status.json"
+            continuationStatus: ".devgod/work/daemon/continuation-status.json",
+            appAutomationRequest: ".devgod/work/daemon/app-automation-request.json",
+            cliSchedulerRequest: ".devgod/work/daemon/cli-scheduler-request.json"
           },
           updatedAt: "2026-05-16T10:00:00.000Z"
         },
@@ -1697,6 +1701,8 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
     assert.equal(report.daemon.continuation?.source, "progress_proof");
     assert.equal(report.daemon.continuation?.sourceId, "proof-1");
     assert.equal(report.daemon.continuation?.actionKind, "resume_target");
+    assert.equal(report.daemon.continuation?.provider, "codex_cli_exec_scheduler");
+    assert.equal(report.daemon.continuation?.wakeOwner, "operator");
     assert.deepEqual(report.daemon.continuation?.nextActions, [
       "consult operator evidence before resuming the artifact target"
     ]);
@@ -1716,6 +1722,14 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
     assert.equal(
       report.daemon.handoff?.detailFiles.continuationStatus,
       ".devgod/work/daemon/continuation-status.json"
+    );
+    assert.equal(
+      report.daemon.handoff?.detailFiles.appAutomationRequest,
+      ".devgod/work/daemon/app-automation-request.json"
+    );
+    assert.equal(
+      report.daemon.handoff?.detailFiles.cliSchedulerRequest,
+      ".devgod/work/daemon/cli-scheduler-request.json"
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

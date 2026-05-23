@@ -1318,9 +1318,11 @@ test("executeOpsCommandFromArgs surfaces blocked daemon continuation state even 
         "operator intervention required for daemon continuation: consult operator evidence before resuming the artifact target"
       )
     );
+    assert.equal(result.report.status.daemon.continuation?.provider, "codex_cli_exec_scheduler");
+    assert.equal(result.report.status.daemon.continuation?.wakeOwner, "operator");
 
     const text = formatOperatorDashboardReport(result.report);
-    assert.match(text, /daemon-continuation: blocked operator_required artifact:resume/);
+    assert.match(text, /daemon-continuation: blocked operator_required artifact:resume owner=operator provider=codex_cli_exec_scheduler/);
     assert.match(
       text,
       /daemon continuation blocked: operator input is required for advisory continuation target artifact:resume/

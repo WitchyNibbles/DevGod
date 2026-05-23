@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAutonomousOperatorSummary,
-  classifyContinueAnalysisDirective
+  classifyContinueAnalysisDirective,
+  selectLocalContinuationProvider
 } from "../src/admin/autonomous-summary.ts";
 import {
   getCheckpointSurface,
@@ -1303,6 +1304,7 @@ test("buildAutonomousOperatorSummary derives blocked fallback sources and execut
   assert.equal(continueAnalysisPlan.resume.source, "progress_proof");
   assert.deepEqual(continueAnalysisPlan.resume.nextActions, ["continue at task:resume-proof"]);
   assert.equal(continueAnalysisPlan.resume.executionMode, "runtime_executable");
+  assert.equal(continueAnalysisPlan.resume.continuationIntent, "continue_now");
 
   const recoveryPlan = buildAutonomousOperatorSummary({
     snapshot: buildRunSnapshot({
@@ -1455,6 +1457,61 @@ test("buildAutonomousOperatorSummary derives blocked fallback sources and execut
   });
   assert.equal(proofFallbackPlan.resume.source, "progress_proof");
   assert.deepEqual(proofFallbackPlan.resume.nextActions, ["resume follow-up analysis"]);
+});
+
+test("selectLocalContinuationProvider chooses explicit automation owners and schedules", () => {
+  assert.deepEqual(
+    selectLocalContinuationProvider({
+      executionMode: "operator_required",
+      continuationIntent: "defer_same_thread",
+      capabilities: {
+        codexAppThreadAutomation: true,
+        codexAppStandaloneAutomation: true,
+        codexCliScheduler: true
+      }
+    }),
+    {
+      provider: "codex_app_thread_automation",
+      wakeOwner: "operator",
+      scheduleKind: "rrule",
+      schedule: "FREQ=MINUTELY;INTERVAL=30"
+    }
+  );
+
+  assert.deepEqual(
+    selectLocalContinuationProvider({
+      executionMode: "operator_required",
+      continuationIntent: "defer_fresh_run",
+      capabilities: {
+        codexAppThreadAutomation: false,
+        codexAppStandaloneAutomation: false,
+        codexCliScheduler: true
+      }
+    }),
+    {
+      provider: "codex_cli_exec_scheduler",
+      wakeOwner: "operator",
+      scheduleKind: "cron",
+      schedule: "0 * * * *"
+    }
+  );
+
+  assert.deepEqual(
+    selectLocalContinuationProvider({
+      executionMode: "operator_required",
+      continuationIntent: "blocked_external",
+      capabilities: {
+        codexAppThreadAutomation: true,
+        codexAppStandaloneAutomation: true,
+        codexCliScheduler: true
+      }
+    }),
+    {
+      provider: "manual_operator_handoff",
+      wakeOwner: "operator",
+      scheduleKind: "manual"
+    }
+  );
 });
 
 test("classifyContinueAnalysisDirective covers typed continuation actions and persisted resume validation", () => {
@@ -1809,6 +1866,7 @@ test("buildAutonomousOperatorSummary covers blocked fallback sources and autonom
   assert.equal(blockedFromCheckpointActions.resume.status, "blocked");
   assert.equal(blockedFromCheckpointActions.resume.source, "checkpoint");
   assert.deepEqual(blockedFromCheckpointActions.resume.nextActions, ["use checkpoint evidence"]);
+  assert.equal(blockedFromCheckpointActions.resume.continuationIntent, "defer_same_thread");
 
   const blockedFromProgressProof = buildAutonomousOperatorSummary({
     snapshot: buildRunSnapshot({
@@ -1902,6 +1960,7 @@ test("buildAutonomousOperatorSummary covers blocked fallback sources and autonom
   });
   assert.equal(blockedFromProgressProof.resume.source, "progress_proof");
   assert.equal(blockedFromProgressProof.resume.nextActions.length, 0);
+  assert.equal(blockedFromProgressProof.resume.continuationIntent, "defer_fresh_run");
 
   const blockedFromExecutionPlan = buildAutonomousOperatorSummary({
     snapshot: buildRunSnapshot({
