@@ -3505,7 +3505,8 @@ async function readDaemonContinuationStatus(
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const state = parsed.state === "blocked" ? "blocked" : "invalid";
     const directiveKind = parsed.directiveKind === "continue_analysis" ? "continue_analysis" : "continue_analysis";
-    const executionMode = parsed.executionMode === "operator_required" ? "operator_required" : "unknown";
+    const executionMode: DaemonContinuationStatusObservation["executionMode"] =
+      parsed.executionMode === "operator_required" ? "operator_required" : "unknown";
     const targetId = typeof parsed.targetId === "string" ? parsed.targetId : undefined;
     const source =
       parsed.source === "blocking_gap" || parsed.source === "progress_proof" || parsed.source === "checkpoint"
@@ -3527,10 +3528,12 @@ async function readDaemonContinuationStatus(
     const derivedProviderSelection =
       provider && wakeOwner
         ? undefined
-        : selectLocalContinuationProvider({
-            executionMode,
-            continuationIntent: executionMode === "operator_required" ? "blocked_external" : "continue_now"
-          });
+        : executionMode === "operator_required"
+          ? selectLocalContinuationProvider({
+              executionMode,
+              continuationIntent: "blocked_external"
+            })
+          : undefined;
     const summary =
       typeof parsed.summary === "string" && parsed.summary.trim().length > 0
         ? parsed.summary
