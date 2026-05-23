@@ -14,11 +14,16 @@ test("release overlay verification script stays aligned with CI", async () => {
   const releaseOverlayScript = await readFile(join(repoRoot, "scripts", "verify-release-overlay.sh"), "utf8");
 
   assert.equal(packageJson.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
-  assert.match(ciWorkflow, /jobs:\n  test:/);
-  assert.match(ciWorkflow, /- run: npm run check:coverage/);
+  assert.match(ciWorkflow, /pull_request:\n\s+branches:\n\s+- main/);
+  assert.match(ciWorkflow, /merge_group:/);
+  assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
+  assert.match(ciWorkflow, /jobs:\n  release-overlay:/);
   assert.match(ciWorkflow, /- run: npm run verify:release-overlay/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
   assert.match(ciWorkflow, /- run: npm run verify:migrations:live/);
   assert.match(ciWorkflow, /tests\/setup-powershell-smoke\.test\.ts/);
+  assert.doesNotMatch(ciWorkflow, /- run: npm run check:coverage/);
 
   assert.match(releaseOverlayScript, /npm test/);
   assert.match(releaseOverlayScript, /npm run check:quality/);

@@ -379,8 +379,10 @@ test("ci workflow pins external actions and keeps read-only permissions", async 
   const ciWorkflow = await readFile(path.join(sourceRoot, ".github/workflows/ci.yml"), "utf8");
 
   assert.match(ciWorkflow, /uses: actions\/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd/);
-  assert.match(ciWorkflow, /uses: actions\/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f/);
+  assert.match(ciWorkflow, /uses: actions\/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e/);
   assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
+  assert.match(ciWorkflow, /merge_group:/);
+  assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.doesNotMatch(ciWorkflow, /contents: write/);
   assert.doesNotMatch(ciWorkflow, /id-token: write/);
 });
@@ -389,11 +391,13 @@ test("ci workflow routes the release posture through the release overlay gate", 
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const ciWorkflow = await readFile(path.join(sourceRoot, ".github/workflows/ci.yml"), "utf8");
 
-  assert.match(ciWorkflow, /jobs:\n  test:/);
-  assert.match(ciWorkflow, /npm run check:coverage/);
+  assert.match(ciWorkflow, /jobs:\n  release-overlay:/);
   assert.match(ciWorkflow, /npm run verify:release-overlay/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
   assert.doesNotMatch(ciWorkflow, /- run: npm test/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:quality/);
+  assert.doesNotMatch(ciWorkflow, /- run: npm run check:coverage/);
 });
 
 test("README frames devgod as an opt-in overlay with production-oriented package checks", async () => {

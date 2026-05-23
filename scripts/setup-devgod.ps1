@@ -233,7 +233,7 @@ if (-not $env:DEVGOD_POSTGRES_PORT) {
 if (-not $env:DEVGOD_CORE_DATABASE_URL) {
     $postgresUser = if ($env:DEVGOD_POSTGRES_USER) { $env:DEVGOD_POSTGRES_USER } else { "devgod" }
     $postgresDb = if ($env:DEVGOD_POSTGRES_DB) { $env:DEVGOD_POSTGRES_DB } else { "devgod" }
-    $env:DEVGOD_CORE_DATABASE_URL = "postgres://$postgresUser:$($env:DEVGOD_POSTGRES_PASSWORD)@127.0.0.1:$($env:DEVGOD_POSTGRES_PORT)/$postgresDb"
+    $env:DEVGOD_CORE_DATABASE_URL = "postgres://${postgresUser}:$($env:DEVGOD_POSTGRES_PASSWORD)@127.0.0.1:$($env:DEVGOD_POSTGRES_PORT)/$postgresDb"
 }
 
 function Wait-DevgodContainerHealth {
