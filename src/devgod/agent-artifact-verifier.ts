@@ -37,8 +37,8 @@ export async function verifyAgentCatalogArtifacts(input: {
     actualFiles = [];
   }
 
-  const expectedSet = new Set(expectedArtifactPaths);
-  const actualSet = new Set(actualFiles);
+  const expectedSet = new Set<string>(expectedArtifactPaths);
+  const actualSet = new Set<string>(actualFiles);
   const missingArtifacts = expectedArtifactPaths.filter((artifactPath) => !actualSet.has(artifactPath));
   const unexpectedArtifacts = actualFiles.filter((artifactPath) => !expectedSet.has(artifactPath));
 
