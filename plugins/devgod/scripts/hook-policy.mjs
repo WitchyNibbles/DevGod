@@ -9,6 +9,7 @@ import {
   isAllowedPath,
   isDestructiveCommand,
   isManagedPath,
+  isReadOnlyBashCommand,
   isTaskPacketPath,
   isVerificationCommand,
   parseApplyPatchTargets,
@@ -88,7 +89,7 @@ export function evaluatePreToolUse(payload, context) {
     const managedTarget = extractBashReferencedManagedPaths(command).find(
       (target) => !isAllowedPath(target, context.allowedWriteScope)
     );
-    if (managedTarget) {
+    if (managedTarget && !isReadOnlyBashCommand(command)) {
       return buildPreToolDeny(
         `managed control-layer path ${managedTarget} is blocked outside explicit task scope`
       );
@@ -115,7 +116,7 @@ export function evaluatePermissionRequest(payload, context) {
   const managedTarget = extractBashReferencedManagedPaths(command).find(
     (target) => !isAllowedPath(target, context.allowedWriteScope)
   );
-  if (managedTarget) {
+  if (managedTarget && !isReadOnlyBashCommand(command)) {
     return buildPermissionDeny(
       `approval request for managed control-layer path ${managedTarget} is blocked outside explicit task scope`
     );
@@ -207,6 +208,14 @@ export function evaluateStop(payload, context) {
     typeof payload?.last_assistant_message === "string" ? payload.last_assistant_message : "";
 
   if (Array.isArray(context.authorityMismatches) && context.authorityMismatches.length > 0) {
+    return undefined;
+  }
+
+  if (context.continuationIntent === "defer_same_thread" || context.continuationIntent === "defer_fresh_run") {
+    return undefined;
+  }
+
+  if (context.continuationIntent === "blocked_external") {
     return undefined;
   }
 

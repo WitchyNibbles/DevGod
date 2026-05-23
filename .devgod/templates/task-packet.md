@@ -73,6 +73,23 @@ When `review_exports=runtime_optional`, the task must run under the runtime work
 
 ## Allowed write scope
 
+## Allowed successor task scope
+
+Declare zero or more pre-authorized follow-on task packet paths when the manager may need to prepare the next slice without reopening the full workflow contract.
+
+Use repo-relative paths, for example:
+
+- `.devgod/work/tasks/task-next-slice.md`
+
+## Scope expansion protocol
+
+If an otherwise valid implementation step falls outside the allowed write scope:
+
+- stop immediately
+- name the exact blocked paths
+- record the minimum safe scope expansion using `blocked_paths`, `requested_write_scope`, and a short reason
+- prefer narrow expansions or explicit follow-on slices over widening the entire task
+
 ## Out of scope
 
 ## Assumptions

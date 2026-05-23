@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,6 +74,49 @@ test("stop hook allows explicit write-scope blockers to end the loop", () => {
   assert.equal(parsed, undefined);
 });
 
+test("pre-tool-use hook allows read-only Bash inspection of managed control-layer paths", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "Bash",
+      tool_input: {
+        command: "sed -n '1,40p' .agents/skills/devgod-intake/SKILL.md"
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-read-only",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  if (parsed) {
+    assert.notEqual(parsed.hookSpecificOutput.permissionDecision, "deny");
+  }
+});
+
+test("pre-tool-use hook still denies write-like Bash commands for managed control-layer paths", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "Bash",
+      tool_input: {
+        command: "touch .codex/tmp.txt"
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-write-like",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /\.codex|managed control-layer/i);
+});
+
 test("stop hook allows explicit task-state blockers to end the loop", () => {
   const parsed = evaluateStop(
     {
@@ -113,6 +156,59 @@ test("stop hook allows explicit completion summaries when only external runtime 
   );
 
   assert.equal(parsed, undefined);
+});
+
+test("stop hook allows stop when structured continuation intent defers same-thread follow-up", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "The current turn is complete."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-defer-same-thread",
+      allowedWriteScope: ["src/core"],
+      continuationIntent: "defer_same_thread",
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("stop hook allows stop when structured continuation intent defers a fresh run", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "The current turn is complete."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-defer-fresh-run",
+      allowedWriteScope: ["src/core"],
+      continuationIntent: "defer_fresh_run",
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.equal(parsed, undefined);
+});
+
+test("stop hook still blocks when structured continuation intent says continue now", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message: "The current turn is complete."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-continue-now",
+      allowedWriteScope: ["src/core"],
+      continuationIntent: "continue_now",
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /task-hook-continue-now remains in progress/i);
 });
 
 test("stop hook still blocks vague blocker summaries without a concrete devgod cause", () => {
@@ -557,4 +653,49 @@ test("hook context splits combined allowed write scope bullets into individual e
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
   }
+});
+
+test("hook context parses structured continuation intent from the active task packet", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-continuation-intent-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-intent\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-intent.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`",
+        "",
+        "## Continuation intent",
+        "",
+        "- `defer_same_thread`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-intent");
+    assert.equal(context.continuationIntent, "defer_same_thread");
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("task packet template exposes successor handoff and scope expansion guidance", async () => {
+  const template = await readFile(join(process.cwd(), ".devgod", "templates", "task-packet.md"), "utf8");
+
+  assert.match(template, /## Allowed successor task scope/);
+  assert.match(template, /## Scope expansion protocol/);
+  assert.match(template, /blocked_paths/);
+  assert.match(template, /requested_write_scope/);
 });

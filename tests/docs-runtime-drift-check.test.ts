@@ -4,10 +4,11 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = "/home/gii/apps/lexer/DevGod";
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const driftScript = path.join(repoRoot, "scripts", "check-docs-runtime-drift.sh");
 
 async function createFixture(): Promise<string> {

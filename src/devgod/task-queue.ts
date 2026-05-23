@@ -158,6 +158,16 @@ export function isTaskBlocked(task: TaskQueueTask): boolean {
   return task.status === "blocked" || task.blocker !== null;
 }
 
+function isRecoverableScopeBlocker(task: TaskQueueTask, activeTaskId: string | null): boolean {
+  if (task.id !== activeTaskId || task.status !== "blocked" || task.blocker === null) {
+    return false;
+  }
+
+  return /\bscope expansion\b|\bout of scope\b|outside the allowed write scope|minimum safe scope expansion/i.test(
+    task.blocker
+  );
+}
+
 function validateTaskQueue(queue: TaskQueue): TaskQueue {
   const taskIds = new Set<string>();
 
@@ -241,6 +251,11 @@ export async function readTaskQueue(
 
 export function selectNextUnblockedTask(queue: TaskQueue): TaskQueueTask | null {
   const index = tasksById(queue);
+  const activeTask = queue.current_task_id === null ? null : index.get(queue.current_task_id) ?? null;
+
+  if (activeTask && isRecoverableScopeBlocker(activeTask, queue.current_task_id)) {
+    return activeTask;
+  }
 
   for (const task of queue.tasks) {
     if (task.status === "done") {

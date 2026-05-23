@@ -1,81 +1,83 @@
 {
-  "project_status": "done",
+  "project_status": "in_progress",
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-21-docs-current-state-refresh",
-      "title": "Refresh README and current-state docs to match shipped package behavior",
+      "id": "2026-05-23-devgod-local-automation-adapters",
+      "title": "Local workflow proof seed for 2026-05-23-devgod-local-automation-adapters",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "README reflects current package mission, shipped capabilities, and actual command surface",
-        "docs/current-state.md reflects 2026-05-21 package reality including modernization mode and hook hardening",
-        "docs/global-setup.md accurately distinguishes source-repo and installed-repo commands"
+        "workflow-proof resolves 2026-05-23-devgod-local-automation-adapters from the latest runtime run",
+        "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "manual diff review against package.json scripts and shipped docs"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-local-automation-adapters"
       ],
       "evidence": [
-        "brief: brief-2026-05-21-docs-current-state-refresh",
-        "task packet: 2026-05-21-docs-current-state-refresh",
-        "verification: manual diff review against package.json scripts",
-        "verification: manual capability review against src/admin/devgod.ts and src/install/merge.ts"
+        "task packet: 2026-05-23-devgod-local-automation-adapters",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-local-automation-adapters",
+        "quality gate: release_readiness_required"
       ],
       "blocker": null
     },
     {
-      "id": "2026-05-21-upgrade-configure-installed-repos",
-      "title": "Upgrade and fully configure installed sibling repos under ../",
+      "id": "2026-05-23-devgod-desktop-app-integration-surfaces",
+      "title": "Desktop/app-native integration surfaces for Codex wake-up ownership",
       "status": "done",
       "class": "release_candidate",
-      "depends_on": [],
+      "depends_on": [
+        "2026-05-23-devgod-local-automation-adapters"
+      ],
       "acceptance_criteria": [
-        "../GII, ../GII2, and ../jump_refactored are upgraded to the current managed DevGod surface",
-        "required local DevGod setup and verification complete in each target repo or exact blockers are recorded",
-        "unrelated uncommitted repo-specific work remains intact"
+        "Active workflow artifacts align to 2026-05-23-devgod-desktop-app-integration-surfaces.",
+        "The active task packet authorizes the minimum source/test scope required for the workflow repair.",
+        "The workflow repair is implemented across the hook, runtime, template, test, and installed-harness surfaces needed for coherence patch and recoverable-blocker handling.",
+        "The focused verification surface proves managed-path read analysis, successor handoff surfacing, recoverable blocker behavior, live workflow proof, and installed-harness success.",
+        "The follow-on verification slice remains queued after this desktop/app task."
       ],
       "verification": [
-        "managed installer dry-run and apply output per repo",
-        "repo-local DevGod setup and verification commands per repo"
+        "node --experimental-strip-types --test tests/hooks.test.ts",
+        "node --experimental-strip-types --test tests/autopilot-status.test.ts",
+        "node --experimental-strip-types --test tests/admin.test.ts",
+        "node --experimental-strip-types --test tests/happy-path.test.ts",
+        "git diff --check -- plugins/devgod/scripts/hook-utils.mjs plugins/devgod/scripts/hook-policy.mjs .devgod/templates/task-packet.md src/devgod/task-queue.ts src/admin.ts tests/hooks.test.ts tests/admin.test.ts tests/autopilot-status.test.ts scripts/verify-installed-repo-harness.sh",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-desktop-app-integration-surfaces",
+        "bash scripts/verify-installed-repo-harness.sh"
       ],
       "evidence": [
-        "brief: brief-2026-05-21-upgrade-configure-installed-repos",
-        "verification: upgrade --dry-run in GII, GII2, and jump_refactored with conflicts=0 and orphans=0",
-        "verification: upgrade --apply in GII, GII2, and jump_refactored",
-        "verification: devgod:setup:git-guard and devgod:verify:git-guard passed in all three repos",
-        "verification: devgod:setup:local passed in all three repos",
-        "verification: devgod:verify:setup passed in all three repos",
-        "verification: devgod:doctor passed in all three repos",
-        "verification: devgod:verify:review-identity passed in all three repos",
-        "verification: devgod:bootstrap repaired runtime registration in GII2 and jump_refactored and refreshed GII runtime mode"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-22-long-running-autonomy-completion-hardening",
-      "title": "Persist durable progress for long-running autonomous tasks so DevGod continues instead of stopping early",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "daemon no-progress detection treats structured checkpoint persistence as real progress",
-        "shared prompts and installed-repo instructions say scale, latency, or item volume are not blockers when the task can be chunked and resumed",
-        "regression tests prove vague no-progress turns still block while durable long-running progress keeps the daemon running"
-      ],
-      "verification": [
-        "focused daemon/admin test coverage for stagnation, checkpoint persistence, and resumed prompt context",
-        "typecheck for touched sources",
-        "runtime workflow proof for authenticated reviewer, security, and qa approvals"
-      ],
-      "evidence": [
-        "brief: brief-2026-05-22-long-running-autonomy-completion-hardening",
-        "plan: plan-2026-05-22-long-running-autonomy-completion-hardening",
-        "task packet: task-2026-05-22-long-running-autonomy-completion-hardening",
+        "task packet: 2026-05-23-devgod-desktop-app-integration-surfaces",
+        "verification: node --experimental-strip-types --test tests/hooks.test.ts",
+        "verification: node --experimental-strip-types --test tests/autopilot-status.test.ts",
         "verification: node --experimental-strip-types --test tests/admin.test.ts",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types ./src/admin/devgod.ts seed-workflow-proof --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening",
-        "verification: node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --workspace-slug default --project-slug devgod --task-id 2026-05-22-long-running-autonomy-completion-hardening"
+        "verification: node --experimental-strip-types --test tests/happy-path.test.ts",
+        "verification: git diff --check -- plugins/devgod/scripts/hook-utils.mjs plugins/devgod/scripts/hook-policy.mjs .devgod/templates/task-packet.md src/devgod/task-queue.ts src/admin.ts tests/hooks.test.ts tests/admin.test.ts tests/autopilot-status.test.ts scripts/verify-installed-repo-harness.sh",
+        "verification: bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-desktop-app-integration-surfaces",
+        "verification: bash scripts/verify-installed-repo-harness.sh",
+        "runtime proof run: d088daef-60bb-493f-93f3-4c4d02d9fc0a"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-codex-verification-and-rollout",
+      "title": "Codex verification and rollout hardening",
+      "status": "pending",
+      "class": "release_candidate",
+      "depends_on": [
+        "2026-05-23-devgod-desktop-app-integration-surfaces"
+      ],
+      "acceptance_criteria": [
+        "A dedicated verification and rollout slice remains queued after desktop/app integration.",
+        "The queued slice preserves local-first operator guidance and runtime-authoritative workflow proof expectations."
+      ],
+      "verification": [
+        "Author the verification-and-rollout task packet when its write scope is granted.",
+        "Keep the queued dependency on 2026-05-23-devgod-desktop-app-integration-surfaces intact until that slice is complete."
+      ],
+      "evidence": [
+        "queued successor: 2026-05-23-devgod-codex-verification-and-rollout",
+        "dependency: 2026-05-23-devgod-desktop-app-integration-surfaces"
       ],
       "blocker": null
     }

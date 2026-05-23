@@ -82,7 +82,7 @@ node --experimental-strip-types "$repo_root/src/install/cli.ts" init --apply --t
 )
 
 run_target npm run devgod:scaffold-workflow -- --task-id "$task_id" --force-active >/dev/null
-run_target node --input-type=module - "$workspace_slug" "$project_slug" "$task_id" <<'EOF'
+run_target node --experimental-strip-types --input-type=module - "$workspace_slug" "$project_slug" "$task_id" <<'EOF'
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

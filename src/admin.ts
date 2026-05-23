@@ -24,7 +24,10 @@ import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin
 import {
   buildAutonomousOperatorSummary,
   classifyContinueAnalysisDirective,
+  selectLocalContinuationProvider,
+  type AutonomousContinuationProvider,
   type AutonomousOperatorSummary,
+  type AutonomousWakeOwner,
   type ContinueAnalysisDirectiveClassification
 } from "./admin/autonomous-summary.ts";
 import {
@@ -984,13 +987,21 @@ interface ExecuteReportCommandOptions extends ExecuteStatusCommandOptions {
 }
 
 interface ExecuteWorkflowProofCommandOptions {
+  cwd?: string | undefined;
   env?: EnvShape | undefined;
+  allowQueueContinuation?: boolean | undefined;
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   findLatestRunForTask?: ((
     workspaceSlug: string,
     projectSlug: string,
     taskId: string
   ) => Promise<{ id: string } | undefined>) | undefined;
+  getProjectContext?: (params: {
+    workspaceSlug: string;
+    projectSlug: string;
+  }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
+  getProjectRuntimeState?: ((projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>) | undefined;
+  saveProjectRuntimeState?: ((state: ProjectRuntimeStateRecord) => Promise<void>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
   getReviews: (runId: string, taskId: string) => Promise<readonly ReviewRecord[]>;
   getApprovals: (runId: string, taskId: string) => Promise<readonly ApprovalRecord[]>;
@@ -1005,6 +1016,8 @@ export interface WorkflowProofResult {
   blockers: [];
   latestReviews: ReviewRecord[];
   latestApproval: ApprovalRecord;
+  continuationApplied: boolean;
+  nextTaskId: string | null;
 }
 
 interface ExecuteSeedWorkflowProofCommandOptions extends ExecuteWorkflowProofCommandOptions {
@@ -3262,6 +3275,8 @@ async function writeDaemonContinuationStatus(
     source: "blocking_gap" | "progress_proof" | "checkpoint";
     sourceId?: string | undefined;
     actionKind?: ContinuationAction["kind"] | undefined;
+    provider?: AutonomousContinuationProvider | undefined;
+    wakeOwner?: AutonomousWakeOwner | undefined;
     summary: string;
     nextActions: string[];
     blockers: string[];
@@ -3503,6 +3518,19 @@ async function readDaemonContinuationStatus(
       parsed.actionKind === "resume_target"
         ? parsed.actionKind
         : undefined;
+    const provider =
+      parsed.provider === "none" || parsed.provider === "codex_cli_exec" ? parsed.provider : undefined;
+    const wakeOwner =
+      parsed.wakeOwner === "none" || parsed.wakeOwner === "runtime" || parsed.wakeOwner === "operator"
+        ? parsed.wakeOwner
+        : undefined;
+    const derivedProviderSelection =
+      provider && wakeOwner
+        ? undefined
+        : selectLocalContinuationProvider({
+            executionMode,
+            continuationIntent: executionMode === "operator_required" ? "blocked_external" : "continue_now"
+          });
     const summary =
       typeof parsed.summary === "string" && parsed.summary.trim().length > 0
         ? parsed.summary
@@ -3524,6 +3552,8 @@ async function readDaemonContinuationStatus(
       source,
       sourceId,
       actionKind,
+      provider: provider ?? derivedProviderSelection?.provider,
+      wakeOwner: wakeOwner ?? derivedProviderSelection?.wakeOwner,
       summary,
       nextActions,
       blockers,
@@ -6260,6 +6290,15 @@ export async function executeWorkflowProofCommandFromArgs(
     );
   }
 
+  const continuation = await maybeContinueWorkflowAfterProof(
+    {
+      runId,
+      taskId
+    },
+    args,
+    options
+  );
+
   return {
     authorityLabel: "runtime_authoritative",
     runId,
@@ -6268,7 +6307,99 @@ export async function executeWorkflowProofCommandFromArgs(
     reviewDecision: "approved",
     blockers: [],
     latestReviews,
-    latestApproval
+    latestApproval,
+    continuationApplied: continuation.applied,
+    nextTaskId: continuation.nextTaskId
+  };
+}
+
+async function maybeContinueWorkflowAfterProof(
+  proof: {
+    runId: string;
+    taskId: string;
+  },
+  args: readonly string[],
+  options: ExecuteWorkflowProofCommandOptions
+): Promise<{
+  applied: boolean;
+  nextTaskId: string | null;
+}> {
+  if (
+    options.allowQueueContinuation === false ||
+    !options.getProjectContext ||
+    !options.getProjectRuntimeState ||
+    !options.saveProjectRuntimeState
+  ) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  const env = options.env ?? process.env;
+  const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG;
+  const projectSlug = resolveCommandFlag(args, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!workspaceSlug || !projectSlug) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  const projectContext = await options.getProjectContext({
+    workspaceSlug,
+    projectSlug
+  });
+  if (!projectContext) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  const runtimeState = await options.getProjectRuntimeState(projectContext.project.id);
+  if (!runtimeState?.activeTaskId || runtimeState.activeTaskId !== proof.taskId) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  if (runtimeState.activeRunId && runtimeState.activeRunId !== proof.runId) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  const queue = parseTaskQueueRecordOrDefault(runtimeState.taskQueue);
+  if (queue.current_task_id !== proof.taskId) {
+    return {
+      applied: false,
+      nextTaskId: null
+    };
+  }
+
+  const advanced = advanceTaskQueue(queue, proof.taskId);
+  const nextRuntimeState: ProjectRuntimeStateRecord = {
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: proof.runId,
+    activeTaskId: advanced.nextTask?.id ?? undefined,
+    taskQueue: advanced.queue,
+    productState: runtimeState.productState ?? buildDefaultProductState(),
+    lastVerifiedRunId: proof.runId,
+    metadata: runtimeState.metadata ?? {},
+    createdAt: runtimeState.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await options.saveProjectRuntimeState(nextRuntimeState);
+  await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
+
+  return {
+    applied: true,
+    nextTaskId: advanced.nextTask?.id ?? null
   };
 }
 
@@ -7128,7 +7259,10 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
   }
 
   const format = resolveFormatFlag(args);
-  const proof = await executeWorkflowProofCommandFromArgs([...args, "--task-id", activeTaskId], options);
+  const proof = await executeWorkflowProofCommandFromArgs([...args, "--task-id", activeTaskId], {
+    ...options,
+    allowQueueContinuation: false
+  });
   const queue = parseTaskQueueRecord(projectRuntimeState?.taskQueue);
 
   if (queue.current_task_id !== activeTaskId) {
@@ -8118,6 +8252,10 @@ export async function executeDaemonCommandFromArgs(
           return codexResult;
         }
 
+        const providerSelection = selectLocalContinuationProvider({
+          executionMode: input.classification.executionMode,
+          continuationIntent: input.classification.continuationIntent
+        });
         await writeDaemonContinuationStatus(cwd, {
           state: "blocked",
           directiveKind: "continue_analysis",
@@ -8129,6 +8267,8 @@ export async function executeDaemonCommandFromArgs(
               ? input.classification.action.sourceId
               : undefined,
           actionKind: input.classification.action?.kind,
+          provider: providerSelection.provider,
+          wakeOwner: providerSelection.wakeOwner,
           summary: input.classification.summary,
           nextActions: [...input.directive.nextActions],
           blockers: [...input.directive.blockers],
@@ -9094,7 +9234,17 @@ async function workflowProofCommand(args: readonly string[]) {
     const store = new PostgresStore(client);
     const service = new DevgodCoreService(store);
     const result = await executeWorkflowProofCommandFromArgs(args, {
+      cwd: process.cwd(),
       env: process.env,
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
       findLatestRun(workspaceSlug, projectSlug) {
         return store.findLatestRun({ workspaceSlug, projectSlug });
       },

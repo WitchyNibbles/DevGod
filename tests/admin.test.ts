@@ -843,6 +843,133 @@ test("executeAdvanceActiveTaskCommandFromArgs previews and applies runtime-gated
   }
 });
 
+test("executeWorkflowProofCommandFromArgs advances the next queued task when proving the active runtime task", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-001",
+    title: "Workflow proof active continuation",
+    request: "Proving the active task should carry the queue forward."
+  });
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-proof-continue-export-"));
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-001",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-001",
+      tasks: [
+        {
+          id: "task-001",
+          title: "Current task",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        },
+        {
+          id: "task-002",
+          title: "Next task",
+          status: "pending",
+          class: "release_candidate",
+          depends_on: ["task-001"],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: runId,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    const result = await executeWorkflowProofCommandFromArgs(
+      ["--run-id", runId, "--workspace-slug", "team", "--project-slug", "devgod", "--task-id", "task-001"],
+      {
+        cwd: exportCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        }
+      }
+    );
+
+    assert.equal(result.authorityLabel, "runtime_authoritative");
+    assert.equal(result.taskId, "task-001");
+    assert.equal(result.continuationApplied, true);
+    assert.equal(result.nextTaskId, "task-002");
+
+    const appliedState = await store.getProjectRuntimeState(projectContext.project.id);
+    const appliedQueue = appliedState?.taskQueue as
+      | { current_task_id?: string | null; tasks?: Array<{ id: string; status: string }> }
+      | undefined;
+    assert.equal(appliedState?.activeTaskId, "task-002");
+    assert.equal(appliedQueue?.current_task_id, "task-002");
+    assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-001")?.status, "done");
+    assert.equal(appliedQueue?.tasks?.find((task) => task.id === "task-002")?.status, "in_progress");
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    assert.equal(exportedActive, "task_id=task-002\nworkflow=devgod\nstate=active\n");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
 test("executeAdvanceActiveTaskCommandFromArgs refuses queue mutation when runtime proof is missing", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
@@ -3463,6 +3590,8 @@ test("executeDaemonCommandFromArgs blocks advisory-only continuation targets bef
       targetId: string;
       source: string;
       sourceId?: string | undefined;
+      provider?: string | undefined;
+      wakeOwner?: string | undefined;
       summary: string;
       nextActions: string[];
       blockers: string[];
@@ -3472,6 +3601,8 @@ test("executeDaemonCommandFromArgs blocks advisory-only continuation targets bef
     assert.equal(continuationStatus.executionMode, "operator_required");
     assert.equal(continuationStatus.targetId, "artifact:resume");
     assert.equal(continuationStatus.source, "blocking_gap");
+    assert.equal(continuationStatus.provider, "codex_cli_exec");
+    assert.equal(continuationStatus.wakeOwner, "operator");
     assert.equal(continuationStatus.summary, result.result.reason);
     assert.deepEqual(continuationStatus.nextActions, ["consult operator evidence before resuming the artifact target"]);
     assert.ok(

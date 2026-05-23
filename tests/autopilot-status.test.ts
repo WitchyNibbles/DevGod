@@ -94,6 +94,42 @@ test("selectNextUnblockedTask skips blocked tasks", () => {
   assert.equal(summarizeTaskQueue(queue).blockedTasks.map((task) => task.id).join(","), "task-001");
 });
 
+test("selectNextUnblockedTask keeps a recoverable scope-blocked current task selected", () => {
+  const queue = parseTaskQueueContent(
+    JSON.stringify(
+      buildQueue({
+        current_task_id: "task-001",
+        tasks: [
+          {
+            id: "task-001",
+            title: "Recoverable current task",
+            status: "blocked",
+            class: "release_candidate",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: "scope expansion required: required edit apps/web/src/components/operator-portal.tsx is outside the allowed write scope"
+          },
+          {
+            id: "task-002",
+            title: "Unrelated ready task",
+            status: "pending",
+            class: "docs_only",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          }
+        ]
+      })
+    )
+  );
+
+  assert.equal(selectNextUnblockedTask(queue)?.id, "task-001");
+});
+
 test("selectNextUnblockedTask skips tasks with unmet dependencies", () => {
   const queue = parseTaskQueueContent(
     JSON.stringify(

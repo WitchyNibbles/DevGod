@@ -28,6 +28,27 @@ const verificationCommandPatterns = [
   /\bbash\s+scripts\/check-/,
   /\bdevgod:verify\b/
 ];
+const readOnlyCommandSegmentPatterns = [
+  /^(?:pwd|true|:)\b/,
+  /^(?:cat|nl|wc|head|tail|ls|find|rg)\b/,
+  /^sed\s+-n\b/,
+  /^(?:echo|printf)\b/,
+  /^git\s+show\b/
+];
+const writeLikeCommandSegmentPatterns = [
+  />/,
+  /\btee\b/,
+  /\btouch\b/,
+  /\bmkdir\b/,
+  /\bcp\b/,
+  /\bmv\b/,
+  /\binstall\b/,
+  /\bsed\s+-i\b/,
+  /\bperl\b[^\n]*\s-i\b/,
+  /\bpython(?:3)?\b[^\n]*\s-c\b/,
+  /\bnode\b[^\n]*\s-e\b/,
+  /\bgit\s+(?:apply|checkout|restore|clean|rm|mv)\b/
+];
 const blockerMessagePatterns = [
   /need user input/i,
   /requires user input/i,
@@ -71,6 +92,13 @@ const externalClosureCausePatterns = [
   /\bexternal workflow closure\b/i,
   /\bexternal runtime closure\b/i
 ];
+const continuationIntentValues = new Set([
+  "continue_now",
+  "defer_same_thread",
+  "defer_fresh_run",
+  "blocked_external",
+  "unknown"
+]);
 
 export async function readHookPayload() {
   let content = "";
@@ -215,6 +243,7 @@ export async function readActiveTaskContext(options = {}) {
     activeTaskId: undefined,
     allowedWriteScope: [],
     allowedTaskHandoffScope: [],
+    continuationIntent: undefined,
     queueCurrentTaskId: undefined,
     authorityMismatches: []
   };
@@ -326,6 +355,7 @@ export async function readActiveTaskContext(options = {}) {
 
   context.allowedWriteScope = parseAllowedWriteScopeSection(taskMarkdown);
   context.allowedTaskHandoffScope = parseAllowedTaskHandoffScopeSection(taskMarkdown);
+  context.continuationIntent = parseContinuationIntentSection(taskMarkdown);
   return context;
 }
 
@@ -375,6 +405,16 @@ function parseAllowedTaskHandoffScopeSection(markdown) {
       .map((entry) => entry.trim().replace(/^and\s+/i, "").replace(/[.:;]+$/g, ""))
       .filter(Boolean)
   );
+}
+
+function parseContinuationIntentSection(markdown) {
+  const [value] = parseMarkdownListSection(markdown, "## Continuation intent");
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().replace(/`/g, "");
+  return continuationIntentValues.has(normalized) ? normalized : undefined;
 }
 
 function normalizePath(value) {
@@ -457,6 +497,28 @@ export function extractBashReferencedManagedPaths(command) {
     }
   }
   return [...new Set(matches)];
+}
+
+export function isReadOnlyBashCommand(command) {
+  if (typeof command !== "string" || command.trim().length === 0) {
+    return false;
+  }
+
+  const segments = command
+    .split(/\&\&|\|\||[|;]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return false;
+  }
+
+  return segments.every((segment) => {
+    if (writeLikeCommandSegmentPatterns.some((pattern) => pattern.test(segment))) {
+      return false;
+    }
+
+    return readOnlyCommandSegmentPatterns.some((pattern) => pattern.test(segment));
+  });
 }
 
 export function getBashExitCode(toolResponse) {
