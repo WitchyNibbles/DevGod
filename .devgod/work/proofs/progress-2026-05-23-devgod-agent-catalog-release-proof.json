@@ -1,0 +1,41 @@
+{
+  "task_id": "2026-05-23-devgod-agent-catalog-release-proof",
+  "captured_at": "2026-05-23T14:00:00.000Z",
+  "status": "verified",
+  "summary": "The manifest-driven catalog rollout advanced from focused implementation slices into release proof with deterministic artifact drift coverage, explicit shipped day-one agents, and anti-stall continuation verification already green.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/contracts.test.ts tests/policy.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/runtime-surface.test.ts tests/ops-recovery.test.ts",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/devgod/agent-catalog.ts",
+    "src/devgod/agent-artifact-verifier.ts",
+    "docs/devgod-agent-team.md",
+    "tests/install.test.ts",
+    "tests/admin.test.ts"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 4
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "release:full-verification-and-pr",
+  "why_next": "The remaining work is to prove the branch through the full local suite, workflow checks, PR publication, and CI repair if needed.",
+  "cycle": 1,
+  "residual_risk": [
+    "The full suite and PR CI may still expose package or workflow-proof regressions not covered by the focused slices.",
+    "Release-proof review summaries still need to be written after the final local verification run."
+  ]
+}

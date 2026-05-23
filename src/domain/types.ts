@@ -1,4 +1,5 @@
 import type { TaskQueue } from "../devgod/task-queue.ts";
+import { agentRoleIds } from "../devgod/agent-catalog.ts";
 
 export const runStatuses = [
   "intake",
@@ -71,24 +72,7 @@ export const reasoningVerificationKinds = [
   "human_review"
 ] as const;
 export const reasoningVerificationStatuses = ["passed", "failed", "pending", "skipped"] as const;
-export const retrievalRoles = [
-  "planner",
-  "product_strategist",
-  "solution_architect",
-  "docs_researcher",
-  "backend_engineer",
-  "frontend_designer",
-  "git_operator",
-  "infra_engineer",
-  "reviewer",
-  "build_resolver",
-  "security_reviewer",
-  "qa_engineer",
-  "tdd-guide",
-  "e2e-runner",
-  "release-readiness",
-  "memory_curator"
-] as const;
+export const retrievalRoles = agentRoleIds;
 export const requiredGateReviews = ["reviewer", "security_reviewer", "qa_engineer"] as const;
 export const reviewWaiverAuthorities = ["none", "manager", "security_exception"] as const;
 export const qualityGates = [

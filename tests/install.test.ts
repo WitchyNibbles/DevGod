@@ -22,6 +22,10 @@ import {
   upgradeDevgodInProject,
   verifyDevgodInstall
 } from "../src/install/cli.ts";
+import {
+  listCatalogAgentArtifactPaths,
+  verifyAgentCatalogArtifacts
+} from "../src/devgod/agent-artifact-verifier.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -335,6 +339,43 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
 
+test("verifyAgentCatalogArtifacts reports missing, unexpected, and metadata drift deterministically", async () => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "devgod-agent-catalog-"));
+  const agentsRoot = path.join(repoRoot, ".codex", "agents");
+  await mkdir(agentsRoot, { recursive: true });
+
+  await writeFile(
+    path.join(agentsRoot, "backend-engineer.toml"),
+    [
+      'name = "wrong_backend_role"',
+      'description = "Broken metadata fixture"',
+      'model = "gpt-5.4"'
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(agentsRoot, "mystery-agent.toml"),
+    [
+      'name = "mystery_agent"',
+      'description = "Unexpected artifact fixture"',
+      'model = "gpt-5.4-mini"'
+    ].join("\n") + "\n",
+    "utf8"
+  );
+
+  const result = await verifyAgentCatalogArtifacts({
+    repoRoot,
+    roles: ["backend_engineer", "technical_writer"]
+  });
+
+  assert.deepEqual(result.missingArtifacts, [".codex/agents/technical-writer.toml"]);
+  assert.deepEqual(result.unexpectedArtifacts, [".codex/agents/mystery-agent.toml"]);
+  assert.deepEqual(result.metadataMismatches, [
+    '.codex/agents/backend-engineer.toml: expected name "backend_engineer", got "wrong_backend_role"'
+  ]);
+  assert.equal(result.ok, false);
+});
+
 test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
   const merged = JSON.parse(
     mergePackageJson(
@@ -452,24 +493,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-tdd/SKILL.md"
   ];
 
-  const expectedAgentFiles = [
-    ".codex/agents/backend-engineer.toml",
-    ".codex/agents/build-resolver.toml",
-    ".codex/agents/docs-researcher.toml",
-    ".codex/agents/e2e-runner.toml",
-    ".codex/agents/frontend-designer.toml",
-    ".codex/agents/git-operator.toml",
-    ".codex/agents/infra-engineer.toml",
-    ".codex/agents/memory-curator.toml",
-    ".codex/agents/planner.toml",
-    ".codex/agents/product-strategist.toml",
-    ".codex/agents/qa-engineer.toml",
-    ".codex/agents/release-readiness.toml",
-    ".codex/agents/reviewer.toml",
-    ".codex/agents/security-reviewer.toml",
-    ".codex/agents/solution-architect.toml",
-    ".codex/agents/tdd-guide.toml"
-  ];
+  const expectedAgentFiles = listCatalogAgentArtifactPaths();
 
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -522,6 +546,13 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
 
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
   assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
+  assert.ok(pkg.files.includes("docs/devgod-agent-team.md"));
+
+  const catalogVerification = await verifyAgentCatalogArtifacts({ repoRoot: sourceRoot });
+  assert.equal(catalogVerification.ok, true);
+  assert.deepEqual(catalogVerification.missingArtifacts, []);
+  assert.deepEqual(catalogVerification.unexpectedArtifacts, []);
+  assert.deepEqual(catalogVerification.metadataMismatches, []);
   assert.equal(pkg.private, true);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
@@ -2301,30 +2332,14 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-tdd/SKILL.md"
   ];
 
-  const expectedAgentFiles = [
-    ".codex/agents/backend-engineer.toml",
-    ".codex/agents/build-resolver.toml",
-    ".codex/agents/docs-researcher.toml",
-    ".codex/agents/e2e-runner.toml",
-    ".codex/agents/frontend-designer.toml",
-    ".codex/agents/git-operator.toml",
-    ".codex/agents/infra-engineer.toml",
-    ".codex/agents/memory-curator.toml",
-    ".codex/agents/planner.toml",
-    ".codex/agents/product-strategist.toml",
-    ".codex/agents/qa-engineer.toml",
-    ".codex/agents/release-readiness.toml",
-    ".codex/agents/reviewer.toml",
-    ".codex/agents/security-reviewer.toml",
-    ".codex/agents/solution-architect.toml",
-    ".codex/agents/tdd-guide.toml"
-  ];
+  const expectedAgentFiles = listCatalogAgentArtifactPaths();
 
   const packedSkillFiles = [...packedFiles].filter((file) => file.startsWith(".agents/skills/")).sort();
   const packedAgentFiles = [...packedFiles].filter((file) => file.startsWith(".codex/agents/")).sort();
 
   assert.deepEqual(packedSkillFiles, expectedSkillFiles);
   assert.deepEqual(packedAgentFiles, expectedAgentFiles);
+  assert.ok(packedFiles.has("docs/devgod-agent-team.md"));
 
   for (const expectedPath of [
     ".githooks/commit-msg",
