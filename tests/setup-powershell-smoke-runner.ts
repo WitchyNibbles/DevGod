@@ -150,12 +150,13 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);
-    assert.deepEqual(dockerCalls.slice(0, 2), [
+    assert.deepEqual(dockerCalls.slice(0, 3), [
+      "version",
       "version",
       "compose up -d devgod-postgres devgod-qdrant"
     ]);
 
-    const inspectCalls = dockerCalls.slice(2);
+    const inspectCalls = dockerCalls.slice(3);
     assert.deepEqual(inspectCalls, [
       "inspect -f {{.State.Health.Status}} alpha-container",
       "inspect -f {{.State.Health.Status}} devgod-qdrant-alpha"
