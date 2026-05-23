@@ -228,6 +228,7 @@ Current and shipped in this package:
 - installer overlay
 - runtime-backed task/review/run storage
 - workflow proof and review recording surfaces
+- runtime-proven package status at the package level, and authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`
 - daemon, supervisor, operator, MCP, and UI surfaces
 - modernization-mode readiness gates and installed-repo proof
 - hook hardening for continuation handoff and authority mismatch

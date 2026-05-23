@@ -116,6 +116,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       ")",
       'if "%~1"=="install" exit /b 0',
       'if "%~1"=="run" (',
+      '  if /i "%~2"=="devgod:setup:git-guard" exit /b 0',
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',
       '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
@@ -141,6 +142,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\r?\n/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:git-guard",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
@@ -148,12 +150,13 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);
-    assert.deepEqual(dockerCalls.slice(0, 2), [
+    assert.deepEqual(dockerCalls.slice(0, 3), [
+      "version",
       "version",
       "compose up -d devgod-postgres devgod-qdrant"
     ]);
 
-    const inspectCalls = dockerCalls.slice(2);
+    const inspectCalls = dockerCalls.slice(3);
     assert.deepEqual(inspectCalls, [
       "inspect -f {{.State.Health.Status}} alpha-container",
       "inspect -f {{.State.Health.Status}} devgod-qdrant-alpha"
@@ -172,7 +175,8 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     assert.match(capturedEnv, /DEVGOD_PROJECT_NAME=Alpha Project/);
     assert.equal(await realpath(capturedProjectRepoPath), await realpath(targetRoot));
     assert.match(capturedEnv, /DEVGOD_DOCKER_CONTAINER_NAME=alpha-container/);
-    assert.match(capturedEnv, /DEVGOD_QDRANT_URL=http:\/\/127\.0\.0\.1:6333/);
+    const escapedHealthUrl = healthServer.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(capturedEnv, new RegExp(`DEVGOD_QDRANT_URL=${escapedHealthUrl}`));
 
     const copiedEnv = await readFile(join(targetRoot, ".env"), "utf8");
     const exampleEnv = await readFile(join(targetRoot, ".env.example"), "utf8");
