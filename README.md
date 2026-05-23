@@ -35,7 +35,7 @@ For a new substantive request, DevGod now biases toward a short clarification pa
 
 ## 📦 What It Is Right Now
 
-As of `2026-05-21`, this repo is the package source of truth for DevGod.
+As of `2026-05-20`, this repo is the package source of truth for DevGod and is runtime-proven at the package level.
 
 It ships:
 
@@ -248,6 +248,8 @@ npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
 npm run devgod -- serve-ui
 npm run mcp
 ```
+
+Common command families exposed through `npm run devgod -- ...` include `status`, `ops`, `report`, `coverage`, and `gaps`.
 
 Other important source-repo scripts that really exist today:
 

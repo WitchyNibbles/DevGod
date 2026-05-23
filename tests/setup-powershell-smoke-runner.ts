@@ -116,6 +116,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       ")",
       'if "%~1"=="install" exit /b 0',
       'if "%~1"=="run" (',
+      '  if /i "%~2"=="devgod:setup:git-guard" exit /b 0',
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',
       '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
@@ -141,6 +142,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\r?\n/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:git-guard",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",

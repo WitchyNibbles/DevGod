@@ -20,6 +20,8 @@ test("release overlay verification script stays aligned with CI", async () => {
   assert.match(ciWorkflow, /jobs:\n  release-overlay:/);
   assert.match(ciWorkflow, /- run: npm run verify:release-overlay/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n\s+qdrant:\n\s+image: qdrant\/qdrant:v1\.13\.4/);
+  assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
   assert.match(ciWorkflow, /- run: npm run verify:migrations:live/);
   assert.match(ciWorkflow, /tests\/setup-powershell-smoke\.test\.ts/);

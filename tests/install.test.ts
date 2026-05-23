@@ -383,6 +383,8 @@ test("ci workflow pins external actions and keeps read-only permissions", async 
   assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
   assert.match(ciWorkflow, /merge_group:/);
   assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
+  assert.match(ciWorkflow, /qdrant\/qdrant:v1\.13\.4/);
+  assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
   assert.doesNotMatch(ciWorkflow, /contents: write/);
   assert.doesNotMatch(ciWorkflow, /id-token: write/);
 });
