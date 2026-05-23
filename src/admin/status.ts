@@ -10,6 +10,7 @@ import type { GitNexusStatusObservation } from "./gitnexus.ts";
 import {
   buildAutonomousOperatorSummary,
   type AutonomousContinuationProvider,
+  type AutonomousContinuationScheduleKind,
   type AutonomousOperatorSummary,
   type AutonomousWakeOwner
 } from "./autonomous-summary.ts";
@@ -42,6 +43,8 @@ export interface DaemonContinuationStatusObservation {
   actionKind?: "resolve_blocking_gap" | "run_workflow_proof" | "resume_target" | undefined;
   provider?: AutonomousContinuationProvider | undefined;
   wakeOwner?: AutonomousWakeOwner | undefined;
+  scheduleKind?: AutonomousContinuationScheduleKind | undefined;
+  schedule?: string | undefined;
   summary: string;
   nextActions: string[];
   blockers: string[];
@@ -76,6 +79,7 @@ export interface DaemonOperatorHandoffObservation {
   nextActions: string[];
   detailFiles: {
     continuationStatus?: string | undefined;
+    automationEnvelope?: string | undefined;
     reviewQueueStatus?: string | undefined;
     scopeExpansionRequest?: string | undefined;
   };

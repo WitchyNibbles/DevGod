@@ -24,7 +24,7 @@ Make the shared `devgod` package use Codex-native local automation and desktop/a
 
 ## Current Milestone
 
-Desktop/app-native Codex integration surfaces, with workflow self-blocking repair completed and follow-on rollout verification queued
+Codex automation execution adapters, with the runtime envelope landed and the app handoff slice active
 
 ## Completed Milestones
 
@@ -34,17 +34,17 @@ Desktop/app-native Codex integration surfaces, with workflow self-blocking repai
 
 ## Current Task
 
-`2026-05-23-devgod-codex-automation-runtime-envelope`
+`2026-05-23-devgod-codex-app-automation-adapter`
 
 ## Next Task
 
-`2026-05-23-devgod-codex-app-automation-adapter`
+`2026-05-23-devgod-codex-cli-scheduler-adapter`
 
 ## Blockers
 
 - no workflow-contract scope blocker remains inside the completed CI regression repair slice
 - no blocking workflow or installed-harness issue remains inside the completed implementation scope
-- the current automation integration sequence is active and the runtime-envelope slice is the first required implementation step
+- the current automation integration sequence is active and the app-handoff slice is the next required implementation step
 
 ## Reasoning Debt
 
@@ -100,6 +100,11 @@ Desktop/app-native Codex integration surfaces, with workflow self-blocking repai
 - `node --experimental-strip-types --test tests/hooks.test.ts` passed
 - `node --experimental-strip-types --test tests/autopilot-status.test.ts` passed
 - `node --experimental-strip-types --test tests/admin.test.ts` passed
+- `node --experimental-strip-types --test tests/runtime-surface.test.ts` passed for the provider-backed runtime envelope slice
+- `node --experimental-strip-types --test tests/status-report.test.ts` passed for the provider-backed runtime envelope slice
+- `node --experimental-strip-types --test tests/ops-recovery.test.ts` passed for the provider-backed runtime envelope slice
+- `node --experimental-strip-types --test tests/hooks.test.ts` passed for the provider-backed runtime envelope slice
+- `git diff --check` passed for the provider-backed runtime envelope slice
 - seeded authoritative workflow proof run `d088daef-60bb-493f-93f3-4c4d02d9fc0a` for `2026-05-23-devgod-desktop-app-integration-surfaces`
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-desktop-app-integration-surfaces` now reaches authoritative workflow proof for this task
 - `bash scripts/verify-installed-repo-harness.sh` passed after adding strip-types support to the harness inline module invocation

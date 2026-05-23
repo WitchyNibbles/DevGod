@@ -24,8 +24,10 @@ import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin
 import {
   buildAutonomousOperatorSummary,
   classifyContinueAnalysisDirective,
+  resolveContinuationCapabilities,
   selectLocalContinuationProvider,
   type AutonomousContinuationProvider,
+  type AutonomousContinuationScheduleKind,
   type AutonomousOperatorSummary,
   type AutonomousWakeOwner,
   type ContinueAnalysisDirectiveClassification
@@ -3277,6 +3279,8 @@ async function writeDaemonContinuationStatus(
     actionKind?: ContinuationAction["kind"] | undefined;
     provider?: AutonomousContinuationProvider | undefined;
     wakeOwner?: AutonomousWakeOwner | undefined;
+    scheduleKind?: AutonomousContinuationScheduleKind | undefined;
+    schedule?: string | undefined;
     summary: string;
     nextActions: string[];
     blockers: string[];
@@ -3292,8 +3296,44 @@ async function writeDaemonContinuationStatus(
   );
 }
 
+async function writeDaemonAutomationEnvelope(
+  cwd: string,
+  envelope: {
+    provider: Exclude<AutonomousContinuationProvider, "none" | "manual_operator_handoff">;
+    wakeOwner: "operator";
+    continuationIntent: "defer_same_thread" | "defer_fresh_run";
+    targetMode: "same_thread" | "fresh_run";
+    scheduleKind: Exclude<AutonomousContinuationScheduleKind, "none" | "manual">;
+    schedule: string;
+    targetId: string;
+    source: "progress_proof" | "checkpoint";
+    sourceId?: string | undefined;
+    summary: string;
+    nextActions: string[];
+    workspaceSlug: string;
+    projectSlug: string;
+    activeRunId: string;
+    activeTaskId: string;
+    updatedAt: string;
+  }
+): Promise<void> {
+  const daemonDir = path.join(cwd, ".devgod", "work", "daemon");
+  await mkdir(daemonDir, { recursive: true });
+  await writeFile(
+    path.join(daemonDir, "automation-envelope.json"),
+    `${JSON.stringify(envelope, null, 2)}\n`,
+    "utf8"
+  );
+}
+
 async function clearDaemonContinuationStatus(cwd: string): Promise<void> {
   await rm(path.join(cwd, ".devgod", "work", "daemon", "continuation-status.json"), {
+    force: true
+  });
+}
+
+async function clearDaemonAutomationEnvelope(cwd: string): Promise<void> {
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "automation-envelope.json"), {
     force: true
   });
 }
@@ -3326,6 +3366,7 @@ async function writeDaemonOperatorHandoff(
     nextActions: string[];
     detailFiles: {
       continuationStatus?: string | undefined;
+      automationEnvelope?: string | undefined;
       reviewQueueStatus?: string | undefined;
       scopeExpansionRequest?: string | undefined;
     };
@@ -3520,18 +3561,38 @@ async function readDaemonContinuationStatus(
         ? parsed.actionKind
         : undefined;
     const provider =
-      parsed.provider === "none" || parsed.provider === "codex_cli_exec" ? parsed.provider : undefined;
+      parsed.provider === "none" ||
+      parsed.provider === "manual_operator_handoff" ||
+      parsed.provider === "codex_cli_exec_scheduler" ||
+      parsed.provider === "codex_cli_exec" ||
+      parsed.provider === "codex_app_thread_automation" ||
+      parsed.provider === "codex_app_standalone_automation"
+        ? parsed.provider
+        : undefined;
     const wakeOwner =
       parsed.wakeOwner === "none" || parsed.wakeOwner === "runtime" || parsed.wakeOwner === "operator"
         ? parsed.wakeOwner
         : undefined;
+    const scheduleKind =
+      parsed.scheduleKind === "none" ||
+      parsed.scheduleKind === "manual" ||
+      parsed.scheduleKind === "cron" ||
+      parsed.scheduleKind === "rrule"
+        ? parsed.scheduleKind
+        : undefined;
+    const schedule = typeof parsed.schedule === "string" ? parsed.schedule : undefined;
     const derivedProviderSelection =
       provider && wakeOwner
         ? undefined
         : executionMode === "operator_required"
           ? selectLocalContinuationProvider({
               executionMode,
-              continuationIntent: "blocked_external"
+              continuationIntent:
+                source === "checkpoint"
+                  ? "defer_same_thread"
+                  : source === "progress_proof"
+                    ? "defer_fresh_run"
+                    : "blocked_external"
             })
           : undefined;
     const summary =
@@ -3555,8 +3616,13 @@ async function readDaemonContinuationStatus(
       source,
       sourceId,
       actionKind,
-      provider: provider ?? derivedProviderSelection?.provider,
+      provider:
+        provider === "codex_cli_exec"
+          ? "codex_cli_exec_scheduler"
+          : (provider ?? derivedProviderSelection?.provider),
       wakeOwner: wakeOwner ?? derivedProviderSelection?.wakeOwner,
+      scheduleKind: scheduleKind ?? derivedProviderSelection?.scheduleKind,
+      schedule: schedule ?? derivedProviderSelection?.schedule,
       summary,
       nextActions,
       blockers,
@@ -3665,6 +3731,10 @@ async function readDaemonOperatorHandoff(
         continuationStatus:
           typeof detailFilesCandidate.continuationStatus === "string"
             ? detailFilesCandidate.continuationStatus
+            : undefined,
+        automationEnvelope:
+          typeof detailFilesCandidate.automationEnvelope === "string"
+            ? detailFilesCandidate.automationEnvelope
             : undefined,
         reviewQueueStatus:
           typeof detailFilesCandidate.reviewQueueStatus === "string"
@@ -7923,6 +7993,7 @@ export async function executeDaemonCommandFromArgs(
       const activeTaskId = projectRuntimeState?.activeTaskId ?? null;
       latestSessionId = latestSessionId ?? readDaemonSessionId(projectRuntimeState?.metadata);
       await clearDaemonContinuationStatus(cwd);
+      await clearDaemonAutomationEnvelope(cwd);
       await clearDaemonOperatorHandoff(cwd);
       await clearDaemonScopeExpansionRequest(cwd);
 
@@ -8257,8 +8328,10 @@ export async function executeDaemonCommandFromArgs(
 
         const providerSelection = selectLocalContinuationProvider({
           executionMode: input.classification.executionMode,
-          continuationIntent: input.classification.continuationIntent
+          continuationIntent: input.classification.continuationIntent,
+          capabilities: resolveContinuationCapabilities(env)
         });
+        const updatedAt = now().toISOString();
         await writeDaemonContinuationStatus(cwd, {
           state: "blocked",
           directiveKind: "continue_analysis",
@@ -8272,11 +8345,49 @@ export async function executeDaemonCommandFromArgs(
           actionKind: input.classification.action?.kind,
           provider: providerSelection.provider,
           wakeOwner: providerSelection.wakeOwner,
+          scheduleKind: providerSelection.scheduleKind,
+          schedule: providerSelection.schedule,
           summary: input.classification.summary,
           nextActions: [...input.directive.nextActions],
           blockers: [...input.directive.blockers],
-          updatedAt: now().toISOString()
+          updatedAt
         });
+        if (
+          (providerSelection.provider === "codex_app_thread_automation" ||
+            providerSelection.provider === "codex_app_standalone_automation" ||
+            providerSelection.provider === "codex_cli_exec_scheduler") &&
+          providerSelection.wakeOwner === "operator" &&
+          providerSelection.scheduleKind !== "none" &&
+          providerSelection.scheduleKind !== "manual" &&
+          typeof providerSelection.schedule === "string" &&
+          (input.classification.continuationIntent === "defer_same_thread" ||
+            input.classification.continuationIntent === "defer_fresh_run") &&
+          (input.directive.source === "checkpoint" || input.directive.source === "progress_proof")
+        ) {
+          await writeDaemonAutomationEnvelope(cwd, {
+            provider: providerSelection.provider,
+            wakeOwner: "operator",
+            continuationIntent: input.classification.continuationIntent,
+            targetMode: input.classification.continuationIntent === "defer_same_thread" ? "same_thread" : "fresh_run",
+            scheduleKind: providerSelection.scheduleKind,
+            schedule: providerSelection.schedule,
+            targetId: input.directive.targetId,
+            source: input.directive.source,
+            sourceId:
+              input.classification.action?.kind === "resume_target"
+                ? input.classification.action.sourceId
+                : undefined,
+            summary: input.classification.summary,
+            nextActions: [...input.directive.nextActions],
+            workspaceSlug,
+            projectSlug,
+            activeRunId,
+            activeTaskId,
+            updatedAt
+          });
+        } else {
+          await clearDaemonAutomationEnvelope(cwd);
+        }
         cycles.push({
           cycle,
           directiveKind: input.directive.kind,
@@ -8296,7 +8407,14 @@ export async function executeDaemonCommandFromArgs(
           directiveKind: input.directive.kind,
           nextActions: [...input.directive.nextActions],
           detailFiles: {
-            continuationStatus: ".devgod/work/daemon/continuation-status.json"
+            continuationStatus: ".devgod/work/daemon/continuation-status.json",
+            ...(providerSelection.provider === "codex_app_thread_automation" ||
+            providerSelection.provider === "codex_app_standalone_automation" ||
+            providerSelection.provider === "codex_cli_exec_scheduler"
+              ? {
+                  automationEnvelope: ".devgod/work/daemon/automation-envelope.json"
+                }
+              : {})
           }
         });
       };

@@ -1606,6 +1606,8 @@ test("executeStatusCommandFromArgs marks advisory continuation as operator-requi
   });
 
   assert.equal(report.autonomous.resume.executionMode, "operator_required");
+  assert.equal(report.autonomous.resume.provider, "codex_cli_exec_scheduler");
+  assert.equal(report.autonomous.resume.wakeOwner, "operator");
   assert.match(
     report.autonomous.resume.executionSummary,
     /operator input is required for advisory continuation target artifact:resume/
@@ -1697,6 +1699,8 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
     assert.equal(report.daemon.continuation?.source, "progress_proof");
     assert.equal(report.daemon.continuation?.sourceId, "proof-1");
     assert.equal(report.daemon.continuation?.actionKind, "resume_target");
+    assert.equal(report.daemon.continuation?.provider, "codex_cli_exec_scheduler");
+    assert.equal(report.daemon.continuation?.wakeOwner, "operator");
     assert.deepEqual(report.daemon.continuation?.nextActions, [
       "consult operator evidence before resuming the artifact target"
     ]);

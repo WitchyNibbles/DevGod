@@ -6,13 +6,13 @@
 
 ## Status
 
-`active`
+`complete`
 
 ## Date
 
 `2026-05-23`
 
-## Planned in this slice
+## Completed in this slice
 
 - broaden the continuation provider contract beyond CLI-only advisory ownership
 - add schedule and envelope metadata for deferred continuation
