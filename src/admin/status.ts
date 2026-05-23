@@ -7,7 +7,12 @@ import type {
   TaskStatus
 } from "../domain/types.ts";
 import type { GitNexusStatusObservation } from "./gitnexus.ts";
-import { buildAutonomousOperatorSummary, type AutonomousOperatorSummary } from "./autonomous-summary.ts";
+import {
+  buildAutonomousOperatorSummary,
+  type AutonomousContinuationProvider,
+  type AutonomousOperatorSummary,
+  type AutonomousWakeOwner
+} from "./autonomous-summary.ts";
 import { buildRuntimeTraceRegistry } from "../runtime/runtime-trace-registry.ts";
 
 type StatusAuthorityLabel = "runtime_authoritative" | "derived_only";
@@ -35,6 +40,8 @@ export interface DaemonContinuationStatusObservation {
   source?: "blocking_gap" | "progress_proof" | "checkpoint" | undefined;
   sourceId?: string | undefined;
   actionKind?: "resolve_blocking_gap" | "run_workflow_proof" | "resume_target" | undefined;
+  provider?: AutonomousContinuationProvider | undefined;
+  wakeOwner?: AutonomousWakeOwner | undefined;
   summary: string;
   nextActions: string[];
   blockers: string[];
