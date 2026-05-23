@@ -84,6 +84,12 @@ export function buildOperatorDashboardReport(input: {
     }
   }
 
+  if (input.status.daemon.handoff?.detailFiles.appAutomationRequest) {
+    nextActions.push(
+      `apply Codex app automation request: ${input.status.daemon.handoff.detailFiles.appAutomationRequest}`
+    );
+  }
+
   if (input.status.daemon.supervisor) {
     alerts.push(
       `daemon supervisor ${input.status.daemon.supervisor.state}: ${input.status.daemon.supervisor.reason}`

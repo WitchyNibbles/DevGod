@@ -6,13 +6,13 @@
 
 ## Status
 
-`active`
+`complete`
 
 ## Date
 
 `2026-05-23`
 
-## Planned in this slice
+## Completed in this slice
 
 - generate durable request artifacts for app-thread and app-standalone continuation providers
 - move supervisor app-provider handling from rerun loops to materialized handoff completion

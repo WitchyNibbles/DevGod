@@ -360,6 +360,16 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
     if (report.status.daemon.handoff.nextActions.length > 0) {
       lines.push(`- daemon handoff next actions: ${report.status.daemon.handoff.nextActions.join("; ")}`);
     }
+    const handoffFiles = [
+      report.status.daemon.handoff.detailFiles.continuationStatus,
+      report.status.daemon.handoff.detailFiles.automationEnvelope,
+      report.status.daemon.handoff.detailFiles.appAutomationRequest,
+      report.status.daemon.handoff.detailFiles.reviewQueueStatus,
+      report.status.daemon.handoff.detailFiles.scopeExpansionRequest
+    ].filter((value): value is string => typeof value === "string" && value.length > 0);
+    if (handoffFiles.length > 0) {
+      lines.push(`- daemon handoff files: ${handoffFiles.join("; ")}`);
+    }
   }
   if (report.status.daemon.supervisor) {
     lines.push(

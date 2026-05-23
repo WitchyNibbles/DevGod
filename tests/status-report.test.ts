@@ -1674,7 +1674,8 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
           directiveKind: "continue_analysis",
           nextActions: ["consult operator evidence before resuming the artifact target"],
           detailFiles: {
-            continuationStatus: ".devgod/work/daemon/continuation-status.json"
+            continuationStatus: ".devgod/work/daemon/continuation-status.json",
+            appAutomationRequest: ".devgod/work/daemon/app-automation-request.json"
           },
           updatedAt: "2026-05-16T10:00:00.000Z"
         },
@@ -1720,6 +1721,10 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
     assert.equal(
       report.daemon.handoff?.detailFiles.continuationStatus,
       ".devgod/work/daemon/continuation-status.json"
+    );
+    assert.equal(
+      report.daemon.handoff?.detailFiles.appAutomationRequest,
+      ".devgod/work/daemon/app-automation-request.json"
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

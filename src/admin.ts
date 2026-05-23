@@ -1181,7 +1181,7 @@ export interface DaemonCommandResult {
 
 interface SupervisorActionRecord {
   cycle: number;
-  action: "enqueue_operator_continuation" | "enqueue_review_action";
+  action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
   targetId?: string | undefined;
   taskId?: string | undefined;
   reviewRole?: ReviewRecord["reviewerRole"] | undefined;
@@ -3338,6 +3338,268 @@ async function clearDaemonAutomationEnvelope(cwd: string): Promise<void> {
   });
 }
 
+async function readDaemonAutomationEnvelope(
+  cwd: string
+): Promise<
+  | {
+      provider: Exclude<AutonomousContinuationProvider, "none" | "manual_operator_handoff">;
+      wakeOwner: "operator";
+      continuationIntent: "defer_same_thread" | "defer_fresh_run";
+      targetMode: "same_thread" | "fresh_run";
+      scheduleKind: Exclude<AutonomousContinuationScheduleKind, "none" | "manual">;
+      schedule: string;
+      targetId: string;
+      source: "progress_proof" | "checkpoint";
+      sourceId?: string | undefined;
+      summary: string;
+      nextActions: string[];
+      workspaceSlug: string;
+      projectSlug: string;
+      activeRunId: string;
+      activeTaskId: string;
+      updatedAt?: string | undefined;
+    }
+  | undefined
+> {
+  const envelopePath = path.join(cwd, ".devgod", "work", "daemon", "automation-envelope.json");
+  let raw: string;
+  try {
+    raw = await readFile(envelopePath, "utf8");
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : "";
+    if (code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const provider =
+    parsed.provider === "codex_cli_exec_scheduler" ||
+    parsed.provider === "codex_app_thread_automation" ||
+    parsed.provider === "codex_app_standalone_automation"
+      ? parsed.provider
+      : undefined;
+  const wakeOwner = parsed.wakeOwner === "operator" ? "operator" : undefined;
+  const continuationIntent =
+    parsed.continuationIntent === "defer_same_thread" || parsed.continuationIntent === "defer_fresh_run"
+      ? parsed.continuationIntent
+      : undefined;
+  const targetMode =
+    parsed.targetMode === "same_thread" || parsed.targetMode === "fresh_run" ? parsed.targetMode : undefined;
+  const scheduleKind =
+    parsed.scheduleKind === "cron" || parsed.scheduleKind === "rrule" ? parsed.scheduleKind : undefined;
+  const schedule = typeof parsed.schedule === "string" ? parsed.schedule : undefined;
+  const targetId = typeof parsed.targetId === "string" ? parsed.targetId : undefined;
+  const source = parsed.source === "progress_proof" || parsed.source === "checkpoint" ? parsed.source : undefined;
+  const summary = typeof parsed.summary === "string" ? parsed.summary : undefined;
+  const workspaceSlug = typeof parsed.workspaceSlug === "string" ? parsed.workspaceSlug : undefined;
+  const projectSlug = typeof parsed.projectSlug === "string" ? parsed.projectSlug : undefined;
+  const activeRunId = typeof parsed.activeRunId === "string" ? parsed.activeRunId : undefined;
+  const activeTaskId = typeof parsed.activeTaskId === "string" ? parsed.activeTaskId : undefined;
+  if (
+    !provider ||
+    !wakeOwner ||
+    !continuationIntent ||
+    !targetMode ||
+    !scheduleKind ||
+    !schedule ||
+    !targetId ||
+    !source ||
+    !summary ||
+    !workspaceSlug ||
+    !projectSlug ||
+    !activeRunId ||
+    !activeTaskId
+  ) {
+    return undefined;
+  }
+
+  return {
+    provider,
+    wakeOwner,
+    continuationIntent,
+    targetMode,
+    scheduleKind,
+    schedule,
+    targetId,
+    source,
+    sourceId: typeof parsed.sourceId === "string" ? parsed.sourceId : undefined,
+    summary,
+    nextActions: Array.isArray(parsed.nextActions)
+      ? parsed.nextActions.filter((value): value is string => typeof value === "string")
+      : [],
+    workspaceSlug,
+    projectSlug,
+    activeRunId,
+    activeTaskId,
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined
+  };
+}
+
+function convertSupportedCronScheduleToRrule(schedule: string): string {
+  switch (schedule.trim()) {
+    case "*/30 * * * *":
+      return "FREQ=MINUTELY;INTERVAL=30";
+    case "0 * * * *":
+      return "FREQ=HOURLY;INTERVAL=1";
+    default:
+      throw new Error(`unsupported cron schedule for Codex app automation handoff: ${schedule}`);
+  }
+}
+
+function buildAppAutomationPrompt(input: {
+  envelope: {
+    continuationIntent: "defer_same_thread" | "defer_fresh_run";
+    targetMode: "same_thread" | "fresh_run";
+    targetId: string;
+    source: "progress_proof" | "checkpoint";
+    sourceId?: string | undefined;
+    summary: string;
+    nextActions: string[];
+    workspaceSlug: string;
+    projectSlug: string;
+    activeRunId: string;
+    activeTaskId: string;
+  };
+  cwd: string;
+}): string {
+  const lines = [
+    `Resume deferred devgod work for workspace ${input.envelope.workspaceSlug} project ${input.envelope.projectSlug}.`,
+    `Repo root: ${input.cwd}`,
+    `Active run: ${input.envelope.activeRunId}`,
+    `Active task: ${input.envelope.activeTaskId}`,
+    `Continuation target: ${input.envelope.targetId}`,
+    `Continuation intent: ${input.envelope.continuationIntent}`,
+    `Target mode: ${input.envelope.targetMode}`,
+    `Resume source: ${input.envelope.source}${input.envelope.sourceId ? ` (${input.envelope.sourceId})` : ""}`,
+    `Summary: ${input.envelope.summary}`,
+    "Before making changes, read `.devgod/work/daemon/automation-envelope.json` and confirm the active runtime task still matches this request.",
+    "Carry out the recorded continuation target, record concrete progress or blockers, and stop if the task becomes blocked by external input or no longer remains active."
+  ];
+  if (input.envelope.nextActions.length > 0) {
+    lines.push(`Next actions: ${input.envelope.nextActions.join("; ")}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function detectGitAutomationExecutionEnvironment(cwd: string): Promise<"worktree" | "local"> {
+  try {
+    await access(path.join(cwd, ".git"));
+    return "worktree";
+  } catch {
+    return "local";
+  }
+}
+
+async function writeDaemonAppAutomationRequest(
+  cwd: string,
+  input: {
+    envelope: {
+      provider: "codex_app_thread_automation" | "codex_app_standalone_automation";
+      continuationIntent: "defer_same_thread" | "defer_fresh_run";
+      targetMode: "same_thread" | "fresh_run";
+      scheduleKind: "cron" | "rrule";
+      schedule: string;
+      targetId: string;
+      source: "progress_proof" | "checkpoint";
+      sourceId?: string | undefined;
+      summary: string;
+      nextActions: string[];
+      workspaceSlug: string;
+      projectSlug: string;
+      activeRunId: string;
+      activeTaskId: string;
+    };
+    updatedAt: string;
+  }
+): Promise<string> {
+  const daemonDir = path.join(cwd, ".devgod", "work", "daemon");
+  await mkdir(daemonDir, { recursive: true });
+  const relativePath = ".devgod/work/daemon/app-automation-request.json";
+  const appSchedule =
+    input.envelope.scheduleKind === "rrule"
+      ? input.envelope.schedule
+      : convertSupportedCronScheduleToRrule(input.envelope.schedule);
+  const prompt = buildAppAutomationPrompt({
+    envelope: input.envelope,
+    cwd
+  });
+  const executionEnvironment =
+    input.envelope.provider === "codex_app_standalone_automation"
+      ? await detectGitAutomationExecutionEnvironment(cwd)
+      : undefined;
+  const request =
+    input.envelope.provider === "codex_app_thread_automation"
+      ? {
+          tool: "automation_update",
+          request: {
+            mode: "suggested_create",
+            kind: "heartbeat",
+            destination: "thread",
+            name: `Devgod same-thread follow-up: ${input.envelope.activeTaskId}`,
+            prompt,
+            rrule: appSchedule,
+            status: "ACTIVE"
+          },
+          context: {
+            provider: input.envelope.provider,
+            workspaceSlug: input.envelope.workspaceSlug,
+            projectSlug: input.envelope.projectSlug,
+            activeRunId: input.envelope.activeRunId,
+            activeTaskId: input.envelope.activeTaskId,
+            targetId: input.envelope.targetId,
+            targetMode: input.envelope.targetMode,
+            notes: [
+              "Apply this request through the Codex app automation surface as a thread heartbeat.",
+              "The automation should return to the same conversation rather than starting a fresh background run."
+            ],
+            generatedAt: input.updatedAt
+          }
+        }
+      : {
+          tool: "automation_update",
+          request: {
+            mode: "suggested_create",
+            kind: "cron",
+            executionEnvironment,
+            cwds: [cwd],
+            name: `Devgod deferred run: ${input.envelope.activeTaskId}`,
+            prompt,
+            rrule: appSchedule,
+            status: "ACTIVE"
+          },
+          context: {
+            provider: input.envelope.provider,
+            workspaceSlug: input.envelope.workspaceSlug,
+            projectSlug: input.envelope.projectSlug,
+            activeRunId: input.envelope.activeRunId,
+            activeTaskId: input.envelope.activeTaskId,
+            targetId: input.envelope.targetId,
+            targetMode: input.envelope.targetMode,
+            executionEnvironment,
+            notes: [
+              "Apply this request through the Codex app automation surface as a standalone automation.",
+              executionEnvironment === "worktree"
+                ? "Worktree execution is recommended because the repo exposes Git metadata."
+                : "Local-project execution is suggested because no Git metadata was detected in the repo root."
+            ],
+            generatedAt: input.updatedAt
+          }
+        };
+  await writeFile(path.join(cwd, relativePath), `${JSON.stringify(request, null, 2)}\n`, "utf8");
+  return relativePath;
+}
+
+async function clearDaemonAppAutomationRequest(cwd: string): Promise<void> {
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "app-automation-request.json"), {
+    force: true
+  });
+}
+
 async function writeDaemonOperatorHandoff(
   cwd: string,
   handoff: {
@@ -3367,6 +3629,7 @@ async function writeDaemonOperatorHandoff(
     detailFiles: {
       continuationStatus?: string | undefined;
       automationEnvelope?: string | undefined;
+      appAutomationRequest?: string | undefined;
       reviewQueueStatus?: string | undefined;
       scopeExpansionRequest?: string | undefined;
     };
@@ -3436,7 +3699,7 @@ async function writeDaemonSupervisorStatus(
     missingReviewRoles: string[];
     actions: Array<{
       cycle: number;
-      action: "enqueue_operator_continuation" | "enqueue_review_action";
+      action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
       targetId?: string | undefined;
       taskId?: string | undefined;
       reviewRole?: string | undefined;
@@ -3491,7 +3754,7 @@ async function appendDaemonSupervisorHistory(
     missingReviewRoles: string[];
     actions: Array<{
       cycle: number;
-      action: "enqueue_operator_continuation" | "enqueue_review_action";
+      action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
       targetId?: string | undefined;
       taskId?: string | undefined;
       reviewRole?: string | undefined;
@@ -3736,6 +3999,10 @@ async function readDaemonOperatorHandoff(
           typeof detailFilesCandidate.automationEnvelope === "string"
             ? detailFilesCandidate.automationEnvelope
             : undefined,
+        appAutomationRequest:
+          typeof detailFilesCandidate.appAutomationRequest === "string"
+            ? detailFilesCandidate.appAutomationRequest
+            : undefined,
         reviewQueueStatus:
           typeof detailFilesCandidate.reviewQueueStatus === "string"
             ? detailFilesCandidate.reviewQueueStatus
@@ -3821,8 +4088,13 @@ async function readDaemonSupervisorStatus(
           }
           const candidate = value as Record<string, unknown>;
           const action =
-            candidate.action === "enqueue_operator_continuation" || candidate.action === "enqueue_review_action"
-              ? (candidate.action as "enqueue_operator_continuation" | "enqueue_review_action")
+            candidate.action === "enqueue_operator_continuation" ||
+            candidate.action === "enqueue_review_action" ||
+            candidate.action === "materialize_app_automation"
+              ? (candidate.action as
+                  | "enqueue_operator_continuation"
+                  | "enqueue_review_action"
+                  | "materialize_app_automation")
               : undefined;
           const cycle = typeof candidate.cycle === "number" ? candidate.cycle : undefined;
           const filePath = typeof candidate.filePath === "string" ? candidate.filePath : undefined;
@@ -7994,6 +8266,7 @@ export async function executeDaemonCommandFromArgs(
       latestSessionId = latestSessionId ?? readDaemonSessionId(projectRuntimeState?.metadata);
       await clearDaemonContinuationStatus(cwd);
       await clearDaemonAutomationEnvelope(cwd);
+      await clearDaemonAppAutomationRequest(cwd);
       await clearDaemonOperatorHandoff(cwd);
       await clearDaemonScopeExpansionRequest(cwd);
 
@@ -9142,6 +9415,85 @@ export async function executeSupervisorCommandFromArgs(
         activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
         activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
         sessionId: handoff.sessionId ?? daemonResult.result.sessionId
+      });
+    }
+
+    if (
+      continuationStatus.provider === "codex_app_thread_automation" ||
+      continuationStatus.provider === "codex_app_standalone_automation"
+    ) {
+      const envelope = await readDaemonAutomationEnvelope(cwd);
+      if (
+        !envelope ||
+        envelope.provider !== continuationStatus.provider ||
+        envelope.targetId !== continuationStatus.targetId
+      ) {
+        return finalize({
+          status: "blocked",
+          blockerKind: "continuation_derivation_failed",
+          reason: "supervisor could not derive the Codex app automation handoff from the daemon envelope",
+          activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+          activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+          sessionId: handoff.sessionId ?? daemonResult.result.sessionId
+        });
+      }
+
+      const nowValue = now().toISOString();
+      const appAutomationRequestPath = await writeDaemonAppAutomationRequest(cwd, {
+        envelope: {
+          provider: envelope.provider,
+          continuationIntent: envelope.continuationIntent,
+          targetMode: envelope.targetMode,
+          scheduleKind: envelope.scheduleKind,
+          schedule: envelope.schedule,
+          targetId: envelope.targetId,
+          source: envelope.source,
+          sourceId: envelope.sourceId,
+          summary: envelope.summary,
+          nextActions: envelope.nextActions,
+          workspaceSlug: envelope.workspaceSlug,
+          projectSlug: envelope.projectSlug,
+          activeRunId: envelope.activeRunId,
+          activeTaskId: envelope.activeTaskId
+        },
+        updatedAt: nowValue
+      });
+      await writeDaemonOperatorHandoff(cwd, {
+        state: "blocked",
+        blockerKind: handoff.blockerKind,
+        reason: handoff.reason,
+        workspaceSlug: handoff.workspaceSlug ?? workspaceSlug,
+        projectSlug: handoff.projectSlug ?? projectSlug,
+        activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+        activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+        sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
+        cycle,
+        directiveKind: handoff.directiveKind,
+        nextActions: [`apply the Codex app automation request in ${appAutomationRequestPath}`, ...handoff.nextActions],
+        detailFiles: {
+          ...handoff.detailFiles,
+          appAutomationRequest: appAutomationRequestPath
+        },
+        updatedAt: nowValue
+      });
+      const summary =
+        envelope.provider === "codex_app_thread_automation"
+          ? `materialized Codex app thread automation request for ${continuationStatus.targetId}`
+          : `materialized Codex app standalone automation request for ${continuationStatus.targetId}`;
+      actions.push({
+        cycle,
+        action: "materialize_app_automation",
+        targetId: continuationStatus.targetId,
+        filePath: appAutomationRequestPath,
+        summary
+      });
+      return finalize({
+        status: "completed",
+        reason: summary,
+        activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+        activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+        sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
+        nextActions: [`apply the Codex app automation request in ${appAutomationRequestPath}`]
       });
     }
 

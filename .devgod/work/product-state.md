@@ -24,7 +24,7 @@ Make the shared `devgod` package use Codex-native local automation and desktop/a
 
 ## Current Milestone
 
-Codex automation execution adapters, with the runtime envelope landed and the app handoff slice active
+Codex automation execution adapters, with app handoff complete and CLI scheduler handoff active
 
 ## Completed Milestones
 
@@ -34,17 +34,17 @@ Codex automation execution adapters, with the runtime envelope landed and the ap
 
 ## Current Task
 
-`2026-05-23-devgod-codex-app-automation-adapter`
+`2026-05-23-devgod-codex-cli-scheduler-adapter`
 
 ## Next Task
 
-`2026-05-23-devgod-codex-cli-scheduler-adapter`
+`2026-05-23-devgod-codex-automation-rollout-verification`
 
 ## Blockers
 
 - no workflow-contract scope blocker remains inside the completed CI regression repair slice
 - no blocking workflow or installed-harness issue remains inside the completed implementation scope
-- the current automation integration sequence is active and the app-handoff slice is the next required implementation step
+- the current automation integration sequence is active and the CLI scheduler handoff slice is the next required implementation step
 
 ## Reasoning Debt
 
@@ -105,6 +105,10 @@ Codex automation execution adapters, with the runtime envelope landed and the ap
 - `node --experimental-strip-types --test tests/ops-recovery.test.ts` passed for the provider-backed runtime envelope slice
 - `node --experimental-strip-types --test tests/hooks.test.ts` passed for the provider-backed runtime envelope slice
 - `git diff --check` passed for the provider-backed runtime envelope slice
+- `node --experimental-strip-types --test tests/admin.test.ts` passed for the app automation handoff slice
+- `node --experimental-strip-types --test tests/status-report.test.ts` passed for the app automation handoff slice
+- `node --experimental-strip-types --test tests/ops-recovery.test.ts` passed for the app automation handoff slice
+- `node --experimental-strip-types --test tests/report-command.test.ts` passed for the app automation handoff slice
 - seeded authoritative workflow proof run `d088daef-60bb-493f-93f3-4c4d02d9fc0a` for `2026-05-23-devgod-desktop-app-integration-surfaces`
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-desktop-app-integration-surfaces` now reaches authoritative workflow proof for this task
 - `bash scripts/verify-installed-repo-harness.sh` passed after adding strip-types support to the harness inline module invocation

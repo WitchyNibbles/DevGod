@@ -80,6 +80,7 @@ export interface DaemonOperatorHandoffObservation {
   detailFiles: {
     continuationStatus?: string | undefined;
     automationEnvelope?: string | undefined;
+    appAutomationRequest?: string | undefined;
     reviewQueueStatus?: string | undefined;
     scopeExpansionRequest?: string | undefined;
   };
@@ -109,7 +110,7 @@ export interface DaemonSupervisorStatusObservation {
   missingReviewRoles: string[];
   actions: Array<{
     cycle: number;
-    action: "enqueue_operator_continuation" | "enqueue_review_action";
+    action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
     targetId?: string | undefined;
     taskId?: string | undefined;
     reviewRole?: string | undefined;

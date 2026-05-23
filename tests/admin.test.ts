@@ -4588,6 +4588,435 @@ test("executeSupervisorCommandFromArgs synthesizes operator continuation actions
   }
 });
 
+test("executeSupervisorCommandFromArgs materializes a same-thread Codex app automation request and stops cleanly", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor app-thread handoff",
+    request: "Supervisor should materialize a same-thread Codex app automation request.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeOpenGap: false,
+    includeCheckpoint: true,
+    checkpointTarget: "artifact:resume",
+    progressNextTarget: "artifact:resume",
+    gapNextActions: ["check the artifact again after the next heartbeat"],
+    progressWhyNext: "Return to the same thread after a timed heartbeat."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-app-thread-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: {
+          ...process.env,
+          DEVGOD_CODEX_APP_THREAD_AUTOMATION: "true",
+          DEVGOD_CODEX_APP_STANDALONE_AUTOMATION: "true"
+        },
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            mode: "runtime_authoritative" as const,
+            runId,
+            runStatus: "approved" as const,
+            autonomousExecution: undefined,
+            directive: {
+              kind: "continue_analysis" as const,
+              targetId: "artifact:resume",
+              source: "checkpoint" as const,
+              actions: [
+                {
+                  kind: "resume_target" as const,
+                  targetId: "artifact:resume",
+                  source: "checkpoint" as const,
+                  sourceId: "cp-admin"
+                }
+              ],
+              nextActions: ["check the artifact again after the next heartbeat"],
+              blockers: [],
+              rationale: ["timed same-thread follow-up is required"]
+            }
+          });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should materialize an app heartbeat request instead of launching another Codex turn");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.daemonRuns.length, 1);
+    assert.equal(result.result.daemonRuns[0]?.status, "blocked");
+    assert.equal(result.result.actions.length, 1);
+    assert.equal(result.result.actions[0]?.action, "materialize_app_automation");
+    assert.equal(result.result.actions[0]?.targetId, "artifact:resume");
+
+    const request = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "app-automation-request.json"), "utf8")
+    ) as {
+      tool: string;
+      request: {
+        mode: string;
+        kind: string;
+        destination?: string | undefined;
+        prompt: string;
+        rrule: string;
+        status: string;
+      };
+      context: {
+        provider: string;
+        targetMode: string;
+      };
+    };
+    assert.equal(request.tool, "automation_update");
+    assert.equal(request.request.mode, "suggested_create");
+    assert.equal(request.request.kind, "heartbeat");
+    assert.equal(request.request.destination, "thread");
+    assert.equal(request.request.rrule, "FREQ=MINUTELY;INTERVAL=30");
+    assert.equal(request.request.status, "ACTIVE");
+    assert.match(request.request.prompt, /Continuation target: artifact:resume/);
+    assert.match(request.request.prompt, /Continuation intent: defer_same_thread/);
+    assert.equal(request.context.provider, "codex_app_thread_automation");
+    assert.equal(request.context.targetMode, "same_thread");
+
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      detailFiles?: { appAutomationRequest?: string | undefined };
+      nextActions?: string[];
+    };
+    assert.equal(
+      operatorHandoff.detailFiles?.appAutomationRequest,
+      ".devgod/work/daemon/app-automation-request.json"
+    );
+    assert.ok(
+      operatorHandoff.nextActions?.some((action) => action.includes(".devgod/work/daemon/app-automation-request.json"))
+    );
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs materializes a standalone Codex app automation request with worktree guidance", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor app-standalone handoff",
+    request: "Supervisor should materialize a standalone Codex app automation request.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeOpenGap: false,
+    includeCheckpoint: false,
+    progressNextTarget: "artifact:fresh-run",
+    progressWhyNext: "Return through a fresh automation run."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-app-standalone-"));
+  await mkdir(path.join(daemonCwd, ".git"), { recursive: true });
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: {
+          ...process.env,
+          DEVGOD_CODEX_APP_THREAD_AUTOMATION: "true",
+          DEVGOD_CODEX_APP_STANDALONE_AUTOMATION: "true"
+        },
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            mode: "runtime_authoritative" as const,
+            runId,
+            runStatus: "approved" as const,
+            autonomousExecution: undefined,
+            directive: {
+              kind: "continue_analysis" as const,
+              targetId: "artifact:fresh-run",
+              source: "progress_proof" as const,
+              actions: [
+                {
+                  kind: "resume_target" as const,
+                  targetId: "artifact:fresh-run",
+                  source: "progress_proof" as const,
+                  sourceId: "proof-admin"
+                }
+              ],
+              nextActions: ["start a fresh automation run after the next scheduled interval"],
+              blockers: [],
+              rationale: ["fresh background follow-up is required"]
+            }
+          });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should materialize an app standalone request instead of launching another Codex turn");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.daemonRuns.length, 1);
+    assert.equal(result.result.daemonRuns[0]?.status, "blocked");
+    assert.equal(result.result.actions.length, 1);
+    assert.equal(result.result.actions[0]?.action, "materialize_app_automation");
+    assert.equal(result.result.actions[0]?.targetId, "artifact:fresh-run");
+
+    const request = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "app-automation-request.json"), "utf8")
+    ) as {
+      tool: string;
+      request: {
+        mode: string;
+        kind: string;
+        executionEnvironment?: string | undefined;
+        cwds?: string[] | undefined;
+        prompt: string;
+        rrule: string;
+      };
+      context: {
+        provider: string;
+        targetMode: string;
+        executionEnvironment?: string | undefined;
+      };
+    };
+    assert.equal(request.tool, "automation_update");
+    assert.equal(request.request.mode, "suggested_create");
+    assert.equal(request.request.kind, "cron");
+    assert.equal(request.request.executionEnvironment, "worktree");
+    assert.deepEqual(request.request.cwds, [daemonCwd]);
+    assert.equal(request.request.rrule, "FREQ=HOURLY;INTERVAL=1");
+    assert.match(request.request.prompt, /Continuation target: artifact:fresh-run/);
+    assert.match(request.request.prompt, /Continuation intent: defer_fresh_run/);
+    assert.equal(request.context.provider, "codex_app_standalone_automation");
+    assert.equal(request.context.targetMode, "fresh_run");
+    assert.equal(request.context.executionEnvironment, "worktree");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
 test("executeSupervisorCommandFromArgs synthesizes trusted review actions and reruns the daemon", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {

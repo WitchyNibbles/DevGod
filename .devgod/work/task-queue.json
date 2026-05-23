@@ -1,6 +1,6 @@
 {
   "project_status": "in_progress",
-  "current_task_id": "2026-05-23-devgod-codex-app-automation-adapter",
+  "current_task_id": "2026-05-23-devgod-codex-cli-scheduler-adapter",
   "tasks": [
     {
       "id": "2026-05-23-devgod-codex-automation-runtime-envelope",
@@ -32,7 +32,7 @@
     {
       "id": "2026-05-23-devgod-codex-app-automation-adapter",
       "title": "Codex app automation request adapter surfaces",
-      "status": "in_progress",
+      "status": "done",
       "class": "implementation_slice",
       "depends_on": [
         "2026-05-23-devgod-codex-automation-runtime-envelope"
@@ -54,7 +54,7 @@
     {
       "id": "2026-05-23-devgod-codex-cli-scheduler-adapter",
       "title": "Codex CLI scheduler handoff surfaces",
-      "status": "pending",
+      "status": "in_progress",
       "class": "implementation_slice",
       "depends_on": [
         "2026-05-23-devgod-codex-app-automation-adapter"
@@ -67,7 +67,9 @@
         "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/runtime-surface.test.ts"
       ],
       "evidence": [
-        "task packet: 2026-05-23-devgod-codex-cli-scheduler-adapter"
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-cli-scheduler-adapter.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-cli-scheduler-adapter.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-cli-scheduler-adapter.md"
       ],
       "blocker": null
     },
