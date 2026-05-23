@@ -383,6 +383,14 @@ test("ci workflow pins external actions and keeps read-only permissions", async 
   assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
   assert.match(ciWorkflow, /merge_group:/);
   assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
+  assert.match(
+    ciWorkflow,
+    /DEVGOD_REVIEW_IDENTITY_BINDINGS: \.devgod\/templates\/review-identity-bindings\.json/
+  );
+  assert.match(
+    ciWorkflow,
+    /DEVGOD_REVIEW_IDENTITY_FIXTURES: \.devgod\/templates\/review-identity-adapter\.fixture\.json/
+  );
   assert.match(ciWorkflow, /qdrant\/qdrant:v1\.13\.4/);
   assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
   assert.doesNotMatch(ciWorkflow, /contents: write/);
@@ -397,6 +405,10 @@ test("ci workflow routes the release posture through the release overlay gate", 
   assert.match(ciWorkflow, /npm run verify:release-overlay/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
+  assert.doesNotMatch(
+    ciWorkflow,
+    /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*persist-credentials: false/
+  );
   assert.doesNotMatch(ciWorkflow, /- run: npm test/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:quality/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:coverage/);

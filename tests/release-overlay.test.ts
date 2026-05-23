@@ -19,6 +19,14 @@ test("release overlay verification script stays aligned with CI", async () => {
   assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.match(ciWorkflow, /jobs:\n  release-overlay:/);
   assert.match(ciWorkflow, /- run: npm run verify:release-overlay/);
+  assert.match(
+    ciWorkflow,
+    /DEVGOD_REVIEW_IDENTITY_BINDINGS: \.devgod\/templates\/review-identity-bindings\.json/
+  );
+  assert.match(
+    ciWorkflow,
+    /DEVGOD_REVIEW_IDENTITY_FIXTURES: \.devgod\/templates\/review-identity-adapter\.fixture\.json/
+  );
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n\s+qdrant:\n\s+image: qdrant\/qdrant:v1\.13\.4/);
   assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
@@ -34,6 +42,11 @@ test("release overlay verification script stays aligned with CI", async () => {
 
   const qualityScript = await readFile(join(repoRoot, "scripts", "check-quality.sh"), "utf8");
   assert.match(qualityScript, /npm run check:coverage/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*\n      - name: Checkout source\n        uses: actions\/checkout@/);
+  assert.doesNotMatch(
+    ciWorkflow,
+    /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*persist-credentials: false/
+  );
 });
 
 test("README documents the opt-in overlay release posture honestly", async () => {
