@@ -12,6 +12,14 @@ import type {
 
 export type AutonomousResumeStatus = "not_configured" | "ready" | "blocked";
 export type AutonomousResumeExecutionMode = "none" | "runtime_executable" | "operator_required";
+export type AutonomousContinuationIntent =
+  | "unknown"
+  | "continue_now"
+  | "defer_same_thread"
+  | "defer_fresh_run"
+  | "blocked_external";
+export type AutonomousContinuationProvider = "none" | "codex_cli_exec";
+export type AutonomousWakeOwner = "none" | "runtime" | "operator";
 export type AutonomousResumeSource =
   | "none"
   | "checkpoint"
@@ -28,6 +36,9 @@ export interface AutonomousResumeGuidance {
   nextActions: string[];
   blockers: string[];
   executionMode: AutonomousResumeExecutionMode;
+  continuationIntent: AutonomousContinuationIntent;
+  provider: AutonomousContinuationProvider;
+  wakeOwner: AutonomousWakeOwner;
   executionSummary: string;
   checkpointId?: string | undefined;
   progressProofId?: string | undefined;
@@ -35,6 +46,7 @@ export interface AutonomousResumeGuidance {
 
 export interface ContinueAnalysisDirectiveClassification {
   executionMode: Exclude<AutonomousResumeExecutionMode, "none">;
+  continuationIntent: Exclude<AutonomousContinuationIntent, "unknown">;
   summary: string;
   action?: ContinuationAction | undefined;
 }
@@ -80,6 +92,9 @@ export function buildAutonomousOperatorSummary(input: {
         nextActions: [],
         blockers: [],
         executionMode: "none",
+        continuationIntent: "unknown",
+        provider: "none",
+        wakeOwner: "none",
         executionSummary:
           "run-level workflow proof may still be valid, but no autonomous continuation target is active"
       }
@@ -142,6 +157,15 @@ function buildResumeGuidance(input: {
       : undefined;
 
   if (input.blockers.length > 0) {
+    const executionMode = continueAnalysisClassification?.executionMode ?? "none";
+    const continuationIntent = deriveContinuationIntent({
+      executionMode,
+      source: input.blockingGaps.length > 0 ? "blocking_gap" : sourceForFallback(input)
+    });
+    const providerSelection = selectLocalContinuationProvider({
+      executionMode,
+      continuationIntent
+    });
     const nextActions =
       gapActions.length > 0
           ? [...gapActions]
@@ -156,7 +180,10 @@ function buildResumeGuidance(input: {
       nextTarget: gapTarget ?? proofTarget ?? checkpointTarget,
       nextActions,
       blockers: [...input.blockers],
-      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionMode,
+      continuationIntent,
+      provider: providerSelection.provider,
+      wakeOwner: providerSelection.wakeOwner,
       executionSummary:
         continueAnalysisClassification?.summary ?? "autonomous blockers remain before continuation can proceed",
       checkpointId: input.latestCheckpoint?.checkpointId,
@@ -165,6 +192,15 @@ function buildResumeGuidance(input: {
   }
 
   if (input.latestCheckpoint) {
+    const executionMode = continueAnalysisClassification?.executionMode ?? "none";
+    const continuationIntent = deriveContinuationIntent({
+      executionMode,
+      source: "checkpoint"
+    });
+    const providerSelection = selectLocalContinuationProvider({
+      executionMode,
+      continuationIntent
+    });
     return {
       authorityLabel: "derived_only",
       status: "ready",
@@ -175,7 +211,10 @@ function buildResumeGuidance(input: {
       nextTarget: proofTarget ?? checkpointTarget,
       nextActions: checkpointActions.length > 0 ? [...checkpointActions] : deriveExecutionPlanActions(input.executionPlan),
       blockers: [],
-      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionMode,
+      continuationIntent,
+      provider: providerSelection.provider,
+      wakeOwner: providerSelection.wakeOwner,
       executionSummary:
         continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest checkpoint",
       checkpointId: input.latestCheckpoint.checkpointId,
@@ -184,6 +223,15 @@ function buildResumeGuidance(input: {
   }
 
   if (input.latestProgressProof) {
+    const executionMode = continueAnalysisClassification?.executionMode ?? "none";
+    const continuationIntent = deriveContinuationIntent({
+      executionMode,
+      source: "progress_proof"
+    });
+    const providerSelection = selectLocalContinuationProvider({
+      executionMode,
+      continuationIntent
+    });
     return {
       authorityLabel: "derived_only",
       status: "ready",
@@ -197,7 +245,10 @@ function buildResumeGuidance(input: {
           ? deriveProofActions(input.latestProgressProof)
           : deriveExecutionPlanActions(input.executionPlan),
       blockers: [],
-      executionMode: continueAnalysisClassification?.executionMode ?? "none",
+      executionMode,
+      continuationIntent,
+      provider: providerSelection.provider,
+      wakeOwner: providerSelection.wakeOwner,
       executionSummary:
         continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest progress proof",
       checkpointId: undefined,
@@ -206,6 +257,15 @@ function buildResumeGuidance(input: {
   }
 
   const planActions = deriveExecutionPlanActions(input.executionPlan);
+  const executionMode = continueAnalysisClassification?.executionMode ?? "none";
+  const continuationIntent = deriveContinuationIntent({
+    executionMode,
+    source: planActions.length > 0 ? "execution_plan" : "none"
+  });
+  const providerSelection = selectLocalContinuationProvider({
+    executionMode,
+    continuationIntent
+  });
   return {
     authorityLabel: "derived_only",
     status: planActions.length > 0 ? "ready" : "not_configured",
@@ -216,7 +276,10 @@ function buildResumeGuidance(input: {
     nextTarget: checkpointTarget ?? proofTarget ?? gapTarget,
     nextActions: planActions,
     blockers: [],
-    executionMode: continueAnalysisClassification?.executionMode ?? "none",
+    executionMode,
+    continuationIntent,
+    provider: providerSelection.provider,
+    wakeOwner: providerSelection.wakeOwner,
     executionSummary:
       continueAnalysisClassification?.summary ??
       (planActions.length > 0 ? "autonomous continuation is derived from the current execution plan" : "no autonomous continuation target is active")
@@ -231,6 +294,7 @@ export function classifyContinueAnalysisDirective(input: {
   if (!action) {
     return {
       executionMode: "operator_required",
+      continuationIntent: "blocked_external",
       summary: `operator input is required for autonomous target ${input.directive.targetId}: no typed continuation action was derived`
     };
   }
@@ -238,6 +302,7 @@ export function classifyContinueAnalysisDirective(input: {
   if (action.kind === "run_workflow_proof") {
     return {
       executionMode: "runtime_executable",
+      continuationIntent: "continue_now",
       summary: `runtime can execute workflow proof for task ${action.taskId}`,
       action
     };
@@ -246,6 +311,7 @@ export function classifyContinueAnalysisDirective(input: {
   if (action.kind === "resolve_blocking_gap" && action.targetId.startsWith("task:")) {
     return {
       executionMode: "runtime_executable",
+      continuationIntent: "continue_now",
       summary: `runtime can resolve blocking gap ${action.gapId} through task-target workflow proof`,
       action
     };
@@ -254,6 +320,7 @@ export function classifyContinueAnalysisDirective(input: {
   if (action.kind === "resolve_blocking_gap") {
     return {
       executionMode: "operator_required",
+      continuationIntent: "blocked_external",
       summary: `operator input is required for advisory continuation target ${action.targetId} while resolving blocking gap ${action.gapId}`,
       action
     };
@@ -263,6 +330,7 @@ export function classifyContinueAnalysisDirective(input: {
     if (action.targetId.startsWith("task:")) {
       return {
         executionMode: "runtime_executable",
+        continuationIntent: "continue_now",
         summary: `runtime can resume task-target continuation ${action.targetId}`,
         action
       };
@@ -271,6 +339,7 @@ export function classifyContinueAnalysisDirective(input: {
     if (action.targetId === "review:authenticated") {
       return {
         executionMode: "runtime_executable",
+        continuationIntent: "continue_now",
         summary: "runtime can normalize the authenticated-review continuation target",
         action
       };
@@ -308,6 +377,7 @@ export function classifyContinueAnalysisDirective(input: {
 
     return {
       executionMode: "operator_required",
+      continuationIntent: "blocked_external",
       summary: `operator input is required for advisory continuation target ${action.targetId} from ${action.source}${action.sourceId ? ` (${action.sourceId})` : ""}`,
       action
     };
@@ -315,9 +385,67 @@ export function classifyContinueAnalysisDirective(input: {
 
   return {
     executionMode: "operator_required",
+    continuationIntent: "blocked_external",
     summary: `operator input is required for autonomous target ${input.directive.targetId}`,
     action
   };
+}
+
+export function selectLocalContinuationProvider(input: {
+  executionMode: AutonomousResumeExecutionMode;
+  continuationIntent: AutonomousContinuationIntent;
+}): {
+  provider: AutonomousContinuationProvider;
+  wakeOwner: AutonomousWakeOwner;
+} {
+  if (input.executionMode === "runtime_executable") {
+    return {
+      provider: "none",
+      wakeOwner: "runtime"
+    };
+  }
+
+  if (input.executionMode === "operator_required" && input.continuationIntent !== "continue_now") {
+    return {
+      provider: "codex_cli_exec",
+      wakeOwner: "operator"
+    };
+  }
+
+  return {
+    provider: "none",
+    wakeOwner: "none"
+  };
+}
+
+function deriveContinuationIntent(input: {
+  executionMode: AutonomousResumeExecutionMode;
+  source: AutonomousResumeSource;
+}): AutonomousContinuationIntent {
+  if (input.executionMode === "runtime_executable") {
+    return "continue_now";
+  }
+
+  if (input.executionMode === "operator_required") {
+    if (input.source === "checkpoint") {
+      return "defer_same_thread";
+    }
+    if (input.source === "progress_proof") {
+      return "defer_fresh_run";
+    }
+    return "blocked_external";
+  }
+
+  if (input.source === "checkpoint") {
+    return "defer_same_thread";
+  }
+  if (input.source === "progress_proof") {
+    return "defer_fresh_run";
+  }
+  if (input.source === "blocking_gap" || input.source === "execution_plan") {
+    return "blocked_external";
+  }
+  return "unknown";
 }
 
 function classifyPersistedResumeTarget(input: {
@@ -329,6 +457,7 @@ function classifyPersistedResumeTarget(input: {
   if (!input.sourceId?.trim()) {
     return {
       executionMode: "operator_required",
+      continuationIntent: "blocked_external",
       summary: `operator input is required for ${input.targetId}: the originating ${input.sourceLabel} id is missing`
     };
   }
@@ -336,12 +465,14 @@ function classifyPersistedResumeTarget(input: {
   if (!input.matchesSource) {
     return {
       executionMode: "operator_required",
+      continuationIntent: "blocked_external",
       summary: `operator input is required for ${input.targetId}: the originating ${input.sourceLabel} ${input.sourceId} is stale or no longer matches`
     };
   }
 
   return {
     executionMode: "runtime_executable",
+    continuationIntent: "continue_now",
     summary: `runtime can normalize self-referential ${input.sourceLabel} target ${input.targetId}`
   };
 }

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const smokeTestName = "PowerShell setup script bootstraps a clean workspace with synthetic docker and npm";
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 type SmokeRunner = (context: TestContext) => Promise<void> | void;
 type RegisterTest = typeof test;
@@ -104,6 +108,13 @@ test("registerPowerShellSetupSmoke registers a skipped smoke test when prerequis
   assert.equal(calls.length, 1);
   assert.equal(must(calls[0]).name, smokeTestName);
   assert.deepEqual(must(calls[0]).options, { skip: "requires Windows with pwsh" });
+});
+
+test("PowerShell setup script braces postgres user interpolation in the fallback database URL", async () => {
+  const script = await readFile(path.join(repoRoot, "scripts", "setup-devgod.ps1"), "utf8");
+
+  assert.doesNotMatch(script, /postgres:\/\/\$postgresUser:/);
+  assert.match(script, /postgres:\/\/\$\{postgresUser\}:\$\(\$env:DEVGOD_POSTGRES_PASSWORD\)/);
 });
 
 const pwshAvailable = await resolvePwshAvailability(detectPwsh);
