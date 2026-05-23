@@ -6,13 +6,13 @@
 
 ## Status
 
-`active`
+`complete`
 
 ## Date
 
 `2026-05-23`
 
-## Planned in this slice
+## Completed in this slice
 
 - generate durable CLI scheduler request artifacts for deferred continuation providers
 - move supervisor CLI-provider handling from rerun loops to materialized scheduled-exec handoff completion

@@ -81,6 +81,7 @@ export interface DaemonOperatorHandoffObservation {
     continuationStatus?: string | undefined;
     automationEnvelope?: string | undefined;
     appAutomationRequest?: string | undefined;
+    cliSchedulerRequest?: string | undefined;
     reviewQueueStatus?: string | undefined;
     scopeExpansionRequest?: string | undefined;
   };
@@ -110,7 +111,11 @@ export interface DaemonSupervisorStatusObservation {
   missingReviewRoles: string[];
   actions: Array<{
     cycle: number;
-    action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
+    action:
+      | "enqueue_operator_continuation"
+      | "enqueue_review_action"
+      | "materialize_app_automation"
+      | "materialize_cli_scheduler";
     targetId?: string | undefined;
     taskId?: string | undefined;
     reviewRole?: string | undefined;

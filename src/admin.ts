@@ -1181,7 +1181,11 @@ export interface DaemonCommandResult {
 
 interface SupervisorActionRecord {
   cycle: number;
-  action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
+  action:
+    | "enqueue_operator_continuation"
+    | "enqueue_review_action"
+    | "materialize_app_automation"
+    | "materialize_cli_scheduler";
   targetId?: string | undefined;
   taskId?: string | undefined;
   reviewRole?: ReviewRecord["reviewerRole"] | undefined;
@@ -3600,6 +3604,222 @@ async function clearDaemonAppAutomationRequest(cwd: string): Promise<void> {
   });
 }
 
+function buildCliSchedulerPrompt(input: Parameters<typeof buildAppAutomationPrompt>[0]): string {
+  return `${buildAppAutomationPrompt(input)}Return a final response that matches the provided output schema when the scheduled Codex CLI run completes.\n`;
+}
+
+function buildDaemonCliOutputSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["completed", "blocked", "needs_review", "needs_followup"]
+      },
+      blockers: {
+        type: "array",
+        items: { type: "string" }
+      },
+      checkpoint: {
+        type: "object",
+        properties: {
+          evidence_refs: {
+            type: "array",
+            items: { type: "string" }
+          },
+          next_actions: {
+            type: "array",
+            items: { type: "string" }
+          },
+          active_targets: {
+            type: "array",
+            items: { type: "string" }
+          },
+          open_gaps: {
+            type: "array",
+            items: { type: "string" }
+          },
+          compressed_context_summary: { type: "string" },
+          compressed_context_ref: { type: "string" },
+          compressed_context_source_refs: {
+            type: "array",
+            items: { type: "string" }
+          }
+        },
+        required: ["evidence_refs"],
+        additionalProperties: false
+      },
+      scope_request: {
+        type: "object",
+        properties: {
+          blocked_paths: {
+            type: "array",
+            items: { type: "string" }
+          },
+          requested_write_scope: {
+            type: "array",
+            items: { type: "string" }
+          },
+          reason: { type: "string" }
+        },
+        required: ["blocked_paths", "requested_write_scope"],
+        additionalProperties: false
+      }
+    },
+    required: ["summary", "status", "blockers"],
+    additionalProperties: false
+  };
+}
+
+function convertSupportedCronScheduleToSystemdOnCalendar(schedule: string): string | undefined {
+  switch (schedule.trim()) {
+    case "*/30 * * * *":
+      return "*-*-* *:0/30:00";
+    case "0 * * * *":
+      return "hourly";
+    default:
+      return undefined;
+  }
+}
+
+async function writeDaemonCliSchedulerRequest(
+  cwd: string,
+  input: {
+    envelope: {
+      provider: "codex_cli_exec_scheduler";
+      continuationIntent: "defer_same_thread" | "defer_fresh_run";
+      targetMode: "same_thread" | "fresh_run";
+      scheduleKind: "cron" | "rrule";
+      schedule: string;
+      targetId: string;
+      source: "progress_proof" | "checkpoint";
+      sourceId?: string | undefined;
+      summary: string;
+      nextActions: string[];
+      workspaceSlug: string;
+      projectSlug: string;
+      activeRunId: string;
+      activeTaskId: string;
+    };
+    sessionId: string | null;
+    updatedAt: string;
+  }
+): Promise<{
+  requestPath: string;
+  promptPath: string;
+  outputSchemaPath: string;
+  runnable: boolean;
+  manualReviewRequired: boolean;
+}> {
+  const daemonDir = path.join(cwd, ".devgod", "work", "daemon");
+  await mkdir(daemonDir, { recursive: true });
+  const requestPath = ".devgod/work/daemon/cli-scheduler-request.json";
+  const promptPath = ".devgod/work/daemon/cli-scheduler-prompt.txt";
+  const outputSchemaPath = ".devgod/work/daemon/cli-scheduler-output-schema.json";
+  const prompt = buildCliSchedulerPrompt({
+    envelope: input.envelope,
+    cwd
+  });
+  await writeFile(path.join(cwd, promptPath), prompt, "utf8");
+  await writeFile(
+    path.join(cwd, outputSchemaPath),
+    `${JSON.stringify(buildDaemonCliOutputSchema(), null, 2)}\n`,
+    "utf8"
+  );
+
+  const requiresResumeSession =
+    input.envelope.continuationIntent === "defer_same_thread" && input.envelope.targetMode === "same_thread";
+  const runnable = !requiresResumeSession || Boolean(input.sessionId);
+  const manualReviewRequired = !runnable;
+  const commandCore =
+    requiresResumeSession && input.sessionId
+      ? `codex exec resume ${input.sessionId} "$(cat ${promptPath})" --json --output-schema ${outputSchemaPath}`
+      : `codex exec "$(cat ${promptPath})" --json --output-schema ${outputSchemaPath}`;
+  const shellCommand = runnable ? `cd ${JSON.stringify(cwd)} && ${commandCore}` : undefined;
+  const systemdOnCalendar =
+    input.envelope.scheduleKind === "cron"
+      ? convertSupportedCronScheduleToSystemdOnCalendar(input.envelope.schedule)
+      : undefined;
+  const request = {
+    tool: "codex",
+    request: {
+      subcommand: "exec",
+      resumeSessionId: input.sessionId ?? undefined,
+      promptPath,
+      outputSchemaPath,
+      json: true,
+      cwd,
+      runnable
+    },
+    scheduler: {
+      scheduleKind: input.envelope.scheduleKind,
+      schedule: input.envelope.schedule,
+      launcherHints: shellCommand
+        ? [
+            {
+              kind: "cron",
+              schedule: input.envelope.schedule,
+              shellCommand
+            },
+            ...(systemdOnCalendar
+              ? [
+                  {
+                    kind: "systemd",
+                    onCalendar: systemdOnCalendar,
+                    shellCommand
+                  }
+                ]
+              : [])
+          ]
+        : [],
+      manualReviewRequired
+    },
+    context: {
+      provider: input.envelope.provider,
+      workspaceSlug: input.envelope.workspaceSlug,
+      projectSlug: input.envelope.projectSlug,
+      activeRunId: input.envelope.activeRunId,
+      activeTaskId: input.envelope.activeTaskId,
+      targetId: input.envelope.targetId,
+      targetMode: input.envelope.targetMode,
+      continuationIntent: input.envelope.continuationIntent,
+      notes: manualReviewRequired
+        ? [
+            "No persisted Codex session id was available for a same-thread CLI resume.",
+            "Review this handoff manually before converting it into a fresh-run scheduler job or another automation owner."
+          ]
+        : [
+            requiresResumeSession
+              ? "This handoff uses codex exec resume to preserve the same-thread continuation context."
+              : "This handoff uses a fresh codex exec run for deferred continuation.",
+            "Install one of the launcher hints under your preferred local scheduler."
+          ],
+      generatedAt: input.updatedAt
+    }
+  };
+  await writeFile(path.join(cwd, requestPath), `${JSON.stringify(request, null, 2)}\n`, "utf8");
+  return {
+    requestPath,
+    promptPath,
+    outputSchemaPath,
+    runnable,
+    manualReviewRequired
+  };
+}
+
+async function clearDaemonCliSchedulerRequest(cwd: string): Promise<void> {
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "cli-scheduler-request.json"), {
+    force: true
+  });
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "cli-scheduler-prompt.txt"), {
+    force: true
+  });
+  await rm(path.join(cwd, ".devgod", "work", "daemon", "cli-scheduler-output-schema.json"), {
+    force: true
+  });
+}
+
 async function writeDaemonOperatorHandoff(
   cwd: string,
   handoff: {
@@ -3630,6 +3850,7 @@ async function writeDaemonOperatorHandoff(
       continuationStatus?: string | undefined;
       automationEnvelope?: string | undefined;
       appAutomationRequest?: string | undefined;
+      cliSchedulerRequest?: string | undefined;
       reviewQueueStatus?: string | undefined;
       scopeExpansionRequest?: string | undefined;
     };
@@ -3699,7 +3920,11 @@ async function writeDaemonSupervisorStatus(
     missingReviewRoles: string[];
     actions: Array<{
       cycle: number;
-      action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
+      action:
+        | "enqueue_operator_continuation"
+        | "enqueue_review_action"
+        | "materialize_app_automation"
+        | "materialize_cli_scheduler";
       targetId?: string | undefined;
       taskId?: string | undefined;
       reviewRole?: string | undefined;
@@ -3754,7 +3979,11 @@ async function appendDaemonSupervisorHistory(
     missingReviewRoles: string[];
     actions: Array<{
       cycle: number;
-      action: "enqueue_operator_continuation" | "enqueue_review_action" | "materialize_app_automation";
+      action:
+        | "enqueue_operator_continuation"
+        | "enqueue_review_action"
+        | "materialize_app_automation"
+        | "materialize_cli_scheduler";
       targetId?: string | undefined;
       taskId?: string | undefined;
       reviewRole?: string | undefined;
@@ -4003,6 +4232,10 @@ async function readDaemonOperatorHandoff(
           typeof detailFilesCandidate.appAutomationRequest === "string"
             ? detailFilesCandidate.appAutomationRequest
             : undefined,
+        cliSchedulerRequest:
+          typeof detailFilesCandidate.cliSchedulerRequest === "string"
+            ? detailFilesCandidate.cliSchedulerRequest
+            : undefined,
         reviewQueueStatus:
           typeof detailFilesCandidate.reviewQueueStatus === "string"
             ? detailFilesCandidate.reviewQueueStatus
@@ -4090,11 +4323,13 @@ async function readDaemonSupervisorStatus(
           const action =
             candidate.action === "enqueue_operator_continuation" ||
             candidate.action === "enqueue_review_action" ||
-            candidate.action === "materialize_app_automation"
+            candidate.action === "materialize_app_automation" ||
+            candidate.action === "materialize_cli_scheduler"
               ? (candidate.action as
                   | "enqueue_operator_continuation"
                   | "enqueue_review_action"
-                  | "materialize_app_automation")
+                  | "materialize_app_automation"
+                  | "materialize_cli_scheduler")
               : undefined;
           const cycle = typeof candidate.cycle === "number" ? candidate.cycle : undefined;
           const filePath = typeof candidate.filePath === "string" ? candidate.filePath : undefined;
@@ -8267,6 +8502,7 @@ export async function executeDaemonCommandFromArgs(
       await clearDaemonContinuationStatus(cwd);
       await clearDaemonAutomationEnvelope(cwd);
       await clearDaemonAppAutomationRequest(cwd);
+      await clearDaemonCliSchedulerRequest(cwd);
       await clearDaemonOperatorHandoff(cwd);
       await clearDaemonScopeExpansionRequest(cwd);
 
@@ -9494,6 +9730,78 @@ export async function executeSupervisorCommandFromArgs(
         activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
         sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
         nextActions: [`apply the Codex app automation request in ${appAutomationRequestPath}`]
+      });
+    }
+
+    if (continuationStatus.provider === "codex_cli_exec_scheduler") {
+      const envelope = await readDaemonAutomationEnvelope(cwd);
+      if (!envelope || envelope.provider !== "codex_cli_exec_scheduler" || envelope.targetId !== continuationStatus.targetId) {
+        return finalize({
+          status: "blocked",
+          blockerKind: "continuation_derivation_failed",
+          reason: "supervisor could not derive the CLI scheduler handoff from the daemon envelope",
+          activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+          activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+          sessionId: handoff.sessionId ?? daemonResult.result.sessionId
+        });
+      }
+
+      const nowValue = now().toISOString();
+      const schedulerRequest = await writeDaemonCliSchedulerRequest(cwd, {
+        envelope: {
+          provider: envelope.provider,
+          continuationIntent: envelope.continuationIntent,
+          targetMode: envelope.targetMode,
+          scheduleKind: envelope.scheduleKind,
+          schedule: envelope.schedule,
+          targetId: envelope.targetId,
+          source: envelope.source,
+          sourceId: envelope.sourceId,
+          summary: envelope.summary,
+          nextActions: envelope.nextActions,
+          workspaceSlug: envelope.workspaceSlug,
+          projectSlug: envelope.projectSlug,
+          activeRunId: envelope.activeRunId,
+          activeTaskId: envelope.activeTaskId
+        },
+        sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
+        updatedAt: nowValue
+      });
+      await writeDaemonOperatorHandoff(cwd, {
+        state: "blocked",
+        blockerKind: handoff.blockerKind,
+        reason: handoff.reason,
+        workspaceSlug: handoff.workspaceSlug ?? workspaceSlug,
+        projectSlug: handoff.projectSlug ?? projectSlug,
+        activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+        activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+        sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
+        cycle,
+        directiveKind: handoff.directiveKind,
+        nextActions: [`apply the CLI scheduler request in ${schedulerRequest.requestPath}`, ...handoff.nextActions],
+        detailFiles: {
+          ...handoff.detailFiles,
+          cliSchedulerRequest: schedulerRequest.requestPath
+        },
+        updatedAt: nowValue
+      });
+      const summary = schedulerRequest.manualReviewRequired
+        ? `materialized CLI scheduler handoff for ${continuationStatus.targetId}; manual review is required before same-thread resume can be scheduled`
+        : `materialized CLI scheduler handoff for ${continuationStatus.targetId}`;
+      actions.push({
+        cycle,
+        action: "materialize_cli_scheduler",
+        targetId: continuationStatus.targetId,
+        filePath: schedulerRequest.requestPath,
+        summary
+      });
+      return finalize({
+        status: "completed",
+        reason: summary,
+        activeRunId: handoff.activeRunId ?? daemonResult.result.activeRunId,
+        activeTaskId: handoff.activeTaskId ?? daemonResult.result.activeTaskId,
+        sessionId: handoff.sessionId ?? daemonResult.result.sessionId,
+        nextActions: [`apply the CLI scheduler request in ${schedulerRequest.requestPath}`]
       });
     }
 

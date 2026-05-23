@@ -5017,6 +5017,572 @@ test("executeSupervisorCommandFromArgs materializes a standalone Codex app autom
   }
 });
 
+test("executeSupervisorCommandFromArgs materializes a resumable CLI scheduler request for same-thread continuation", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor CLI same-thread handoff",
+    request: "Supervisor should materialize a resumable CLI scheduler request.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeOpenGap: false,
+    includeCheckpoint: true,
+    checkpointTarget: "artifact:resume",
+    progressNextTarget: "artifact:resume",
+    gapNextActions: ["check the artifact again after the next heartbeat"],
+    progressWhyNext: "Return to the same thread after a timed heartbeat."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {
+      ...(existingRuntimeState?.metadata ?? {}),
+      devgodDaemon: {
+        sessionId: "session-cli-resume"
+      }
+    },
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-cli-same-thread-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            mode: "runtime_authoritative" as const,
+            runId,
+            runStatus: "approved" as const,
+            autonomousExecution: undefined,
+            directive: {
+              kind: "continue_analysis" as const,
+              targetId: "artifact:resume",
+              source: "checkpoint" as const,
+              actions: [
+                {
+                  kind: "resume_target" as const,
+                  targetId: "artifact:resume",
+                  source: "checkpoint" as const,
+                  sourceId: "cp-admin"
+                }
+              ],
+              nextActions: ["check the artifact again after the next heartbeat"],
+              blockers: [],
+              rationale: ["timed same-thread follow-up is required"]
+            }
+          });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should materialize a CLI scheduler request instead of launching another Codex turn");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.actions[0]?.action, "materialize_cli_scheduler");
+    const request = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "cli-scheduler-request.json"), "utf8")
+    ) as {
+      request: {
+        resumeSessionId?: string | undefined;
+        promptPath: string;
+        outputSchemaPath: string;
+        runnable: boolean;
+      };
+      scheduler: {
+        schedule: string;
+        manualReviewRequired: boolean;
+        launcherHints: Array<{ shellCommand?: string | undefined }>;
+      };
+    };
+    assert.equal(request.request.resumeSessionId, "session-cli-resume");
+    assert.equal(request.request.runnable, true);
+    assert.equal(request.scheduler.schedule, "*/30 * * * *");
+    assert.equal(request.scheduler.manualReviewRequired, false);
+    assert.match(request.scheduler.launcherHints[0]?.shellCommand ?? "", /codex exec resume session-cli-resume/);
+    const prompt = await readFile(path.join(daemonCwd, request.request.promptPath), "utf8");
+    assert.match(prompt, /Continuation target: artifact:resume/);
+    const outputSchema = JSON.parse(await readFile(path.join(daemonCwd, request.request.outputSchemaPath), "utf8")) as {
+      properties?: { summary?: unknown };
+    };
+    assert.ok(outputSchema.properties?.summary);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs marks same-thread CLI scheduler handoff for manual review when no session id exists", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor CLI manual-review handoff",
+    request: "Supervisor should surface same-thread CLI limits when no session id exists.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeOpenGap: false,
+    includeCheckpoint: true,
+    checkpointTarget: "artifact:resume",
+    progressNextTarget: "artifact:resume",
+    gapNextActions: ["check the artifact again after the next heartbeat"],
+    progressWhyNext: "Return to the same thread after a timed heartbeat."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-cli-manual-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            mode: "runtime_authoritative" as const,
+            runId,
+            runStatus: "approved" as const,
+            autonomousExecution: undefined,
+            directive: {
+              kind: "continue_analysis" as const,
+              targetId: "artifact:resume",
+              source: "checkpoint" as const,
+              actions: [
+                {
+                  kind: "resume_target" as const,
+                  targetId: "artifact:resume",
+                  source: "checkpoint" as const,
+                  sourceId: "cp-admin"
+                }
+              ],
+              nextActions: ["check the artifact again after the next heartbeat"],
+              blockers: [],
+              rationale: ["timed same-thread follow-up is required"]
+            }
+          });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should stop after materializing the CLI request");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.match(result.result.reason, /manual review is required/);
+    assert.equal(result.result.actions[0]?.action, "materialize_cli_scheduler");
+    const request = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "cli-scheduler-request.json"), "utf8")
+    ) as {
+      request: { runnable: boolean; resumeSessionId?: string | undefined };
+      scheduler: { manualReviewRequired: boolean; launcherHints: unknown[] };
+      context: { notes: string[] };
+    };
+    assert.equal(request.request.runnable, false);
+    assert.equal(request.request.resumeSessionId, undefined);
+    assert.equal(request.scheduler.manualReviewRequired, true);
+    assert.deepEqual(request.scheduler.launcherHints, []);
+    assert.ok(request.context.notes.some((note) => note.includes("No persisted Codex session id")));
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs materializes a fresh-run CLI scheduler request", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-proof",
+    title: "Supervisor CLI fresh-run handoff",
+    request: "Supervisor should materialize a fresh-run CLI scheduler request.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeOpenGap: false,
+    includeCheckpoint: false,
+    progressNextTarget: "artifact:fresh-run",
+    progressWhyNext: "Return through a fresh automation run."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const existingRuntimeState = await store.getProjectRuntimeState(projectContext!.project.id);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    activeRunId: runId,
+    activeTaskId: "task-proof",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-proof",
+      tasks: [
+        {
+          id: "task-proof",
+          title: "task-proof",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: existingRuntimeState?.metadata ?? {},
+    createdAt: existingRuntimeState?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-cli-fresh-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext!.project.id,
+    workspaceId: projectContext!.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      [
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--max-supervisor-cycles",
+        "2",
+        "--max-cycles",
+        "1",
+        "--format",
+        "json"
+      ],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            mode: "runtime_authoritative" as const,
+            runId,
+            runStatus: "approved" as const,
+            autonomousExecution: undefined,
+            directive: {
+              kind: "continue_analysis" as const,
+              targetId: "artifact:fresh-run",
+              source: "progress_proof" as const,
+              actions: [
+                {
+                  kind: "resume_target" as const,
+                  targetId: "artifact:fresh-run",
+                  source: "progress_proof" as const,
+                  sourceId: "proof-admin"
+                }
+              ],
+              nextActions: ["start a fresh automation run after the next scheduled interval"],
+              blockers: [],
+              rationale: ["fresh background follow-up is required"]
+            }
+          });
+        },
+        applyRecovery(candidateRunId, actionIds, staleAfterHours) {
+          return service.applyRecovery(candidateRunId, actionIds, { staleAfterHours });
+        },
+        async executeDirectiveStep(candidateRunId, input) {
+          return service.executeDirectiveStep(candidateRunId, {
+            staleAfterHours: input.staleAfterHours
+          });
+        },
+        getReviews(candidateRunId, taskId) {
+          return store.getReviews(candidateRunId, taskId);
+        },
+        getApprovals(candidateRunId, taskId) {
+          return store.getApprovals(candidateRunId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should stop after materializing the CLI request");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "completed");
+    assert.equal(result.result.actions[0]?.action, "materialize_cli_scheduler");
+    const request = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "cli-scheduler-request.json"), "utf8")
+    ) as {
+      request: { resumeSessionId?: string | undefined; runnable: boolean };
+      scheduler: { schedule: string; manualReviewRequired: boolean; launcherHints: Array<{ shellCommand?: string }> };
+    };
+    assert.equal(request.request.resumeSessionId, undefined);
+    assert.equal(request.request.runnable, true);
+    assert.equal(request.scheduler.schedule, "0 * * * *");
+    assert.equal(request.scheduler.manualReviewRequired, false);
+    assert.match(request.scheduler.launcherHints[0]?.shellCommand ?? "", /codex exec "\$\(cat \.devgod\/work\/daemon\/cli-scheduler-prompt\.txt\)"/);
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
 test("executeSupervisorCommandFromArgs synthesizes trusted review actions and reruns the daemon", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {

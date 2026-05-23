@@ -89,6 +89,11 @@ export function buildOperatorDashboardReport(input: {
       `apply Codex app automation request: ${input.status.daemon.handoff.detailFiles.appAutomationRequest}`
     );
   }
+  if (input.status.daemon.handoff?.detailFiles.cliSchedulerRequest) {
+    nextActions.push(
+      `apply CLI scheduler request: ${input.status.daemon.handoff.detailFiles.cliSchedulerRequest}`
+    );
+  }
 
   if (input.status.daemon.supervisor) {
     alerts.push(

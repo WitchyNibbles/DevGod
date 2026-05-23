@@ -364,6 +364,7 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
       report.status.daemon.handoff.detailFiles.continuationStatus,
       report.status.daemon.handoff.detailFiles.automationEnvelope,
       report.status.daemon.handoff.detailFiles.appAutomationRequest,
+      report.status.daemon.handoff.detailFiles.cliSchedulerRequest,
       report.status.daemon.handoff.detailFiles.reviewQueueStatus,
       report.status.daemon.handoff.detailFiles.scopeExpansionRequest
     ].filter((value): value is string => typeof value === "string" && value.length > 0);
