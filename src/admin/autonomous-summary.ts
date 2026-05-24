@@ -18,14 +18,33 @@ export type AutonomousContinuationIntent =
   | "defer_same_thread"
   | "defer_fresh_run"
   | "blocked_external";
-export type AutonomousContinuationProvider = "none" | "codex_cli_exec";
+export type AutonomousContinuationProvider =
+  | "none"
+  | "manual_operator_handoff"
+  | "codex_cli_exec_scheduler"
+  | "codex_app_thread_automation"
+  | "codex_app_standalone_automation";
 export type AutonomousWakeOwner = "none" | "runtime" | "operator";
+export type AutonomousContinuationScheduleKind = "none" | "manual" | "cron" | "rrule";
 export type AutonomousResumeSource =
   | "none"
   | "checkpoint"
   | "progress_proof"
   | "blocking_gap"
   | "execution_plan";
+
+export interface AutonomousContinuationCapabilities {
+  codexAppThreadAutomation: boolean;
+  codexAppStandaloneAutomation: boolean;
+  codexCliScheduler: boolean;
+}
+
+export interface AutonomousContinuationProviderSelection {
+  provider: AutonomousContinuationProvider;
+  wakeOwner: AutonomousWakeOwner;
+  scheduleKind: AutonomousContinuationScheduleKind;
+  schedule?: string | undefined;
+}
 
 export interface AutonomousResumeGuidance {
   authorityLabel: "derived_only";
@@ -39,6 +58,8 @@ export interface AutonomousResumeGuidance {
   continuationIntent: AutonomousContinuationIntent;
   provider: AutonomousContinuationProvider;
   wakeOwner: AutonomousWakeOwner;
+  scheduleKind: AutonomousContinuationScheduleKind;
+  schedule?: string | undefined;
   executionSummary: string;
   checkpointId?: string | undefined;
   progressProofId?: string | undefined;
@@ -95,6 +116,7 @@ export function buildAutonomousOperatorSummary(input: {
         continuationIntent: "unknown",
         provider: "none",
         wakeOwner: "none",
+        scheduleKind: "none",
         executionSummary:
           "run-level workflow proof may still be valid, but no autonomous continuation target is active"
       }
@@ -184,6 +206,8 @@ function buildResumeGuidance(input: {
       continuationIntent,
       provider: providerSelection.provider,
       wakeOwner: providerSelection.wakeOwner,
+      scheduleKind: providerSelection.scheduleKind,
+      schedule: providerSelection.schedule,
       executionSummary:
         continueAnalysisClassification?.summary ?? "autonomous blockers remain before continuation can proceed",
       checkpointId: input.latestCheckpoint?.checkpointId,
@@ -215,6 +239,8 @@ function buildResumeGuidance(input: {
       continuationIntent,
       provider: providerSelection.provider,
       wakeOwner: providerSelection.wakeOwner,
+      scheduleKind: providerSelection.scheduleKind,
+      schedule: providerSelection.schedule,
       executionSummary:
         continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest checkpoint",
       checkpointId: input.latestCheckpoint.checkpointId,
@@ -249,6 +275,8 @@ function buildResumeGuidance(input: {
       continuationIntent,
       provider: providerSelection.provider,
       wakeOwner: providerSelection.wakeOwner,
+      scheduleKind: providerSelection.scheduleKind,
+      schedule: providerSelection.schedule,
       executionSummary:
         continueAnalysisClassification?.summary ?? "resume guidance was derived from the latest progress proof",
       checkpointId: undefined,
@@ -280,6 +308,8 @@ function buildResumeGuidance(input: {
     continuationIntent,
     provider: providerSelection.provider,
     wakeOwner: providerSelection.wakeOwner,
+    scheduleKind: providerSelection.scheduleKind,
+    schedule: providerSelection.schedule,
     executionSummary:
       continueAnalysisClassification?.summary ??
       (planActions.length > 0 ? "autonomous continuation is derived from the current execution plan" : "no autonomous continuation target is active")
@@ -377,7 +407,12 @@ export function classifyContinueAnalysisDirective(input: {
 
     return {
       executionMode: "operator_required",
-      continuationIntent: "blocked_external",
+      continuationIntent:
+        action.source === "checkpoint"
+          ? "defer_same_thread"
+          : action.source === "progress_proof"
+            ? "defer_fresh_run"
+            : "blocked_external",
       summary: `operator input is required for advisory continuation target ${action.targetId} from ${action.source}${action.sourceId ? ` (${action.sourceId})` : ""}`,
       action
     };
@@ -394,27 +429,108 @@ export function classifyContinueAnalysisDirective(input: {
 export function selectLocalContinuationProvider(input: {
   executionMode: AutonomousResumeExecutionMode;
   continuationIntent: AutonomousContinuationIntent;
-}): {
-  provider: AutonomousContinuationProvider;
-  wakeOwner: AutonomousWakeOwner;
-} {
+  capabilities?: Partial<AutonomousContinuationCapabilities> | undefined;
+}): AutonomousContinuationProviderSelection {
+  const capabilities = {
+    codexAppThreadAutomation: false,
+    codexAppStandaloneAutomation: false,
+    codexCliScheduler: true,
+    ...(input.capabilities ?? {})
+  } satisfies AutonomousContinuationCapabilities;
+
   if (input.executionMode === "runtime_executable") {
     return {
       provider: "none",
-      wakeOwner: "runtime"
+      wakeOwner: "runtime",
+      scheduleKind: "none"
     };
   }
 
-  if (input.executionMode === "operator_required" && input.continuationIntent !== "continue_now") {
+  if (input.executionMode !== "operator_required" || input.continuationIntent === "continue_now") {
     return {
-      provider: "codex_cli_exec",
-      wakeOwner: "operator"
+      provider: "none",
+      wakeOwner: "none",
+      scheduleKind: "none"
+    };
+  }
+
+  if (input.continuationIntent === "defer_same_thread") {
+    if (capabilities.codexAppThreadAutomation) {
+      return {
+        provider: "codex_app_thread_automation",
+        wakeOwner: "operator",
+        scheduleKind: "rrule",
+        schedule: "FREQ=MINUTELY;INTERVAL=30"
+      };
+    }
+    if (capabilities.codexCliScheduler) {
+      return {
+        provider: "codex_cli_exec_scheduler",
+        wakeOwner: "operator",
+        scheduleKind: "cron",
+        schedule: "*/30 * * * *"
+      };
+    }
+    return {
+      provider: "manual_operator_handoff",
+      wakeOwner: "operator",
+      scheduleKind: "manual"
+    };
+  }
+
+  if (input.continuationIntent === "defer_fresh_run") {
+    if (capabilities.codexAppStandaloneAutomation) {
+      return {
+        provider: "codex_app_standalone_automation",
+        wakeOwner: "operator",
+        scheduleKind: "cron",
+        schedule: "0 * * * *"
+      };
+    }
+    if (capabilities.codexCliScheduler) {
+      return {
+        provider: "codex_cli_exec_scheduler",
+        wakeOwner: "operator",
+        scheduleKind: "cron",
+        schedule: "0 * * * *"
+      };
+    }
+    return {
+      provider: "manual_operator_handoff",
+      wakeOwner: "operator",
+      scheduleKind: "manual"
     };
   }
 
   return {
-    provider: "none",
-    wakeOwner: "none"
+    provider: "manual_operator_handoff",
+    wakeOwner: "operator",
+    scheduleKind: "manual"
+  };
+}
+
+export function resolveContinuationCapabilities(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>
+): AutonomousContinuationCapabilities {
+  const parseEnabled = (value: string | undefined, fallback: boolean) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+    return fallback;
+  };
+
+  const appAll = parseEnabled(env.DEVGOD_CODEX_APP_AUTOMATION, false);
+  return {
+    codexAppThreadAutomation: parseEnabled(env.DEVGOD_CODEX_APP_THREAD_AUTOMATION, appAll),
+    codexAppStandaloneAutomation: parseEnabled(env.DEVGOD_CODEX_APP_STANDALONE_AUTOMATION, appAll),
+    codexCliScheduler: parseEnabled(env.DEVGOD_CODEX_CLI_SCHEDULER, true)
   };
 }
 

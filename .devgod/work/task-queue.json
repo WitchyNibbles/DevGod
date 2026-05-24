@@ -1,23 +1,139 @@
 {
-  "project_status": "done",
-  "current_task_id": null,
+  "project_status": "in_progress",
+  "current_task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
   "tasks": [
     {
-      "id": "2026-05-23-devgod-agent-catalog-release-proof",
-      "title": "Local workflow proof seed for 2026-05-23-devgod-agent-catalog-release-proof",
+      "id": "2026-05-23-devgod-codex-automation-runtime-envelope",
+      "title": "Provider-backed runtime automation envelope",
+      "status": "done",
+      "class": "implementation_slice",
+      "depends_on": [
+        "2026-05-23-devgod-codex-automation-surfaces-plan"
+      ],
+      "acceptance_criteria": [
+        "runtime continuation ownership includes app-thread, app-standalone, CLI-scheduler, and manual-handoff provider options",
+        "deferred continuation persists a durable automation-envelope artifact when scheduling is applicable",
+        "status, ops, daemon, and hook-adjacent surfaces consume the same explicit automation ownership contract"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/runtime-surface.test.ts",
+        "node --experimental-strip-types --test tests/status-report.test.ts",
+        "node --experimental-strip-types --test tests/ops-recovery.test.ts",
+        "node --experimental-strip-types --test tests/admin.test.ts",
+        "node --experimental-strip-types --test tests/hooks.test.ts"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-automation-runtime-envelope.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-automation-runtime-envelope.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-automation-runtime-envelope.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-codex-app-automation-adapter",
+      "title": "Codex app automation request adapter surfaces",
+      "status": "done",
+      "class": "implementation_slice",
+      "depends_on": [
+        "2026-05-23-devgod-codex-automation-runtime-envelope"
+      ],
+      "acceptance_criteria": [
+        "app-capable deferred continuation emits thread or standalone request data that matches Codex app automation semantics",
+        "Git worktree and local-project execution guidance is explicit and tested"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-app-automation-adapter.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-app-automation-adapter.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-app-automation-adapter.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-codex-cli-scheduler-adapter",
+      "title": "Codex CLI scheduler handoff surfaces",
+      "status": "done",
+      "class": "implementation_slice",
+      "depends_on": [
+        "2026-05-23-devgod-codex-app-automation-adapter"
+      ],
+      "acceptance_criteria": [
+        "CLI-only deferred continuation emits scheduled exec handoff data with JSONL and output-schema guidance",
+        "manual-handoff fallback remains explicit when local automation is unavailable"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/runtime-surface.test.ts"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-cli-scheduler-adapter.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-cli-scheduler-adapter.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-cli-scheduler-adapter.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-codex-automation-rollout-verification",
+      "title": "End-to-end verification and rollout hardening for Codex automation integration",
+      "status": "in_progress",
+      "class": "verification_slice",
+      "depends_on": [
+        "2026-05-23-devgod-codex-cli-scheduler-adapter"
+      ],
+      "acceptance_criteria": [
+        "hook loops stay closed under deferred continuation edge cases",
+        "full verification and CI remain green after the automation integration"
+      ],
+      "verification": [
+        "npm test",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-automation-rollout-verification.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-automation-rollout-verification.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-automation-rollout-verification.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-codex-automation-surfaces-plan",
+      "title": "Source-backed Codex automation surface integration plan",
+      "status": "done",
+      "class": "planning",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "current Codex app automation capabilities are captured in a repo-local plan",
+        "current Codex CLI automation capabilities are captured in a repo-local plan",
+        "the plan maps devgod continuation intents onto explicit native automation owners instead of hook-driven repetition"
+      ],
+      "verification": [
+        "manual source review against official Codex docs and local CLI help"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-23-devgod-codex-automation-surfaces-plan.md",
+        "task: .devgod/work/tasks/task-2026-05-23-devgod-codex-automation-surfaces-plan.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-23-devgod-codex-automation-surfaces-plan.md",
+        "plan: docs/codex-automation-surface-integration-plan.md"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "2026-05-23-devgod-postmerge-ci-repair",
+      "title": "Local workflow proof seed for 2026-05-23-devgod-postmerge-ci-repair",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "workflow-proof resolves 2026-05-23-devgod-agent-catalog-release-proof from the latest runtime run",
+        "workflow-proof resolves 2026-05-23-devgod-postmerge-ci-repair from the latest runtime run",
         "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-agent-catalog-release-proof"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-postmerge-ci-repair"
       ],
       "evidence": [
-        "task packet: 2026-05-23-devgod-agent-catalog-release-proof",
-        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-agent-catalog-release-proof",
+        "task packet: 2026-05-23-devgod-postmerge-ci-repair",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-postmerge-ci-repair",
         "quality gate: release_readiness_required"
       ],
       "blocker": null

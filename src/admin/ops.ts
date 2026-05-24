@@ -68,6 +68,11 @@ export function buildOperatorDashboardReport(input: {
 
   if (input.status.daemon.continuation?.state === "blocked") {
     alerts.push(`daemon continuation blocked: ${input.status.daemon.continuation.summary}`);
+    if (input.status.daemon.continuation.provider && input.status.daemon.continuation.provider !== "none") {
+      alerts.push(
+        `daemon continuation owner=${input.status.daemon.continuation.wakeOwner ?? "unknown"} provider=${input.status.daemon.continuation.provider}`
+      );
+    }
     if (input.status.daemon.continuation.nextActions.length > 0) {
       nextActions.push(
         ...input.status.daemon.continuation.nextActions.map(
@@ -77,6 +82,17 @@ export function buildOperatorDashboardReport(input: {
     } else {
       nextActions.push(`operator intervention required for daemon continuation: ${input.status.daemon.continuation.summary}`);
     }
+  }
+
+  if (input.status.daemon.handoff?.detailFiles.appAutomationRequest) {
+    nextActions.push(
+      `apply Codex app automation request: ${input.status.daemon.handoff.detailFiles.appAutomationRequest}`
+    );
+  }
+  if (input.status.daemon.handoff?.detailFiles.cliSchedulerRequest) {
+    nextActions.push(
+      `apply CLI scheduler request: ${input.status.daemon.handoff.detailFiles.cliSchedulerRequest}`
+    );
   }
 
   if (input.status.daemon.supervisor) {
@@ -121,6 +137,11 @@ export function buildOperatorDashboardReport(input: {
     case "continue_analysis":
       if (input.status.autonomous.resume.executionMode === "operator_required") {
         alerts.push(`autonomous continuation requires operator input: ${input.status.autonomous.resume.executionSummary}`);
+        if (input.status.autonomous.resume.provider !== "none") {
+          alerts.push(
+            `autonomous continuation owner=${input.status.autonomous.resume.wakeOwner} provider=${input.status.autonomous.resume.provider}`
+          );
+        }
         nextActions.push(`operator intervention required: ${input.status.autonomous.resume.executionSummary}`);
       } else {
         nextActions.push(
@@ -202,7 +223,7 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   }
   if (report.status.daemon.continuation) {
     lines.push(
-      `daemon-continuation: ${report.status.daemon.continuation.state} ${report.status.daemon.continuation.executionMode} ${report.status.daemon.continuation.targetId ?? "unknown-target"}`
+      `daemon-continuation: ${report.status.daemon.continuation.state} ${report.status.daemon.continuation.executionMode} ${report.status.daemon.continuation.targetId ?? "unknown-target"} owner=${report.status.daemon.continuation.wakeOwner ?? "unknown"} provider=${report.status.daemon.continuation.provider ?? "unknown"}`
     );
   }
   if (report.status.daemon.supervisor) {
