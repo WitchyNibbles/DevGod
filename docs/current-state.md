@@ -1,6 +1,6 @@
 # Devgod Current State
 
-Status date: `2026-05-21`
+Status date: `2026-05-24`
 
 This is the plain-language snapshot of what `devgod` is today. If another document sounds broader, older, or more aspirational than this one, treat this file plus the repo itself as the current truth.
 
@@ -10,7 +10,13 @@ This is the plain-language snapshot of what `devgod` is today. If another docume
 
 It installs into repositories, adds a reusable control layer, stores workflow/runtime state, and pushes work toward evidence-backed completion instead of loose chat summaries.
 
-For new substantive asks, the current control layer now prefers a short clarification step before planning so the final implementation tracks the user’s intended direction instead of inferred defaults.
+For new substantive asks, the current control layer now prefers a short clarification step before planning so the final implementation tracks the user's intended direction instead of inferred defaults.
+
+## Runtime-proven package status
+
+The package is runtime-proven at the package level, and authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`.
+
+That statement is about the package repo and its maintained verification state. It is not a blanket claim that every consuming repo is already operational or review-authoritative after installation.
 
 ## Mission
 
@@ -81,13 +87,35 @@ Current capabilities:
 
 - task queue inspection and advancement
 - workflow proof checks
-- daemon and supervisor surfaces
+- coverage, gap, checkpoint, and resume summaries
+- daemon, supervisor, and supervisor-history surfaces
 - bounded recovery helpers
 - operator-facing status and report views
 - continuation guidance driven by runtime state
 - MCP and UI inspection surfaces
 
-### 4. Modernization-mode autonomous profile
+### 4. Codex-native automation handoff surfaces
+
+Shipped through:
+
+- `src/admin.ts`
+- `src/admin/autonomous-summary.ts`
+- `src/admin/status.ts`
+- `src/admin/ops.ts`
+- `plugins/devgod/scripts/hook-policy.mjs`
+
+Current capabilities:
+
+- explicit deferred-work intents instead of treating every delay as immediate continuation
+- provider-backed automation envelopes for delayed follow-up
+- Codex app thread-automation handoff materialization for same-thread wakeups
+- Codex app standalone-automation handoff materialization for fresh-run wakeups
+- CLI scheduler handoff artifacts for local-first scheduled `codex exec` flows
+- explicit manual operator handoff when no safe automation surface is available
+
+Operationally, DevGod now distinguishes between "continue now" and "wake this work back up later."
+
+### 5. Modernization-mode autonomous profile
 
 Shipped through:
 
@@ -104,7 +132,7 @@ Current capabilities:
 
 This is the current package answer to large brownfield rewrite work: do not claim modernization readiness until the required evidence classes are present.
 
-### 5. Control-layer hook hardening
+### 6. Control-layer hook hardening
 
 Shipped through:
 
@@ -120,7 +148,7 @@ Current capabilities:
 
 This closed the blocker that previously let stale scope and stale task authority stall autonomous continuation across slices.
 
-### 6. Retrieval and export
+### 7. Retrieval and export
 
 Shipped through:
 
@@ -167,9 +195,16 @@ npm run ops
 npm run devgod -- report --run-id latest
 npm run devgod -- coverage --run-id latest --format text
 npm run devgod -- gaps --run-id latest --format text
+npm run devgod -- checkpoint --input /absolute/path/to/checkpoint.json
+npm run devgod -- resume --run-id latest
 npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
-npm run devgod -- serve-ui
+npm run devgod -- daemon --format text
+npm run devgod -- supervisor --format text
+npm run devgod -- supervisor-history --format text
+npm run devgod -- plan-context --query "what still matters here?"
+npm run export:docs
 npm run mcp
+npm run ui
 ```
 
 Other important source-repo scripts:
@@ -181,7 +216,6 @@ Other important source-repo scripts:
 - `npm run verify:workflow`
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
-- `npm run export:docs`
 
 ## Installed repo command surface
 
@@ -199,7 +233,10 @@ npm run devgod:gaps
 npm run devgod:ops
 npm run devgod:report
 npm run devgod:loop
+npm run devgod:daemon
 npm run devgod:supervisor
+npm run devgod:supervisor-history
+npm run devgod:recover
 npm run devgod:seed-workflow-proof
 npm run devgod:seed-modernization-proof
 npm run devgod:verify:review-identity
@@ -212,14 +249,20 @@ The installed surface is broader than the sample above. Notable additional scrip
 - `devgod:advance-active-task`
 - `devgod:reconcile`
 - `devgod:sync-runtime-exports`
+- `devgod:plan-context`
 - `devgod:refresh-retrieval`
 - `devgod:autopilot-status`
+- `devgod:github-dispatch`
 - `devgod:mcp`
 - `devgod:ui`
 - `devgod:record-review`
 - `devgod:scaffold-workflow`
 - `devgod:upgrade-reasoning-workflow`
 - `devgod:seed-happy-path-fixture`
+- `devgod:check:happy-path`
+- `devgod:check-workflow`
+- `devgod:verify:migrations:live`
+- `devgod:export-docs`
 
 ## Important nuance: shipped truth vs consuming-repo truth
 
@@ -230,6 +273,7 @@ Current and shipped in this package:
 - workflow proof and review recording surfaces
 - runtime-proven package status at the package level, and authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`
 - daemon, supervisor, operator, MCP, and UI surfaces
+- automation envelopes plus app and CLI delayed-work handoff surfaces
 - modernization-mode readiness gates and installed-repo proof
 - hook hardening for continuation handoff and authority mismatch
 
@@ -244,4 +288,4 @@ Still repo-specific after install:
 
 If someone asks, "What is DevGod right now?", the most honest answer is:
 
-> DevGod is a reusable package that tries to make Codex work more like a small engineering organization than a single chat session. It installs workflow rules and operator tools into a repo, stores runtime state in a database, exposes status and recovery surfaces, and pushes work toward evidence-backed completion.
+> DevGod is a reusable package that tries to make Codex work more like a small engineering organization than a single chat session. It installs workflow rules and operator tools into a repo, stores runtime state in a database, exposes status, recovery, and delayed-work handoff surfaces, and pushes work toward evidence-backed completion.

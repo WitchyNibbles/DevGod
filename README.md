@@ -7,10 +7,10 @@
 <p align="center">
   <img alt="node 22+" src="https://img.shields.io/badge/node-22%2B-2f6f3e?style=for-the-badge&logo=node.js&logoColor=white">
   <img alt="typescript runtime" src="https://img.shields.io/badge/typescript-runtime-1f6feb?style=for-the-badge&logo=typescript&logoColor=white">
-  <img alt="codex managed" src="https://img.shields.io/badge/codex-managed-f97316?style=for-the-badge">
-  <img alt="workflow" src="https://img.shields.io/badge/workflow-intake%20to%20proof-8b5cf6?style=for-the-badge">
+  <img alt="workflow" src="https://img.shields.io/badge/workflow-intake%20to%20proof-f97316?style=for-the-badge">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-postgres%20%2B%20qdrant-0f766e?style=for-the-badge">
-  <img alt="state date" src="https://img.shields.io/badge/state-2026--05--21-111827?style=for-the-badge">
+  <img alt="automation" src="https://img.shields.io/badge/automation-codex%20app%20%2B%20cli-7c3aed?style=for-the-badge">
+  <img alt="state date" src="https://img.shields.io/badge/docs-2026--05--24-111827?style=for-the-badge">
 </p>
 
 > `devgod` is an installable package that adds a reusable control layer, runtime-backed workflow state, operator tooling, and proof-oriented completion checks to Codex-driven repository work.
@@ -22,39 +22,35 @@ user ask
    ↓
 clarify direction when needed
    ↓
-intake
+intake → brief → plan → task packet → execution → reviews → workflow proof
    ↓
-brief → plan → task packet → execution → reviews → workflow proof → next task
+next task or real stop condition
 ```
 
 ## ✨ At A Glance
 
-`opt-in overlay` `production-oriented package checks` `runtime-backed authority` `review gates` `autonomous continuation` `MCP server` `operator UI` `docs export`
+`opt-in overlay` `production-oriented package checks` `runtime-backed authority` `review gates` `autonomous continuation` `codex automation adapters` `MCP server` `operator UI` `docs export`
 
-For a new substantive request, DevGod now biases toward a short clarification pass before planning or implementation. The default target is up to four questions covering intended outcome, primary user or operator, constraints or non-goals, and concrete done criteria. If the request is already clear enough, DevGod should record explicit operating assumptions instead of asking unnecessary questions.
+For new substantive asks, DevGod now prefers a short clarification pass before planning or implementation. The default target is up to four questions covering intended outcome, primary user or operator, constraints or non-goals, and concrete done criteria. If the request is already clear enough, DevGod records explicit operating assumptions instead of asking unnecessary questions.
 
 ## 📦 What It Is Right Now
 
 As of `2026-05-20`, this repo is the package source of truth for DevGod and is runtime-proven at the package level.
 
-It ships:
+The current package ships:
 
 - a repo installer and upgrade overlay for consuming repositories
 - reusable `AGENTS.md`, `.codex/agents/`, `.agents/skills/`, `.devgod/rules/`, and `.devgod/templates/`
 - a TypeScript CLI and runtime service for task state, reviews, approvals, checkpoints, reports, and workflow proof
-- autonomous continuation surfaces including `status`, `coverage`, `gaps`, `loop`, `daemon`, `supervisor`, `recover`, and `plan-context`
-- a modernization-grade autonomous profile, `modernization_program`, with stricter rewrite readiness gates
+- autonomous execution surfaces including `status`, `coverage`, `gaps`, `checkpoint`, `resume`, `daemon`, `supervisor`, `supervisor-history`, `recover`, and `plan-context`
+- Codex-native deferred-work handoffs for app automations and CLI scheduler flows
 - installed-repo verification harnesses and a supported `seed-modernization-proof` path
-- control-layer hook hardening for authority mismatch detection and explicit successor task handoff scope
-- clarification-first intake steering for new substantive requests, with runtime-visible clarifying questions and explicit assumptions
 - an MCP server and lightweight operator UI
 
 > This repo proves the package behavior.
 > It does not prove that every consuming repo is fully operational after install.
 
 Installed repos still need their own runtime registration, review identity wiring, and repo-local evidence.
-
-This package is still an `opt-in overlay` with `production-oriented package checks`, not a blanket certification that every consuming repo is production-ready after installation.
 
 ## 🎯 Mission
 
@@ -94,7 +90,7 @@ flowchart LR
     K -- no --> L[Real stop condition]
 ```
 
-## 🏠 The Two Places Devgod Lives
+## 🏠 Where DevGod Lives
 
 | Place | What it is | What it owns |
 | --- | --- | --- |
@@ -103,25 +99,12 @@ flowchart LR
 
 Short version:
 
-- this repo owns reusable package assets under `src/`, `scripts/`, `.agents/`, `.codex/`, and `.devgod/templates/`
+- this repo owns reusable package assets under `src/`, `scripts/`, `.agents/`, `.codex/`, `.devgod/templates/`, and `plugins/`
 - consuming repos own their own local workflow state and runtime setup
 
 Keep that boundary straight. Package verification here is evidence about the package. It is not blanket proof for target repos.
 
-## 📍 Current State Summary
-
-The most important package-level milestones now shipped in this repo are:
-
-- runtime-backed workflow authority rather than markdown-only workflow claims
-- autonomous execution reporting with coverage, gap, checkpoint, and continuation surfaces
-- modernization-mode evidence for cartography, invariants, duplicate families, architecture decisions, migration ledgers, and parity requirements
-- installed-repo proof that a fresh target repo can reach modernization readiness without leaking package-repo runtime state
-- hook-side hardening so stale `.devgod/ACTIVE` state and missing successor packet scope do not stall valid continuation
-- clarification-first intake steering for new substantive requests, with runtime-visible clarifying questions and explicit assumptions
-
-For the plain-language snapshot, see [docs/current-state.md](docs/current-state.md).
-
-## 🧱 Current Shape
+## 🧱 Shipped Surfaces
 
 ### 🛠️ Install and upgrade overlay
 
@@ -141,24 +124,25 @@ Shipped through:
 - `src/admin.ts`
 - `src/core/service.ts`
 - `src/store/postgres-store.ts`
-- `src/runtime/`
 - `src/sql/migrations/`
 
 This layer tracks projects, runs, tasks, reviews, approvals, checkpoints, retrieval work, and runtime authority.
 
-### 📋 Workflow and control layer
+### 🤖 Automation-aware continuation
 
 Shipped through:
 
-- `.devgod/templates/`
-- `.devgod/rules/`
-- `.agents/skills/devgod-*`
-- `.codex/agents/*.toml`
-- `plugins/devgod/scripts/`
+- `src/admin.ts`
+- `src/admin/autonomous-summary.ts`
+- `src/admin/status.ts`
+- `src/admin/ops.ts`
+- `plugins/devgod/scripts/hook-policy.mjs`
 
-This layer governs intake, planning, execution expectations, review gates, write-scope enforcement, continuation, and stop conditions.
+Current deferred-work behavior now distinguishes between immediate continuation and delayed follow-up:
 
-At intake, the managed control layer should ask concise direction-setting questions before planning whenever the request is substantive and still ambiguous. Trivial mechanical work can still stay on the fast path.
+- `defer_same_thread` can materialize a Codex app thread automation or a same-thread CLI resume handoff
+- `defer_fresh_run` can materialize a Codex app standalone automation or a fresh-run CLI scheduler handoff
+- unsupported automation cases fall back to explicit operator handoff instead of fake continuation prose
 
 ### 🧭 Operator and inspection layer
 
@@ -197,7 +181,6 @@ Useful source-repo commands:
 
 ```bash
 npm run devgod -- help
-npm run install:project -- init --apply --target /absolute/path/to/project
 npm run setup:local
 npm run doctor
 npm run status
@@ -243,10 +226,16 @@ npm run ops
 npm run devgod -- report --run-id latest
 npm run devgod -- coverage --run-id latest --format text
 npm run devgod -- gaps --run-id latest --format text
-npm run devgod -- loop --run-id latest --format text
+npm run devgod -- checkpoint --input /absolute/path/to/checkpoint.json
+npm run devgod -- resume --run-id latest
 npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
-npm run devgod -- serve-ui
+npm run devgod -- daemon --format text
+npm run devgod -- supervisor --format text
+npm run devgod -- supervisor-history --format text
+npm run devgod -- plan-context --query "what still matters here?"
+npm run export:docs
 npm run mcp
+npm run ui
 ```
 
 Common command families exposed through `npm run devgod -- ...` include `status`, `ops`, `report`, `coverage`, and `gaps`.
@@ -260,7 +249,6 @@ Other important source-repo scripts that really exist today:
 - `npm run verify:workflow`
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
-- `npm run export:docs`
 
 ### Installed repo commands
 
@@ -278,7 +266,10 @@ npm run devgod:gaps
 npm run devgod:ops
 npm run devgod:report
 npm run devgod:loop
+npm run devgod:daemon
 npm run devgod:supervisor
+npm run devgod:supervisor-history
+npm run devgod:recover
 npm run devgod:seed-workflow-proof
 npm run devgod:seed-modernization-proof
 npm run devgod:verify:review-identity
@@ -292,15 +283,19 @@ Installed repos also get:
 - `devgod:advance-active-task`
 - `devgod:reconcile`
 - `devgod:sync-runtime-exports`
+- `devgod:plan-context`
 - `devgod:refresh-retrieval`
 - `devgod:autopilot-status`
+- `devgod:github-dispatch`
 - `devgod:mcp`
 - `devgod:ui`
+- `devgod:record-review`
 - `devgod:scaffold-workflow`
 - `devgod:upgrade-reasoning-workflow`
 - `devgod:seed-happy-path-fixture`
 - `devgod:check:happy-path`
 - `devgod:check-workflow`
+- `devgod:verify:migrations:live`
 
 ## 💡 Why It Feels Different
 
@@ -339,6 +334,7 @@ That still depends on the target repo, its runtime wiring, its review identity s
 - [docs/global-setup.md](docs/global-setup.md): source repo versus consuming repo setup notes
 - [docs/large-repo-modernization-mode.md](docs/large-repo-modernization-mode.md): modernization-mode design and shipped rollout status
 - [docs/autonomous-execution-redesign.md](docs/autonomous-execution-redesign.md): broader redesign contract and architecture direction
+- [docs/codex-automation-surface-integration-plan.md](docs/codex-automation-surface-integration-plan.md): automation-provider design that informed the shipped integration
 - [docs/devgod-goal-gap-audit.md](docs/devgod-goal-gap-audit.md): historical gap audit context
 - [docs/benchmarks/orchestration-benchmark.md](docs/benchmarks/orchestration-benchmark.md): orchestration benchmark notes
 
