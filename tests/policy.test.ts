@@ -233,6 +233,20 @@ test("routing policy helpers expose bounded review gaps and role retrieval guida
     "runbooks",
     "reviewed retrieval notes"
   ]);
+  assert.deepEqual(getRoleRetrievalGuidance("technical_writer"), [
+    "approved memory",
+    "repo rules",
+    "reviewed plans",
+    "reviewed technical notes",
+    "release notes"
+  ]);
+  assert.deepEqual(getRoleRetrievalGuidance("ux_researcher"), [
+    "approved briefs",
+    "approved memory",
+    "repo rules",
+    "reviewed plans",
+    "reviewed UI artifacts"
+  ]);
 });
 
 test("memory and artifact search builders preserve precedence and access policy", () => {

@@ -2,25 +2,28 @@
 
 ## Product Goal
 
-Make the shared `devgod` package use Codex-native local automation and desktop/app capabilities in a local-first way, without cloud-only dependence, without the current continuation-loop failure mode, and without workflow self-stalls that force users to repair scope or handoff problems the system can handle safely itself.
+Make devgod’s shipped team shape manifest-driven through a canonical agent catalog that expands the day-one role roster, keeps explicit shipped artifacts, and proves stronger control without reintroducing continuation stalls, wait loops, or scope-stranding behavior.
 
 ## Global Acceptance Criteria
 
-- delayed follow-up is modeled explicitly instead of being encoded as another immediate continuation
-- local CLI operators can use Codex-native automation paths without requiring Codex Cloud
-- desktop/app-capable operators can use native Codex automation surfaces through `devgod`
-- stop conditions, blockers, and wake-up ownership remain runtime-authoritative and testable
-- recoverable workflow blockers such as scope escalation or successor handoff do not masquerade as terminal dead ends
+- one reviewed catalog defines the shipped role roster
+- role validation and retrieval guidance derive from that catalog
+- shipped `.codex/agents/*.toml` are verified against the catalog
+- the day-one roster includes new core roles and optional domain specialists
+- stricter control remains CI- and verification-oriented rather than creating unrelated runtime blockers
+- continuation and recoverable-blocker regressions remain green
+- the branch lands as a PR to `main` with passing CI
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Separate immediate continuation from delayed automation | done | continuation-intent and Stop-hook slice |
-| Support local-first Codex automation execution providers | done | local adapter slice plus runtime proof run `8d6b5c1e-aaee-4977-9691-643f2f0525be` |
-| Integrate optional Codex desktop/app-native automation surfaces | in_progress | desktop/app slice remains active while follow-on rollout verification remains open |
-| Verify loop prevention and operator guidance across supported paths | planned | queued verification slice |
-| Keep workflow continuity moving through recoverable scope and handoff blockers | done | hook, template, queue, workflow-proof, and installed-harness repairs are implemented with focused regression coverage plus live workflow proof |
+| Canonical role catalog | complete | `src/devgod/agent-catalog.ts`, `src/domain/types.ts`, `src/core/policy.ts`, focused contracts/policy/admin/report tests passed |
+| Catalog-derived validation and guidance | complete | retrieval guidance and role validation now derive from the catalog; focused tests passed |
+| Catalog-to-artifact drift verification | complete | `src/devgod/agent-artifact-verifier.ts`, deterministic drift test in `tests/install.test.ts` passed |
+| Expanded shipped day-one roster | complete | new `.codex/agents/*.toml`, `docs/devgod-agent-team.md`, package/install assertions passed |
+| Anti-stall continuation proof | complete | optional-role handoff regression plus runtime/admin/status/ops suites passed |
+| Release and PR CI proof | complete | PR #5 opened to `main`, workflow proof/live proof passed locally, hosted CI workflow run `26344908727` passed on branch head `d832699` |
 
 ## Current Milestone
 
@@ -28,9 +31,13 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Completed Milestones
 
-- source repo remote sync and local setup replay
-- continuation-intent and Stop-hook reform
-- local-first Codex automation adapters
+- approved design and implementation plan
+- clean branch-from-main baseline verification
+- canonical catalog landed with derived validation and retrieval guidance
+- catalog-to-artifact verifier landed with deterministic drift coverage
+- expanded day-one agent roster shipped explicitly in package/docs surfaces
+- anti-stall routing and runtime recovery regressions stayed green after the catalog rollout
+- release proof closed with local workflow proof, PR publication, and a green hosted CI workflow on the final branch tip
 
 ## Current Task
 
@@ -48,8 +55,7 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Reasoning Debt
 
-- desktop/app-native integration and final rollout verification remain open after the CLI-first local adapter baseline
-- the current recoverable-blocker handling is improved, but a fuller manager-owned continuity lane and richer blocker state model are still future work
+- GitHub did not attach automatic `pull_request` status checks to PR #5 for this branch, so hosted verification was confirmed through the repo’s own `CI` workflow via `workflow_dispatch` on the exact PR head commit.
 
 ## Verification Summary
 
