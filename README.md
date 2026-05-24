@@ -29,7 +29,7 @@ next task or real stop condition
 
 ## ✨ At A Glance
 
-`opt-in overlay` `runtime-backed authority` `review gates` `autonomous continuation` `codex automation adapters` `MCP server` `operator UI` `docs export`
+`opt-in overlay` `production-oriented package checks` `runtime-backed authority` `review gates` `autonomous continuation` `codex automation adapters` `MCP server` `operator UI` `docs export`
 
 For new substantive asks, DevGod now prefers a short clarification pass before planning or implementation. The default target is up to four questions covering intended outcome, primary user or operator, constraints or non-goals, and concrete done criteria. If the request is already clear enough, DevGod records explicit operating assumptions instead of asking unnecessary questions.
 
