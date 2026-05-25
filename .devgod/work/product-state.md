@@ -23,7 +23,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 | Catalog-to-artifact drift verification | complete | `src/devgod/agent-artifact-verifier.ts`, deterministic drift test in `tests/install.test.ts` passed |
 | Expanded shipped day-one roster | complete | new `.codex/agents/*.toml`, `docs/devgod-agent-team.md`, package/install assertions passed |
 | Anti-stall continuation proof | complete | optional-role handoff regression plus runtime/admin/status/ops suites passed |
-| Release and PR CI proof | in_progress | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, branch `codex/devgod-automation-rollout-verification` is pushed through `b841326`, and the user has redirected the blocked PR step to a direct merge into `main` followed by hosted CI verification |
+| Release and PR CI proof | complete | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, `main` was fast-forwarded to `b96327a`, and hosted `CI` run `26392030568` completed successfully on the merged commit |
 
 ## Current Milestone
 
@@ -41,16 +41,15 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Current Task
 
-`2026-05-23-devgod-codex-automation-rollout-verification`
+`none`
 
 ## Next Task
 
-`merge verified branch into main and verify hosted CI`
+`none`
 
 ## Blockers
 
-- no active blocker remains after the user replaced the PR requirement with a direct merge path
-- hosted CI verification against `main` begins once the verified branch is merged and pushed
+- no active blocker remains
 
 ## Reasoning Debt
 
@@ -66,6 +65,8 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 - the installer contract now strips repo-local GitNexus MCP config from default consumer installs unless `withGitNexus` is explicitly requested, and `node --experimental-strip-types --test tests/install.test.ts` plus `npm test` passed after the repair
 - branch `codex/devgod-automation-rollout-verification` is pushed through `b841326`
 - the earlier PR-creation dead end is no longer gating completion because the user explicitly redirected the publish step to a direct merge into `main`
+- `main` now points to `b96327a` after a direct fast-forward merge from `codex/devgod-automation-rollout-verification`
+- hosted GitHub Actions `CI` run `26392030568` completed successfully for `main` on commit `b96327a381c6651eb4bb2911c1ff5f10700cc52c`
 - `2026-05-23-devgod-postmerge-ci-repair` is complete and the workflow export state is now synced to `state=complete`
 - local authoritative workflow proof run `edc6f8a1-cfc7-42d7-9ba5-23dc98acc476` approved `2026-05-23-devgod-postmerge-ci-repair`
 - `bash scripts/check-docs-runtime-drift.sh` now passes after restoring the required runtime-proven package status wording and explicit `report` command-family coverage in the docs

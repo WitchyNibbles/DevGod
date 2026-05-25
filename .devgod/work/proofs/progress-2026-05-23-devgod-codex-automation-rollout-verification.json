@@ -1,8 +1,8 @@
 {
   "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
   "captured_at": "2026-05-25T08:27:16Z",
-  "status": "active",
-  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. After the blocked PR path, the user explicitly redirected publication to a direct merge of the verified branch into main as Eimi, so the remaining rollout step is local branch integration followed by hosted CI verification on main.",
+  "status": "completed",
+  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. After the blocked PR path, the user explicitly redirected publication to a direct merge of the verified branch into main as Eimi. Main now points to b96327a and hosted CI run 26392030568 completed successfully on that merged commit.",
   "verification": [
     {
       "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
@@ -74,6 +74,20 @@
       "command": "codex GitHub app _list_installed_accounts and _list_installations",
       "status": "blocked",
       "details": "No installed GitHub app accounts or installations are available in this session"
+    },
+    {
+      "command": "git switch main && git merge --ff-only codex/devgod-automation-rollout-verification",
+      "status": "passed"
+    },
+    {
+      "command": "git push origin main",
+      "status": "passed",
+      "details": "Remote accepted the direct update while noting that the pull-request rule was bypassed for refs/heads/main"
+    },
+    {
+      "command": "gh run watch 26392030568 --exit-status",
+      "status": "passed",
+      "details": "GitHub Actions CI run 26392030568 completed successfully for main at b96327a381c6651eb4bb2911c1ff5f10700cc52c"
     }
   ],
   "evidence_refs": [
@@ -106,13 +120,11 @@
     "closed": 2,
     "opened": 0
   },
-  "next_target": "release:direct-main-merge",
-  "why_next": "Local verification and branch publication are complete, and the user has explicitly replaced the blocked PR publication step with a direct merge of the verified branch into main followed by hosted CI verification on the merged branch.",
-  "cycle": 3,
+  "next_target": "none",
+  "why_next": "The verified branch was merged directly into main and the hosted CI run on the merged commit completed successfully.",
+  "cycle": 4,
   "residual_risk": [
-    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally once main is updated.",
-    "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine.",
-    "The rollout task remains incomplete until main is updated and required hosted checks finish green."
+    "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine."
   ],
   "blockers": []
 }

@@ -1,11 +1,11 @@
 {
-  "project_status": "active",
-  "current_task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
+  "project_status": "done",
+  "current_task_id": null,
   "tasks": [
     {
       "id": "2026-05-23-devgod-codex-automation-rollout-verification",
       "title": "Local workflow proof seed for 2026-05-23-devgod-codex-automation-rollout-verification",
-      "status": "in_progress",
+      "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
