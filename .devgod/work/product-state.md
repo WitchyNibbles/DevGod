@@ -12,7 +12,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 - the day-one roster includes new core roles and optional domain specialists
 - stricter control remains CI- and verification-oriented rather than creating unrelated runtime blockers
 - continuation and recoverable-blocker regressions remain green
-- the branch lands as a PR to `main` with passing CI
+- the verified branch lands on `main` with passing CI
 
 ## Required Capabilities
 
@@ -23,7 +23,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 | Catalog-to-artifact drift verification | complete | `src/devgod/agent-artifact-verifier.ts`, deterministic drift test in `tests/install.test.ts` passed |
 | Expanded shipped day-one roster | complete | new `.codex/agents/*.toml`, `docs/devgod-agent-team.md`, package/install assertions passed |
 | Anti-stall continuation proof | complete | optional-role handoff regression plus runtime/admin/status/ops suites passed |
-| Release and PR CI proof | blocked | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, branch `codex/devgod-automation-rollout-verification` is pushed at `482c70a`, but PR creation is denied for the current Enterprise Managed User account and no GitHub app installation is available in this session |
+| Release and PR CI proof | in_progress | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, branch `codex/devgod-automation-rollout-verification` is pushed through `b841326`, and the user has redirected the blocked PR step to a direct merge into `main` followed by hosted CI verification |
 
 ## Current Milestone
 
@@ -45,13 +45,12 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Next Task
 
-`blocked on GitHub PR authorization`
+`merge verified branch into main and verify hosted CI`
 
 ## Blockers
 
-- external GitHub authorization blocks pull-request creation for the current Enterprise Managed User account across both CLI and MCP routes
-- no installed GitHub app account or installation is available in this Codex session to provide an alternate PR-creation path
-- hosted CI verification against `main` cannot begin until PR creation is possible
+- no active blocker remains after the user replaced the PR requirement with a direct merge path
+- hosted CI verification against `main` begins once the verified branch is merged and pushed
 
 ## Reasoning Debt
 
@@ -65,8 +64,8 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 - `.env` now persists `DEVGOD_RUNTIME_MODE=managed`, so plain `npm run setup:local` succeeds without ad hoc overrides in this source repo
 - repo-local GitNexus wiring is present in `.codex/config.toml` and `package.json`, with `.gitnexus/` generated and `npm run devgod:gitnexus:status` green
 - the installer contract now strips repo-local GitNexus MCP config from default consumer installs unless `withGitNexus` is explicitly requested, and `node --experimental-strip-types --test tests/install.test.ts` plus `npm test` passed after the repair
-- branch `codex/devgod-automation-rollout-verification` is pushed at `482c70a`, but `gh pr create`, `gh api repos/.../pulls`, and the GitHub MCP `create_pull_request` route all fail with Enterprise Managed User authorization denial
-- the Codex GitHub app path is unavailable in this session because `_list_installed_accounts` and `_list_installations` both return empty results
+- branch `codex/devgod-automation-rollout-verification` is pushed through `b841326`
+- the earlier PR-creation dead end is no longer gating completion because the user explicitly redirected the publish step to a direct merge into `main`
 - `2026-05-23-devgod-postmerge-ci-repair` is complete and the workflow export state is now synced to `state=complete`
 - local authoritative workflow proof run `edc6f8a1-cfc7-42d7-9ba5-23dc98acc476` approved `2026-05-23-devgod-postmerge-ci-repair`
 - `bash scripts/check-docs-runtime-drift.sh` now passes after restoring the required runtime-proven package status wording and explicit `report` command-family coverage in the docs

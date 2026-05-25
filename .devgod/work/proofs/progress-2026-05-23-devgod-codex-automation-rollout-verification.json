@@ -1,8 +1,8 @@
 {
   "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
   "captured_at": "2026-05-25T08:27:16Z",
-  "status": "blocked",
-  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. The remaining rollout step is externally blocked because the current Enterprise Managed User account can push the branch but cannot create a GitHub pull request, and no GitHub app installation is available in this Codex session to provide an alternate path.",
+  "status": "active",
+  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. After the blocked PR path, the user explicitly redirected publication to a direct merge of the verified branch into main as Eimi, so the remaining rollout step is local branch integration followed by hosted CI verification on main.",
   "verification": [
     {
       "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
@@ -106,16 +106,13 @@
     "closed": 2,
     "opened": 0
   },
-  "next_target": "external:github-pr-authz",
-  "why_next": "Local verification and branch publication are complete, but PR publication and hosted CI closure now require either GitHub PR-create permission for the current Enterprise Managed User account or an installed GitHub app with PR creation access.",
+  "next_target": "release:direct-main-merge",
+  "why_next": "Local verification and branch publication are complete, and the user has explicitly replaced the blocked PR publication step with a direct merge of the verified branch into main followed by hosted CI verification on the merged branch.",
   "cycle": 3,
   "residual_risk": [
-    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally once a PR can be created.",
+    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally once main is updated.",
     "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine.",
-    "The rollout task remains incomplete until the PR exists and required hosted checks finish green."
+    "The rollout task remains incomplete until main is updated and required hosted checks finish green."
   ],
-  "blockers": [
-    "GitHub PR creation is denied for the current Enterprise Managed User account across both CLI and MCP paths.",
-    "No installed GitHub app account or installation is available in this Codex session to provide an alternate PR-creation path."
-  ]
+  "blockers": []
 }

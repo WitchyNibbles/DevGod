@@ -1,4 +1,3 @@
 workflow=devgod
-state=blocked
+state=active
 current_task_id=2026-05-23-devgod-codex-automation-rollout-verification
-blocker=GitHub PR creation is denied for the current Enterprise Managed User account and no GitHub app installation is available in this session

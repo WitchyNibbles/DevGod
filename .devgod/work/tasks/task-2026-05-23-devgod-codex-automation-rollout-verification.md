@@ -31,7 +31,7 @@
 
 ## Goal
 
-Prove the full automation integration locally and in hosted CI, then publish the branch as a PR to `main` with any required code or pipeline fixes landed on the same branch.
+Prove the full automation integration locally and in hosted CI, then merge the verified branch directly into `main` with any required code or pipeline fixes landed as `Eimi`.
 
 ## Inputs
 
@@ -58,7 +58,7 @@ Prove the full automation integration locally and in hosted CI, then publish the
 ## Outputs
 
 - broad local verification evidence for the automation integration
-- PR to `main` from `codex/devgod-codex-automation-integration`
+- direct merge from `codex/devgod-automation-rollout-verification` into `main`
 - CI repair commits if required
 - final green hosted checks or explicit external blocker evidence
 
@@ -79,7 +79,7 @@ Extends the automation integration slice from local implementation into workflow
 
 ## Progress proof
 
-Record the broad local verification bundle, the workflow-proof/live-check evidence, the PR link, and the final hosted CI state with any corrective branch-local commits.
+Record the broad local verification bundle, the workflow-proof/live-check evidence, the direct merge evidence, and the final hosted CI state with any corrective commits.
 
 ## Interrupt checkpoint policy
 
@@ -158,7 +158,7 @@ If a workflow, review, or CI fix requires touching paths outside the allowed sco
 ### Approved assumptions
 
 - the existing automation implementation commits are the intended feature scope for this rollout task
-- hosted CI status on the PR is the source of truth for final branch health
+- hosted CI status on `main` after the direct merge is the source of truth for final branch health
 - pipeline fixes belong on this branch when they are necessary to verify the new automation surfaces correctly
 
 ### Blocked assumptions
@@ -177,7 +177,7 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 
 - runtime, app, and CLI automation slices are already implemented on this branch with focused passing local tests
 - the active blocker is a workflow live-check failure caused by an incomplete rollout verification task packet
-- the user explicitly asked for a PR to `main` and for CI to be fixed until green, including pipeline updates when appropriate
+- the user explicitly redirected the publish step from PR creation to a direct merge into `main` while keeping the CI-until-green requirement
 - the user explicitly approved widening scope to persist the working managed runtime mode and configure repo-local optional integrations in this source repo
 
 ### Assumptions
@@ -187,7 +187,7 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 
 ### Hypotheses and alternatives
 
-- preferred: repair workflow artifacts first, rerun local verification, publish the branch, and iterate on hosted CI until green
+- preferred: repair workflow artifacts first, rerun local verification, merge the verified branch into `main`, and iterate on hosted CI until green
 - alternative: publish immediately and let hosted CI surface both workflow and product issues
 - alternative: stop after local verification and report the branch as ready without hosted proof
 
@@ -224,8 +224,8 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 - wire any documented repo-local optional integrations needed for this source repo, including GitNexus if the repo-local surface is incomplete
 - repair installer/upgrade contract drift introduced by the repo-local GitNexus enablement and rerun the failing install verification slice
 - rerun the broad local regression bundle and `git diff --check`
-- publish the branch to GitHub and open a PR to `main`
-- inspect required checks and repair product or pipeline issues until the PR is green
+- merge the verified branch into `main` and push it to GitHub
+- inspect required checks and repair product or pipeline issues until `main` is green
 
 ### Research and debug budgets
 
@@ -253,6 +253,7 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 
 - attempt-1: complete the rollout verification packet so the workflow live check can proceed to runtime-backed evidence
 - attempt-2: expand the task scope to include the minimum repo-local configuration paths required for durable setup and optional integration wiring after direct user approval
+- attempt-3: replace the blocked PR publication path with the user-approved direct merge into `main`
 
 ### Verification records
 

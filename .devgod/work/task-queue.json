@@ -1,11 +1,11 @@
 {
-  "project_status": "blocked",
+  "project_status": "active",
   "current_task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
   "tasks": [
     {
       "id": "2026-05-23-devgod-codex-automation-rollout-verification",
       "title": "Local workflow proof seed for 2026-05-23-devgod-codex-automation-rollout-verification",
-      "status": "blocked",
+      "status": "in_progress",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
@@ -20,7 +20,7 @@
         "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
         "quality gate: release_readiness_required"
       ],
-      "blocker": "GitHub PR creation is denied for the current Enterprise Managed User account and no GitHub app installation is available in this session"
+      "blocker": null
     }
   ]
 }
