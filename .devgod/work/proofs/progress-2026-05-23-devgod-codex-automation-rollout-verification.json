@@ -1,8 +1,8 @@
 {
   "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
-  "captured_at": "2026-05-25T08:20:00.000Z",
-  "status": "verified",
-  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green.",
+  "captured_at": "2026-05-25T08:27:16Z",
+  "status": "blocked",
+  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. The remaining rollout step is externally blocked because the current Enterprise Managed User account can push the branch but cannot create a GitHub pull request, and no GitHub app installation is available in this Codex session to provide an alternate path.",
   "verification": [
     {
       "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
@@ -47,6 +47,33 @@
     {
       "command": "git diff --check",
       "status": "passed"
+    },
+    {
+      "command": "gh auth status",
+      "status": "passed"
+    },
+    {
+      "command": "gh repo view --json nameWithOwner,defaultBranchRef",
+      "status": "passed"
+    },
+    {
+      "command": "gh api 'repos/WitchyNibbles/DevGod/pulls?head=WitchyNibbles:codex/devgod-automation-rollout-verification&state=all'",
+      "status": "passed"
+    },
+    {
+      "command": "gh api repos/WitchyNibbles/DevGod/pulls --method POST ...",
+      "status": "blocked",
+      "details": "HTTP 403 Unauthorized: As an Enterprise Managed User, you cannot access this content"
+    },
+    {
+      "command": "github/create_pull_request",
+      "status": "blocked",
+      "details": "Permission Denied: Unauthorized: As an Enterprise Managed User, you cannot access this content"
+    },
+    {
+      "command": "codex GitHub app _list_installed_accounts and _list_installations",
+      "status": "blocked",
+      "details": "No installed GitHub app accounts or installations are available in this session"
     }
   ],
   "evidence_refs": [
@@ -79,12 +106,16 @@
     "closed": 2,
     "opened": 0
   },
-  "next_target": "release:github-pr-green",
-  "why_next": "Repo-local DevGod setup is now durable and the optional advisory integration is ready, so the remaining rollout target is still PR publication and hosted CI closure against main.",
-  "cycle": 2,
+  "next_target": "external:github-pr-authz",
+  "why_next": "Local verification and branch publication are complete, but PR publication and hosted CI closure now require either GitHub PR-create permission for the current Enterprise Managed User account or an installed GitHub app with PR creation access.",
+  "cycle": 3,
   "residual_risk": [
-    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally.",
+    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally once a PR can be created.",
     "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine.",
     "The rollout task remains incomplete until the PR exists and required hosted checks finish green."
+  ],
+  "blockers": [
+    "GitHub PR creation is denied for the current Enterprise Managed User account across both CLI and MCP paths.",
+    "No installed GitHub app account or installation is available in this Codex session to provide an alternate PR-creation path."
   ]
 }

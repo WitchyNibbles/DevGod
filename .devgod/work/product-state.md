@@ -23,7 +23,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 | Catalog-to-artifact drift verification | complete | `src/devgod/agent-artifact-verifier.ts`, deterministic drift test in `tests/install.test.ts` passed |
 | Expanded shipped day-one roster | complete | new `.codex/agents/*.toml`, `docs/devgod-agent-team.md`, package/install assertions passed |
 | Anti-stall continuation proof | complete | optional-role handoff regression plus runtime/admin/status/ops suites passed |
-| Release and PR CI proof | complete | PR #5 opened to `main`, workflow proof/live proof passed locally, hosted CI workflow run `26344908727` passed on branch head `d832699` |
+| Release and PR CI proof | blocked | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, branch `codex/devgod-automation-rollout-verification` is pushed at `482c70a`, but PR creation is denied for the current Enterprise Managed User account and no GitHub app installation is available in this session |
 
 ## Current Milestone
 
@@ -45,13 +45,13 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Next Task
 
-`none`
+`blocked on GitHub PR authorization`
 
 ## Blockers
 
-- no workflow-contract scope blocker remains inside the completed CI regression repair slice
-- no blocking workflow or installed-harness issue remains inside the completed implementation scope
-- the current automation integration sequence is active and the rollout verification slice is the final required implementation step
+- external GitHub authorization blocks pull-request creation for the current Enterprise Managed User account across both CLI and MCP routes
+- no installed GitHub app account or installation is available in this Codex session to provide an alternate PR-creation path
+- hosted CI verification against `main` cannot begin until PR creation is possible
 
 ## Reasoning Debt
 
@@ -62,6 +62,11 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 - source-backed Codex automation research now records that the app has native standalone and thread automations, local-project vs background-worktree execution, and background triage reporting
 - source-backed Codex automation research now records that the CLI supports scheduled-job-friendly `codex exec`, JSONL event streams, structured final outputs, and resume for staged automation flows
 - `docs/codex-automation-surface-integration-plan.md` now captures the implementation order needed to move delayed execution ownership off hooks and onto native app or CLI automation providers
+- `.env` now persists `DEVGOD_RUNTIME_MODE=managed`, so plain `npm run setup:local` succeeds without ad hoc overrides in this source repo
+- repo-local GitNexus wiring is present in `.codex/config.toml` and `package.json`, with `.gitnexus/` generated and `npm run devgod:gitnexus:status` green
+- the installer contract now strips repo-local GitNexus MCP config from default consumer installs unless `withGitNexus` is explicitly requested, and `node --experimental-strip-types --test tests/install.test.ts` plus `npm test` passed after the repair
+- branch `codex/devgod-automation-rollout-verification` is pushed at `482c70a`, but `gh pr create`, `gh api repos/.../pulls`, and the GitHub MCP `create_pull_request` route all fail with Enterprise Managed User authorization denial
+- the Codex GitHub app path is unavailable in this session because `_list_installed_accounts` and `_list_installations` both return empty results
 - `2026-05-23-devgod-postmerge-ci-repair` is complete and the workflow export state is now synced to `state=complete`
 - local authoritative workflow proof run `edc6f8a1-cfc7-42d7-9ba5-23dc98acc476` approved `2026-05-23-devgod-postmerge-ci-repair`
 - `bash scripts/check-docs-runtime-drift.sh` now passes after restoring the required runtime-proven package status wording and explicit `report` command-family coverage in the docs
@@ -142,4 +147,4 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Last Updated
 
-2026-05-23
+2026-05-25
