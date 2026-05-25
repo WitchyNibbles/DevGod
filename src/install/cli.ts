@@ -8,7 +8,8 @@ import {
   mergeAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
-  mergePackageJson
+  mergePackageJson,
+  stripGitNexusFromCodexConfig
 } from "./merge.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
@@ -805,9 +806,10 @@ async function buildInstallPlan(
   }
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
+  const baseCodexConfigSource = stripGitNexusFromCodexConfig(sourceConfig);
   const codexConfigSource = options.withGitNexus
-    ? mergeCodexConfig(sourceConfig, gitNexusCodexConfigFragment())
-    : sourceConfig;
+    ? mergeCodexConfig(baseCodexConfigSource, gitNexusCodexConfigFragment())
+    : baseCodexConfigSource;
   const setupScriptSh = await readFile(path.join(sourceRoot, "scripts/setup-devgod.sh"), "utf8");
   const setupScriptPs1 = await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8");
 

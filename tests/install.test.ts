@@ -843,6 +843,31 @@ test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP con
   }
 });
 
+test("installDevgodIntoProject keeps GitNexus opt-in even when the source repo enables it locally", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-default-no-gitnexus-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    const summary = await installDevgodIntoProject({ sourceRoot, targetRoot });
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+    const gitignore = await readFile(path.join(targetRoot, ".gitignore"), "utf8");
+
+    assert.equal(packageJson.devDependencies?.gitnexus, undefined);
+    assert.equal(packageJson.scripts?.["devgod:gitnexus:analyze"], undefined);
+    assert.doesNotMatch(codexConfig, /\[mcp_servers\.gitnexus\]/);
+    assert.doesNotMatch(gitignore, /\.gitnexus\//);
+    assert.doesNotMatch(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("install CLI init --apply is explicit, replay-safe, and does not run docker", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-apply-"));

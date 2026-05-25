@@ -17,6 +17,10 @@ plugin_hooks = true
 max_threads = 8
 max_depth = 2
 
+[mcp_servers.gitnexus]
+command = "npx"
+args = ["--no-install", "gitnexus", "mcp"]
+
 # devgod keeps reviewed project memory in repo markdown and operational state in
 # the shared core service backed by Postgres + pgvector.
 #

@@ -151,6 +151,8 @@
     "verify:release-overlay": "bash scripts/verify-release-overlay.sh",
     "verify:migrations:live": "node --experimental-strip-types src/admin.ts verify-live-migrations",
     "verify:review-identity": "node --experimental-strip-types src/admin.ts verify-review-identity",
+    "devgod:gitnexus:analyze": "gitnexus analyze --skip-agents-md",
+    "devgod:gitnexus:status": "gitnexus status",
     "record:review": "node --experimental-strip-types src/admin.ts record-review --input .devgod/review-action.json",
     "mcp": "node --experimental-strip-types src/mcp/server.ts",
     "ui": "node --experimental-strip-types src/ui/server.ts",
@@ -168,6 +170,7 @@
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/pg": "^8.20.0",
+    "gitnexus": "1.6.3",
     "typescript": "^5.8.3"
   },
   "engines": {

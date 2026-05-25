@@ -159,6 +159,34 @@ function mergeTomlTable(
   return merged;
 }
 
+function omitGitNexusMcpServer(
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  const normalized = normalizeManagedCodexConfig(config);
+  const mcpServers =
+    normalized.mcp_servers &&
+    typeof normalized.mcp_servers === "object" &&
+    !Array.isArray(normalized.mcp_servers)
+      ? { ...(normalized.mcp_servers as Record<string, unknown>) }
+      : undefined;
+
+  if (!mcpServers || mcpServers.gitnexus === undefined) {
+    return normalized;
+  }
+
+  delete mcpServers.gitnexus;
+
+  if (Object.keys(mcpServers).length === 0) {
+    const { mcp_servers: _removed, ...rest } = normalized;
+    return rest;
+  }
+
+  return {
+    ...normalized,
+    mcp_servers: mcpServers
+  };
+}
+
 export function mergeCodexConfig(
   existingContent: string | undefined,
   sourceContent: string
@@ -202,6 +230,13 @@ export function gitNexusCodexConfigFragment(): string {
     'command = "npx"\n' +
     'args = ["--no-install", "gitnexus", "mcp"]\n'
   );
+}
+
+export function stripGitNexusFromCodexConfig(
+  sourceContent: string
+): string {
+  const source = omitGitNexusMcpServer(TOML.parse(sourceContent) as Record<string, unknown>);
+  return `${TOML.stringify(sortObjectKeys(source) as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
 }
 
 export function mergeGitignore(

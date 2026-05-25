@@ -41,11 +41,14 @@ Prove the full automation integration locally and in hosted CI, then publish the
 - `src/admin/status.ts`
 - `src/admin/ops.ts`
 - `src/admin/report.ts`
+- `src/install/cli.ts`
+- `src/install/merge.ts`
 - `tests/admin.test.ts`
 - `tests/status-report.test.ts`
 - `tests/runtime-surface.test.ts`
 - `tests/ops-recovery.test.ts`
 - `tests/report-command.test.ts`
+- `tests/install.test.ts`
 - `.github/workflows/ci.yml`
 
 ## Dependencies
@@ -110,12 +113,21 @@ review_exports=required
 - `src/admin/status.ts`
 - `src/admin/ops.ts`
 - `src/admin/report.ts`
+- `src/install/cli.ts`
+- `src/install/merge.ts`
 - `tests/admin.test.ts`
 - `tests/status-report.test.ts`
 - `tests/runtime-surface.test.ts`
 - `tests/ops-recovery.test.ts`
 - `tests/report-command.test.ts`
+- `tests/install.test.ts`
 - `.github/workflows/ci.yml`
+- `.env`
+- `.gitignore`
+- `package.json`
+- `package-lock.json`
+- `.codex/config.toml`
+- `.gitnexus/`
 
 ## Allowed successor task scope
 
@@ -129,10 +141,15 @@ If a workflow, review, or CI fix requires touching paths outside the allowed sco
 - record the blocked paths and the minimum safe requested write expansion
 - prefer a narrow CI-focused follow-on slice over broadening product scope
 
+### Approved expansion
+
+- the user approved widening this verification slice so repo-local runtime persistence and optional integration wiring can be completed in-place
+- the minimum approved expansion is `src/install/cli.ts`, `src/install/merge.ts`, `tests/install.test.ts`, `.env`, `.gitignore`, `package.json`, `package-lock.json`, `.codex/config.toml`, and `.gitnexus/`
+- use the expanded paths only for configuration required to make the source repo's local DevGod setup durable and to enable supported optional integrations that this repo already documents
+
 ## Out of scope
 
 - `.agents/`
-- `.codex/`
 - `.devgod/memory/`
 - unrelated product changes outside automation integration and CI repair
 
@@ -161,6 +178,7 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 - runtime, app, and CLI automation slices are already implemented on this branch with focused passing local tests
 - the active blocker is a workflow live-check failure caused by an incomplete rollout verification task packet
 - the user explicitly asked for a PR to `main` and for CI to be fixed until green, including pipeline updates when appropriate
+- the user explicitly approved widening scope to persist the working managed runtime mode and configure repo-local optional integrations in this source repo
 
 ### Assumptions
 
@@ -195,10 +213,16 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 
 - whether hosted CI requires workflow changes or only product/test adjustments
 - whether any required review export files need to be generated before final completion reporting
+- whether GitNexus in this source repo requires only repo-local Codex config or also a package-level dependency/script change
+- whether the installer contract should treat source-repo GitNexus enablement as implicit drift or preserve GitNexus as opt-in for consuming repos
 
 ### Verification plan
 
 - repair the rollout task packet until `check-devgod-workflow-live.sh` passes
+- verify the expanded scope is recognized by the control-layer guard before touching repo-local config paths
+- persist the working runtime mode in `.env` so `npm run setup:local` succeeds without an ad hoc override
+- wire any documented repo-local optional integrations needed for this source repo, including GitNexus if the repo-local surface is incomplete
+- repair installer/upgrade contract drift introduced by the repo-local GitNexus enablement and rerun the failing install verification slice
 - rerun the broad local regression bundle and `git diff --check`
 - publish the branch to GitHub and open a PR to `main`
 - inspect required checks and repair product or pipeline issues until the PR is green
@@ -228,6 +252,7 @@ The correct next step is a verification-and-publish slice that repairs workflow 
 ### Attempt records
 
 - attempt-1: complete the rollout verification packet so the workflow live check can proceed to runtime-backed evidence
+- attempt-2: expand the task scope to include the minimum repo-local configuration paths required for durable setup and optional integration wiring after direct user approval
 
 ### Verification records
 

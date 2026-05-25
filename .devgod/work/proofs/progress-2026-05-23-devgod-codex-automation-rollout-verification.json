@@ -1,8 +1,8 @@
 {
   "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
-  "captured_at": "2026-05-23T19:15:00.000Z",
+  "captured_at": "2026-05-25T08:20:00.000Z",
   "status": "verified",
-  "summary": "The Codex automation continuation envelope, app automation handoff, and CLI scheduler handoff slices now pass the broad local regression bundle, and the rollout verification task packet has been repaired to satisfy the live workflow contract before PR publication.",
+  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green.",
   "verification": [
     {
       "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
@@ -15,9 +15,50 @@
     {
       "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
       "status": "passed"
+    },
+    {
+      "command": "npm run setup:local",
+      "status": "passed"
+    },
+    {
+      "command": "npm run doctor",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    },
+    {
+      "command": "npm run devgod:gitnexus:status",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm test",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
     }
   ],
   "evidence_refs": [
+    ".env",
+    ".gitignore",
+    ".codex/config.toml",
+    "package.json",
+    "package-lock.json",
+    ".gitnexus/meta.json",
+    "src/install/cli.ts",
+    "src/install/merge.ts",
+    "tests/install.test.ts",
     "src/admin.ts",
     "src/admin/status.ts",
     "src/admin/ops.ts",
@@ -39,10 +80,11 @@
     "opened": 0
   },
   "next_target": "release:github-pr-green",
-  "why_next": "Local automation integration, regression coverage, and workflow-packet compliance are now in place, so the remaining rollout target is PR publication and hosted CI closure against main.",
-  "cycle": 1,
+  "why_next": "Repo-local DevGod setup is now durable and the optional advisory integration is ready, so the remaining rollout target is still PR publication and hosted CI closure against main.",
+  "cycle": 2,
   "residual_risk": [
     "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally.",
+    "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine.",
     "The rollout task remains incomplete until the PR exists and required hosted checks finish green."
   ]
 }
