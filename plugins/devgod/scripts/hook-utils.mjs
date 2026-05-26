@@ -127,6 +127,43 @@ async function readTextIfExists(filePath) {
   }
 }
 
+async function readDaemonContinuationIntent(resolvedRepoRoot, activeTaskId) {
+  if (typeof activeTaskId !== "string" || activeTaskId.trim().length === 0) {
+    return undefined;
+  }
+
+  const raw = await readTextIfExists(
+    path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "automation-envelope.json")
+  );
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const envelopeTaskId =
+      typeof parsed.activeTaskId === "string" && parsed.activeTaskId.trim().length > 0
+        ? parsed.activeTaskId.trim()
+        : undefined;
+    const continuationIntent =
+      parsed.continuationIntent === "defer_same_thread" || parsed.continuationIntent === "defer_fresh_run"
+        ? parsed.continuationIntent
+        : undefined;
+
+    if (!envelopeTaskId || !continuationIntent || envelopeTaskId !== activeTaskId) {
+      return undefined;
+    }
+
+    return continuationIntent;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseDotEnv(content) {
   const values = {};
   if (typeof content !== "string" || content.trim().length === 0) {
@@ -356,6 +393,12 @@ export async function readActiveTaskContext(options = {}) {
   context.allowedWriteScope = parseAllowedWriteScopeSection(taskMarkdown);
   context.allowedTaskHandoffScope = parseAllowedTaskHandoffScopeSection(taskMarkdown);
   context.continuationIntent = parseContinuationIntentSection(taskMarkdown);
+  if (!context.continuationIntent) {
+    context.continuationIntent = await readDaemonContinuationIntent(
+      resolvedRepoRoot,
+      context.activeTaskId
+    );
+  }
   return context;
 }
 

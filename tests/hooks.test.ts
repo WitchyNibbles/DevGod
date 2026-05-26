@@ -691,6 +691,71 @@ test("hook context parses structured continuation intent from the active task pa
   }
 });
 
+test("hook context infers deferred continuation intent from the daemon automation envelope", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-daemon-intent-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await mkdir(join(repoRoot, ".devgod", "work", "daemon"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-daemon-intent\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-daemon-intent.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "daemon", "automation-envelope.json"),
+      `${JSON.stringify(
+        {
+          provider: "codex_app_thread_automation",
+          wakeOwner: "operator",
+          continuationIntent: "defer_same_thread",
+          targetMode: "same_thread",
+          scheduleKind: "rrule",
+          schedule: "FREQ=MINUTELY;INTERVAL=30",
+          targetId: "checkpoint-123",
+          source: "checkpoint",
+          summary: "Resume the active task after the waiting interval.",
+          nextActions: ["resume from the checkpoint"],
+          workspaceSlug: "workspace",
+          projectSlug: "project",
+          activeRunId: "run-123",
+          activeTaskId: "task-daemon-intent",
+          updatedAt: "2026-05-26T10:00:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+    const parsed = evaluateStop(
+      {
+        last_assistant_message: "The current turn is complete."
+      },
+      context
+    );
+
+    assert.equal(context.activeTaskId, "task-daemon-intent");
+    assert.equal(context.continuationIntent, "defer_same_thread");
+    assert.equal(parsed, undefined);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("task packet template exposes successor handoff and scope expansion guidance", async () => {
   const template = await readFile(join(process.cwd(), ".devgod", "templates", "task-packet.md"), "utf8");
 
