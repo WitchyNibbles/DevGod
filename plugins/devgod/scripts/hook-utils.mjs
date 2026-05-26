@@ -66,6 +66,13 @@ const explicitBlockerVerbPatterns = [
   /outside explicit task scope/i,
   /outside the active devgod task write scope/i
 ];
+const explicitExternalWaitBlockerVerbPatterns = [
+  /\breal blocker\b/i,
+  /\bremaining blocker\b/i,
+  /cannot be completed yet/i,
+  /cannot be completed until/i,
+  /cannot complete until/i
+];
 const explicitDevgodBlockerCausePatterns = [
   /\bwrite scope\b/i,
   /\bmanaged control-layer\b/i,
@@ -79,6 +86,17 @@ const explicitDevgodBlockerCausePatterns = [
   /\bpermission denied\b/i,
   /\bwrite scope locked\b/i,
   /\bout of scope\b/i
+];
+const explicitExternalWaitCausePatterns = [
+  /\bexternal elapsed time\b/i,
+  /\bobserved hours?\b/i,
+  /\bpaper[- ]trading hours?\b/i,
+  /\bwaiting interval\b/i,
+  /\bwaiting period\b/i,
+  /\bobservation (?:period|window)\b/i,
+  /\bvalidation window\b/i,
+  /\buntil time passes\b/i,
+  /\btime must pass\b/i
 ];
 const completionMessagePatterns = [
   /\bno blocker remains\b/i,
@@ -127,14 +145,8 @@ async function readTextIfExists(filePath) {
   }
 }
 
-async function readDaemonContinuationIntent(resolvedRepoRoot, activeTaskId) {
-  if (typeof activeTaskId !== "string" || activeTaskId.trim().length === 0) {
-    return undefined;
-  }
-
-  const raw = await readTextIfExists(
-    path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "automation-envelope.json")
-  );
+async function readJsonIfExists(filePath) {
+  const raw = await readTextIfExists(filePath);
   if (!raw) {
     return undefined;
   }
@@ -144,24 +156,107 @@ async function readDaemonContinuationIntent(resolvedRepoRoot, activeTaskId) {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return undefined;
     }
-
-    const envelopeTaskId =
-      typeof parsed.activeTaskId === "string" && parsed.activeTaskId.trim().length > 0
-        ? parsed.activeTaskId.trim()
-        : undefined;
-    const continuationIntent =
-      parsed.continuationIntent === "defer_same_thread" || parsed.continuationIntent === "defer_fresh_run"
-        ? parsed.continuationIntent
-        : undefined;
-
-    if (!envelopeTaskId || !continuationIntent || envelopeTaskId !== activeTaskId) {
-      return undefined;
-    }
-
-    return continuationIntent;
+    return parsed;
   } catch {
     return undefined;
   }
+}
+
+async function readDaemonContinuationIntent(resolvedRepoRoot, activeTaskId) {
+  if (typeof activeTaskId !== "string" || activeTaskId.trim().length === 0) {
+    return undefined;
+  }
+
+  const parsed = await readJsonIfExists(
+    path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "automation-envelope.json")
+  );
+  if (!parsed) {
+    return undefined;
+  }
+
+  const envelopeTaskId =
+    typeof parsed.activeTaskId === "string" && parsed.activeTaskId.trim().length > 0
+      ? parsed.activeTaskId.trim()
+      : undefined;
+  const continuationIntent =
+    parsed.continuationIntent === "defer_same_thread" || parsed.continuationIntent === "defer_fresh_run"
+      ? parsed.continuationIntent
+      : undefined;
+
+  if (!envelopeTaskId || !continuationIntent || envelopeTaskId !== activeTaskId) {
+    return undefined;
+  }
+
+  return continuationIntent;
+}
+
+async function readMaterializedAutomationRequestContinuationIntent(resolvedRepoRoot, activeTaskId) {
+  if (typeof activeTaskId !== "string" || activeTaskId.trim().length === 0) {
+    return undefined;
+  }
+
+  const appRequest = await readJsonIfExists(
+    path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "app-automation-request.json")
+  );
+  if (appRequest) {
+    const context =
+      appRequest.context && typeof appRequest.context === "object" && !Array.isArray(appRequest.context)
+        ? appRequest.context
+        : undefined;
+    const request =
+      appRequest.request && typeof appRequest.request === "object" && !Array.isArray(appRequest.request)
+        ? appRequest.request
+        : undefined;
+    const requestTaskId =
+      typeof context?.activeTaskId === "string" && context.activeTaskId.trim().length > 0
+        ? context.activeTaskId.trim()
+        : undefined;
+    const targetMode =
+      context?.targetMode === "same_thread" || context?.targetMode === "fresh_run"
+        ? context.targetMode
+        : undefined;
+    const provider =
+      context?.provider === "codex_app_thread_automation" || context?.provider === "codex_app_standalone_automation"
+        ? context.provider
+        : undefined;
+    const rrule = typeof request?.rrule === "string" && request.rrule.trim().length > 0 ? request.rrule : undefined;
+
+    if (requestTaskId === activeTaskId && provider && targetMode && rrule) {
+      return targetMode === "same_thread" ? "defer_same_thread" : "defer_fresh_run";
+    }
+  }
+
+  const cliRequest = await readJsonIfExists(
+    path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "cli-scheduler-request.json")
+  );
+  if (!cliRequest) {
+    return undefined;
+  }
+
+  const context =
+    cliRequest.context && typeof cliRequest.context === "object" && !Array.isArray(cliRequest.context)
+      ? cliRequest.context
+      : undefined;
+  const scheduler =
+    cliRequest.scheduler && typeof cliRequest.scheduler === "object" && !Array.isArray(cliRequest.scheduler)
+      ? cliRequest.scheduler
+      : undefined;
+  const requestTaskId =
+    typeof context?.activeTaskId === "string" && context.activeTaskId.trim().length > 0
+      ? context.activeTaskId.trim()
+      : undefined;
+  const continuationIntent =
+    context?.continuationIntent === "defer_same_thread" || context?.continuationIntent === "defer_fresh_run"
+      ? context.continuationIntent
+      : undefined;
+  const provider = context?.provider === "codex_cli_exec_scheduler" ? context.provider : undefined;
+  const schedule = typeof scheduler?.schedule === "string" && scheduler.schedule.trim().length > 0 ? scheduler.schedule : undefined;
+
+  if (requestTaskId === activeTaskId && continuationIntent && provider && schedule) {
+    return continuationIntent;
+  }
+
+  return undefined;
 }
 
 function parseDotEnv(content) {
@@ -399,6 +494,12 @@ export async function readActiveTaskContext(options = {}) {
       context.activeTaskId
     );
   }
+  if (!context.continuationIntent) {
+    context.continuationIntent = await readMaterializedAutomationRequestContinuationIntent(
+      resolvedRepoRoot,
+      context.activeTaskId
+    );
+  }
   return context;
 }
 
@@ -604,6 +705,16 @@ export function shouldHoldStop(lastAssistantMessage) {
   const hasExplicitDevgodBlockerCause = explicitDevgodBlockerCausePatterns.some((pattern) =>
     pattern.test(lastAssistantMessage)
   );
+  const hasExplicitExternalWaitBlockerVerb = explicitExternalWaitBlockerVerbPatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+  const hasExplicitExternalWaitCause = explicitExternalWaitCausePatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+
+  if (hasExplicitExternalWaitBlockerVerb && hasExplicitExternalWaitCause) {
+    return false;
+  }
 
   return !(hasExplicitBlockerVerb && hasExplicitDevgodBlockerCause);
 }
