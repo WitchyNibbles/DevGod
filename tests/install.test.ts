@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "@iarna/toml";
 import {
+  grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
   mergeCodexConfig,
@@ -109,7 +110,7 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
-  assert.ok(managedWordCount < 450, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
+  assert.ok(managedWordCount < 480, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
@@ -194,6 +195,18 @@ test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing p
   assert.match(merged, /"--no-install"/);
   assert.match(merged, /"gitnexus"/);
   assert.match(merged, /"mcp"/);
+  assert.match(merged, /\[mcp_servers\.playwright\]/);
+});
+
+test("mergeCodexConfig adds Grafana MCP settings without overwriting existing project config", () => {
+  const merged = mergeCodexConfig(
+    'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
+    grafanaCodexConfigFragment()
+  );
+
+  assert.match(merged, /\[mcp_servers\.grafana\]/);
+  assert.match(merged, /command = "node"/);
+  assert.match(merged, /src\/grafana\/mcp-server\.ts/);
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
@@ -397,6 +410,28 @@ test("mergePackageJson adds pinned GitNexus helpers only when requested", () => 
   assert.equal(merged.devDependencies.gitnexus, "1.6.3");
   assert.equal(merged.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
   assert.equal(merged.scripts["devgod:gitnexus:status"], "gitnexus status");
+});
+
+test("mergePackageJson adds a Grafana MCP helper only when requested", () => {
+  const merged = JSON.parse(
+    mergePackageJson(
+      JSON.stringify({
+        name: "target-project",
+        private: true
+      }),
+      "../devgod",
+      {
+        withGrafana: true
+      }
+    )
+  ) as {
+    scripts: Record<string, string>;
+  };
+
+  assert.equal(
+    merged.scripts["devgod:grafana:mcp"],
+    "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+  );
 });
 
 test("mergeGitignore adds devgod env ignores once", () => {
@@ -709,6 +744,17 @@ test("parseCliArgs defaults upgrade-reasoning-workflow mode to strict", () => {
   });
 });
 
+test("parseCliArgs accepts Grafana install opt-in", () => {
+  const parsed = parseCliArgs(["init", "--apply", "--with-grafana", "--target", "/tmp/project"]);
+
+  assert.deepEqual(parsed, {
+    command: "init",
+    dryRun: false,
+    targetArg: "/tmp/project",
+    withGrafana: true
+  });
+});
+
 test("upgradeReasoningWorkflowArtifacts backfills policy, attempts, and verdict into a legacy task packet", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-workflow-"));
@@ -868,6 +914,39 @@ test("installDevgodIntoProject keeps GitNexus opt-in even when the source repo e
   }
 });
 
+test("installDevgodIntoProject opt-in Grafana setup adds MCP config, env guidance, and helper script", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-grafana-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    const summary = await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot,
+      withGrafana: true
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex/config.toml"), "utf8");
+    const envExample = await readFile(path.join(targetRoot, ".env.devgod.example"), "utf8");
+
+    assert.equal(
+      packageJson.scripts["devgod:grafana:mcp"],
+      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+    );
+    assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
+    assert.match(codexConfig, /src\/grafana\/mcp-server\.ts/);
+    assert.match(envExample, /DEVGOD_GRAFANA_URL=/);
+    assert.match(envExample, /DEVGOD_GRAFANA_LOGS_DATASOURCE_UID=/);
+    assert.match(summary.nextSteps.join("\n"), /DEVGOD_GRAFANA_URL/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("install CLI init --apply is explicit, replay-safe, and does not run docker", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-apply-"));
@@ -954,6 +1033,27 @@ test("verifyDevgodInstall auto-detects the GitNexus install option", async () =>
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall auto-detects the Grafana install option", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-grafana-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot, withGrafana: true });
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, true);
+    assert.deepEqual(summary.missing, []);
+    assert.deepEqual(summary.modified, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }

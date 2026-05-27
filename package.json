@@ -99,6 +99,7 @@
     "src/evals/orchestration-baseline.ts",
     "src/evals/orchestration-benchmark.ts",
     "src/evals/retrieval-memory-baseline.ts",
+    "src/grafana/",
     "src/index.ts",
     "src/install/cli.ts",
     "src/install/git-guard.ts",

@@ -3,22 +3,30 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-23-devgod-codex-automation-rollout-verification",
-      "title": "Local workflow proof seed for 2026-05-23-devgod-codex-automation-rollout-verification",
+      "id": "2026-05-27-grafana-logs-mcp-integration",
+      "title": "Optional Grafana MCP install and log-query wiring for debugging and research",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "workflow-proof resolves 2026-05-23-devgod-codex-automation-rollout-verification from the latest runtime run",
-        "required reviewer, qa, and security reviews are recorded as authenticated approvals"
+        "consuming-repo installs can opt into a Grafana MCP server config without making Grafana mandatory",
+        "the shipped Grafana MCP tools can authenticate to an existing Grafana server and query Loki-backed logs through Grafana",
+        "docs, focused tests, and installed-repo verification cover the Grafana opt-in path"
       ],
       "verification": [
-        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-codex-automation-rollout-verification"
+        "node --experimental-strip-types --test tests/grafana-config.test.ts",
+        "node --experimental-strip-types --test tests/grafana-mcp-tools.test.ts",
+        "node --experimental-strip-types --test tests/install.test.ts",
+        "node --experimental-strip-types --test tests/happy-path.test.ts",
+        "npm run devgod -- workflow-proof --run-id latest --task-id 2026-05-27-grafana-logs-mcp-integration",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-27-grafana-logs-mcp-integration"
       ],
       "evidence": [
-        "task packet: 2026-05-23-devgod-codex-automation-rollout-verification",
-        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
-        "quality gate: release_readiness_required"
+        "task packet: 2026-05-27-grafana-logs-mcp-integration",
+        "source files: src/grafana/config.ts, src/grafana/client.ts, src/grafana/tools.ts, src/grafana/mcp-server.ts",
+        "install wiring: src/install/cli.ts, src/install/merge.ts, src/install/types.ts, package.json, .env.example",
+        "verification: focused Grafana/install/happy-path suites and runtime-authoritative workflow proof",
+        "quality gates: release_readiness_required, reasoning_strict_required, progress_proof_required"
       ],
       "blocker": null
     }

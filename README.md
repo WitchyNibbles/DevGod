@@ -195,6 +195,12 @@ From this source repo:
 npm run install:project -- init --apply --target /absolute/path/to/project
 ```
 
+To add the optional Grafana log surface during install:
+
+```bash
+npm run install:project -- init --apply --target /absolute/path/to/project --with-grafana
+```
+
 Then inside the target repo:
 
 ```bash
@@ -210,6 +216,7 @@ Important:
 
 - installed repos get the `devgod:*` script names
 - this source repo uses shorter package-maintainer names like `setup:local`, `doctor`, and `status`
+- `--with-grafana` adds Grafana MCP wiring only; it does not install Grafana
 
 ## 🧰 Command Surfaces
 
@@ -288,6 +295,30 @@ Installed repos also get:
 - `devgod:autopilot-status`
 - `devgod:github-dispatch`
 - `devgod:mcp`
+
+### Optional Grafana log access
+
+When a consuming repo is installed with `--with-grafana`, DevGod adds a local Grafana MCP server entry and a `devgod:grafana:mcp` script. The MCP server reads connection settings from `.env.devgod`.
+
+Required connection settings:
+
+- `DEVGOD_GRAFANA_URL`
+- `DEVGOD_GRAFANA_LOGS_DATASOURCE_UID`
+- one auth mode: `DEVGOD_GRAFANA_TOKEN` or `DEVGOD_GRAFANA_USERNAME` plus `DEVGOD_GRAFANA_PASSWORD`
+
+Optional settings:
+
+- `DEVGOD_GRAFANA_ORG_ID`
+- `DEVGOD_GRAFANA_LOKI_TENANT_ID`
+- `DEVGOD_GRAFANA_TIMEOUT_MS`
+
+Installed repos can validate the wiring with:
+
+```bash
+npm run devgod:grafana:mcp
+```
+
+Grafana logs are advisory evidence for debugging and research. They do not replace runtime workflow proof, authenticated reviews, or repo-local verification.
 - `devgod:ui`
 - `devgod:record-review`
 - `devgod:scaffold-workflow`

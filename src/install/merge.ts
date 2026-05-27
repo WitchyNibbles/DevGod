@@ -43,6 +43,7 @@ ${workflowContractBlock}
 - on the first substantive ask, clarify outcome, user, constraints/non-goals, and done criteria unless explicit assumptions are enough
 - task packets that inherit a brief or plan must carry explicit workflow artifact refs; only use \`review_exports=runtime_optional\` when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
+- when the optional Grafana MCP server is configured, use Grafana logs as advisory debugging and research evidence
 - route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
 - use runtime-backed devgod commands for proof, status, and task advancement
@@ -67,6 +68,7 @@ ${AGENTS_END}`;
 
 interface GitNexusInstallSettings {
   withGitNexus?: boolean;
+  withGrafana?: boolean;
   gitNexusPackageVersion?: string;
 }
 
@@ -232,6 +234,14 @@ export function gitNexusCodexConfigFragment(): string {
   );
 }
 
+export function grafanaCodexConfigFragment(): string {
+  return (
+    '[mcp_servers.grafana]\n' +
+    'command = "node"\n' +
+    'args = ["--experimental-strip-types", "./node_modules/devgod/src/grafana/mcp-server.ts"]\n'
+  );
+}
+
 export function stripGitNexusFromCodexConfig(
   sourceContent: string
 ): string {
@@ -349,6 +359,11 @@ export function mergePackageJson(
   scripts["devgod:setup:git-guard"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts";
   scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
+
+  if (options.withGrafana) {
+    scripts["devgod:grafana:mcp"] =
+      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts";
+  }
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);
 
