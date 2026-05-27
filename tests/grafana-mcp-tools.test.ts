@@ -1,14 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createGrafanaClient } from "../src/grafana/client.ts";
 import { createGrafanaMcpToolDefinitions } from "../src/grafana/tools.ts";
 
+type GrafanaStubHandler = (
+  req: IncomingMessage,
+  res: ServerResponse<IncomingMessage>
+) => void | Promise<void>;
+
 async function withGrafanaStub(
-  handler: Parameters<typeof createServer>[0],
+  handler: GrafanaStubHandler,
   run: (url: string) => Promise<void>
 ): Promise<void> {
-  const server = createServer(handler);
+  const server = createServer((req, res) => {
+    void handler(req, res);
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
@@ -24,11 +31,12 @@ test("Grafana client queries Loki logs through the datasource proxy", async () =
   const seenRequests: Array<{ url: string; auth?: string; tenant?: string }> = [];
 
   await withGrafanaStub(async (req, res) => {
-    seenRequests.push({
+    const requestRecord: { url: string; auth?: string; tenant?: string } = {
       url: req.url ?? "",
-      auth: req.headers.authorization,
-      tenant: typeof req.headers["x-scope-orgid"] === "string" ? req.headers["x-scope-orgid"] : undefined
-    });
+      ...(typeof req.headers.authorization === "string" ? { auth: req.headers.authorization } : {}),
+      ...(typeof req.headers["x-scope-orgid"] === "string" ? { tenant: req.headers["x-scope-orgid"] } : {})
+    };
+    seenRequests.push(requestRecord);
 
     if (req.url === "/api/health") {
       res.writeHead(200, { "content-type": "application/json" });
