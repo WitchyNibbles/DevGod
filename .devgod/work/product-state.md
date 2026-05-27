@@ -27,7 +27,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 
 ## Current Milestone
 
-Codex automation integration verification and rollout, with runtime, app, and CLI slices implemented
+Optional Grafana log-query integration for installed repos, using DevGod-shipped MCP tools and opt-in consumer configuration
 
 ## Completed Milestones
 
@@ -45,11 +45,11 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Next Task
 
-`none`
+`none queued`
 
 ## Blockers
 
-- no active blocker remains
+- no active blocker yet; current risk is choosing a Grafana query surface that stays aligned with the documented auth and Loki access model
 
 ## Reasoning Debt
 
@@ -57,6 +57,11 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Verification Summary
 
+- Grafana integration intake is approved for consuming-repo users who want DevGod to inspect Grafana-backed logs during debugging and research
+- the planned first slice is an opt-in consuming-repo install flag plus a DevGod-shipped Grafana MCP server, keeping runtime workflow authority separate from external log evidence
+- the Grafana slice is now implemented with opt-in installer wiring, `.env.devgod` Grafana settings, a Loki-only Grafana MCP server, and debugging/research guidance updates
+- focused verification passed for `tests/grafana-config.test.ts`, `tests/grafana-mcp-tools.test.ts`, `tests/install.test.ts`, and `tests/happy-path.test.ts`
+- runtime-authoritative workflow proof approved `2026-05-27-grafana-logs-mcp-integration`, and `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-27-grafana-logs-mcp-integration` passed
 - source-backed Codex automation research now records that the app has native standalone and thread automations, local-project vs background-worktree execution, and background triage reporting
 - source-backed Codex automation research now records that the CLI supports scheduled-job-friendly `codex exec`, JSONL event streams, structured final outputs, and resume for staged automation flows
 - `docs/codex-automation-surface-integration-plan.md` now captures the implementation order needed to move delayed execution ownership off hooks and onto native app or CLI automation providers
@@ -144,7 +149,8 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 - reviewer, QA, and security runtime-verified summaries are recorded for the local automation adapters slice
 - reviewer, QA, and security research summaries now record role-specific findings about the workflow self-blocking diagnosis and the recommended direction
 - reviewer, QA, and security implementation summaries now record the landed workflow repair and passed verification state
+- reviewer, QA, and security runtime-authenticated approvals now exist for `2026-05-27-grafana-logs-mcp-integration`
 
 ## Last Updated
 
-2026-05-25
+2026-05-27

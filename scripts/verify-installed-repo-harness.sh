@@ -7,6 +7,7 @@ target_root=""
 keep_target=0
 workspace_slug="default"
 task_id="harness-proof"
+with_grafana=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
       task_id="$2"
       shift 2
+      ;;
+    --with-grafana)
+      with_grafana=1
+      shift
       ;;
     *)
       printf 'unknown option: %s\n' "$1" >&2
@@ -74,7 +79,12 @@ run_target() {
   )
 }
 
-node --experimental-strip-types "$repo_root/src/install/cli.ts" init --apply --target "$target_root" >/dev/null
+install_args=(init --apply --target "$target_root")
+if [[ "$with_grafana" -eq 1 ]]; then
+  install_args+=(--with-grafana)
+fi
+
+node --experimental-strip-types "$repo_root/src/install/cli.ts" "${install_args[@]}" >/dev/null
 
 (
   cd "$target_root"
@@ -304,8 +314,20 @@ assert.equal(status.autonomous.comprehensionSummary?.parityRequirementCount, 1);
 assert.equal(report.report.autonomous.comprehensionSummary?.rewriteReadiness, "ready");
 
 const activeExport = await readFile(join(cwd, ".devgod", "ACTIVE"), "utf8");
+const codexConfig = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
 assert.equal(activeExport, `task_id=${taskId}\nworkflow=devgod\nstate=active\n`);
+
+console.log(
+  JSON.stringify({
+    hasGrafana: /\[mcp_servers\.grafana\]/.test(codexConfig)
+  })
+);
 EOF
+
+grafana_status="disabled"
+if [[ "$with_grafana" -eq 1 ]]; then
+  grafana_status="enabled"
+fi
 
 printf 'installed repo harness passed\n'
 printf 'workspace: %s\n' "$workspace_slug"
@@ -313,4 +335,5 @@ printf 'project: %s\n' "$project_slug"
 printf 'task: %s\n' "$task_id"
 printf 'profile: modernization_program\n'
 printf 'rewrite_readiness: ready\n'
+printf 'grafana-opt-in: %s\n' "$grafana_status"
 printf 'target: %s\n' "$target_root"
