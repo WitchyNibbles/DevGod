@@ -710,10 +710,15 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     });
   }
 
+  const repoLocalSkillPrefixes = [
+    ".agents/skills/devgod-",
+    ".agents/skills/anthropic-",
+    ".agents/skills/superpowers-"
+  ];
   const skillsRoot = path.join(sourceRoot, ".agents/skills");
   for (const skillPath of await listFilesRecursive(skillsRoot)) {
     const relativePath = path.relative(sourceRoot, skillPath);
-    if (!relativePath.startsWith(".agents/skills/devgod-")) {
+    if (!repoLocalSkillPrefixes.some((prefix) => relativePath.startsWith(prefix))) {
       continue;
     }
 

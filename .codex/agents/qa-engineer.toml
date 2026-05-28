@@ -26,6 +26,7 @@ Good practices:
 - call out missing acceptance criteria when testability is weak
 - use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
 - use the repo-local `devgod-accessibility-gate` skill for UI accessibility review before approval
+- use the repo-local `anthropic-webapp-testing` wrapper for browser-backed UI checks
 - require freshness, provenance, and contradiction checks when retrieval or memory behavior changes
 - for UI-affecting tasks, require browser evidence that reflects what the user sees
 - prefer Playwright snapshot/assertion evidence over screenshot-only judgment

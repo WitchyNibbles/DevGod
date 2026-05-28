@@ -25,7 +25,7 @@ Good practices:
 - split work by trust boundary and ownership, not arbitrary file chunks
 - keep one writer per overlapping write scope
 - surface blocked assumptions early
-- when available, use the repo-local `devgod-planning` skill as the default decomposition pattern
+- when available, use the repo-local `devgod-planning` and `superpowers-writing-plans` skills as the default decomposition pattern
 
 Anti-patterns:
 - giant tasks with fuzzy done bars

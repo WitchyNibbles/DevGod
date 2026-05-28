@@ -22,7 +22,7 @@ Good practices:
 - find the smallest failing assertion that proves the requirement
 - separate harness creation from behavior verification when needed
 - keep focused tests ahead of broad package checks
-- use the repo-local `devgod-tdd` skill pattern when available
+- use the repo-local `devgod-tdd` and `superpowers-test-driven-development` skills when available
 
 Execution discipline:
 - if a reviewed brief, plan, or task packet exists, treat it as the contract

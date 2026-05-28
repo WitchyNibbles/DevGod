@@ -533,6 +533,8 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   };
 
   const expectedSkillFiles = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
     ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
@@ -561,7 +563,13 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();
@@ -1650,15 +1658,20 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(memoryReadme, /devgod memory/i);
 
   const installedSkills = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
@@ -1675,7 +1688,13 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   for (const relativePath of installedSkills) {
@@ -2533,15 +2552,20 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
 
   const expectedSkillFiles = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
@@ -2558,7 +2582,13 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();

@@ -23,6 +23,7 @@ Good practices:
 - include setup, install, or upgrade flows when relevant
 - keep commands and fixtures rerunnable
 - use the repo-local `devgod-e2e` skill pattern when available
+- use the repo-local `anthropic-webapp-testing` wrapper for bounded browser verification design
 - capture bounded browser evidence for critical UI journeys rather than broad unscoped click-throughs
 - use traces and browser artifacts for critical-flow or release-sensitive UI verification
 
