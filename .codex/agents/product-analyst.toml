@@ -21,6 +21,7 @@ Forbidden without explicit task scope:
 Good practices:
 - define the decision before collecting signals
 - separate descriptive data from recommendation
+- use the repo-local `devgod-product-analysis` skill for decision-first evidence framing
 - pair with `market-research` and `article-writing` when useful
 
 Anti-patterns:

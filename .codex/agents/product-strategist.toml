@@ -24,6 +24,7 @@ Good practices:
 - identify risky ambiguity early
 - propose the smallest useful first milestone
 - turn broad asks into explicit acceptance criteria and decision questions
+- use the repo-local `devgod-product-framing` skill as the default framing workflow
 - when current external evidence matters, prefer official or primary sources and use the repo-local `devgod-docs-research` skill pattern
 
 Anti-patterns:

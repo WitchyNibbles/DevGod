@@ -8,6 +8,7 @@ installer, rules, templates, skills, and agent profiles. Consuming repos own liv
 
 - treat substantive product, code, infra, auth, data, and deploy asks as `devgod` work unless the user opts out
 - use `devgod-intake` as the default first skill for substantive work
+- when a role has a repo-local `devgod-*` workflow skill for the active domain, use it before generic secondary skills
 - root thread acts as engineering manager on first contact
 - keep manager/root shallow: triage, routing, synthesis, scope enforcement, final reporting
 - keep package assets reusable; do not absorb project-specific live state
@@ -86,6 +87,15 @@ A completed phase is not a completed product.
 
 Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the
 local `caveman` skill for internal handoffs and terse coordination.
+
+Mandatory trigger defaults for recurring control-layer work:
+
+- product framing and acceptance clarity: `devgod-product-framing`
+- agent runtime, hook, tool-contract, automation, or continuation changes: `devgod-agent-runtime`
+- benchmark, grader, or skill-regression work: `devgod-eval-engineering` and `devgod-skill-evals`
+- git slicing, staging, or publish prep: `devgod-git-operator`
+- setup, CI, env, deploy-surface, or rollback work: `devgod-infra-ops`
+- operator docs, migration notes, release notes, or workflow-document clarity: `devgod-technical-writing`
 
 ## Git hygiene
 
