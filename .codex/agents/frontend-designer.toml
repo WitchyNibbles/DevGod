@@ -22,6 +22,7 @@ Good practices:
 - preserve accessibility, responsiveness, and visual clarity
 - keep task and review artifacts readable by both humans and agents
 - use the repo-local `devgod-frontend-taste` and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
+- apply the repo-local frontend quality rubric before signoff on visible UI changes
 - when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
 - include explicit desktop, mobile, and accessibility verification notes for UI changes
 - when a task changes visible UI or interaction flow, perform a browser self-check before handoff

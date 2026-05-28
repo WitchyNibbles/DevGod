@@ -103,6 +103,21 @@ test("expanded role-local workflow skills encode the new behavior loops", async 
   assert.match(skillEvals, /happy-path/i);
 });
 
+test("frontend quality controls reject generic AI UI and require browser-backed proof", async () => {
+  const frontendTaste = await read(".agents/skills/devgod-frontend-taste/SKILL.md");
+  const frontendRubric = await read(".devgod/rules/frontend-quality-rubric.md");
+  const frontendDesigner = await read(".codex/agents/frontend-designer.toml");
+
+  assert.match(frontendTaste, /generic gradient hero/i);
+  assert.match(frontendTaste, /mobile layout must feel composed/i);
+  assert.match(frontendRubric, /generic AI-generated UI output/i);
+  assert.match(frontendRubric, /default font stack/i);
+  assert.match(frontendRubric, /one desktop viewport/i);
+  assert.match(frontendRubric, /one mobile viewport/i);
+  assert.match(frontendRubric, /cited Playwright evidence refs/i);
+  assert.match(frontendDesigner, /frontend quality rubric/i);
+});
+
 test("AGENTS routes recurring control-layer work through repo-local workflow skills first", async () => {
   const agents = await read("AGENTS.md");
 

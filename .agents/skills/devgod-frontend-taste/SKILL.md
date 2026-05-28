@@ -23,6 +23,7 @@ Goal: produce interfaces that look intentional, differentiated, and implementati
    - scan on mobile: composition still feels intentional
 5. When changing existing UI, preserve the product's established visual language unless the task explicitly calls for redesign.
 6. Before handoff, state the intended visual direction in one or two sentences and verify it in the browser.
+7. Apply the repo-local frontend quality rubric before approval so generic AI patterns are rejected explicitly.
 
 ## Heuristics
 
@@ -31,6 +32,7 @@ Goal: produce interfaces that look intentional, differentiated, and implementati
 - typography must do real work, not act as a default placeholder
 - motion should clarify entry, hierarchy, or state change
 - if a page could plausibly belong to any SaaS landing page, it is too generic
+- mobile layout must feel composed, not merely scaled down
 
 ## Output
 
