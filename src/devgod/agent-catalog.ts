@@ -84,7 +84,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/frontend-designer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["frontend-design", "frontend-patterns", "web-design-guidelines"],
+    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "web-design-guidelines"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
   },
   git_operator: {
@@ -156,7 +156,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/qa-engineer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-qa-verification", "e2e-testing", "verification-loop"],
+    defaultSkillIds: ["devgod-qa-verification", "devgod-accessibility-gate", "e2e-testing", "verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "review gates", "eval artifacts"]
   },
   "tdd-guide": {
@@ -252,7 +252,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/mobile-engineer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["frontend-patterns", "e2e-testing"],
+    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "e2e-testing"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts", "test artifacts"]
   },
   ml_engineer: {
@@ -288,7 +288,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/ux-researcher.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-ux-research", "market-research"],
+    defaultSkillIds: ["devgod-ux-research", "devgod-frontend-taste", "market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
   },
   product_analyst: {

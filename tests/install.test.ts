@@ -533,15 +533,18 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   };
 
   const expectedSkillFiles = [
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",

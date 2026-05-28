@@ -19,13 +19,13 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 | `solution_architect` | manager | core_required | `devgod-architecture`, `backend-patterns`, `security-review` |
 | `docs_researcher` | knowledge | core_required | `devgod-docs-research`, `documentation-lookup` |
 | `backend_engineer` | delivery | core_required | `devgod-execution`, `backend-patterns`, `api-design` |
-| `frontend_designer` | delivery | core_required | `frontend-design`, `frontend-patterns`, `web-design-guidelines` |
+| `frontend_designer` | delivery | core_required | `devgod-frontend-taste`, `devgod-design-system`, `frontend-patterns`, `web-design-guidelines` |
 | `git_operator` | knowledge | core_required | `devgod-git-operator`, `superpowers:using-git-worktrees`, `superpowers:finishing-a-development-branch` |
 | `infra_engineer` | delivery | core_required | `devgod-infra-ops`, `devgod-setup`, `devgod-release-readiness` |
 | `reviewer` | quality | core_required | `devgod-review` |
 | `build_resolver` | delivery | core_required | `devgod-debugging`, `superpowers:systematic-debugging` |
 | `security_reviewer` | quality | core_required | `security-review`, `devgod-docs-research` |
-| `qa_engineer` | quality | core_required | `devgod-qa-verification`, `e2e-testing`, `verification-loop` |
+| `qa_engineer` | quality | core_required | `devgod-qa-verification`, `devgod-accessibility-gate`, `e2e-testing`, `verification-loop` |
 | `tdd-guide` | quality | core_required | `devgod-tdd`, `superpowers:test-driven-development` |
 | `e2e-runner` | quality | core_required | `devgod-e2e`, `e2e-testing` |
 | `release-readiness` | quality | core_required | `devgod-release-readiness`, `verification-loop` |
@@ -33,10 +33,10 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 | `eval_engineer` | quality | core_required | `devgod-eval-engineering`, `devgod-skill-evals`, `eval-harness` |
 | `technical_writer` | knowledge | core_required | `devgod-technical-writing`, `documentation-lookup`, `article-writing` |
 | `agent_runtime_engineer` | delivery | core_required | `devgod-agent-runtime`, `mcp-server-patterns`, `verification-loop` |
-| `mobile_engineer` | domain_specialist | domain_optional | `frontend-patterns`, `e2e-testing` |
+| `mobile_engineer` | domain_specialist | domain_optional | `devgod-frontend-taste`, `devgod-design-system`, `frontend-patterns`, `e2e-testing` |
 | `ml_engineer` | domain_specialist | domain_optional | `documentation-lookup`, `verification-loop` |
 | `data_engineer` | domain_specialist | domain_optional | `backend-patterns`, `verification-loop` |
-| `ux_researcher` | domain_specialist | domain_optional | `devgod-ux-research`, `market-research` |
+| `ux_researcher` | domain_specialist | domain_optional | `devgod-ux-research`, `devgod-frontend-taste`, `market-research` |
 | `product_analyst` | domain_specialist | domain_optional | `devgod-product-analysis`, `market-research` |
 | `compliance_reviewer` | domain_specialist | domain_optional | `devgod-compliance-review`, `security-review`, `documentation-lookup` |
 
@@ -44,6 +44,7 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 
 - Skills are intentionally sparse. Each role should have one primary workflow discipline and at most a small number of secondary skills.
 - Repo-local workflow skills should be the default identity for roles with recurring `devgod`-specific decision loops; generic pattern skills remain secondary support.
+- Frontend-facing roles now use repo-local wrappers for visual taste, design-system discipline, and accessibility gating so UI quality does not depend on ambient global skill installs.
 - Repo-wide policy belongs in `AGENTS.md`; specialist workflow details belong in role-specific skills and agent instructions.
 - Optional domain roles still stay intentionally thin until repeated repo-local workload justifies a dedicated `devgod-*` workflow skill.
 - UI-affecting tasks should declare their UI surface explicitly and carry browser evidence through `qa_engineer` before workflow-proof approval.
