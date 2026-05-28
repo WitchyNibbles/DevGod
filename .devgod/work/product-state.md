@@ -28,7 +28,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 
 ## Current Milestone
 
-Optional Grafana log-query integration and maintainer-only package-quality hardening are complete
+Optional Grafana log-query integration and maintainer-only package-quality hardening are complete; a repo-context memory proposal is now prepared for the next consuming-repo intelligence slice
 
 ## Completed Milestones
 
@@ -40,24 +40,28 @@ Optional Grafana log-query integration and maintainer-only package-quality harde
 - anti-stall routing and runtime recovery regressions stayed green after the catalog rollout
 - release proof closed with local workflow proof, PR publication, and a green hosted CI workflow on the final branch tip
 - maintainer-only regression tooling boundary for promptfoo, property tests, and mutation testing
+- research and proposal for smarter consuming-repo repo-context memory
 
 ## Current Task
 
-`none`
+`2026-05-28-repo-context-memory-rollout`
 
 ## Next Task
 
-`none queued`
+`slice 1: queue compatibility repair and consuming-repo cleanup tool`
 
 ## Blockers
 
 - no active blocker yet; current risk is choosing a Grafana query surface that stays aligned with the documented auth and Loki access model
 - maintainer-only tooling now has verified package/export boundaries, but `promptfoo` remains pinned until the repo runtime moves past the newer Node engine floor
+- smarter consuming-repo memory is still design-only; implementation, tests, and evals remain open
+- active rollout risk: queue compatibility repair must stay strict enough to reject unknown task classes while still cleaning the known legacy alias
 
 ## Reasoning Debt
 
 - GitHub did not attach automatic `pull_request` status checks to PR #5 for this branch, so hosted verification was confirmed through the repo’s own `CI` workflow via `workflow_dispatch` on the exact PR head commit.
 - maintainer-only quality tooling now has boundary proof, but broader mutation and eval coverage can still expand incrementally from this baseline
+- the repo-context memory slice currently has only a design artifact; no implementation or eval evidence exists yet
 
 ## Verification Summary
 
@@ -74,6 +78,9 @@ Optional Grafana log-query integration and maintainer-only package-quality harde
 - local authoritative workflow proof run `05028a18-ab7f-45e0-8cd4-128f0151c3e6` approved `2026-05-28-devgod-maintainer-only-quality-tooling`
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
+- repo-context memory proposal concludes that DevGod should add a derived repo-context profile in runtime registration metadata plus reviewed slot-aware memory for durable preferences and conventions
+- the recommended first slice avoids a schema migration and reuses `runtime_project_registrations.manifest`, `memory_entries.metadata`, existing retrieval freshness checks, and later optional Qdrant indexing for structured slots
+- implementation rollout opened on branch `codex/repo-context-memory-rollout` with slice order: queue repair, repo-context profiling, hydration/setup wiring, then regression and publish
 
 ## Review Summary
 
