@@ -1,6 +1,6 @@
 # Devgod Current State
 
-Status date: `2026-05-24`
+Status date: `2026-05-28`
 
 This is the plain-language snapshot of what `devgod` is today. If another document sounds broader, older, or more aspirational than this one, treat this file plus the repo itself as the current truth.
 
@@ -164,6 +164,26 @@ Current capabilities:
 - Qdrant-backed artifact indexing
 - Obsidian-friendly docs export from runtime worklogs and export requests
 
+### 8. Repo-context profiling and queue repair
+
+Shipped through:
+
+- `src/runtime/repo-context-profile.ts`
+- `src/admin.ts`
+- `src/admin/planning-context.ts`
+- `src/devgod/task-queue.ts`
+- `src/install/merge.ts`
+- `scripts/setup-devgod.sh`
+- `scripts/setup-devgod.ps1`
+
+Current capabilities:
+
+- canonical alias handling for legacy task queue class values plus an explicit `repair-task-queue` rewrite command for already-installed consuming repos
+- deterministic `repoContextProfile` capture in runtime registration metadata
+- first-slot probing for virtualenv paths, `manage.py`, Django DB selector variables, and common package scripts
+- planning-context hydration from repo context before falling back to repo rediscovery
+- consuming-repo setup that refreshes repo context automatically alongside retrieval refresh
+
 ## What this repo is for
 
 This repository is the shared-package source of truth.
@@ -202,6 +222,7 @@ npm run devgod -- daemon --format text
 npm run devgod -- supervisor --format text
 npm run devgod -- supervisor-history --format text
 npm run devgod -- plan-context --query "what still matters here?"
+npm run devgod -- refresh-repo-context
 npm run export:docs
 npm run mcp
 npm run ui
@@ -232,6 +253,8 @@ npm run devgod:coverage
 npm run devgod:gaps
 npm run devgod:ops
 npm run devgod:report
+npm run devgod:refresh-repo-context
+npm run devgod:repair-task-queue
 npm run devgod:loop
 npm run devgod:daemon
 npm run devgod:supervisor

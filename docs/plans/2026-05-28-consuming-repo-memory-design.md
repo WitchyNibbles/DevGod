@@ -258,6 +258,25 @@ Examples of the resulting behavior:
 - Explicit user remember/replace requests are handled safely.
 - Unrelated cross-repo memory is not stored.
 
+## Implementation status on 2026-05-28
+
+The first runtime slice from this design is now implemented in the package repo.
+
+Shipped pieces:
+
+- `repair-task-queue` rewrites the known legacy `implementation_slice` alias in already-installed consuming repos
+- `refresh-repo-context` stores a derived `repoContextProfile` in `runtime_project_registrations.manifest`
+- the initial deterministic slots cover virtualenv path, `manage.py`, Django DB selector variable, and common package scripts
+- planning context now hydrates repo context and auto-refreshes it when the stored profile is stale
+- installed setup scripts now refresh repo context before retrieval refresh
+
+Still pending relative to the full design:
+
+- reviewed memory entries refining specific `slotKey`s
+- explicit replace-versus-task-only remember flow
+- richer git/PR convention capture
+- optional Qdrant indexing for structured repo-context facts
+
 ## Risks and mitigations
 
 ### Risk: stale repo context
