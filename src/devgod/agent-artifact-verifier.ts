@@ -7,12 +7,18 @@ import {
   type AgentRoleId,
   getAgentCatalogEntry
 } from "./agent-catalog.ts";
+import { listCatalogRepoLocalSkillPaths } from "./repo-local-skill-surface.ts";
 
 export interface AgentArtifactVerificationResult {
   ok: boolean;
   missingArtifacts: string[];
   unexpectedArtifacts: string[];
   metadataMismatches: string[];
+}
+
+export interface CatalogRepoLocalSkillVerificationResult {
+  ok: boolean;
+  missingSkillFiles: string[];
 }
 
 export async function verifyAgentCatalogArtifacts(input: {
@@ -82,4 +88,25 @@ export function listCatalogAgentRoles(): AgentRoleId[] {
 
 export function listCatalogShippedAgentEntries(): typeof agentCatalogEntries {
   return agentCatalogEntries.filter((entry) => entry.shipsAgentArtifact);
+}
+
+export async function verifyCatalogRepoLocalSkills(input: {
+  repoRoot: string;
+  roles?: readonly AgentRoleId[] | undefined;
+}): Promise<CatalogRepoLocalSkillVerificationResult> {
+  const expectedSkillFiles = listCatalogRepoLocalSkillPaths({ roles: input.roles });
+  const missingSkillFiles: string[] = [];
+
+  for (const relativePath of expectedSkillFiles) {
+    try {
+      await readFile(path.join(input.repoRoot, relativePath), "utf8");
+    } catch {
+      missingSkillFiles.push(relativePath);
+    }
+  }
+
+  return {
+    ok: missingSkillFiles.length === 0,
+    missingSkillFiles
+  };
 }

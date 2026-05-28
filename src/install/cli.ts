@@ -13,6 +13,7 @@ import {
   playwrightCodexConfigFragment,
   stripGitNexusFromCodexConfig
 } from "./merge.ts";
+import { repoLocalSkillIdPrefixes } from "../devgod/repo-local-skill-surface.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
   InstallMode,
@@ -710,11 +711,7 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     });
   }
 
-  const repoLocalSkillPrefixes = [
-    ".agents/skills/devgod-",
-    ".agents/skills/anthropic-",
-    ".agents/skills/superpowers-"
-  ];
+  const repoLocalSkillPrefixes = repoLocalSkillIdPrefixes.map((prefix) => `.agents/skills/${prefix}`);
   const skillsRoot = path.join(sourceRoot, ".agents/skills");
   for (const skillPath of await listFilesRecursive(skillsRoot)) {
     const relativePath = path.relative(sourceRoot, skillPath);

@@ -27,8 +27,10 @@ import {
 } from "../src/install/cli.ts";
 import {
   listCatalogAgentArtifactPaths,
+  verifyCatalogRepoLocalSkills,
   verifyAgentCatalogArtifacts
 } from "../src/devgod/agent-artifact-verifier.ts";
+import { listCatalogRepoLocalSkillPaths } from "../src/devgod/repo-local-skill-surface.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -412,6 +414,35 @@ test("verifyAgentCatalogArtifacts reports missing, unexpected, and metadata drif
   assert.equal(result.ok, false);
 });
 
+test("verifyCatalogRepoLocalSkills reports missing repo-local wrapper files deterministically", async () => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "devgod-skill-catalog-"));
+
+  try {
+    for (const relativePath of listCatalogRepoLocalSkillPaths({ roles: ["planner", "reviewer"] })) {
+      const targetPath = path.join(repoRoot, relativePath);
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      await writeFile(targetPath, "---\nname = \"placeholder\"\n---\n", "utf8");
+    }
+
+    await rm(path.join(repoRoot, ".agents/skills/superpowers-verification-before-completion"), {
+      recursive: true,
+      force: true
+    });
+
+    const result = await verifyCatalogRepoLocalSkills({
+      repoRoot,
+      roles: ["planner", "reviewer"]
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.missingSkillFiles, [
+      ".agents/skills/superpowers-verification-before-completion/SKILL.md"
+    ]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
   const merged = JSON.parse(
     mergePackageJson(
@@ -573,6 +604,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();
+  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
 
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -631,12 +663,18 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
   assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
   assert.ok(pkg.files.includes("docs/devgod-agent-team.md"));
+  for (const relativePath of expectedCatalogRepoLocalSkills) {
+    assert.ok(shippedSkillFiles.includes(relativePath), `${relativePath} should ship because the catalog references it`);
+  }
 
   const catalogVerification = await verifyAgentCatalogArtifacts({ repoRoot: sourceRoot });
   assert.equal(catalogVerification.ok, true);
   assert.deepEqual(catalogVerification.missingArtifacts, []);
   assert.deepEqual(catalogVerification.unexpectedArtifacts, []);
   assert.deepEqual(catalogVerification.metadataMismatches, []);
+  const catalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: sourceRoot });
+  assert.equal(catalogSkillVerification.ok, true);
+  assert.deepEqual(catalogSkillVerification.missingSkillFiles, []);
   assert.equal(pkg.private, true);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
@@ -1701,6 +1739,9 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     const content = await readFile(path.join(targetRoot, relativePath), "utf8");
     assert.match(content, /^---/m, `${relativePath} should install a skill file`);
   }
+  const installedCatalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: targetRoot });
+  assert.equal(installedCatalogSkillVerification.ok, true);
+  assert.deepEqual(installedCatalogSkillVerification.missingSkillFiles, []);
 
   const productStateTemplate = await readFile(
     path.join(targetRoot, ".devgod", "templates", "product-state.md"),
@@ -2592,6 +2633,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();
+  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
 
   const packedSkillFiles = [...packedFiles].filter((file) => file.startsWith(".agents/skills/")).sort();
   const packedAgentFiles = [...packedFiles].filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -2599,6 +2641,9 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   assert.deepEqual(packedSkillFiles, expectedSkillFiles);
   assert.deepEqual(packedAgentFiles, expectedAgentFiles);
   assert.ok(packedFiles.has("docs/devgod-agent-team.md"));
+  for (const relativePath of expectedCatalogRepoLocalSkills) {
+    assert.ok(packedSkillFiles.includes(relativePath), `${relativePath} should be packed because the catalog references it`);
+  }
 
   for (const expectedPath of [
     ".githooks/commit-msg",
