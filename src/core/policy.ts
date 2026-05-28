@@ -15,6 +15,7 @@ import {
   type TaskRecord,
   type WorkflowDocumentRecord
 } from "../domain/types.ts";
+import { getAgentCatalogEntry } from "../devgod/agent-catalog.ts";
 import {
   canReviewRecordSatisfyGate,
   effectiveRequiredReviews,
@@ -23,24 +24,6 @@ import {
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 
 export const SEARCH_MEMORY_STALE_AFTER_DAYS = 90;
-const roleRetrievalGuidance: Record<RetrievalRole, string[]> = {
-  planner: ["approved memory", "reviewed briefs", "reviewed plans", "repo rules"],
-  product_strategist: ["approved briefs", "approved memory", "repo rules", "cited external research"],
-  solution_architect: ["approved memory", "repo rules", "reviewed plans", "architecture notes"],
-  docs_researcher: ["approved memory", "repo rules", "approved briefs", "local technical notes"],
-  backend_engineer: ["approved memory", "repo rules", "runbooks", "reviewed retrieval notes"],
-  frontend_designer: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"],
-  git_operator: ["approved memory", "repo rules", "reviewed plans", "task packets", "git status and diff evidence"],
-  infra_engineer: ["approved memory", "repo rules", "setup notes", "runbooks", "incident learnings"],
-  reviewer: ["approved memory", "repo rules", "reviewed plans", "task packets", "review artifacts"],
-  build_resolver: ["approved memory", "repo rules", "setup notes", "incident notes", "prior fixes"],
-  security_reviewer: ["approved memory", "repo rules", "incident notes", "review artifacts"],
-  qa_engineer: ["approved memory", "repo rules", "review gates", "eval artifacts"],
-  "tdd-guide": ["approved memory", "repo rules", "reviewed plans", "task packets", "verification artifacts"],
-  "e2e-runner": ["approved memory", "repo rules", "reviewed plans", "setup notes", "test artifacts"],
-  "release-readiness": ["approved memory", "repo rules", "reviewed plans", "setup notes", "release notes"],
-  memory_curator: ["all reviewed project artifacts"]
-};
 
 function pathOverlap(left: string, right: string): boolean {
   return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
@@ -147,7 +130,7 @@ export function collectUnsatisfiedReviewRoles(
 }
 
 export function getRoleRetrievalGuidance(role: RetrievalRole): string[] {
-  return [...roleRetrievalGuidance[role]];
+  return [...getAgentCatalogEntry(role).retrievalGuidance];
 }
 
 type SearchableText = Pick<MemoryEntryRecord, "content" | "title" | "scope">;

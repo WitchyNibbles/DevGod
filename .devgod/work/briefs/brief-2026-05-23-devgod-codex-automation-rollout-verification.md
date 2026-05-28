@@ -14,16 +14,20 @@ Original user ask:
 
 `implement the codex automation integration plan end-to-end, test edge cases, commit each task on a branch from main, open a PR, and fix CI until green`
 
+Updated user instruction:
+
+`do not make a PR to devgod, directly merge and commit the branch directly as eimi`
+
 ## Goal
 
-Verify the end-to-end automation integration, publish the branch as a PR to `main`, and repair any CI or workflow regressions until the branch is green.
+Verify the end-to-end automation integration, merge the verified branch directly into `main` as `Eimi`, and repair any CI or workflow regressions until `main` is green.
 
 ## Intended outcome
 
 - the local automation integration passes a broad regression sweep
 - workflow and live checks remain healthy for the active verification task
-- a PR to `main` exists for the feature branch
-- CI failures are investigated and fixed on the branch, including pipeline changes when the new automation features require them
+- the verified feature branch is merged directly into `main`
+- CI failures are investigated and fixed on the merged branch or `main`, including pipeline changes when the new automation features require them
 
 ## User
 
@@ -33,14 +37,14 @@ DevGod package maintainer shipping the approved Codex automation roadmap end-to-
 
 - preserve branch-local history with task-scoped commits
 - fix pipelines when they lag the new feature instead of weakening the feature to fit stale CI assumptions
-- keep the branch on `main` as the PR base
+- keep the branch based on `main` until the final direct merge
 - do not absorb unrelated repo noise into the verification branch
 
 ## Risks
 
 - broad verification may uncover dormant workflow/reporting regressions outside the adapter seams
 - CI may fail on runner-specific assumptions that local tests do not exercise
-- PR metadata and branch publishing can stall if the local Git/GitHub surface is misconfigured
+- GitHub PR metadata may be unavailable under the current account, requiring a direct-merge path instead
 
 ## Assumptions
 
@@ -74,12 +78,12 @@ DevGod package maintainer shipping the approved Codex automation roadmap end-to-
 ### Facts
 
 - runtime, app, and CLI slices now each have focused passing regression evidence
-- the user explicitly asked for a PR to `main` and CI repair until green
+- the user explicitly redirected the publish step from PR creation to a direct merge into `main`
 - this repo already has workflow and live-check scripts for workflow contract validation
 
 ### Hypotheses and alternatives
 
-- preferred: run a broad local verification sweep, then open the PR and repair any hosted CI regressions directly on the branch
+- preferred: run a broad local verification sweep, merge the verified branch into `main`, then repair any hosted CI regressions on the merged branch if required
 - alternative: open the PR before broader local verification
 - alternative: treat local passing tests as sufficient and skip hosted CI repair
 
@@ -100,7 +104,7 @@ DevGod package maintainer shipping the approved Codex automation roadmap end-to-
 
 - broad local verification passes for the automation integration
 - workflow proof/live checks for the verification slice are healthy or any blockers are explicit
-- a PR to `main` exists and required CI is green after any necessary fixes
+- the verified branch is merged into `main` and required CI is green after any necessary fixes
 
 ## Stop Go
 
@@ -108,4 +112,4 @@ DevGod package maintainer shipping the approved Codex automation roadmap end-to-
 
 ## Next step
 
-Run the broad verification bundle, open the PR to `main`, and repair CI until all required checks succeed.
+Run the broad verification bundle, merge the branch directly into `main`, and repair CI until all required checks succeed.

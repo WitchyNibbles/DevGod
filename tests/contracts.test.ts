@@ -149,12 +149,12 @@ test("validateTaskPacket rejects non-devgod roles and missing mandatory review t
 });
 
 test("validateTaskPacket accepts newly shipped specialist roles", () => {
-  const errors = validateTaskPacket({
+  const evalRoleErrors = validateTaskPacket({
     taskId: "task-1",
-    title: "TDD task",
-    ownerRole: "tdd-guide",
+    title: "Eval task",
+    ownerRole: "eval_engineer",
     completionStandard: "specialist_verified",
-    requiredSpecialistRoles: ["tdd-guide"],
+    requiredSpecialistRoles: ["eval_engineer"],
     qualityGates: ["tdd_required"],
     goal: "prove behavior first",
     inputs: ["brief"],
@@ -171,7 +171,30 @@ test("validateTaskPacket accepts newly shipped specialist roles", () => {
     handoffFormat: "summary"
   });
 
-  assert.ok(!errors.some((error) => error.includes("ownerRole must be one of")));
+  const domainRoleErrors = validateTaskPacket({
+    taskId: "task-2",
+    title: "UX task",
+    ownerRole: "ux_researcher",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: ["ux_researcher"],
+    qualityGates: ["product_acceptance"],
+    goal: "validate product flow quality",
+    inputs: ["brief"],
+    outputs: ["research notes"],
+    dependencies: [],
+    allowedWriteScope: ["docs"],
+    outOfScope: ["deploy"],
+    acceptanceCriteria: ["findings are documented"],
+    verificationSteps: ["npm test"],
+    requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
+    securityChecks: ["no secrets"],
+    antiPatterns: ["inventing users"],
+    rollbackNotes: "revert patch",
+    handoffFormat: "summary"
+  });
+
+  assert.ok(!evalRoleErrors.some((error) => error.includes("ownerRole must be one of")));
+  assert.ok(!domainRoleErrors.some((error) => error.includes("ownerRole must be one of")));
 });
 
 test("validateTaskPacket requires strict reasoning artifacts when strict mode is selected", () => {
@@ -531,8 +554,12 @@ test("normalizeRetrievalMetadata defaults roles and deduplicates metadata arrays
 
 test("default helpers and type guards expose the shipped workflow vocabulary", () => {
   assert.ok(defaultRetrievalRoles().includes("planner"));
+  assert.ok(defaultRetrievalRoles().includes("agent_runtime_engineer"));
+  assert.ok(defaultRetrievalRoles().includes("compliance_reviewer"));
   assert.deepEqual(effectiveRequiredReviews(["reviewer"]), ["reviewer", "security_reviewer", "qa_engineer"]);
   assert.equal(isRetrievalRole("planner"), true);
+  assert.equal(isRetrievalRole("agent_runtime_engineer"), true);
+  assert.equal(isRetrievalRole("compliance_reviewer"), true);
   assert.equal(isRetrievalRole("ceo"), false);
   assert.equal(isGateReviewRole("reviewer"), true);
   assert.equal(isGateReviewRole("planner"), false);

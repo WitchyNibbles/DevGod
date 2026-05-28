@@ -4,11 +4,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import {
+  grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
-  mergePackageJson
+  mergePackageJson,
+  stripGitNexusFromCodexConfig
 } from "./merge.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
@@ -66,6 +68,7 @@ interface ParsedInstallCommand {
   dryRun: boolean;
   targetArg: string;
   withGitNexus?: boolean;
+  withGrafana?: boolean;
 }
 
 interface ParsedVerifyCommand {
@@ -152,9 +155,9 @@ export default createReviewPrincipalAdapter(async () => {
 
 function usage(): never {
   throw new Error(
-    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-gitnexus] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-gitnexus] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-gitnexus] --target <path> | <path>\n" +
+    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
       "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]\n" +
@@ -165,7 +168,10 @@ function usage(): never {
 function buildNextSteps(
   command: "init" | "upgrade",
   mode: InstallMode,
-  withGitNexus: boolean
+  options: {
+    withGitNexus: boolean;
+    withGrafana: boolean;
+  }
 ): string[] {
   if (command === "upgrade") {
     if (mode === "dry-run") {
@@ -173,18 +179,24 @@ function buildNextSteps(
         "Review the planned upgrade changes, conflicts, and orphans.",
         "Resolve any conflicts before applying the upgrade.",
         "Rerun in apply mode to write the planned managed-file updates.",
-        withGitNexus
+        options.withGitNexus
           ? "After apply, run npm install and npm run devgod:gitnexus:analyze to refresh the advisory index."
           : "Run verify after the upgrade to confirm the managed surface is clean.",
+        options.withGrafana
+          ? "If you want Grafana-backed logs, set DEVGOD_GRAFANA_URL plus auth in .env.devgod, then use the grafana MCP tools from Codex."
+          : "Optional: rerun upgrade with --with-grafana to install the Grafana MCP server wiring for log-backed debugging and research.",
         "After apply, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard."
       ];
     }
 
     return [
       "Review any backups under .devgod/install-backups/ if you changed managed files locally.",
-      withGitNexus
+      options.withGitNexus
         ? "Run npm install, then npm run devgod:gitnexus:analyze to create or refresh the advisory index."
         : "Run verify to confirm the managed surface is clean.",
+      options.withGrafana
+        ? "Fill in DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod before using Grafana-backed log tools."
+        : "Optional: rerun upgrade with --with-grafana to install the Grafana MCP server wiring for log-backed debugging and research.",
       "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
       "Resolve any reported orphans manually if the current package no longer manages them."
     ];
@@ -197,9 +209,12 @@ function buildNextSteps(
         "After apply, run npm install in the target project.",
         "After npm install, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
         "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
-        withGitNexus
+        options.withGitNexus
           ? "After npm install, run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
           : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
+        options.withGrafana
+          ? "If you want Grafana-backed logs, set DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod after apply."
+          : "Optional: rerun init with --with-grafana to add Grafana MCP wiring for log-backed debugging and research.",
         "Implement devgod/review-identity-adapter.ts before trusting review actions or running npm run devgod:record-review."
       ];
   }
@@ -209,9 +224,12 @@ function buildNextSteps(
     "npm install",
     "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
     "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
-    withGitNexus
+    options.withGitNexus
       ? "Run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
       : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
+    options.withGrafana
+      ? "Fill in DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod before using the Grafana MCP tools."
+      : "Optional: rerun init with --with-grafana to add Grafana MCP wiring for log-backed debugging and research.",
     "Implement devgod/review-identity-adapter.ts, run npm run devgod:verify:review-identity, then use npm run devgod:record-review for live review actions."
   ];
 }
@@ -790,6 +808,7 @@ async function buildInstallPlan(
   sourceRoot: string,
   options: {
     withGitNexus?: boolean;
+    withGrafana?: boolean;
   } = {}
 ): Promise<InstallPlanEntry[]> {
   const plan: InstallPlanEntry[] = [];
@@ -805,9 +824,14 @@ async function buildInstallPlan(
   }
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
-  const codexConfigSource = options.withGitNexus
-    ? mergeCodexConfig(sourceConfig, gitNexusCodexConfigFragment())
-    : sourceConfig;
+  const baseCodexConfigSource = stripGitNexusFromCodexConfig(sourceConfig);
+  let codexConfigSource = baseCodexConfigSource;
+  if (options.withGitNexus) {
+    codexConfigSource = mergeCodexConfig(codexConfigSource, gitNexusCodexConfigFragment());
+  }
+  if (options.withGrafana) {
+    codexConfigSource = mergeCodexConfig(codexConfigSource, grafanaCodexConfigFragment());
+  }
   const setupScriptSh = await readFile(path.join(sourceRoot, "scripts/setup-devgod.sh"), "utf8");
   const setupScriptPs1 = await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8");
 
@@ -834,12 +858,15 @@ async function buildInstallPlan(
         return mergePackageJson(
           currentContent,
           dependencyPath,
-          options.withGitNexus
-            ? {
-                withGitNexus: true,
-                gitNexusPackageVersion
-              }
-            : {}
+          {
+            ...(options.withGitNexus
+              ? {
+                  withGitNexus: true,
+                  gitNexusPackageVersion
+                }
+              : {}),
+            ...(options.withGrafana ? { withGrafana: true } : {})
+          }
         );
       }
     },
@@ -904,6 +931,28 @@ async function detectInstalledGitNexus(targetRoot: string): Promise<boolean> {
   return false;
 }
 
+async function detectInstalledGrafana(targetRoot: string): Promise<boolean> {
+  const codexConfig = await readFileIfExists(path.join(targetRoot, ".codex/config.toml"));
+  if (codexConfig?.includes("[mcp_servers.grafana]")) {
+    return true;
+  }
+
+  const packageJsonContent = await readFileIfExists(path.join(targetRoot, "package.json"));
+  if (!packageJsonContent) {
+    return false;
+  }
+
+  try {
+    const packageJson = JSON.parse(packageJsonContent) as {
+      scripts?: Record<string, unknown>;
+    };
+
+    return typeof packageJson.scripts?.["devgod:grafana:mcp"] === "string";
+  } catch {
+    return false;
+  }
+}
+
 async function backupExistingFile(
   targetRoot: string,
   relativePath: string,
@@ -954,8 +1003,9 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   return {
     command,
     dryRun: hasDryRun,
-    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply", "--with-gitnexus"])),
-    ...(args.includes("--with-gitnexus") ? { withGitNexus: true } : {})
+    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply", "--with-gitnexus", "--with-grafana"])),
+    ...(args.includes("--with-gitnexus") ? { withGitNexus: true } : {}),
+    ...(args.includes("--with-grafana") ? { withGrafana: true } : {})
   };
 }
 
@@ -1064,9 +1114,10 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
     if (
       commandArgs.includes("--apply") ||
       commandArgs.includes("--dry-run") ||
-      commandArgs.includes("--with-gitnexus")
+      commandArgs.includes("--with-gitnexus") ||
+      commandArgs.includes("--with-grafana")
     ) {
-      throw new Error("verify does not support --apply, --dry-run, or --with-gitnexus.");
+      throw new Error("verify does not support --apply, --dry-run, --with-gitnexus, or --with-grafana.");
     }
 
     return {
@@ -1100,8 +1151,9 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   return {
     command: "init",
     dryRun: true,
-    targetArg: resolveCliTarget(rawArgs, new Set(["--dry-run", "--with-gitnexus"])),
-    ...(rawArgs.includes("--with-gitnexus") ? { withGitNexus: true } : {})
+    targetArg: resolveCliTarget(rawArgs, new Set(["--dry-run", "--with-gitnexus", "--with-grafana"])),
+    ...(rawArgs.includes("--with-gitnexus") ? { withGitNexus: true } : {}),
+    ...(rawArgs.includes("--with-grafana") ? { withGrafana: true } : {})
   };
 }
 
@@ -1317,6 +1369,7 @@ async function buildManagedUpgradePlan(
   manifest: InstallManifest,
   options: {
     withGitNexus?: boolean;
+    withGrafana?: boolean;
   } = {}
 ): Promise<{
   orphans: string[];
@@ -1364,14 +1417,15 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
   const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
+  const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("init", mode, withGitNexus));
+  const summary = createInstallSummary(mode, buildNextSteps("init", mode, { withGitNexus, withGrafana }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const plannedWrites: PlannedWrite[] = [];
 
-  for (const entry of await buildInstallPlan(sourceRoot, { withGitNexus })) {
+  for (const entry of await buildInstallPlan(sourceRoot, { withGitNexus, withGrafana })) {
     const plannedWrite = resolveInstallAction(await resolvePlanEntry(entry, targetRoot));
     plannedWrites.push(plannedWrite);
     if (plannedWrite.action === "conflict") {
@@ -1395,14 +1449,16 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
   const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
+  const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, withGitNexus));
+  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, { withGitNexus, withGrafana }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const { existingManifest, manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
   const { orphans, plannedWrites } = await buildManagedUpgradePlan(sourceRoot, targetRoot, manifest, {
-    withGitNexus
+    withGitNexus,
+    withGrafana
   });
 
   summary.orphans.push(...orphans);
@@ -1440,11 +1496,12 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetRoot = path.resolve(options.targetRoot);
   const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
+  const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const { manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
-  const planEntries = (await buildInstallPlan(sourceRoot, { withGitNexus })).filter(
+  const planEntries = (await buildInstallPlan(sourceRoot, { withGitNexus, withGrafana })).filter(
     (entry) => entry.mode === "managed"
   );
   const plannedTargets = new Set(planEntries.map((entry) => entry.target));

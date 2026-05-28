@@ -975,6 +975,106 @@ test("executeWorkflowProofCommandFromArgs advances the next queued task when pro
   }
 });
 
+test("recommendRouting advances from an approved task into a queued optional-role task without blocking", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Optional role continuation",
+    request: "Prove catalog-backed optional roles do not strand the next queued task."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      outputs: ["approved plan"]
+    }),
+    taskPacket({
+      taskId: "ux-pass",
+      ownerRole: "ux_researcher",
+      requiredSpecialistRoles: ["ux_researcher"],
+      dependencies: ["plan"],
+      outputs: ["flow findings"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Planning slice approved and ready to hand off.",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["routing prerequisites verified"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured"],
+    contextRefs: ["brief://plan"]
+  });
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const report = await service.recommendRouting(run.id);
+  const ownerRecommendation = report.recommendations.find((entry) => entry.taskId === "ux-pass");
+
+  assert.equal(ownerRecommendation?.recommendation, "owner_dispatch");
+  assert.equal(ownerRecommendation?.targetRole, "ux_researcher");
+  assert.deepEqual(ownerRecommendation?.blockers, []);
+  assert.deepEqual(ownerRecommendation?.retrievalGuidance, [
+    "approved briefs",
+    "approved memory",
+    "repo rules",
+    "reviewed plans",
+    "reviewed UI artifacts"
+  ]);
+});
+
 test("executeAdvanceActiveTaskCommandFromArgs refuses queue mutation when runtime proof is missing", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {

@@ -1,8 +1,8 @@
 {
   "task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
-  "captured_at": "2026-05-23T19:15:00.000Z",
-  "status": "verified",
-  "summary": "The Codex automation continuation envelope, app automation handoff, and CLI scheduler handoff slices now pass the broad local regression bundle, and the rollout verification task packet has been repaired to satisfy the live workflow contract before PR publication.",
+  "captured_at": "2026-05-25T08:27:16Z",
+  "status": "completed",
+  "summary": "The rollout verification packet now includes the user-approved scope expansion needed for repo-local setup persistence, this source repo boots cleanly in managed runtime mode without ad hoc overrides, the optional GitNexus advisory surface is configured and indexed, and the installer contract once again keeps GitNexus opt-in for consuming repos while the broad local suite stays green. After the blocked PR path, the user explicitly redirected publication to a direct merge of the verified branch into main as Eimi. Main now points to b96327a and hosted CI run 26392030568 completed successfully on that merged commit.",
   "verification": [
     {
       "command": "node --experimental-strip-types --test tests/runtime-surface.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/admin.test.ts tests/report-command.test.ts tests/hooks.test.ts",
@@ -15,9 +15,91 @@
     {
       "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
       "status": "passed"
+    },
+    {
+      "command": "npm run setup:local",
+      "status": "passed"
+    },
+    {
+      "command": "npm run doctor",
+      "status": "passed"
+    },
+    {
+      "command": "npm run status",
+      "status": "passed"
+    },
+    {
+      "command": "npm run devgod:gitnexus:status",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm test",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-codex-automation-rollout-verification",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "gh auth status",
+      "status": "passed"
+    },
+    {
+      "command": "gh repo view --json nameWithOwner,defaultBranchRef",
+      "status": "passed"
+    },
+    {
+      "command": "gh api 'repos/WitchyNibbles/DevGod/pulls?head=WitchyNibbles:codex/devgod-automation-rollout-verification&state=all'",
+      "status": "passed"
+    },
+    {
+      "command": "gh api repos/WitchyNibbles/DevGod/pulls --method POST ...",
+      "status": "blocked",
+      "details": "HTTP 403 Unauthorized: As an Enterprise Managed User, you cannot access this content"
+    },
+    {
+      "command": "github/create_pull_request",
+      "status": "blocked",
+      "details": "Permission Denied: Unauthorized: As an Enterprise Managed User, you cannot access this content"
+    },
+    {
+      "command": "codex GitHub app _list_installed_accounts and _list_installations",
+      "status": "blocked",
+      "details": "No installed GitHub app accounts or installations are available in this session"
+    },
+    {
+      "command": "git switch main && git merge --ff-only codex/devgod-automation-rollout-verification",
+      "status": "passed"
+    },
+    {
+      "command": "git push origin main",
+      "status": "passed",
+      "details": "Remote accepted the direct update while noting that the pull-request rule was bypassed for refs/heads/main"
+    },
+    {
+      "command": "gh run watch 26392030568 --exit-status",
+      "status": "passed",
+      "details": "GitHub Actions CI run 26392030568 completed successfully for main at b96327a381c6651eb4bb2911c1ff5f10700cc52c"
     }
   ],
   "evidence_refs": [
+    ".env",
+    ".gitignore",
+    ".codex/config.toml",
+    "package.json",
+    "package-lock.json",
+    ".gitnexus/meta.json",
+    "src/install/cli.ts",
+    "src/install/merge.ts",
+    "tests/install.test.ts",
     "src/admin.ts",
     "src/admin/status.ts",
     "src/admin/ops.ts",
@@ -38,11 +120,11 @@
     "closed": 2,
     "opened": 0
   },
-  "next_target": "release:github-pr-green",
-  "why_next": "Local automation integration, regression coverage, and workflow-packet compliance are now in place, so the remaining rollout target is PR publication and hosted CI closure against main.",
-  "cycle": 1,
+  "next_target": "none",
+  "why_next": "The verified branch was merged directly into main and the hosted CI run on the merged commit completed successfully.",
+  "cycle": 4,
   "residual_risk": [
-    "Hosted GitHub Actions may still reveal runner-specific assumptions that did not reproduce locally.",
-    "The rollout task remains incomplete until the PR exists and required hosted checks finish green."
-  ]
+    "Obsidian export remains intentionally disabled because no repo-safe vault path was provided for this machine."
+  ],
+  "blockers": []
 }

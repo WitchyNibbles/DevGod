@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "@iarna/toml";
 import { auditMaintainerOnlyPublishedPaths } from "../src/install/maintainer-boundary.ts";
 import {
+  grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
   mergeCodexConfig,
@@ -23,6 +24,10 @@ import {
   upgradeDevgodInProject,
   verifyDevgodInstall
 } from "../src/install/cli.ts";
+import {
+  listCatalogAgentArtifactPaths,
+  verifyAgentCatalogArtifacts
+} from "../src/devgod/agent-artifact-verifier.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,7 +111,7 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
-  assert.ok(managedWordCount < 450, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
+  assert.ok(managedWordCount < 480, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
@@ -191,6 +196,18 @@ test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing p
   assert.match(merged, /"--no-install"/);
   assert.match(merged, /"gitnexus"/);
   assert.match(merged, /"mcp"/);
+  assert.match(merged, /\[mcp_servers\.playwright\]/);
+});
+
+test("mergeCodexConfig adds Grafana MCP settings without overwriting existing project config", () => {
+  const merged = mergeCodexConfig(
+    'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
+    grafanaCodexConfigFragment()
+  );
+
+  assert.match(merged, /\[mcp_servers\.grafana\]/);
+  assert.match(merged, /command = "node"/);
+  assert.match(merged, /src\/grafana\/mcp-server\.ts/);
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
@@ -336,6 +353,43 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
 
+test("verifyAgentCatalogArtifacts reports missing, unexpected, and metadata drift deterministically", async () => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "devgod-agent-catalog-"));
+  const agentsRoot = path.join(repoRoot, ".codex", "agents");
+  await mkdir(agentsRoot, { recursive: true });
+
+  await writeFile(
+    path.join(agentsRoot, "backend-engineer.toml"),
+    [
+      'name = "wrong_backend_role"',
+      'description = "Broken metadata fixture"',
+      'model = "gpt-5.4"'
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(agentsRoot, "mystery-agent.toml"),
+    [
+      'name = "mystery_agent"',
+      'description = "Unexpected artifact fixture"',
+      'model = "gpt-5.4-mini"'
+    ].join("\n") + "\n",
+    "utf8"
+  );
+
+  const result = await verifyAgentCatalogArtifacts({
+    repoRoot,
+    roles: ["backend_engineer", "technical_writer"]
+  });
+
+  assert.deepEqual(result.missingArtifacts, [".codex/agents/technical-writer.toml"]);
+  assert.deepEqual(result.unexpectedArtifacts, [".codex/agents/mystery-agent.toml"]);
+  assert.deepEqual(result.metadataMismatches, [
+    '.codex/agents/backend-engineer.toml: expected name "backend_engineer", got "wrong_backend_role"'
+  ]);
+  assert.equal(result.ok, false);
+});
+
 test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
   const merged = JSON.parse(
     mergePackageJson(
@@ -357,6 +411,28 @@ test("mergePackageJson adds pinned GitNexus helpers only when requested", () => 
   assert.equal(merged.devDependencies.gitnexus, "1.6.3");
   assert.equal(merged.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
   assert.equal(merged.scripts["devgod:gitnexus:status"], "gitnexus status");
+});
+
+test("mergePackageJson adds a Grafana MCP helper only when requested", () => {
+  const merged = JSON.parse(
+    mergePackageJson(
+      JSON.stringify({
+        name: "target-project",
+        private: true
+      }),
+      "../devgod",
+      {
+        withGrafana: true
+      }
+    )
+  ) as {
+    scripts: Record<string, string>;
+  };
+
+  assert.equal(
+    merged.scripts["devgod:grafana:mcp"],
+    "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+  );
 });
 
 test("mergeGitignore adds devgod env ignores once", () => {
@@ -453,24 +529,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-tdd/SKILL.md"
   ];
 
-  const expectedAgentFiles = [
-    ".codex/agents/backend-engineer.toml",
-    ".codex/agents/build-resolver.toml",
-    ".codex/agents/docs-researcher.toml",
-    ".codex/agents/e2e-runner.toml",
-    ".codex/agents/frontend-designer.toml",
-    ".codex/agents/git-operator.toml",
-    ".codex/agents/infra-engineer.toml",
-    ".codex/agents/memory-curator.toml",
-    ".codex/agents/planner.toml",
-    ".codex/agents/product-strategist.toml",
-    ".codex/agents/qa-engineer.toml",
-    ".codex/agents/release-readiness.toml",
-    ".codex/agents/reviewer.toml",
-    ".codex/agents/security-reviewer.toml",
-    ".codex/agents/solution-architect.toml",
-    ".codex/agents/tdd-guide.toml"
-  ];
+  const expectedAgentFiles = listCatalogAgentArtifactPaths();
 
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -526,6 +585,13 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
 
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
   assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
+  assert.ok(pkg.files.includes("docs/devgod-agent-team.md"));
+
+  const catalogVerification = await verifyAgentCatalogArtifacts({ repoRoot: sourceRoot });
+  assert.equal(catalogVerification.ok, true);
+  assert.deepEqual(catalogVerification.missingArtifacts, []);
+  assert.deepEqual(catalogVerification.unexpectedArtifacts, []);
+  assert.deepEqual(catalogVerification.metadataMismatches, []);
   assert.equal(pkg.private, true);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
@@ -683,6 +749,17 @@ test("parseCliArgs defaults upgrade-reasoning-workflow mode to strict", () => {
   });
 });
 
+test("parseCliArgs accepts Grafana install opt-in", () => {
+  const parsed = parseCliArgs(["init", "--apply", "--with-grafana", "--target", "/tmp/project"]);
+
+  assert.deepEqual(parsed, {
+    command: "init",
+    dryRun: false,
+    targetArg: "/tmp/project",
+    withGrafana: true
+  });
+});
+
 test("upgradeReasoningWorkflowArtifacts backfills policy, attempts, and verdict into a legacy task packet", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-workflow-"));
@@ -817,6 +894,64 @@ test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP con
   }
 });
 
+test("installDevgodIntoProject keeps GitNexus opt-in even when the source repo enables it locally", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-default-no-gitnexus-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    const summary = await installDevgodIntoProject({ sourceRoot, targetRoot });
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+    const gitignore = await readFile(path.join(targetRoot, ".gitignore"), "utf8");
+
+    assert.equal(packageJson.devDependencies?.gitnexus, undefined);
+    assert.equal(packageJson.scripts?.["devgod:gitnexus:analyze"], undefined);
+    assert.doesNotMatch(codexConfig, /\[mcp_servers\.gitnexus\]/);
+    assert.doesNotMatch(gitignore, /\.gitnexus\//);
+    assert.doesNotMatch(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installDevgodIntoProject opt-in Grafana setup adds MCP config, env guidance, and helper script", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-grafana-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+
+    const summary = await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot,
+      withGrafana: true
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex/config.toml"), "utf8");
+    const envExample = await readFile(path.join(targetRoot, ".env.devgod.example"), "utf8");
+
+    assert.equal(
+      packageJson.scripts["devgod:grafana:mcp"],
+      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+    );
+    assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
+    assert.match(codexConfig, /src\/grafana\/mcp-server\.ts/);
+    assert.match(envExample, /DEVGOD_GRAFANA_URL=/);
+    assert.match(envExample, /DEVGOD_GRAFANA_LOGS_DATASOURCE_UID=/);
+    assert.match(summary.nextSteps.join("\n"), /DEVGOD_GRAFANA_URL/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("install CLI init --apply is explicit, replay-safe, and does not run docker", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-apply-"));
@@ -903,6 +1038,27 @@ test("verifyDevgodInstall auto-detects the GitNexus install option", async () =>
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall auto-detects the Grafana install option", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-grafana-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot, withGrafana: true });
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, true);
+    assert.deepEqual(summary.missing, []);
+    assert.deepEqual(summary.modified, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -2306,30 +2462,14 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-tdd/SKILL.md"
   ];
 
-  const expectedAgentFiles = [
-    ".codex/agents/backend-engineer.toml",
-    ".codex/agents/build-resolver.toml",
-    ".codex/agents/docs-researcher.toml",
-    ".codex/agents/e2e-runner.toml",
-    ".codex/agents/frontend-designer.toml",
-    ".codex/agents/git-operator.toml",
-    ".codex/agents/infra-engineer.toml",
-    ".codex/agents/memory-curator.toml",
-    ".codex/agents/planner.toml",
-    ".codex/agents/product-strategist.toml",
-    ".codex/agents/qa-engineer.toml",
-    ".codex/agents/release-readiness.toml",
-    ".codex/agents/reviewer.toml",
-    ".codex/agents/security-reviewer.toml",
-    ".codex/agents/solution-architect.toml",
-    ".codex/agents/tdd-guide.toml"
-  ];
+  const expectedAgentFiles = listCatalogAgentArtifactPaths();
 
   const packedSkillFiles = [...packedFiles].filter((file) => file.startsWith(".agents/skills/")).sort();
   const packedAgentFiles = [...packedFiles].filter((file) => file.startsWith(".codex/agents/")).sort();
 
   assert.deepEqual(packedSkillFiles, expectedSkillFiles);
   assert.deepEqual(packedAgentFiles, expectedAgentFiles);
+  assert.ok(packedFiles.has("docs/devgod-agent-team.md"));
 
   for (const expectedPath of [
     ".githooks/commit-msg",

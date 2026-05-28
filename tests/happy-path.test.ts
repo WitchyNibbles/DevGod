@@ -210,6 +210,17 @@ test("installed consumer fixture can seed and pass the happy-path flow without m
   }
 });
 
+test("verify-installed-repo-harness can include the Grafana opt-in wiring", async () => {
+  const { stdout } = await execFileAsync(
+    "bash",
+    ["scripts/verify-installed-repo-harness.sh", "--with-grafana"],
+    { cwd: repoRoot }
+  );
+
+  assert.match(stdout, /installed repo harness passed/);
+  assert.match(stdout, /grafana-opt-in: enabled/);
+});
+
 test("seed-happy-path-fixture rejects non-fixture task ids", async () => {
   const targetRoot = await mkdtemp(join(tmpdir(), "devgod-consumer-happy-path-reject-"));
 

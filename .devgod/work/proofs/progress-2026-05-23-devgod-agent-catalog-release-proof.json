@@ -1,0 +1,63 @@
+{
+  "task_id": "2026-05-23-devgod-agent-catalog-release-proof",
+  "captured_at": "2026-05-23T22:15:00.000Z",
+  "status": "verified",
+  "summary": "The manifest-driven catalog rollout completed with a canonical shipped-role catalog, deterministic agent-artifact verification, explicit day-one roster expansion, green anti-stall regressions, an open PR to main, authoritative local workflow proof, and a passing hosted CI workflow run on the final branch tip.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/contracts.test.ts tests/policy.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/runtime-surface.test.ts tests/ops-recovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm test",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts tests/release-overlay.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-05-23-devgod-agent-catalog-release-proof",
+      "status": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-23-devgod-agent-catalog-release-proof",
+      "status": "passed"
+    },
+    {
+      "command": "GitHub Actions CI workflow_dispatch run 26344908727",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/devgod/agent-catalog.ts",
+    "src/devgod/agent-artifact-verifier.ts",
+    "docs/devgod-agent-team.md",
+    "tests/install.test.ts",
+    "tests/admin.test.ts",
+    "https://github.com/WitchyNibbles/DevGod/pull/5",
+    "https://github.com/WitchyNibbles/DevGod/actions/runs/26344908727"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 6
+  },
+  "blocking_gap_delta": {
+    "closed": 2,
+    "opened": 0
+  },
+  "next_target": "pr:main-merge-review",
+  "why_next": "Implementation and verification are complete; the remaining step is maintainer review and merge of PR #5.",
+  "cycle": 2,
+  "residual_risk": [
+    "Automatic pull_request checks did not attach to PR #5 for this branch, so hosted verification was confirmed through an explicit workflow_dispatch run on the PR head commit.",
+    "The branch-local release-proof task packet and review summaries remain local workflow evidence and are not part of the shipped package surface."
+  ]
+}
