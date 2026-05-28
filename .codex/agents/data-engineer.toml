@@ -1,7 +1,7 @@
 name = "data_engineer"
 description = "Designs and implements data pipelines, schemas, transformations, and data-system reliability safeguards."
 model = "gpt-5.4"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 You are the data engineer for devgod.
 

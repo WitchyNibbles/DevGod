@@ -13,6 +13,7 @@ import {
   grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
+  mergeDotAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
   mergePackageJson,
@@ -118,13 +119,25 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.equal(first, second);
 });
 
+test("mergeDotAgentsMd appends and is idempotent", () => {
+  const first = mergeDotAgentsMd("# local notes\n");
+  const second = mergeDotAgentsMd(first);
+
+  assert.match(first, /BEGIN DEVGOD KERNEL/);
+  assert.match(first, /Devgod Kernel/);
+  assert.match(first, /devgod-intake/);
+  assert.match(first, /specialist_verified/);
+  assert.equal(first, second);
+});
+
 test("mergeCodexConfig preserves existing values and adds missing devgod defaults", () => {
   const merged = mergeCodexConfig(
     `model = "custom-model"\n\n[features]\npersonality = false\n`,
-    `model = "gpt-5.4"\nmodel_verbosity = "low"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\nproject_doc_max_bytes = 16384\n\n[features]\nmulti_agent = true\nenable_request_compression = true\nplugin_hooks = true\n\n[agents]\nmax_threads = 8\n`
+    `model = "gpt-5.4"\nmodel_reasoning_effort = "medium"\nmodel_verbosity = "low"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nproject_doc_fallback_filenames = [".agents.md", "AGENTS.md"]\nproject_doc_max_bytes = 8192\n\n[features]\nmulti_agent = true\nenable_request_compression = true\nplugin_hooks = true\n\n[agents]\nmax_threads = 8\n`
   );
   const parsed = parseToml(merged) as {
     model?: string;
+    model_reasoning_effort?: string;
     model_verbosity?: string;
     approval_policy?: string;
     sandbox_mode?: string;
@@ -136,11 +149,12 @@ test("mergeCodexConfig preserves existing values and adds missing devgod default
   };
 
   assert.equal(parsed.model, "custom-model");
+  assert.equal(parsed.model_reasoning_effort, "medium");
   assert.equal(parsed.model_verbosity, "low");
   assert.equal(parsed.approval_policy, "never");
   assert.equal(parsed.sandbox_mode, "danger-full-access");
   assert.deepEqual(parsed.project_doc_fallback_filenames, [".agents.md", "AGENTS.md"]);
-  assert.equal(parsed.project_doc_max_bytes, 16384);
+  assert.equal(parsed.project_doc_max_bytes, 8192);
   assert.equal(parsed.suppress_unstable_features_warning, true);
   assert.equal(parsed.features?.multi_agent, true);
   assert.equal(parsed.features?.plugin_hooks, true);
@@ -772,6 +786,7 @@ test("installDevgodIntoProject ships Playwright MCP configs and setup wiring", a
     const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };
+    const kernelAgents = await readFile(path.join(targetRoot, ".agents.md"), "utf8");
     const playwrightConfig = await readFile(path.join(targetRoot, ".devgod", "playwright", "mcp.json"), "utf8");
     const playwrightVisionConfig = await readFile(
       path.join(targetRoot, ".devgod", "playwright", "mcp.vision.json"),
@@ -788,6 +803,8 @@ test("installDevgodIntoProject ships Playwright MCP configs and setup wiring", a
       packageJson.scripts?.["devgod:verify:playwright"],
       "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify"
     );
+    assert.match(kernelAgents, /BEGIN DEVGOD KERNEL/);
+    assert.match(kernelAgents, /devgod-intake/);
     assert.match(playwrightConfig, /"browserName": "chromium"/);
     assert.match(playwrightVisionConfig, /"vision"/);
   } finally {

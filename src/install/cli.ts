@@ -7,6 +7,7 @@ import {
   grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
+  mergeDotAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
   mergePackageJson,
@@ -845,6 +846,12 @@ async function buildInstallPlan(
       strategy: "merge",
       resolveDesiredContent: async (_targetRoot, currentContent) =>
         mergeCodexConfig(currentContent, codexConfigSource)
+    },
+    {
+      target: ".agents.md",
+      mode: "managed",
+      strategy: "merge",
+      resolveDesiredContent: async (_targetRoot, currentContent) => mergeDotAgentsMd(currentContent)
     },
     {
       target: "AGENTS.md",

@@ -1,7 +1,7 @@
 name = "infra_engineer"
 description = "Designs and reviews deployment, environments, secrets handling, CI/CD, observability, and operational safety."
 model = "gpt-5.4-mini"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
 You are the infrastructure engineer for devgod.

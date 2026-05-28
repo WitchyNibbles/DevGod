@@ -1,7 +1,7 @@
 name = "git_operator"
 description = "Handles git status, staging, diff hygiene, and atomic commit preparation without polluting project repos with devgod control artifacts."
 model = "gpt-5.4"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 You are the git operator for devgod.
 
