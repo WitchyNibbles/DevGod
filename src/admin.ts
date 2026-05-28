@@ -1541,8 +1541,8 @@ export interface RefreshRepoContextResult {
   projectSlug: string;
   repoRoot: string;
   slotCount: number;
-  status: "ready" | "degraded";
-  fingerprint: string;
+  status?: "ready" | "degraded" | undefined;
+  fingerprint?: string | undefined;
 }
 
 export interface CreateRuntimeStoreOptions {
@@ -11230,18 +11230,19 @@ export async function executeRefreshRepoContextCommandFromArgs(
   maybeOptions: ExecuteRefreshRepoContextCommandOptions = {}
 ): Promise<RefreshRepoContextResult> {
   const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
-  const options = Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions;
-  const env = options.env ?? process.env;
-  const argv = options.argv ?? process.argv;
-  const cwd = options.cwd ?? process.cwd();
+  const resolvedOptions = (Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions) as ExecuteRefreshRepoContextCommandOptions;
+  const env = resolvedOptions.env ?? process.env;
+  const argv = resolvedOptions.argv ?? process.argv;
+  const cwd = resolvedOptions.cwd ?? process.cwd();
   const effectiveArgs = Array.isArray(argsOrOptions)
     ? args.length > 0
       ? args
       : argv.slice(3)
     : [];
-  const withClientImpl = options.withClient ?? withClient;
-  const createStoreImpl = options.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
-  const now = (options.now ?? (() => new Date()))().toISOString();
+  const withClientImpl = resolvedOptions.withClient ?? withClient;
+  const createStoreImpl =
+    resolvedOptions.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
+  const now = (resolvedOptions.now ?? (() => new Date()))().toISOString();
   const targetRepoRoot = resolveRepoMarkdownTargetRoot(env, effectiveArgs, cwd);
   const workspaceSlug = resolveCommandFlag(effectiveArgs, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "default";
   const projectSlug = resolveCommandFlag(effectiveArgs, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
@@ -11250,7 +11251,7 @@ export async function executeRefreshRepoContextCommandFromArgs(
     throw new Error("DEVGOD_PROJECT_SLUG is required");
   }
 
-  return withClientImpl(async (client) => {
+  return withClientImpl(async (client: PostgresStoreClient) => {
     const store = createStoreImpl(client);
     const context = await store.getProjectContext({
       workspaceSlug,
