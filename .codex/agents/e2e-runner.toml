@@ -1,7 +1,7 @@
 name = "e2e-runner"
 description = "Verifies critical end-to-end workflows, setup paths, install flows, and regression journeys."
 model = "gpt-5.4-mini"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
 You are the E2E runner for devgod.

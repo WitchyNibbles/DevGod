@@ -1364,6 +1364,11 @@ const repoMarkdownCommandFlagsWithValues = new Set([
   "--embedding-model"
 ]);
 
+const planContextRefreshPassthroughFlagsWithValues = new Set([
+  "--workspace-slug",
+  "--project-slug"
+]);
+
 function resolveCommandPositionals(
   args: readonly string[],
   flagsWithValues: ReadonlySet<string> = new Set()
@@ -1387,6 +1392,28 @@ function resolveCommandPositionals(
   }
 
   return positionals;
+}
+
+export function buildPlanContextRefreshArgs(args: readonly string[]): string[] {
+  const passthrough: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (!value.startsWith("-")) {
+      continue;
+    }
+
+    if (planContextRefreshPassthroughFlagsWithValues.has(value)) {
+      passthrough.push(value);
+      const nextValue = args[index + 1];
+      if (typeof nextValue === "string") {
+        passthrough.push(nextValue);
+        index += 1;
+      }
+    }
+  }
+
+  return passthrough;
 }
 
 function resolveRepoMarkdownTargetRoot(
@@ -1413,6 +1440,15 @@ function resolveEmbeddingJobLimit(env: EnvShape, candidate?: string | undefined)
     throw new Error(`Invalid embedding job limit: ${limitValue}`);
   }
   return limit;
+}
+
+function resolveArtifactsOnlyRetrievalRefresh(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--artifacts-only")) {
+    return true;
+  }
+
+  const candidate = env.DEVGOD_RETRIEVAL_REFRESH_MODE?.trim().toLowerCase();
+  return candidate === "artifacts_only" || candidate === "artifacts-only" || candidate === "fast";
 }
 
 interface RetrievalIndexManifestRecord {
@@ -1525,6 +1561,7 @@ export interface RefreshRetrievalResult {
   workspaceSlug: string;
   projectSlug: string;
   repoRoot: string;
+  mode: "full" | "artifacts_only";
   filesIndexed: number;
   chunksStored: number;
   jobsQueued: number;
@@ -1579,13 +1616,16 @@ export async function createPlanContextEmbedQuery(
 }
 
 function resolveAutoRefreshRetrievalEnabled(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--auto-refresh-retrieval")) {
+    return true;
+  }
   if (args.includes("--no-auto-refresh-retrieval")) {
     return false;
   }
 
   const candidate = env.DEVGOD_AUTO_REFRESH_RETRIEVAL?.trim().toLowerCase();
   if (!candidate) {
-    return true;
+    return false;
   }
 
   if (["0", "false", "no", "off"].includes(candidate)) {
@@ -1596,17 +1636,20 @@ function resolveAutoRefreshRetrievalEnabled(args: readonly string[], env: EnvSha
     return true;
   }
 
-  return true;
+  return false;
 }
 
 function resolveAutoRefreshRepoContextEnabled(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--auto-refresh-repo-context")) {
+    return true;
+  }
   if (args.includes("--no-auto-refresh-repo-context")) {
     return false;
   }
 
   const candidate = env.DEVGOD_AUTO_REFRESH_REPO_CONTEXT?.trim().toLowerCase();
   if (!candidate) {
-    return true;
+    return false;
   }
 
   if (["0", "false", "no", "off"].includes(candidate)) {
@@ -1617,7 +1660,11 @@ function resolveAutoRefreshRepoContextEnabled(args: readonly string[], env: EnvS
     return true;
   }
 
-  return true;
+  return false;
+}
+
+function appendAutomaticRefreshDeferredSummary(summary: string, kind: "repo context" | "retrieval"): string {
+  return `${summary}; automatic ${kind} refresh deferred for interactive planning`;
 }
 
 async function resolvePlanningRepoContextState(
@@ -1635,7 +1682,14 @@ async function resolvePlanningRepoContextState(
     !resolveAutoRefreshRepoContextEnabled(args, env) ||
     repoContext.state === "fresh"
   ) {
-    return repoContext;
+    if (repoContext.state === "fresh" || !options.refreshRepoContext) {
+      return repoContext;
+    }
+
+    return {
+      ...repoContext,
+      summary: appendAutomaticRefreshDeferredSummary(repoContext.summary, "repo context")
+    };
   }
 
   try {
@@ -1669,7 +1723,14 @@ async function resolvePlanningRetrievalState(
 
   let retrieval = await options.getRetrievalFreshness();
   if (!options.refreshRetrieval || !resolveAutoRefreshRetrievalEnabled(args, env) || retrieval.state === "fresh") {
-    return retrieval;
+    if (retrieval.state === "fresh" || !options.refreshRetrieval) {
+      return retrieval;
+    }
+
+    return {
+      ...retrieval,
+      summary: appendAutomaticRefreshDeferredSummary(retrieval.summary, "retrieval")
+    };
   }
 
   try {
@@ -10823,6 +10884,7 @@ async function planContextCommand(args: readonly string[]) {
   const embedQuery = await createPlanContextEmbedQuery(process.env);
   const workspaceSlug = resolveCommandFlag(args, "--workspace-slug") ?? process.env.DEVGOD_WORKSPACE_SLUG;
   const projectSlug = resolveCommandFlag(args, "--project-slug") ?? process.env.DEVGOD_PROJECT_SLUG;
+  const refreshArgs = buildPlanContextRefreshArgs(args);
 
   await withClient(async (client) => {
     const store = createRuntimeStore(client);
@@ -10840,7 +10902,7 @@ async function planContextCommand(args: readonly string[]) {
         });
       },
       refreshRepoContext() {
-        return executeRefreshRepoContextCommandFromArgs(args, {
+        return executeRefreshRepoContextCommandFromArgs(refreshArgs, {
           cwd: process.cwd(),
           env: {
             ...process.env,
@@ -11072,6 +11134,14 @@ export async function inspectRetrievalFreshness(input: {
     }
 
     const manifestStatus = manifest.status ?? "missing";
+    if (embeddingModel && manifestStatus === "artifacts_only_pending_embeddings") {
+      return {
+        authorityLabel: "derived_only",
+        state: "degraded",
+        summary: "repo retrieval index matches the current repo snapshot, but embeddings are still pending"
+      };
+    }
+
     if (embeddingModel && manifestStatus !== "ready") {
       return {
         authorityLabel: "derived_only",
@@ -11127,6 +11197,7 @@ export async function executeRefreshRetrievalCommand(
   const include = resolveRepoMarkdownInclude(env);
   const embeddingModel = (resolveCommandFlag(args, "--embedding-model") ?? env.DEVGOD_EMBEDDING_MODEL)?.trim()
     || undefined;
+  const artifactsOnly = resolveArtifactsOnlyRetrievalRefresh(args, env);
 
   if (!projectSlug) {
     throw new Error("DEVGOD_PROJECT_SLUG is required");
@@ -11156,7 +11227,7 @@ export async function executeRefreshRetrievalCommand(
           failed: number;
         }
       | undefined;
-    if (embeddingModel) {
+    if (embeddingModel && !artifactsOnly) {
       const provider = await createEmbeddingProviderImpl(env);
       embeddingJobs = await runEmbeddingJobsImpl({
         store,
@@ -11179,9 +11250,11 @@ export async function executeRefreshRetrievalCommand(
     }
 
     const retrievalStatus = embeddingModel
-      ? (embeddingJobs?.failed ?? 0) === 0
-        ? "ready"
-        : "degraded"
+      ? artifactsOnly
+        ? "artifacts_only_pending_embeddings"
+        : (embeddingJobs?.failed ?? 0) === 0
+          ? "ready"
+          : "degraded"
       : "artifacts_only";
 
     await store.saveProjectRuntimeRegistration({
@@ -11213,6 +11286,7 @@ export async function executeRefreshRetrievalCommand(
       workspaceSlug,
       projectSlug,
       repoRoot: targetRepoRoot,
+      mode: artifactsOnly ? "artifacts_only" : "full",
       filesIndexed: indexResult.filesIndexed,
       chunksStored: indexResult.chunksStored,
       jobsQueued: indexResult.jobsQueued,

@@ -1,7 +1,7 @@
 name = "build_resolver"
 description = "Diagnoses and fixes build, typecheck, test, and setup failures with incremental verification."
 model = "gpt-5.4"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 You are the build resolver for devgod.
 

@@ -2,6 +2,8 @@ import TOML from "@iarna/toml";
 
 const AGENTS_BEGIN = "<!-- BEGIN DEVGOD MANAGED -->";
 const AGENTS_END = "<!-- END DEVGOD MANAGED -->";
+const DOT_AGENTS_BEGIN = "<!-- BEGIN DEVGOD KERNEL -->";
+const DOT_AGENTS_END = "<!-- END DEVGOD KERNEL -->";
 const workflowContractBlock = `<!-- devgod-workflow-contract:start -->
 workflow=devgod
 workflow_runtime=postgres
@@ -66,6 +68,36 @@ ${workflowContractBlock}
 
 ${AGENTS_END}`;
 
+const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
+# Devgod Kernel
+
+- substantive asks default to \`devgod\` unless the user opts out
+- use \`devgod-intake\` first for substantive work
+- root thread is the manager: confirm goal, criteria, constraints, and main risk
+- manager/root gets at most two shallow inspections before trivial handling or bounded delegation
+- create or update \`.devgod/ACTIVE\` and \`.devgod/work/briefs/brief-<task-id>.md\` before moving past intake
+- default sequence: evidence -> \`solution_architect\` -> \`planner\` -> task packet -> specialist owner -> \`reviewer\`, \`qa_engineer\`, \`security_reviewer\`
+- task packets need \`task_id\`, owner role, completion standard, required specialists, quality gates, write scope, acceptance criteria, verification steps, required reviews, security checks, and rollback notes
+- run \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\` before declaring substantive work complete
+- current task id must match \`.devgod/ACTIVE\`, the current brief, the current plan/task, and required review files
+- unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
+- markdown review files are evidence summaries, not reviewer authority
+- authenticated reviewer identity and waiver authority must come from runtime policy or another authenticated principal-binding source
+- package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
+- live work state belongs in \`.devgod/work/\`
+- reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there
+- ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
+- use repo-local \`devgod\` skills and agents when they fit; use \`caveman\` for terse internal handoffs
+
+Gate reminders:
+
+- substantive non-trivial work should normally use \`specialist_verified\`
+- workers must not edit \`AGENTS.md\`, \`.codex/\`, \`.agents/\`, or \`.devgod/memory/\` unless the task packet allows it
+- keep live work state in \`.devgod/work/\`; reviewed memory is not a scratchpad
+
+See \`AGENTS.md\` and \`.devgod/rules/\` for the full workflow contract and policy details.
+${DOT_AGENTS_END}`;
+
 interface GitNexusInstallSettings {
   withGitNexus?: boolean;
   withGrafana?: boolean;
@@ -119,6 +151,19 @@ export function mergeAgentsMd(existingContent: string | undefined): string {
   }
 
   return `${existingContent.trimEnd()}\n\n${managedAgentsBlock}\n`;
+}
+
+export function mergeDotAgentsMd(existingContent: string | undefined): string {
+  if (!existingContent || existingContent.trim().length === 0) {
+    return `${managedDotAgentsBlock}\n`;
+  }
+
+  const blockPattern = new RegExp(`${DOT_AGENTS_BEGIN}[\\s\\S]*?${DOT_AGENTS_END}`, "m");
+  if (blockPattern.test(existingContent)) {
+    return `${existingContent.replace(blockPattern, managedDotAgentsBlock).trimEnd()}\n`;
+  }
+
+  return `${existingContent.trimEnd()}\n\n${managedDotAgentsBlock}\n`;
 }
 
 function ensureStringArray(value: unknown, fallback: string[]): string[] {
@@ -346,11 +391,13 @@ export function mergePackageJson(
   scripts["devgod:supervisor"] = `${devgodEntry} supervisor --format text`;
   scripts["devgod:supervisor-history"] = `${devgodEntry} supervisor-history --format text`;
   scripts["devgod:ops"] = `${devgodEntry} ops --format text`;
+  scripts["devgod:focus"] = `${devgodEntry} ops --format text`;
   scripts["devgod:loop"] = `${devgodEntry} loop --format text`;
   scripts["devgod:recover"] = `${devgodEntry} recover`;
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
   scripts["devgod:refresh-retrieval"] = `${devgodEntry} refresh-retrieval`;
+  scripts["devgod:refresh-retrieval:fast"] = `${devgodEntry} refresh-retrieval --artifacts-only`;
   scripts["devgod:refresh-repo-context"] = `${devgodEntry} refresh-repo-context`;
   scripts["devgod:repair-task-queue"] = `${devgodEntry} repair-task-queue`;
   scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;

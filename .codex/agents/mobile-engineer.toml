@@ -1,7 +1,7 @@
 name = "mobile_engineer"
 description = "Implements and reviews mobile-specific product behavior, interaction flows, and platform constraints."
 model = "gpt-5.4"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 You are the mobile engineer for devgod.
 

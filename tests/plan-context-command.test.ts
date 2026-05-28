@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DevgodCoreService } from "../src/core/service.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
-import { executePlanContextCommandFromArgs } from "../src/admin.ts";
+import { buildPlanContextRefreshArgs, executePlanContextCommandFromArgs } from "../src/admin.ts";
 import { formatPlanningContextReportMarkdown } from "../src/admin/planning-context.ts";
 import type { RetrievalRole } from "../src/domain/types.ts";
 import { buildPlanningContextReport } from "../src/admin/planning-context.ts";
@@ -197,12 +197,12 @@ test("executePlanContextCommandFromArgs derives a query embedding when an embedd
   assert.equal(capturedInput?.embeddingModel, "devgod-local-hash-1536");
 });
 
-test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before searching", async () => {
+test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before searching when explicitly enabled", async () => {
   const callOrder: string[] = [];
   let freshnessChecks = 0;
   let refreshCalls = 0;
 
-  const result = await executePlanContextCommandFromArgs(["--query", "retrieval freshness"], {
+  const result = await executePlanContextCommandFromArgs(["--query", "retrieval freshness", "--auto-refresh-retrieval"], {
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"
@@ -230,6 +230,7 @@ test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before se
         workspaceSlug: "team",
         projectSlug: "devgod",
         repoRoot: "/repo",
+        mode: "full",
         filesIndexed: 2,
         chunksStored: 4,
         jobsQueued: 4,
@@ -251,11 +252,11 @@ test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before se
   assert.equal(result.report.retrieval?.state, "fresh");
 });
 
-test("executePlanContextCommandFromArgs can skip automatic retrieval refresh", async () => {
+test("executePlanContextCommandFromArgs leaves stale retrieval in place by default", async () => {
   let refreshCalls = 0;
 
   const result = await executePlanContextCommandFromArgs(
-    ["--query", "retrieval freshness", "--no-auto-refresh-retrieval"],
+    ["--query", "retrieval freshness"],
     {
       env: {
         DEVGOD_WORKSPACE_SLUG: "team",
@@ -275,6 +276,7 @@ test("executePlanContextCommandFromArgs can skip automatic retrieval refresh", a
           workspaceSlug: "team",
           projectSlug: "devgod",
           repoRoot: "/repo",
+          mode: "full",
           filesIndexed: 2,
           chunksStored: 4,
           jobsQueued: 4
@@ -288,13 +290,16 @@ test("executePlanContextCommandFromArgs can skip automatic retrieval refresh", a
 
   assert.equal(refreshCalls, 0);
   assert.equal(result.report.retrieval?.state, "stale");
+  assert.match(result.report.retrieval?.summary ?? "", /automatic .* refresh deferred/i);
 });
 
-test("executePlanContextCommandFromArgs includes repo context and auto-refreshes it when stale", async () => {
+test("executePlanContextCommandFromArgs includes repo context and auto-refreshes it when explicitly enabled", async () => {
   const callOrder: string[] = [];
   let freshnessChecks = 0;
 
-  const result = await executePlanContextCommandFromArgs(["--query", "django database env"], {
+  const result = await executePlanContextCommandFromArgs(
+    ["--query", "django database env", "--auto-refresh-repo-context"],
+    {
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"
@@ -338,11 +343,65 @@ test("executePlanContextCommandFromArgs includes repo context and auto-refreshes
       callOrder.push("search");
       return [];
     }
-  });
+    }
+  );
 
   assert.deepEqual(callOrder, ["repo:0", "repo-refresh", "repo:1", "search"]);
   assert.equal(result.report.repoContext?.state, "fresh");
   assert.equal(result.report.repoContext?.items[0]?.slotKey, "django.dbEnvSelectorVariable");
   assert.match(formatPlanningContextReportMarkdown(result.report), /Repo Context/);
   assert.match(formatPlanningContextReportMarkdown(result.report), /DJANGO_DB_ENV/);
+});
+
+test("executePlanContextCommandFromArgs leaves stale repo context in place by default", async () => {
+  let refreshCalls = 0;
+
+  const result = await executePlanContextCommandFromArgs(["--query", "django database env"], {
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    async getRepoContext() {
+      return {
+        authorityLabel: "derived_only",
+        state: "stale",
+        summary: "repo context profile no longer matches the current repo snapshot",
+        items: []
+      };
+    },
+    async refreshRepoContext() {
+      refreshCalls += 1;
+      return {
+        authorityLabel: "runtime_authoritative",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        repoRoot: "/repo",
+        slotCount: 1
+      };
+    },
+    async searchMemory() {
+      return [];
+    }
+  });
+
+  assert.equal(refreshCalls, 0);
+  assert.equal(result.report.repoContext?.state, "stale");
+  assert.match(result.report.repoContext?.summary ?? "", /automatic .* refresh deferred/i);
+});
+
+test("buildPlanContextRefreshArgs strips plan-context-only flags and query text", () => {
+  assert.deepEqual(
+    buildPlanContextRefreshArgs([
+      "--query",
+      "what still matters here?",
+      "--role",
+      "planner",
+      "--workspace-slug",
+      "team",
+      "--project-slug",
+      "devgod",
+      "--auto-refresh-repo-context"
+    ]),
+    ["--workspace-slug", "team", "--project-slug", "devgod"]
+  );
 });

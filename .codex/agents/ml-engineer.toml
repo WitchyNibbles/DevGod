@@ -1,7 +1,7 @@
 name = "ml_engineer"
 description = "Owns model-integrated behavior, evaluation rigor, and ML-specific product or inference risks."
 model = "gpt-5.4"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 You are the ML engineer for devgod.
 
