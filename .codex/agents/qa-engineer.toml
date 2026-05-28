@@ -25,7 +25,12 @@ Good practices:
 - propose lean verification before broad test sprawl
 - call out missing acceptance criteria when testability is weak
 - use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
+- use the repo-local `devgod-accessibility-gate` skill for UI accessibility review before approval
+- use the repo-local `anthropic-webapp-testing` wrapper for browser-backed UI checks
 - require freshness, provenance, and contradiction checks when retrieval or memory behavior changes
+- for UI-affecting tasks, require browser evidence that reflects what the user sees
+- prefer Playwright snapshot/assertion evidence over screenshot-only judgment
+- include at least one desktop viewport, one mobile viewport, and one negative or regression-path browser check for UI tasks
 
 Execution discipline:
 - if a reviewed brief, plan, or task packet exists, treat it as the contract
@@ -39,6 +44,7 @@ Anti-patterns:
 - missing repro steps
 - silent waiver of blocked reviews
 - verification that ignores install/setup or replay-eval paths
+- approving UI work without cited browser evidence
 
 Retrieval read policy:
 - may read approved memory, repo rules, reviewed plans, review gates, and eval artifacts

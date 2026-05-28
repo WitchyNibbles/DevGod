@@ -91,6 +91,8 @@ node --experimental-strip-types "$repo_root/src/install/cli.ts" "${install_args[
   npm install >/dev/null
 )
 
+run_target npm run devgod:setup:playwright >/dev/null
+
 run_target npm run devgod:scaffold-workflow -- --task-id "$task_id" --force-active >/dev/null
 run_target node --experimental-strip-types --input-type=module - "$workspace_slug" "$project_slug" "$task_id" <<'EOF'
 import assert from "node:assert/strict";

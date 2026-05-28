@@ -135,6 +135,8 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     outOfScope: overrides.outOfScope ?? ["production deploys"],
     acceptanceCriteria: overrides.acceptanceCriteria ?? ["task packet exists"],
     verificationSteps: overrides.verificationSteps ?? ["review generated packet"],
+    uiSurface: overrides.uiSurface,
+    playwrightRequired: overrides.playwrightRequired,
     requiredReviews: overrides.requiredReviews ?? ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
@@ -682,6 +684,189 @@ test("executeWorkflowProofCommandFromArgs returns runtime-authoritative proof fo
   assert.equal(result.latestReviews.length, 3);
   assert.equal(result.latestApproval?.decision, "approved");
   assert.equal(result.latestApproval?.identityAssurance, "authenticated");
+});
+
+test("executeWorkflowProofCommandFromArgs rejects UI tasks whose QA review lacks Playwright evidence refs", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Ship UI proof",
+    request: "Require browser evidence for visible UI work."
+  });
+
+  await service.createTaskGraph(
+    run.id,
+    [taskPacket({ taskId: "ui-task", ownerRole: "frontend_designer", uiSurface: "visual_change", playwrightRequired: true })]
+  );
+  await service.claimTask(run.id, "ui-task", "frontend_designer");
+  await service.submitHandoff(run.id, "ui-task", {
+    actor: "frontend-designer-actor",
+    ownerRole: "frontend_designer",
+    completionStandard: "specialist_verified",
+    summary: "Updated the visible UI.",
+    changedFiles: ["src/ui.tsx"],
+    blockers: [],
+    verificationNotes: ["layout reviewed locally"],
+    executionEvidence: ["UI patch written"],
+    qualityGateEvidence: ["frontend acceptance listed"],
+    contextRefs: ["brief://ui-proof"]
+  });
+
+  await service.recordReview(run.id, "ui-task", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "ui-task", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "ui-task", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  await assert.rejects(
+    executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "ui-task"], {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    }),
+    /qa_engineer review must cite Playwright evidence refs/
+  );
+});
+
+test("executeWorkflowProofCommandFromArgs accepts UI tasks when QA review cites Playwright evidence refs", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Ship UI proof",
+    request: "Require browser evidence for visible UI work."
+  });
+
+  await service.createTaskGraph(
+    run.id,
+    [taskPacket({ taskId: "ui-task", ownerRole: "frontend_designer", uiSurface: "visual_change", playwrightRequired: true })]
+  );
+  await service.claimTask(run.id, "ui-task", "frontend_designer");
+  await service.submitHandoff(run.id, "ui-task", {
+    actor: "frontend-designer-actor",
+    ownerRole: "frontend_designer",
+    completionStandard: "specialist_verified",
+    summary: "Updated the visible UI.",
+    changedFiles: ["src/ui.tsx"],
+    blockers: [],
+    verificationNotes: ["layout reviewed locally"],
+    executionEvidence: ["UI patch written"],
+    qualityGateEvidence: ["frontend acceptance listed"],
+    contextRefs: ["brief://ui-proof"]
+  });
+
+  await service.recordReview(run.id, "ui-task", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "ui-task", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "ui-task", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: [],
+    evidenceRefs: ["playwright://snapshot/desktop", "artifact://playwright/ui-task/mobile.png"]
+  });
+
+  const result = await executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "ui-task"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    }
+  });
+
+  assert.equal(result.reviewDecision, "approved");
+  assert.equal(result.taskId, "ui-task");
 });
 
 test("executeAdvanceActiveTaskCommandFromArgs previews and applies runtime-gated queue rollover", async () => {

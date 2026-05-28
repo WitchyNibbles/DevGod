@@ -60,7 +60,14 @@ import {
   parseTaskQueueContent,
   type TaskQueue
 } from "./devgod/task-queue.ts";
-import { effectiveRequiredReviews, isGateReviewRole, isRetrievalRole, isReviewSeverity, isReviewState } from "./domain/contracts.ts";
+import {
+  effectiveRequiredReviews,
+  isGateReviewRole,
+  isPlaywrightRequiredForTask,
+  isRetrievalRole,
+  isReviewSeverity,
+  isReviewState
+} from "./domain/contracts.ts";
 import { analysisPhases } from "./domain/types.ts";
 import {
   createReviewActionContextResolver,
@@ -6860,6 +6867,8 @@ export async function executeWorkflowProofCommandFromArgs(
     throw new Error(`Task ${taskId} is missing one or more required runtime reviews`);
   }
 
+  enforcePlaywrightWorkflowProof(task.packet, latestReviews);
+
   const latestApproval = (await options.getApprovals(runId, taskId)).at(-1);
   if (!latestApproval) {
     throw new Error(`Task ${taskId} is missing a runtime approval record`);
@@ -6891,6 +6900,23 @@ export async function executeWorkflowProofCommandFromArgs(
     continuationApplied: continuation.applied,
     nextTaskId: continuation.nextTaskId
   };
+}
+
+function enforcePlaywrightWorkflowProof(packet: TaskPacketInput, latestReviews: readonly ReviewRecord[]): void {
+  if (!isPlaywrightRequiredForTask(packet)) {
+    return;
+  }
+
+  const qaReview = latestReviews.find((review) => review.reviewerRole === "qa_engineer");
+  if (!qaReview) {
+    throw new Error(`Task ${packet.taskId} is missing the qa_engineer runtime review required for Playwright proof`);
+  }
+
+  const evidenceRefs = qaReview.evidenceRefs ?? [];
+  const hasPlaywrightEvidence = evidenceRefs.some((ref) => /playwright/i.test(ref));
+  if (!hasPlaywrightEvidence) {
+    throw new Error(`Task ${packet.taskId} qa_engineer review must cite Playwright evidence refs before workflow-proof`);
+  }
 }
 
 async function maybeContinueWorkflowAfterProof(
@@ -7004,6 +7030,8 @@ function buildWorkflowProofSeedTaskPacket(taskId: string): TaskPacketInput {
     verificationSteps: [
       `node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id ${taskId}`
     ],
+    uiSurface: "none",
+    playwrightRequired: false,
     requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: [
       "use the trusted review-context resolver",
@@ -7044,6 +7072,8 @@ function buildModernizationProofSeedTaskPacket(taskId: string): TaskPacketInput 
       "node --experimental-strip-types src/admin.ts status",
       "node --experimental-strip-types src/admin.ts report --format json"
     ],
+    uiSurface: "none",
+    playwrightRequired: false,
     requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: [
       "use the trusted review-context resolver",

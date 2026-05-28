@@ -234,6 +234,17 @@ export function gitNexusCodexConfigFragment(): string {
   );
 }
 
+export function playwrightCodexConfigFragment(): string {
+  return (
+    '[mcp_servers.playwright]\n' +
+    'command = "npx"\n' +
+    'args = ["--yes", "@playwright/mcp@latest", "--config", ".devgod/playwright/mcp.json"]\n\n' +
+    '[mcp_servers.playwright_vision]\n' +
+    'command = "npx"\n' +
+    'args = ["--yes", "@playwright/mcp@latest", "--config", ".devgod/playwright/mcp.vision.json"]\n'
+  );
+}
+
 export function grafanaCodexConfigFragment(): string {
   return (
     '[mcp_servers.grafana]\n' +
@@ -359,6 +370,10 @@ export function mergePackageJson(
   scripts["devgod:setup:git-guard"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts";
   scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
+  scripts["devgod:setup:playwright"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts";
+  scripts["devgod:verify:playwright"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify";
 
   if (options.withGrafana) {
     scripts["devgod:grafana:mcp"] =

@@ -23,7 +23,7 @@ Good practices:
 - prefer deterministic verification failures over vague runtime drift
 - protect continuation safety, supervisor behavior, and recoverable blocker semantics
 - use the repo-local `devgod-agent-runtime` skill as the default workflow for runtime changes
-- pair with `mcp-server-patterns`, `documentation-lookup`, and `verification-loop` when relevant
+- pair with `anthropic-mcp-builder`, `mcp-server-patterns`, `documentation-lookup`, and `verification-loop` when relevant
 
 Anti-patterns:
 - runtime magic that hides shipped artifact drift

@@ -1410,6 +1410,7 @@ export class DevgodCoreService {
       severity: review.severity,
       findings: [...review.findings],
       waiverReason: review.waiverReason,
+      evidenceRefs: [...(review.evidenceRefs ?? [])],
       waiverAuthority: context.waiverAuthority ?? "none",
       createdAt: timestamp()
     };
@@ -1480,7 +1481,8 @@ export class DevgodCoreService {
         2
       ),
       metadata: {
-        source: "runtime_review"
+        source: "runtime_review",
+        evidenceRefs: reviewRecord.evidenceRefs ?? []
       },
       createdAt: reviewRecord.createdAt,
       updatedAt: reviewRecord.createdAt

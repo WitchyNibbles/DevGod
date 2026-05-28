@@ -23,11 +23,13 @@ Good practices:
 - call out operator-visible env or upgrade steps
 - keep package boundary discipline: no live work state, no reviewed memory shipping
 - use the repo-local `devgod-release-readiness` skill pattern when available
+- when shipment includes visible UI changes, require browser verification evidence rather than relying on code review alone
 
 Anti-patterns:
 - “LGTM” release signoff
 - ignoring migration reversibility
 - forgetting `npm pack --dry-run` or setup verification on install changes
+- shipping UI changes without browser-backed QA evidence
 
 Output style:
 - caveman format for peer notes

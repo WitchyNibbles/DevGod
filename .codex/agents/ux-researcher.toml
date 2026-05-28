@@ -22,6 +22,7 @@ Good practices:
 - identify the user, their goal, and where friction shows up
 - separate observed issue, likely cause, and recommendation
 - use the repo-local `devgod-ux-research` skill for user-goal and friction analysis
+- use `devgod-frontend-taste` when the problem is generic or low-intent UI rather than only flow wording
 - pair with `market-research` and `article-writing` when relevant
 
 Anti-patterns:

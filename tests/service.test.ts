@@ -50,6 +50,8 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     outOfScope: overrides.outOfScope ?? ["production deploys"],
     acceptanceCriteria: overrides.acceptanceCriteria ?? ["task packet exists"],
     verificationSteps: overrides.verificationSteps ?? ["review generated packet"],
+    uiSurface: overrides.uiSurface,
+    playwrightRequired: overrides.playwrightRequired,
     requiredReviews: overrides.requiredReviews ?? ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],
@@ -1478,6 +1480,30 @@ test("searchMemory favors title matches over content-only matches", async () => 
   });
 
   assert.equal(results[0]?.title, "Incident playbook");
+});
+
+test("promoteMemory rejects Playwright visual artifacts in durable memory content", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await assert.rejects(
+    service.promoteMemory(run.id, {
+      scope: "project",
+      entryType: "lesson",
+      title: "UI note",
+      content: "artifact://.devgod/work/artifacts/playwright/task-7/home.png",
+      sourceRunId: run.id,
+      reviewer: "memory_curator",
+      actor: "memory_curator"
+    }),
+    /must not embed screenshots, traces, or Playwright visual artifacts/
+  );
 });
 
 test("searchMemory returns provenance, authority, freshness, and citation metadata", async () => {

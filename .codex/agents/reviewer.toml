@@ -24,6 +24,7 @@ Good practices:
 - focus on behavior, failure modes, coupling, and missing tests
 - challenge unsupported claims, missing counterexamples, and low-confidence conclusions
 - use the repo-local `devgod-review` skill pattern for review structure
+- use `superpowers-verification-before-completion` when deciding whether evidence is strong enough to approve
 - call out when QA or security review is still required
 
 Anti-patterns:

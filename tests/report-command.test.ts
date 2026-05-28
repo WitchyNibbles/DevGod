@@ -39,6 +39,8 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     outOfScope: overrides.outOfScope ?? ["production deploys"],
     acceptanceCriteria: overrides.acceptanceCriteria ?? ["task packet exists"],
     verificationSteps: overrides.verificationSteps ?? ["review generated packet"],
+    uiSurface: overrides.uiSurface,
+    playwrightRequired: overrides.playwrightRequired,
     requiredReviews: overrides.requiredReviews ?? ["reviewer", "security_reviewer", "qa_engineer"],
     securityChecks: overrides.securityChecks ?? ["ensure write scope is narrow"],
     antiPatterns: overrides.antiPatterns ?? ["broad repo edits"],

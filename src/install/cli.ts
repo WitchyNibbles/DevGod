@@ -10,8 +10,10 @@ import {
   mergeCodexConfig,
   mergeGitignore,
   mergePackageJson,
+  playwrightCodexConfigFragment,
   stripGitNexusFromCodexConfig
 } from "./merge.ts";
+import { repoLocalSkillIdPrefixes } from "../devgod/repo-local-skill-surface.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
   InstallMode,
@@ -675,7 +677,7 @@ async function readInstallManifest(targetRoot: string): Promise<InstallManifest 
 async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   const manifest: InstallFile[] = [];
 
-  const recursiveRoots = [".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
+  const recursiveRoots = [".devgod/playwright", ".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
 
   for (const relativeRoot of recursiveRoots) {
     const sourcePath = path.join(sourceRoot, relativeRoot);
@@ -709,10 +711,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     });
   }
 
+  const repoLocalSkillPrefixes = repoLocalSkillIdPrefixes.map((prefix) => `.agents/skills/${prefix}`);
   const skillsRoot = path.join(sourceRoot, ".agents/skills");
   for (const skillPath of await listFilesRecursive(skillsRoot)) {
     const relativePath = path.relative(sourceRoot, skillPath);
-    if (!relativePath.startsWith(".agents/skills/devgod-")) {
+    if (!repoLocalSkillPrefixes.some((prefix) => relativePath.startsWith(prefix))) {
       continue;
     }
 
@@ -825,7 +828,7 @@ async function buildInstallPlan(
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
   const baseCodexConfigSource = stripGitNexusFromCodexConfig(sourceConfig);
-  let codexConfigSource = baseCodexConfigSource;
+  let codexConfigSource = mergeCodexConfig(baseCodexConfigSource, playwrightCodexConfigFragment());
   if (options.withGitNexus) {
     codexConfigSource = mergeCodexConfig(codexConfigSource, gitNexusCodexConfigFragment());
   }
@@ -1733,6 +1736,11 @@ function fillEmptySection(content: string, heading: string, body: string): strin
   return content.replace(new RegExp(`(${escaped}\n\n)(?=(?:## |### |$))`), `$1${body}\n\n`);
 }
 
+function replaceSectionBody(content: string, heading: string, body: string): string {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content.replace(new RegExp(`(${escaped}\n\n)([\\s\\S]*?)(?=\n## |\n### |$)`), `$1${body}\n`);
+}
+
 function buildTaskFromTemplate(templateContent: string, taskId: string): string {
   const scaffolded = replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
@@ -1773,7 +1781,7 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
       ].join("\n")
     );
 
-  return [
+  const hydrated = [
     ["## Goal", `Seed starter workflow metadata for \`${taskId}\` and replace these defaults before claiming completion.`],
     ["## Inputs", "- scaffold-workflow generated artifact set\n- repo-specific context to be filled before execution"],
     ["## Dependencies", "- none yet; add upstream tasks or runtime prerequisites before execution"],
@@ -1786,6 +1794,12 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ["## Allowed write scope", "- specialize this section before implementation; scaffold only covers workflow artifact setup"],
     ["## Out of scope", "- substantive product or code changes outside the eventual task-specific write scope"],
     ["## Acceptance criteria", "- replace scaffold defaults with task-specific completion criteria before execution"],
+    ["## UI surface", "`none`"],
+    ["## Playwright requirement", "`false`"],
+    [
+      "## Browser evidence expectations",
+      "- not required for the scaffolded default; replace this block if the task becomes UI-affecting"
+    ],
     ["## Verification steps", "- update with the exact commands, fixtures, and runtime proofs for this task"],
     ["## Security checks", "- confirm the scaffold does not widen trust boundaries or write scope unintentionally"],
     ["## Retrieval guidance", "- prefer runtime authority and task-local artifacts over narrative summaries when they disagree"],
@@ -1801,6 +1815,14 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ["### Verification plan", "- update the task packet with real scope and verification details\n- run the workflow checks after the packet is specialized"],
     ["### Research and debug budgets", "- implementation attempts: 1\n- verification passes: 1\n- repair loops: 1"]
   ].reduce((current, [heading, body]) => fillEmptySection(current, heading, body), scaffolded);
+
+  const withUiDefaults = replaceSectionBody(hydrated, "## UI surface", "`none`");
+  const withPlaywrightDefaults = replaceSectionBody(withUiDefaults, "## Playwright requirement", "`false`");
+  return replaceSectionBody(
+    withPlaywrightDefaults,
+    "## Browser evidence expectations",
+    "- not required for the scaffolded default; replace this block if the task becomes UI-affecting"
+  );
 }
 
 function extractMarkdownSection(content: string, heading: string): string | undefined {
@@ -1915,7 +1937,7 @@ function buildReviewFromTemplate(
     )
     .replace(
       "## Verification evidence\n\nList exact commands, fixtures, or repro steps used for this gate.\n",
-      "## Verification evidence\n\nPending review execution.\n"
+      "## Verification evidence\n\nPending review execution. For Playwright-required QA reviews, cite Playwright evidence refs here.\n"
     )
     .replace(
       "## Waiver reason\n\nDo not waive a required gate without actor, actor role, authority, and explicit reason. Unauthorized waivers remain blocking.\n",

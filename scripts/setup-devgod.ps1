@@ -128,6 +128,20 @@ function Invoke-DevgodNpmScript {
     npm run $scriptName
 }
 
+function Test-DevgodScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$Preferred,
+        [Parameter(Mandatory = $true)][string]$Fallback
+    )
+
+    try {
+        [void](Resolve-DevgodNpmScript -Preferred $Preferred -Fallback $Fallback)
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Resolve-DevgodRuntimeModeFromProfile {
     param([string]$Profile)
 
@@ -324,10 +338,17 @@ if ((Test-Path -LiteralPath ".devgod/install-manifest.json")) {
     }
 }
 
+if (Test-DevgodScript -Preferred "devgod:setup:playwright" -Fallback "setup:playwright") {
+    npm run devgod:setup:playwright
+}
+
 Invoke-DevgodNpmScript -Preferred "devgod:migrate" -Fallback "migrate"
 Invoke-DevgodNpmScript -Preferred "devgod:bootstrap" -Fallback "bootstrap"
 npm run devgod:refresh-retrieval
 Invoke-DevgodNpmScript -Preferred "devgod:verify:setup" -Fallback "verify:setup"
+if (Test-DevgodScript -Preferred "devgod:verify:playwright" -Fallback "verify:playwright") {
+    npm run devgod:verify:playwright
+}
 
 Write-Host ""
 Write-Host "devgod local setup complete"
@@ -336,3 +357,4 @@ Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"
 Write-Host "qdrant: configured"
+Write-Host "playwright: configured"

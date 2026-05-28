@@ -181,6 +181,39 @@ Required for refactors, migrations, command rewrites, and other behavior-preserv
 
 ## Bad-path or edge-case checks
 
+## UI surface
+
+Declare one:
+
+- `none`
+- `visual_change`
+- `interactive_flow`
+
+If the value is `visual_change` or `interactive_flow`, the task must carry Playwright evidence before approval.
+
+## Playwright requirement
+
+State whether browser verification is required for this task.
+
+- `true` for `visual_change`
+- `true` for `interactive_flow`
+- `false` for backend-only or non-UI work
+
+When `true`, the task should define:
+
+- desktop viewport check
+- mobile viewport check
+- one happy-path check
+- one edge, failure, or regression-path check
+
+## Browser evidence expectations
+
+For `playwright_required = true` tasks:
+
+- `frontend_designer` must perform a browser self-check before handoff
+- `qa_engineer` must cite Playwright evidence refs in the runtime review
+- screenshots, traces, and videos stay task-scoped artifacts and must not be promoted into durable memory
+
 ## Verification steps
 
 ## Residual risk disposition

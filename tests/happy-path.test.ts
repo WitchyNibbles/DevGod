@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -10,6 +10,27 @@ import { installDevgodIntoProject, seedHappyPathFixtureArtifacts } from "../src/
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+async function writeExecutable(filePath: string, content: string): Promise<void> {
+  await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+  await chmod(filePath, 0o755);
+}
+
+async function createPlaywrightNpxStub(): Promise<{ stubPath: string; stubRoot: string }> {
+  const stubRoot = await mkdtemp(join(tmpdir(), "devgod-playwright-npx-"));
+  const stubPath = join(stubRoot, "npx");
+
+  await writeExecutable(
+    stubPath,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "exit 0"
+    ].join("\n")
+  );
+
+  return { stubPath, stubRoot };
+}
 
 async function createHappyPathFixture(taskId: string): Promise<string> {
   const targetRoot = await mkdtemp(join(tmpdir(), "devgod-happy-path-"));
@@ -211,14 +232,26 @@ test("installed consumer fixture can seed and pass the happy-path flow without m
 });
 
 test("verify-installed-repo-harness can include the Grafana opt-in wiring", async () => {
-  const { stdout } = await execFileAsync(
-    "bash",
-    ["scripts/verify-installed-repo-harness.sh", "--with-grafana"],
-    { cwd: repoRoot }
-  );
+  const { stubPath, stubRoot } = await createPlaywrightNpxStub();
 
-  assert.match(stdout, /installed repo harness passed/);
-  assert.match(stdout, /grafana-opt-in: enabled/);
+  try {
+    const { stdout } = await execFileAsync(
+      "bash",
+      ["scripts/verify-installed-repo-harness.sh", "--with-grafana"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          DEVGOD_PLAYWRIGHT_NPX_BIN: stubPath
+        }
+      }
+    );
+
+    assert.match(stdout, /installed repo harness passed/);
+    assert.match(stdout, /grafana-opt-in: enabled/);
+  } finally {
+    await rm(stubRoot, { recursive: true, force: true });
+  }
 });
 
 test("seed-happy-path-fixture rejects non-fixture task ids", async () => {
@@ -358,19 +391,26 @@ test("check-devgod-happy-path fails clearly when installed setup wiring is incom
 
 
 test("verify-installed-repo-harness isolates fresh target repo context and reaches authoritative workflow proof", async () => {
-  const { stdout } = await execFileAsync("bash", ["scripts/verify-installed-repo-harness.sh"], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      DEVGOD_WORKSPACE_SLUG: "wrong-workspace",
-      DEVGOD_PROJECT_SLUG: "wrong-project"
-    }
-  });
+  const { stubPath, stubRoot } = await createPlaywrightNpxStub();
 
-  assert.match(stdout, /installed repo harness passed/);
-  assert.match(stdout, /workspace: default/);
-  assert.match(stdout, /project: devgod-installed-harness-/);
-  assert.match(stdout, /task: harness-proof/);
-  assert.match(stdout, /profile: modernization_program/);
-  assert.match(stdout, /rewrite_readiness: ready/);
+  try {
+    const { stdout } = await execFileAsync("bash", ["scripts/verify-installed-repo-harness.sh"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "wrong-workspace",
+        DEVGOD_PROJECT_SLUG: "wrong-project",
+        DEVGOD_PLAYWRIGHT_NPX_BIN: stubPath
+      }
+    });
+
+    assert.match(stdout, /installed repo harness passed/);
+    assert.match(stdout, /workspace: default/);
+    assert.match(stdout, /project: devgod-installed-harness-/);
+    assert.match(stdout, /task: harness-proof/);
+    assert.match(stdout, /profile: modernization_program/);
+    assert.match(stdout, /rewrite_readiness: ready/);
+  } finally {
+    await rm(stubRoot, { recursive: true, force: true });
+  }
 });

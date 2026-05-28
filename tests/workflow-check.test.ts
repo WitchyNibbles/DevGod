@@ -95,6 +95,8 @@ async function writeLiveTaskPacket(
     qualityGates?: string[];
     verificationCommand?: string;
     omitSections?: string[];
+    uiSurface?: "none" | "visual_change" | "interactive_flow";
+    playwrightRequired?: boolean;
     reasoningMode?: "dual" | "strict";
     inputs?: string[];
     dependencies?: string[];
@@ -108,6 +110,8 @@ async function writeLiveTaskPacket(
   const qualityGates = options?.qualityGates ?? ["product_acceptance"];
   const verificationCommand = options?.verificationCommand ?? "bash scripts/check-devgod-workflow-live.sh";
   const omitSections = new Set(options?.omitSections ?? []);
+  const uiSurface = options?.uiSurface;
+  const playwrightRequired = options?.playwrightRequired;
   const reasoningMode = options?.reasoningMode;
   const inputs = options?.inputs ?? ["- active workflow artifact set"];
   const dependencies = options?.dependencies ?? ["- brief artifact"];
@@ -143,6 +147,13 @@ async function writeLiveTaskPacket(
     ["## Workflow artifact refs", workflowArtifactRefLines],
     ["## Allowed write scope", ["- `scripts/`", "- `tests/`"]],
     ["## Out of scope", ["- historical artifact cleanup"]],
+    ...(uiSurface
+      ? ([
+          ["## UI surface", [`\`${uiSurface}\``]],
+          ["## Playwright requirement", [`\`${playwrightRequired === true ? "true" : "false"}\``]],
+          ["## Browser evidence expectations", ["- QA review export must cite Playwright evidence for UI tasks"]]
+        ] as Array<[string, string[]]>)
+      : []),
     ["## Assumptions", []],
     ["### Approved assumptions", ["- live checks should be stricter than artifact checks"]],
     ["### Blocked assumptions", ["- none"]],
@@ -366,6 +377,8 @@ async function writeWorkflowReview(
     decision?: "approved" | "waived";
     waiverAuthority?: "none" | "manager" | "security_exception";
     waiverReason?: string;
+    verificationEvidenceLines?: string[];
+    sourceHandoffLines?: string[];
   }
 ): Promise<void> {
   const provenanceStatus = options?.provenanceStatus ?? "runtime_verified";
@@ -374,14 +387,18 @@ async function writeWorkflowReview(
   const waiverAuthority = options?.waiverAuthority ?? "none";
   const waiverReason = options?.waiverReason ?? "None.";
   const runtimeProofLines =
-    provenanceStatus === "runtime_verified"
+    options?.verificationEvidenceLines
+      ? options.verificationEvidenceLines
+      : provenanceStatus === "runtime_verified"
       ? [
           "- Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
           "- bash scripts/check-devgod-workflow-live.sh"
         ]
       : ["- bash scripts/check-devgod-workflow-live.sh"];
   const sourceHandoff =
-    provenanceStatus === "runtime_verified"
+    options?.sourceHandoffLines
+      ? options.sourceHandoffLines
+      : provenanceStatus === "runtime_verified"
       ? [
           "Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
           "",
@@ -545,6 +562,64 @@ test("check-devgod-workflow validates queue metadata when a task queue export is
       ) + "\n",
       "utf8"
     );
+
+    await execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot, "--task-id", taskId], {
+      cwd: repoRoot
+    });
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow rejects Playwright-required UI tasks when QA export lacks Playwright evidence", async () => {
+  const taskId = "DG-PLAYWRIGHT-MISSING";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-playwright-missing-");
+
+  try {
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      uiSurface: "visual_change",
+      playwrightRequired: true
+    });
+    await writeWorkflowReview(targetRoot, taskId, "reviewer");
+    await writeWorkflowReview(targetRoot, taskId, "qa_engineer", {
+      verificationEvidenceLines: ["- bash scripts/check-devgod-workflow.sh"],
+      sourceHandoffLines: ["Manager summary of QA output."]
+    });
+    await writeWorkflowReview(targetRoot, taskId, "security_reviewer");
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot, "--task-id", taskId], {
+        cwd: repoRoot
+      }),
+      /must cite Playwright evidence in qa review export/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow accepts Playwright-required UI tasks when QA export cites Playwright evidence", async () => {
+  const taskId = "DG-PLAYWRIGHT-PRESENT";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-playwright-present-");
+
+  try {
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      uiSurface: "interactive_flow",
+      playwrightRequired: true
+    });
+    await writeWorkflowReview(targetRoot, taskId, "reviewer");
+    await writeWorkflowReview(targetRoot, taskId, "qa_engineer", {
+      verificationEvidenceLines: [
+        "- playwright://snapshot/desktop",
+        "- artifact://.devgod/work/artifacts/playwright/task-1/mobile.png"
+      ],
+      sourceHandoffLines: [
+        "Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
+        "",
+        "Playwright evidence reviewed for desktop and mobile."
+      ]
+    });
+    await writeWorkflowReview(targetRoot, taskId, "security_reviewer");
 
     await execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot, "--task-id", taskId], {
       cwd: repoRoot

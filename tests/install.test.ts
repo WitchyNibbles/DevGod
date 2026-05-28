@@ -15,7 +15,8 @@ import {
   mergeAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
-  mergePackageJson
+  mergePackageJson,
+  playwrightCodexConfigFragment
 } from "../src/install/merge.ts";
 import {
   installDevgodIntoProject,
@@ -26,8 +27,10 @@ import {
 } from "../src/install/cli.ts";
 import {
   listCatalogAgentArtifactPaths,
+  verifyCatalogRepoLocalSkills,
   verifyAgentCatalogArtifacts
 } from "../src/devgod/agent-artifact-verifier.ts";
+import { listCatalogRepoLocalSkillPaths } from "../src/devgod/repo-local-skill-surface.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -199,6 +202,19 @@ test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing p
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
+test("mergeCodexConfig adds Playwright MCP settings with standard and vision profiles", () => {
+  const merged = mergeCodexConfig(
+    'model = "gpt-5.4"\n',
+    playwrightCodexConfigFragment()
+  );
+
+  assert.match(merged, /\[mcp_servers\.playwright\]/);
+  assert.match(merged, /@playwright\/mcp@latest/);
+  assert.match(merged, /\.devgod\/playwright\/mcp\.json/);
+  assert.match(merged, /\[mcp_servers\.playwright_vision\]/);
+  assert.match(merged, /\.devgod\/playwright\/mcp\.vision\.json/);
+});
+
 test("mergeCodexConfig adds Grafana MCP settings without overwriting existing project config", () => {
   const merged = mergeCodexConfig(
     'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
@@ -350,6 +366,14 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:setup:local"],
     /node_modules\/devgod\/src\/install\/setup-local\.ts/
   );
+  assert.match(
+    merged.scripts["devgod:setup:playwright"],
+    /node_modules\/devgod\/src\/install\/setup-playwright\.ts/
+  );
+  assert.match(
+    merged.scripts["devgod:verify:playwright"],
+    /node_modules\/devgod\/src\/install\/setup-playwright\.ts --verify/
+  );
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
 
@@ -388,6 +412,35 @@ test("verifyAgentCatalogArtifacts reports missing, unexpected, and metadata drif
     '.codex/agents/backend-engineer.toml: expected name "backend_engineer", got "wrong_backend_role"'
   ]);
   assert.equal(result.ok, false);
+});
+
+test("verifyCatalogRepoLocalSkills reports missing repo-local wrapper files deterministically", async () => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "devgod-skill-catalog-"));
+
+  try {
+    for (const relativePath of listCatalogRepoLocalSkillPaths({ roles: ["planner", "reviewer"] })) {
+      const targetPath = path.join(repoRoot, relativePath);
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      await writeFile(targetPath, "---\nname = \"placeholder\"\n---\n", "utf8");
+    }
+
+    await rm(path.join(repoRoot, ".agents/skills/superpowers-verification-before-completion"), {
+      recursive: true,
+      force: true
+    });
+
+    const result = await verifyCatalogRepoLocalSkills({
+      repoRoot,
+      roles: ["planner", "reviewer"]
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.missingSkillFiles, [
+      ".agents/skills/superpowers-verification-before-completion/SKILL.md"
+    ]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
@@ -511,15 +564,20 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   };
 
   const expectedSkillFiles = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
@@ -536,10 +594,17 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();
+  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
 
   const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
   const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -548,6 +613,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".env.example",
     "README.md",
     "docker-compose.yml",
+    ".devgod/playwright/",
     "docs/global-setup.md",
     "scripts/check-devgod-commit-msg.sh",
     "scripts/check-devgod-git-guard.sh",
@@ -574,6 +640,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/install/merge.ts",
     "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
+    "src/install/setup-playwright.ts",
     "src/install/types.ts",
     "src/install/verify-git-guard.ts",
     "src/mcp/",
@@ -596,12 +663,18 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
   assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
   assert.ok(pkg.files.includes("docs/devgod-agent-team.md"));
+  for (const relativePath of expectedCatalogRepoLocalSkills) {
+    assert.ok(shippedSkillFiles.includes(relativePath), `${relativePath} should ship because the catalog references it`);
+  }
 
   const catalogVerification = await verifyAgentCatalogArtifacts({ repoRoot: sourceRoot });
   assert.equal(catalogVerification.ok, true);
   assert.deepEqual(catalogVerification.missingArtifacts, []);
   assert.deepEqual(catalogVerification.unexpectedArtifacts, []);
   assert.deepEqual(catalogVerification.metadataMismatches, []);
+  const catalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: sourceRoot });
+  assert.equal(catalogSkillVerification.ok, true);
+  assert.deepEqual(catalogSkillVerification.missingSkillFiles, []);
   assert.equal(pkg.private, true);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
@@ -669,6 +742,42 @@ test("installDevgodIntoProject dry-run reports planned changes without writing",
     await assert.rejects(readFile(path.join(targetRoot, "AGENTS.md"), "utf8"));
     await assert.rejects(readFile(path.join(targetRoot, "scripts/devgod-setup.sh"), "utf8"));
     await assert.rejects(readFile(path.join(targetRoot, ".codex/config.toml"), "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installDevgodIntoProject ships Playwright MCP configs and setup wiring", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-playwright-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const playwrightConfig = await readFile(path.join(targetRoot, ".devgod", "playwright", "mcp.json"), "utf8");
+    const playwrightVisionConfig = await readFile(
+      path.join(targetRoot, ".devgod", "playwright", "mcp.vision.json"),
+      "utf8"
+    );
+
+    assert.match(codexConfig, /\[mcp_servers\.playwright\]/);
+    assert.match(codexConfig, /\[mcp_servers\.playwright_vision\]/);
+    assert.equal(
+      packageJson.scripts?.["devgod:setup:playwright"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts"
+    );
+    assert.equal(
+      packageJson.scripts?.["devgod:verify:playwright"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify"
+    );
+    assert.match(playwrightConfig, /"browserName": "chromium"/);
+    assert.match(playwrightVisionConfig, /"vision"/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1587,15 +1696,20 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(memoryReadme, /devgod memory/i);
 
   const installedSkills = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
@@ -1612,19 +1726,35 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   for (const relativePath of installedSkills) {
     const content = await readFile(path.join(targetRoot, relativePath), "utf8");
     assert.match(content, /^---/m, `${relativePath} should install a skill file`);
   }
+  const installedCatalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: targetRoot });
+  assert.equal(installedCatalogSkillVerification.ok, true);
+  assert.deepEqual(installedCatalogSkillVerification.missingSkillFiles, []);
 
   const productStateTemplate = await readFile(
     path.join(targetRoot, ".devgod", "templates", "product-state.md"),
     "utf8"
   );
   assert.match(productStateTemplate, /# Product State/);
+
+  const reviewGateTemplate = await readFile(
+    path.join(targetRoot, ".devgod", "templates", "review-gate.md"),
+    "utf8"
+  );
+  assert.match(reviewGateTemplate, /Playwright evidence refs/i);
+  assert.match(reviewGateTemplate, /desktop\/mobile coverage/i);
 
   const taskQueueTemplate = await readFile(
     path.join(targetRoot, ".devgod", "templates", "task-queue.json"),
@@ -1962,7 +2092,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1989,10 +2119,12 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
@@ -2124,7 +2256,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2167,10 +2299,12 @@ test("installed setup script falls back to native Linux services when docker is 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
 
     const unitFiles = await readdir(unitDir);
@@ -2242,7 +2376,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2271,10 +2405,12 @@ test("installed setup script honors managed runtime mode without taking service 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
@@ -2464,15 +2600,20 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
 
   const expectedSkillFiles = [
+    ".agents/skills/anthropic-mcp-builder/SKILL.md",
+    ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
+    ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
     ".agents/skills/devgod-e2e/SKILL.md",
     ".agents/skills/devgod-eval-engineering/SKILL.md",
     ".agents/skills/devgod-execution/SKILL.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
     ".agents/skills/devgod-gitnexus/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
@@ -2489,10 +2630,17 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md"
+    ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
+    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
+    ".agents/skills/superpowers-test-driven-development/SKILL.md",
+    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
+    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
+    ".agents/skills/superpowers-writing-plans/SKILL.md"
   ];
 
   const expectedAgentFiles = listCatalogAgentArtifactPaths();
+  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
 
   const packedSkillFiles = [...packedFiles].filter((file) => file.startsWith(".agents/skills/")).sort();
   const packedAgentFiles = [...packedFiles].filter((file) => file.startsWith(".codex/agents/")).sort();
@@ -2500,6 +2648,9 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   assert.deepEqual(packedSkillFiles, expectedSkillFiles);
   assert.deepEqual(packedAgentFiles, expectedAgentFiles);
   assert.ok(packedFiles.has("docs/devgod-agent-team.md"));
+  for (const relativePath of expectedCatalogRepoLocalSkills) {
+    assert.ok(packedSkillFiles.includes(relativePath), `${relativePath} should be packed because the catalog references it`);
+  }
 
   for (const expectedPath of [
     ".githooks/commit-msg",

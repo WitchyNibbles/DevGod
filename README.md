@@ -207,7 +207,9 @@ Then inside the target repo:
 npm install
 npm run devgod:setup:git-guard
 npm run devgod:verify:git-guard
+npm run devgod:setup:playwright
 npm run devgod:setup:local
+npm run devgod:verify:playwright
 npm run devgod:doctor
 npm run devgod:verify:setup
 ```
@@ -217,6 +219,7 @@ Important:
 - installed repos get the `devgod:*` script names
 - this source repo uses shorter package-maintainer names like `setup:local`, `doctor`, and `status`
 - `--with-grafana` adds Grafana MCP wiring only; it does not install Grafana
+- UI-affecting tasks now rely on the shipped Playwright MCP profiles in `.devgod/playwright/` and task-scoped artifacts under `.devgod/work/artifacts/playwright/`
 
 ## 🧰 Command Surfaces
 

@@ -1032,6 +1032,8 @@ fi
 if [[ -f "$task_file" ]]; then
   mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
   task_reasoning_mode="legacy"
+  task_ui_surface="none"
+  task_playwright_required="false"
   if grep -Fq "## Reasoning policy" "$task_file"; then
     task_reasoning_mode_raw="$(extract_section_value "### Mode" "$task_file")"
     if [[ -n "$task_reasoning_mode_raw" ]]; then
@@ -1061,6 +1063,21 @@ if [[ -f "$task_file" ]]; then
       fail "specialist_verified work requires strict reasoning mode in ${task_file#"$repo_root"/}"
     [[ "$has_stronger_artifact_gate" -eq 1 ]] ||
       fail "specialist_verified work requires at least one stronger artifact gate (coverage_ledger_required, progress_proof_required, checkpoint_resume_required, or memory_compaction_required) in ${task_file#"$repo_root"/}"
+  fi
+
+  if grep -Fq "## UI surface" "$task_file"; then
+    task_ui_surface="$(normalize_value "$(extract_section_value "## UI surface" "$task_file")")"
+    require_allowed_value "$task_ui_surface" "$task_file" "none" "visual_change" "interactive_flow"
+  fi
+
+  if grep -Fq "## Playwright requirement" "$task_file"; then
+    task_playwright_required="$(normalize_value "$(extract_section_value "## Playwright requirement" "$task_file")")"
+    require_allowed_value "$task_playwright_required" "$task_file" "true" "false"
+  fi
+
+  if [[ "$task_ui_surface" == "visual_change" || "$task_ui_surface" == "interactive_flow" ]]; then
+    [[ "$task_playwright_required" == "true" ]] ||
+      fail "ui surface ${task_ui_surface} must require Playwright in ${task_file#"$repo_root"/}"
   fi
 
   coverage_manifest_file="$repo_root/.devgod/work/coverage/coverage-${artifact_task_id}.json"
@@ -1268,6 +1285,16 @@ for role in "${roles[@]}"; do
 done
 
 if [[ -f "$task_file" ]]; then
+  if [[ "$task_playwright_required" == "true" ]]; then
+    qa_review_file="$(resolve_review_file "$qa_engineer_rel" "$artifact_task_id" "qa" "qa_engineer")"
+    [[ -n "$qa_review_file" ]] || fail "playwright-required task is missing qa review export for ${artifact_task_id}"
+    qa_verification_block="$(extract_section_block "## Verification evidence" "$qa_review_file")"
+    qa_source_handoff_block="$(extract_section_block "## Source handoff" "$qa_review_file")"
+    if ! printf '%s\n%s\n' "$qa_verification_block" "$qa_source_handoff_block" | grep -Eqi 'playwright'; then
+      fail "playwright-required task must cite Playwright evidence in qa review export ${qa_review_file#"$repo_root"/}"
+    fi
+  fi
+
   if printf '%s\n' "${task_quality_gates[@]}" | grep -Fxq "release_readiness_required"; then
     release_readiness_evidence_found=0
     for role in "${roles[@]}"; do

@@ -23,7 +23,7 @@ Good practices:
 - narrow the failing boundary before changing code
 - make one fix at a time and verify after each
 - try the next most plausible hypothesis when the first fix fails, and stop at the repair budget
-- use the repo-local `devgod-debugging` skill pattern when applicable
+- use the repo-local `devgod-debugging` and `superpowers-systematic-debugging` skills when applicable
 
 Anti-patterns:
 - speculative edits before repro
