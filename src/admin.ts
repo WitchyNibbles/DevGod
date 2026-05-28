@@ -1442,6 +1442,15 @@ function resolveEmbeddingJobLimit(env: EnvShape, candidate?: string | undefined)
   return limit;
 }
 
+function resolveArtifactsOnlyRetrievalRefresh(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--artifacts-only")) {
+    return true;
+  }
+
+  const candidate = env.DEVGOD_RETRIEVAL_REFRESH_MODE?.trim().toLowerCase();
+  return candidate === "artifacts_only" || candidate === "artifacts-only" || candidate === "fast";
+}
+
 interface RetrievalIndexManifestRecord {
   status?: string | undefined;
   repoRoot?: string | undefined;
@@ -1552,6 +1561,7 @@ export interface RefreshRetrievalResult {
   workspaceSlug: string;
   projectSlug: string;
   repoRoot: string;
+  mode: "full" | "artifacts_only";
   filesIndexed: number;
   chunksStored: number;
   jobsQueued: number;
@@ -11124,6 +11134,14 @@ export async function inspectRetrievalFreshness(input: {
     }
 
     const manifestStatus = manifest.status ?? "missing";
+    if (embeddingModel && manifestStatus === "artifacts_only_pending_embeddings") {
+      return {
+        authorityLabel: "derived_only",
+        state: "degraded",
+        summary: "repo retrieval index matches the current repo snapshot, but embeddings are still pending"
+      };
+    }
+
     if (embeddingModel && manifestStatus !== "ready") {
       return {
         authorityLabel: "derived_only",
@@ -11179,6 +11197,7 @@ export async function executeRefreshRetrievalCommand(
   const include = resolveRepoMarkdownInclude(env);
   const embeddingModel = (resolveCommandFlag(args, "--embedding-model") ?? env.DEVGOD_EMBEDDING_MODEL)?.trim()
     || undefined;
+  const artifactsOnly = resolveArtifactsOnlyRetrievalRefresh(args, env);
 
   if (!projectSlug) {
     throw new Error("DEVGOD_PROJECT_SLUG is required");
@@ -11208,7 +11227,7 @@ export async function executeRefreshRetrievalCommand(
           failed: number;
         }
       | undefined;
-    if (embeddingModel) {
+    if (embeddingModel && !artifactsOnly) {
       const provider = await createEmbeddingProviderImpl(env);
       embeddingJobs = await runEmbeddingJobsImpl({
         store,
@@ -11231,9 +11250,11 @@ export async function executeRefreshRetrievalCommand(
     }
 
     const retrievalStatus = embeddingModel
-      ? (embeddingJobs?.failed ?? 0) === 0
-        ? "ready"
-        : "degraded"
+      ? artifactsOnly
+        ? "artifacts_only_pending_embeddings"
+        : (embeddingJobs?.failed ?? 0) === 0
+          ? "ready"
+          : "degraded"
       : "artifacts_only";
 
     await store.saveProjectRuntimeRegistration({
@@ -11265,6 +11286,7 @@ export async function executeRefreshRetrievalCommand(
       workspaceSlug,
       projectSlug,
       repoRoot: targetRepoRoot,
+      mode: artifactsOnly ? "artifacts_only" : "full",
       filesIndexed: indexResult.filesIndexed,
       chunksStored: indexResult.chunksStored,
       jobsQueued: indexResult.jobsQueued,

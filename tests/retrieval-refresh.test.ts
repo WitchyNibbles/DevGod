@@ -186,6 +186,101 @@ test("executeRefreshRetrievalCommand accepts flags before the positional repo ro
   }
 });
 
+test("executeRefreshRetrievalCommand supports an artifacts-only fast path that defers embeddings", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "devgod-refresh-retrieval-fast-"));
+  const store = new MemoryStore();
+
+  try {
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await store.saveProjectRuntimeRegistration({
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      repoPath: directory,
+      runtimeProfile: "local-docker",
+      dataRoot: path.join(directory, "runtime-root"),
+      qdrantUrl: "http://127.0.0.1:6333/",
+      qdrantCollection: "devgod-memory",
+      installManifestPath: ".devgod/install-manifest.json",
+      manifest: {},
+      provenance: { authority: "runtime_authoritative" },
+      createdAt: "2026-05-15T00:00:00.000Z",
+      updatedAt: "2026-05-15T00:00:00.000Z"
+    });
+
+    const result = await executeRefreshRetrievalCommand({
+      argv: ["node", "src/admin.ts", "refresh-retrieval", "--artifacts-only"],
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod",
+        DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+      },
+      async withClient(callback) {
+        return callback({ kind: "client" } as never);
+      },
+      createStore() {
+        return store as never;
+      },
+      async captureSnapshot() {
+        return {
+          repoRoot: directory,
+          include: ["README.md", "docs"],
+          fileCount: 2,
+          fingerprint: "repo-fingerprint"
+        };
+      },
+      async indexRepoMarkdown() {
+        return {
+          runId: "run-markdown",
+          filesIndexed: 2,
+          chunksStored: 4,
+          jobsQueued: 4
+        };
+      },
+      async runEmbeddingJobs() {
+        assert.fail("artifacts-only refresh should not run embedding jobs");
+      },
+      now() {
+        return new Date("2026-05-15T12:00:00.000Z");
+      }
+    });
+
+    assert.equal(result.mode, "artifacts_only");
+    assert.equal(result.embeddingJobs, undefined);
+
+    const registration = await store.getProjectRuntimeRegistration(context.project.id);
+    const retrievalIndex = registration?.manifest.retrievalIndex as Record<string, unknown> | undefined;
+    assert.equal(retrievalIndex?.status, "artifacts_only_pending_embeddings");
+
+    const freshness = await inspectRetrievalFreshness({
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod",
+        DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+      },
+      store,
+      async captureSnapshot() {
+        return {
+          repoRoot: directory,
+          include: ["README.md", "docs"],
+          fileCount: 2,
+          fingerprint: "repo-fingerprint"
+        };
+      }
+    });
+
+    assert.equal(freshness.state, "degraded");
+    assert.match(freshness.summary, /embeddings .* pending|pending .* embeddings/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("inspectRetrievalFreshness reports stale when the repo fingerprint diverges from runtime metadata", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "devgod-retrieval-freshness-"));
   const store = new MemoryStore();

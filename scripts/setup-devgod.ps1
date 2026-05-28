@@ -348,7 +348,7 @@ if (Test-Path -LiteralPath ".devgod/work/task-queue.json") {
     npm run devgod:repair-task-queue
 }
 npm run devgod:refresh-repo-context
-npm run devgod:refresh-retrieval
+npm run devgod:refresh-retrieval:fast
 Invoke-DevgodNpmScript -Preferred "devgod:verify:setup" -Fallback "verify:setup"
 if (Test-DevgodScript -Preferred "devgod:verify:playwright" -Fallback "verify:playwright") {
     npm run devgod:verify:playwright

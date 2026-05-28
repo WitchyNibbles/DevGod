@@ -314,6 +314,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval"
   );
   assert.equal(
+    merged.scripts["devgod:refresh-retrieval:fast"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval --artifacts-only"
+  );
+  assert.equal(
     merged.scripts["devgod:refresh-repo-context"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-repo-context"
   );
@@ -2108,7 +2112,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2139,7 +2143,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-repo-context",
-      "run devgod:refresh-retrieval",
+      "run devgod:refresh-retrieval:fast",
       "run devgod:verify:setup",
       "run devgod:verify:playwright"
     ]);
@@ -2273,7 +2277,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2320,7 +2324,7 @@ test("installed setup script falls back to native Linux services when docker is 
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-repo-context",
-      "run devgod:refresh-retrieval",
+      "run devgod:refresh-retrieval:fast",
       "run devgod:verify:setup",
       "run devgod:verify:playwright"
     ]);
@@ -2394,7 +2398,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2427,7 +2431,7 @@ test("installed setup script honors managed runtime mode without taking service 
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-repo-context",
-      "run devgod:refresh-retrieval",
+      "run devgod:refresh-retrieval:fast",
       "run devgod:verify:setup",
       "run devgod:verify:playwright"
     ]);

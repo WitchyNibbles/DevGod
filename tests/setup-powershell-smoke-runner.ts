@@ -121,6 +121,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',
       '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
+      '  if /i "%~2"=="devgod:refresh-retrieval:fast" exit /b 0',
       '  if /i "%~2"=="devgod:verify:setup" exit /b 0',
       '  if /i "%~2"=="devgod:verify:playwright" exit /b 0',
       ")",
@@ -148,7 +149,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
-      "run devgod:refresh-retrieval",
+      "run devgod:refresh-retrieval:fast",
       "run devgod:verify:setup",
       "run devgod:verify:playwright"
     ]);
