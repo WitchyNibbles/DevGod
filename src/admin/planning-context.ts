@@ -7,6 +7,21 @@ export interface PlanningContextRetrievalState {
   summary: string;
 }
 
+export interface PlanningContextRepoContextItem {
+  slotKey: string;
+  title: string;
+  value: string;
+  sourceKind: "derived_file" | "derived_manifest";
+  freshness: "fresh" | "stale";
+}
+
+export interface PlanningContextRepoContextState {
+  authorityLabel: "derived_only";
+  state: "fresh" | "stale" | "missing" | "degraded";
+  summary: string;
+  items: PlanningContextRepoContextItem[];
+}
+
 export interface PlanningContextItem {
   id: string;
   title: string;
@@ -26,6 +41,7 @@ export interface PlanningContextReport {
   query: string;
   requesterRole: RetrievalRole;
   totalResults: number;
+  repoContext?: PlanningContextRepoContextState | undefined;
   retrieval?: PlanningContextRetrievalState | undefined;
   summary: string[];
   items: PlanningContextItem[];
@@ -34,6 +50,7 @@ export interface PlanningContextReport {
 export function buildPlanningContextReport(input: {
   query: string;
   requesterRole: RetrievalRole;
+  repoContext?: PlanningContextRepoContextState | undefined;
   retrieval?: PlanningContextRetrievalState | undefined;
   results: readonly SearchMemoryResult[];
 }): PlanningContextReport {
@@ -62,6 +79,7 @@ export function buildPlanningContextReport(input: {
     query: input.query,
     requesterRole: input.requesterRole,
     totalResults: items.length,
+    repoContext: input.repoContext,
     retrieval: input.retrieval,
     summary,
     items
@@ -75,11 +93,27 @@ export function formatPlanningContextReportMarkdown(report: PlanningContextRepor
   lines.push(`- query: ${report.query}`);
   lines.push(`- role: \`${report.requesterRole}\``);
   lines.push(`- results: ${report.totalResults}`);
+  if (report.repoContext) {
+    lines.push(`- repo-context: ${report.repoContext.state}`);
+    lines.push(`- repo-context-summary: ${report.repoContext.summary}`);
+  }
   if (report.retrieval) {
     lines.push(`- retrieval: ${report.retrieval.state}`);
     lines.push(`- retrieval-summary: ${report.retrieval.summary}`);
   }
   lines.push("");
+  if (report.repoContext?.items.length) {
+    lines.push(`## Repo Context`);
+    lines.push("");
+    for (const item of report.repoContext.items) {
+      lines.push(`- ${item.title}`);
+      lines.push(`  slot: ${item.slotKey}`);
+      lines.push(`  value: ${item.value}`);
+      lines.push(`  source-kind: ${item.sourceKind}`);
+      lines.push(`  freshness: ${item.freshness}`);
+    }
+    lines.push("");
+  }
   if (report.summary.length > 0) {
     lines.push(`## Summary`);
     lines.push("");

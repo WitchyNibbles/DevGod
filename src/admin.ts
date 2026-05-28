@@ -19,6 +19,10 @@ import {
   DEFAULT_REPO_MARKDOWN_INCLUDE_PATHS,
   indexRepoMarkdown
 } from "./runtime/repo-markdown-indexer.ts";
+import {
+  inspectRepoContextFreshness,
+  probeRepoContextProfile
+} from "./runtime/repo-context-profile.ts";
 import { loadDotEnv, withClient } from "./admin/db.ts";
 import { buildRunEvidenceReport, formatRunEvidenceReportMarkdown } from "./admin/report.ts";
 import {
@@ -35,6 +39,7 @@ import {
 import {
   buildPlanningContextReport,
   formatPlanningContextReportMarkdown,
+  type PlanningContextRepoContextState,
   type PlanningContextRetrievalState
 } from "./admin/planning-context.ts";
 import { dispatchGithubWorkItem } from "./admin/github-dispatch.ts";
@@ -150,6 +155,10 @@ type RefreshRetrievalStore = IndexRepoMarkdownStore &
     | "completeEmbeddingJob"
     | "failEmbeddingJob"
   >;
+type RefreshRepoContextStore = Pick<
+  DevgodStoreContract,
+  "getProjectContext" | "getProjectRuntimeRegistration" | "saveProjectRuntimeRegistration"
+>;
 
 interface LoadedReviewIdentityAdapter {
   adapter: ReviewPrincipalAdapter<unknown>;
@@ -1451,6 +1460,8 @@ interface ExecutePlanContextCommandOptions {
     requesterRole: RetrievalRole;
   }) => Promise<readonly SearchMemoryResult[]>;
   embedQuery?: ((input: { model: string; text: string }) => Promise<readonly number[]>) | undefined;
+  getRepoContext?: (() => Promise<PlanningContextRepoContextState>) | undefined;
+  refreshRepoContext?: (() => Promise<RefreshRepoContextResult>) | undefined;
   getRetrievalFreshness?: (() => Promise<PlanningContextRetrievalState>) | undefined;
   refreshRetrieval?: (() => Promise<RefreshRetrievalResult>) | undefined;
 }
@@ -1488,6 +1499,15 @@ export interface ExecuteRefreshRetrievalCommandOptions {
   now?: (() => Date) | undefined;
 }
 
+export interface ExecuteRefreshRepoContextCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  argv?: readonly string[] | undefined;
+  withClient?: typeof withClient | undefined;
+  createStore?: ((client: PostgresStoreClient) => RefreshRepoContextStore) | undefined;
+  now?: (() => Date) | undefined;
+}
+
 export interface ExecuteRepairTaskQueueCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
@@ -1513,6 +1533,16 @@ export interface RefreshRetrievalResult {
     completed: number;
     failed: number;
   } | undefined;
+}
+
+export interface RefreshRepoContextResult {
+  authorityLabel: "runtime_authoritative";
+  workspaceSlug: string;
+  projectSlug: string;
+  repoRoot: string;
+  slotCount: number;
+  status: "ready" | "degraded";
+  fingerprint: string;
 }
 
 export interface CreateRuntimeStoreOptions {
@@ -1567,6 +1597,65 @@ function resolveAutoRefreshRetrievalEnabled(args: readonly string[], env: EnvSha
   }
 
   return true;
+}
+
+function resolveAutoRefreshRepoContextEnabled(args: readonly string[], env: EnvShape): boolean {
+  if (args.includes("--no-auto-refresh-repo-context")) {
+    return false;
+  }
+
+  const candidate = env.DEVGOD_AUTO_REFRESH_REPO_CONTEXT?.trim().toLowerCase();
+  if (!candidate) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(candidate)) {
+    return false;
+  }
+
+  if (["1", "true", "yes", "on"].includes(candidate)) {
+    return true;
+  }
+
+  return true;
+}
+
+async function resolvePlanningRepoContextState(
+  args: readonly string[],
+  env: EnvShape,
+  options: ExecutePlanContextCommandOptions
+): Promise<PlanningContextRepoContextState | undefined> {
+  if (!options.getRepoContext) {
+    return undefined;
+  }
+
+  let repoContext = await options.getRepoContext();
+  if (
+    !options.refreshRepoContext ||
+    !resolveAutoRefreshRepoContextEnabled(args, env) ||
+    repoContext.state === "fresh"
+  ) {
+    return repoContext;
+  }
+
+  try {
+    await options.refreshRepoContext();
+    repoContext = await options.getRepoContext();
+    if (repoContext.state === "fresh") {
+      return {
+        ...repoContext,
+        summary: `${repoContext.summary} after automatic refresh`
+      };
+    }
+
+    return repoContext;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...repoContext,
+      summary: `${repoContext.summary}; automatic refresh failed: ${message}`
+    };
+  }
 }
 
 async function resolvePlanningRetrievalState(
@@ -10697,6 +10786,7 @@ export async function executePlanContextCommandFromArgs(
 
   const format = resolveMarkdownFormatFlag(args);
   const includeGlobal = !args.includes("--project-only");
+  const repoContext = await resolvePlanningRepoContextState(args, env, options);
   const retrieval = await resolvePlanningRetrievalState(args, env, options);
   const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim();
   const queryEmbedding =
@@ -10722,6 +10812,7 @@ export async function executePlanContextCommandFromArgs(
     report: buildPlanningContextReport({
       query,
       requesterRole: roleCandidate,
+      repoContext,
       retrieval,
       results
     })
@@ -10740,6 +10831,28 @@ async function planContextCommand(args: readonly string[]) {
       env: process.env,
       searchMemory(input) {
         return service.searchMemory(input);
+      },
+      getRepoContext() {
+        return inspectRepoContextFreshness({
+          cwd: process.cwd(),
+          env: process.env,
+          store
+        });
+      },
+      refreshRepoContext() {
+        return executeRefreshRepoContextCommandFromArgs(args, {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ...(workspaceSlug ? { DEVGOD_WORKSPACE_SLUG: workspaceSlug } : {}),
+            ...(projectSlug ? { DEVGOD_PROJECT_SLUG: projectSlug } : {})
+          },
+          argv: ["node", "src/admin.ts", "refresh-repo-context"],
+          withClient: async (callback) => callback(client),
+          createStore() {
+            return store;
+          }
+        });
       },
       getRetrievalFreshness() {
         return inspectRetrievalFreshness({
@@ -11112,6 +11225,76 @@ async function refreshRetrievalCommand() {
   console.log(JSON.stringify(await executeRefreshRetrievalCommand()));
 }
 
+export async function executeRefreshRepoContextCommandFromArgs(
+  argsOrOptions: readonly string[] | ExecuteRefreshRepoContextCommandOptions = [],
+  maybeOptions: ExecuteRefreshRepoContextCommandOptions = {}
+): Promise<RefreshRepoContextResult> {
+  const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
+  const options = Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions;
+  const env = options.env ?? process.env;
+  const argv = options.argv ?? process.argv;
+  const cwd = options.cwd ?? process.cwd();
+  const effectiveArgs = Array.isArray(argsOrOptions)
+    ? args.length > 0
+      ? args
+      : argv.slice(3)
+    : [];
+  const withClientImpl = options.withClient ?? withClient;
+  const createStoreImpl = options.createStore ?? ((client: PostgresStoreClient) => createRuntimeStore(client));
+  const now = (options.now ?? (() => new Date()))().toISOString();
+  const targetRepoRoot = resolveRepoMarkdownTargetRoot(env, effectiveArgs, cwd);
+  const workspaceSlug = resolveCommandFlag(effectiveArgs, "--workspace-slug") ?? env.DEVGOD_WORKSPACE_SLUG ?? "default";
+  const projectSlug = resolveCommandFlag(effectiveArgs, "--project-slug") ?? env.DEVGOD_PROJECT_SLUG;
+
+  if (!projectSlug) {
+    throw new Error("DEVGOD_PROJECT_SLUG is required");
+  }
+
+  return withClientImpl(async (client) => {
+    const store = createStoreImpl(client);
+    const context = await store.getProjectContext({
+      workspaceSlug,
+      projectSlug
+    });
+    if (!context) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} must be bootstrapped before repo context refresh`);
+    }
+
+    const registration = await store.getProjectRuntimeRegistration(context.project.id);
+    if (!registration) {
+      throw new Error(`Project ${workspaceSlug}/${projectSlug} must be runtime-registered before repo context refresh`);
+    }
+
+    const profile = await probeRepoContextProfile({
+      repoRoot: targetRepoRoot,
+      now
+    });
+
+    await store.saveProjectRuntimeRegistration({
+      ...registration,
+      manifest: {
+        ...registration.manifest,
+        repoContextProfile: profile
+      },
+      updatedAt: now
+    });
+
+    return {
+      authorityLabel: "runtime_authoritative",
+      workspaceSlug,
+      projectSlug,
+      repoRoot: targetRepoRoot,
+      slotCount: Object.keys(profile.slots).length,
+      status: profile.status,
+      fingerprint: profile.fingerprint
+    };
+  });
+}
+
+async function refreshRepoContextCommand(args: readonly string[]) {
+  console.log(JSON.stringify(await executeRefreshRepoContextCommandFromArgs(args)));
+}
+
 export async function executeRepairTaskQueueCommandFromArgs(
   args: readonly string[],
   options: ExecuteRepairTaskQueueCommandOptions = {}
@@ -11175,6 +11358,11 @@ async function main() {
 
   if (command === "refresh-retrieval") {
     await refreshRetrievalCommand();
+    return;
+  }
+
+  if (command === "refresh-repo-context") {
+    await refreshRepoContextCommand(args);
     return;
   }
 

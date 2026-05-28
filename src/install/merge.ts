@@ -351,6 +351,7 @@ export function mergePackageJson(
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;
   scripts["devgod:plan-context"] = `${devgodEntry} plan-context`;
   scripts["devgod:refresh-retrieval"] = `${devgodEntry} refresh-retrieval`;
+  scripts["devgod:refresh-repo-context"] = `${devgodEntry} refresh-repo-context`;
   scripts["devgod:repair-task-queue"] = `${devgodEntry} repair-task-queue`;
   scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;
   scripts["devgod:autopilot-status"] =
