@@ -344,6 +344,9 @@ if (Test-DevgodScript -Preferred "devgod:setup:playwright" -Fallback "setup:play
 
 Invoke-DevgodNpmScript -Preferred "devgod:migrate" -Fallback "migrate"
 Invoke-DevgodNpmScript -Preferred "devgod:bootstrap" -Fallback "bootstrap"
+if (Test-Path -LiteralPath ".devgod/work/task-queue.json") {
+    npm run devgod:repair-task-queue
+}
 npm run devgod:refresh-retrieval
 Invoke-DevgodNpmScript -Preferred "devgod:verify:setup" -Fallback "verify:setup"
 if (Test-DevgodScript -Preferred "devgod:verify:playwright" -Fallback "verify:playwright") {

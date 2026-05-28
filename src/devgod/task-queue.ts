@@ -9,6 +9,10 @@ export const ALLOWED_TASK_CLASSES = [
   "docs_only"
 ] as const;
 
+const LEGACY_TASK_CLASS_ALIASES = {
+  implementation_slice: "prototype_slice"
+} as const;
+
 export type TaskStatus = (typeof ALLOWED_TASK_STATUSES)[number];
 export type TaskClass = (typeof ALLOWED_TASK_CLASSES)[number];
 
@@ -128,11 +132,20 @@ function asTaskStatus(value: unknown, context: string): TaskStatus {
 
 function asTaskClass(value: unknown, context: string): TaskClass {
   const taskClass = asString(value, context);
-  if (!ALLOWED_TASK_CLASSES.includes(taskClass as TaskClass)) {
+  const canonical = canonicalizeTaskClass(taskClass);
+  if (!canonical) {
     throw new Error(`${context} has invalid class "${taskClass}"`);
   }
 
-  return taskClass as TaskClass;
+  return canonical;
+}
+
+export function canonicalizeTaskClass(taskClass: string): TaskClass | undefined {
+  if (ALLOWED_TASK_CLASSES.includes(taskClass as TaskClass)) {
+    return taskClass as TaskClass;
+  }
+
+  return LEGACY_TASK_CLASS_ALIASES[taskClass as keyof typeof LEGACY_TASK_CLASS_ALIASES];
 }
 
 function parseTask(value: unknown, index: number): TaskQueueTask {
@@ -247,6 +260,38 @@ export async function readTaskQueue(
 ): Promise<TaskQueue> {
   const content = await readFile(queuePath, "utf8");
   return parseTaskQueueContent(content);
+}
+
+export function repairTaskQueueContent(content: string): {
+  changed: boolean;
+  repairedTasks: number;
+  queue: TaskQueue;
+  content: string;
+} {
+  const parsed = JSON.parse(content) as {
+    tasks?: Array<{ class?: unknown }> | undefined;
+  };
+  const queue = parseTaskQueueContent(content);
+
+  let repairedTasks = 0;
+  for (const [index, task] of queue.tasks.entries()) {
+    const originalClass = parsed.tasks?.[index]?.class;
+    if (typeof originalClass !== "string") {
+      continue;
+    }
+
+    if (originalClass !== task.class && canonicalizeTaskClass(originalClass) === task.class) {
+      repairedTasks += 1;
+    }
+  }
+
+  const repairedContent = `${JSON.stringify(queue, null, 2)}\n`;
+  return {
+    changed: repairedContent !== content,
+    repairedTasks,
+    queue,
+    content: repairedContent
+  };
 }
 
 export function selectNextUnblockedTask(queue: TaskQueue): TaskQueueTask | null {

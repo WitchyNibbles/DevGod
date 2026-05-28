@@ -56,6 +56,7 @@ import { buildObsidianTargetPath } from "./docs-export/targets.ts";
 import { RuntimeWorklogProvider, type WorklogProvider } from "./docs-export/worklog-provider.ts";
 import {
   advanceTaskQueue,
+  repairTaskQueueContent,
   deriveTaskQueueEvidence,
   parseTaskQueueContent,
   type TaskQueue
@@ -1485,6 +1486,18 @@ export interface ExecuteRefreshRetrievalCommandOptions {
   runEmbeddingJobs?: typeof runEmbeddingJobs | undefined;
   createEmbeddingProvider?: typeof createEmbeddingProvider | undefined;
   now?: (() => Date) | undefined;
+}
+
+export interface ExecuteRepairTaskQueueCommandOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+}
+
+export interface RepairTaskQueueResult {
+  authorityLabel: "derived_only";
+  queuePath: string;
+  changed: boolean;
+  repairedTasks: number;
 }
 
 export interface RefreshRetrievalResult {
@@ -11099,6 +11112,32 @@ async function refreshRetrievalCommand() {
   console.log(JSON.stringify(await executeRefreshRetrievalCommand()));
 }
 
+export async function executeRepairTaskQueueCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteRepairTaskQueueCommandOptions = {}
+): Promise<RepairTaskQueueResult> {
+  const cwd = options.cwd ?? process.cwd();
+  const queuePathArg = resolveCommandFlag(args, "--queue-path");
+  const queuePath = queuePathArg ? path.resolve(cwd, queuePathArg) : path.join(cwd, ".devgod", "work", "task-queue.json");
+  const existing = await readFile(queuePath, "utf8");
+  const repaired = repairTaskQueueContent(existing);
+
+  if (repaired.changed) {
+    await writeFile(queuePath, repaired.content, "utf8");
+  }
+
+  return {
+    authorityLabel: "derived_only",
+    queuePath,
+    changed: repaired.changed,
+    repairedTasks: repaired.repairedTasks
+  };
+}
+
+async function repairTaskQueueCommand(args: readonly string[]) {
+  console.log(JSON.stringify(await executeRepairTaskQueueCommandFromArgs(args)));
+}
+
 async function main() {
   await loadDotEnv();
   const command = process.argv[2];
@@ -11136,6 +11175,11 @@ async function main() {
 
   if (command === "refresh-retrieval") {
     await refreshRetrievalCommand();
+    return;
+  }
+
+  if (command === "repair-task-queue") {
+    await repairTaskQueueCommand(args);
     return;
   }
 

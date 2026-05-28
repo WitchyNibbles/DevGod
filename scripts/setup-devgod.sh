@@ -597,6 +597,9 @@ fi
 
 run_devgod_npm_script "devgod:migrate" "migrate"
 run_devgod_npm_script "devgod:bootstrap" "bootstrap"
+if [[ -f .devgod/work/task-queue.json ]]; then
+  npm run devgod:repair-task-queue
+fi
 npm run devgod:refresh-retrieval
 run_devgod_npm_script "devgod:verify:setup" "verify:setup"
 if has_npm_script "devgod:verify:playwright" "verify:playwright"; then

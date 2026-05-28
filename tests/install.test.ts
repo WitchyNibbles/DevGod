@@ -314,6 +314,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval"
   );
   assert.equal(
+    merged.scripts["devgod:repair-task-queue"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts repair-task-queue"
+  );
+  assert.equal(
     merged.scripts["devgod:autopilot-status"],
     "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts"
   );
@@ -1870,6 +1874,10 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
   );
   assert.match(
+    targetPackageJson.scripts["devgod:repair-task-queue"],
+    /node_modules\/devgod\/src\/admin\/devgod\.ts repair-task-queue/
+  );
+  assert.match(
     targetPackageJson.scripts["devgod:autopilot-status"],
     /node_modules\/devgod\/src\/devgod\/autopilot-status\.ts/
   );
@@ -2092,7 +2100,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2256,7 +2264,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2376,7 +2384,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
