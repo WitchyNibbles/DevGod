@@ -116,7 +116,11 @@
     "check:happy-path": "bash scripts/check-devgod-happy-path.sh",
     "check:workflow": "bash scripts/check-devgod-workflow.sh",
     "eval:orchestration": "node --experimental-strip-types src/evals/orchestration-baseline.ts",
+    "eval:promptfoo:maintainer-boundary": "promptfoo eval -c evals/promptfoo/maintainer-boundary.promptfooconfig.yaml",
     "benchmark:orchestration": "node --experimental-strip-types src/evals/orchestration-benchmark.ts",
+    "test:properties": "node --experimental-strip-types --test tests/properties/*.test.ts",
+    "test:mutation:maintainer-boundary": "stryker run stryker-maintainer-boundary.config.json",
+    "test:mutation:maintainer-boundary:dry-run": "stryker run stryker-maintainer-boundary.config.json --dryRunOnly",
     "typecheck": "tsc --noEmit",
     "migrate": "node --experimental-strip-types src/admin.ts migrate",
     "health": "node --experimental-strip-types src/admin.ts health",
@@ -156,8 +160,13 @@
     "qs": "6.15.2"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/tap-runner": "^9.6.1",
     "@types/node": "^25.6.0",
     "@types/pg": "^8.20.0",
+    "fast-check": "^4.8.0",
+    "promptfoo": "0.120.19",
+    "tsx": "^4.22.3",
     "typescript": "^5.8.3"
   },
   "engines": {

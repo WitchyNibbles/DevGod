@@ -8,6 +8,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "@iarna/toml";
+import { auditMaintainerOnlyPublishedPaths } from "../src/install/maintainer-boundary.ts";
 import {
   gitNexusCodexConfigFragment,
   mergeAgentsMd,
@@ -405,10 +406,10 @@ test("ci workflow routes the release posture through the release overlay gate", 
   assert.match(ciWorkflow, /npm run verify:release-overlay/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
-  assert.doesNotMatch(
-    ciWorkflow,
-    /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*persist-credentials: false/
-  );
+  const windowsJobBlock = ciWorkflow.match(
+    /\n  windows-setup-smoke:[\s\S]*?(?=\n  [a-z0-9-]+:|\n$)/
+  )?.[0] ?? "";
+  assert.doesNotMatch(windowsJobBlock, /persist-credentials: false/);
   assert.doesNotMatch(ciWorkflow, /- run: npm test/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:quality/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:coverage/);
@@ -515,9 +516,12 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   const excludedOverlayFiles = [
     ".devgod/install-backups/",
     ".devgod/work/2026-05-04-project-state-review/BRIEF.md",
+    "docs/maintainers/quality-tooling.md",
+    "evals/promptfoo/maintainer-boundary.promptfooconfig.yaml",
     "scripts/",
     "scripts/check-coverage.ts",
-    "src/"
+    "src/",
+    "stryker-maintainer-boundary.config.json"
   ];
 
   assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
@@ -542,6 +546,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   for (const relativePath of excludedOverlayFiles) {
     assert.ok(!pkg.files.includes(relativePath), `${relativePath} should stay out of the overlay package manifest`);
   }
+  assert.deepEqual(auditMaintainerOnlyPublishedPaths(pkg.files), []);
   assert.ok(pkg.files.every((file) => !file.includes("*")));
 });
 

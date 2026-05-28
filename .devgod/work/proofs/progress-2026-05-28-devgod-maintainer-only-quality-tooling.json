@@ -1,0 +1,69 @@
+{
+  "task_id": "2026-05-28-devgod-maintainer-only-quality-tooling",
+  "captured_at": "2026-05-28T06:10:00.000Z",
+  "status": "verified",
+  "summary": "Devgod now has maintainer-only promptfoo, property-test, and mutation-test lanes wired in the source repo, plus boundary helpers and checks that prove those surfaces do not leak into target-repo installs or the published package manifest.",
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/install-maintainer-boundary.test.ts tests/properties/maintainer-boundary.property.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run test:properties",
+      "status": "passed"
+    },
+    {
+      "command": "npm run eval:promptfoo:maintainer-boundary",
+      "status": "passed"
+    },
+    {
+      "command": "npm run test:mutation:maintainer-boundary:dry-run",
+      "status": "passed"
+    },
+    {
+      "command": "npm run test:mutation:maintainer-boundary",
+      "status": "passed",
+      "notes": "Mutation score 88.89% on src/install/maintainer-boundary.ts"
+    },
+    {
+      "command": "npm run verify:release-overlay",
+      "status": "passed"
+    },
+    {
+      "command": "npm run devgod:seed-workflow-proof -- --task-id 2026-05-28-devgod-maintainer-only-quality-tooling",
+      "status": "passed",
+      "notes": "Runtime-authoritative proof run 05028a18-ab7f-45e0-8cd4-128f0151c3e6"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    "src/install/maintainer-boundary.ts",
+    "tests/install-maintainer-boundary.test.ts",
+    "tests/properties/maintainer-boundary.property.test.ts",
+    "tests/install.test.ts",
+    "tests/release-overlay.test.ts",
+    "evals/promptfoo/maintainer-boundary.promptfooconfig.yaml",
+    "evals/promptfoo/providers/maintainer-boundary-provider.mjs",
+    "stryker-maintainer-boundary.config.json",
+    "docs/maintainers/quality-tooling.md",
+    ".github/workflows/ci.yml",
+    "README.md"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "2026-05-23-devgod-codex-automation-rollout-verification",
+  "why_next": "Resume the previously queued rollout-verification work now that the maintainer-only regression boundary is in place.",
+  "cycle": 1,
+  "residual_risk": [
+    "Promptfoo remains pinned to 0.120.19 until the repo runtime moves past the newer Node engine floor.",
+    "The CI mutation lane intentionally uses dry-run scope; deeper mutation testing remains a maintainer-local command."
+  ]
+}

@@ -31,7 +31,13 @@ test("release overlay verification script stays aligned with CI", async () => {
   assert.match(ciWorkflow, /jobs:[\s\S]*\n\s+qdrant:\n\s+image: qdrant\/qdrant:v1\.13\.4/);
   assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  property-regressions:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  promptfoo-maintainer-boundary:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  mutation-maintainer-boundary:/);
   assert.match(ciWorkflow, /- run: npm run verify:migrations:live/);
+  assert.match(ciWorkflow, /- run: npm run test:properties/);
+  assert.match(ciWorkflow, /- run: npm run eval:promptfoo:maintainer-boundary/);
+  assert.match(ciWorkflow, /- run: npm run test:mutation:maintainer-boundary:dry-run/);
   assert.match(ciWorkflow, /tests\/setup-powershell-smoke\.test\.ts/);
   assert.doesNotMatch(ciWorkflow, /- run: npm run check:coverage/);
 
@@ -42,11 +48,11 @@ test("release overlay verification script stays aligned with CI", async () => {
 
   const qualityScript = await readFile(join(repoRoot, "scripts", "check-quality.sh"), "utf8");
   assert.match(qualityScript, /npm run check:coverage/);
-  assert.match(ciWorkflow, /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*\n      - name: Checkout source\n        uses: actions\/checkout@/);
-  assert.doesNotMatch(
-    ciWorkflow,
-    /jobs:[\s\S]*\n  windows-setup-smoke:[\s\S]*persist-credentials: false/
-  );
+  const windowsJobBlock = ciWorkflow.match(
+    /\n  windows-setup-smoke:[\s\S]*?(?=\n  [a-z0-9-]+:|\n$)/
+  )?.[0] ?? "";
+  assert.match(windowsJobBlock, /\n      - name: Checkout source\n        uses: actions\/checkout@/);
+  assert.doesNotMatch(windowsJobBlock, /persist-credentials: false/);
 });
 
 test("README documents the opt-in overlay release posture honestly", async () => {

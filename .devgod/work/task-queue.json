@@ -1,7 +1,39 @@
 {
   "project_status": "in_progress",
-  "current_task_id": "2026-05-23-devgod-codex-automation-rollout-verification",
+  "current_task_id": "2026-05-28-devgod-maintainer-only-quality-tooling",
   "tasks": [
+    {
+      "id": "2026-05-28-devgod-maintainer-only-quality-tooling",
+      "title": "Maintainer-only regression tooling boundary",
+      "status": "done",
+      "class": "implementation_slice",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "maintainer-only quality tooling lives only in the devgod source repo",
+        "target-repo install and package export surfaces prove they exclude maintainer-only scripts, dependencies, and config",
+        "CI exposes explicit job boundaries for property tests, promptfoo maintainer evals, and mutation dry-run"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/install-maintainer-boundary.test.ts tests/properties/maintainer-boundary.property.test.ts",
+        "npm run test:properties",
+        "npm run eval:promptfoo:maintainer-boundary",
+        "npm run test:mutation:maintainer-boundary:dry-run",
+        "npm run test:mutation:maintainer-boundary",
+        "npm run verify:release-overlay",
+        "npm run devgod:seed-workflow-proof -- --task-id 2026-05-28-devgod-maintainer-only-quality-tooling",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-05-28-devgod-maintainer-only-quality-tooling.md",
+        "task: .devgod/work/tasks/task-2026-05-28-devgod-maintainer-only-quality-tooling.md",
+        "plan: .devgod/work/plans/plan-2026-05-28-devgod-maintainer-only-quality-tooling.md",
+        "design: docs/plans/2026-05-28-maintainer-only-quality-tooling-design.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-2026-05-28-devgod-maintainer-only-quality-tooling.md",
+        "proof: .devgod/work/proofs/progress-2026-05-28-devgod-maintainer-only-quality-tooling.json"
+      ],
+      "blocker": null
+    },
     {
       "id": "2026-05-23-devgod-codex-automation-runtime-envelope",
       "title": "Provider-backed runtime automation envelope",
@@ -76,7 +108,7 @@
     {
       "id": "2026-05-23-devgod-codex-automation-rollout-verification",
       "title": "End-to-end verification and rollout hardening for Codex automation integration",
-      "status": "in_progress",
+      "status": "planned",
       "class": "verification_slice",
       "depends_on": [
         "2026-05-23-devgod-codex-cli-scheduler-adapter"

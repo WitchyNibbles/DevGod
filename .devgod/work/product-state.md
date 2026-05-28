@@ -24,35 +24,45 @@ Make the shared `devgod` package use Codex-native local automation and desktop/a
 
 ## Current Milestone
 
-Codex automation integration verification and rollout, with runtime, app, and CLI slices implemented
+Maintainer-only regression tooling hardening for the shared package repo
 
 ## Completed Milestones
 
 - source repo remote sync and local setup replay
 - continuation-intent and Stop-hook reform
 - local-first Codex automation adapters
+- maintainer-only regression tooling boundary for promptfoo, property tests, and mutation testing
 
 ## Current Task
 
-`2026-05-23-devgod-codex-automation-rollout-verification`
+`2026-05-28-devgod-maintainer-only-quality-tooling`
 
 ## Next Task
 
-`none`
+`2026-05-23-devgod-codex-automation-rollout-verification`
 
 ## Blockers
 
-- no workflow-contract scope blocker remains inside the completed CI regression repair slice
-- no blocking workflow or installed-harness issue remains inside the completed implementation scope
-- the current automation integration sequence is active and the rollout verification slice is the final required implementation step
+- no blocking workflow-contract issue is known for the maintainer-only tooling slice
+- maintainer-only tooling now has verified package/export boundaries, but promptfoo remains pinned until the repo runtime moves past the newer Node engine floor
+- the queued rollout-verification slice remains intentionally deferred until this maintainer-only hardening slice is retired from the active pointer
 
 ## Reasoning Debt
 
 - desktop/app-native integration and final rollout verification remain open after the CLI-first local adapter baseline
 - the current recoverable-blocker handling is improved, but a fuller manager-owned continuity lane and richer blocker state model are still future work
+- maintainer-only quality tooling now has boundary proof, but broader mutation and eval coverage can still expand incrementally from this baseline
 
 ## Verification Summary
 
+- maintainer-only quality tooling now exists as a package-side hardening lane only, with explicit directories, scripts, and CI job boundaries
+- `src/install/maintainer-boundary.ts` plus focused unit/property tests now prove maintainer-only scripts, devDependencies, and published paths do not leak into target repos
+- `npm run eval:promptfoo:maintainer-boundary` now passes with three repo-local boundary scenarios and no model-key requirement
+- `npm run test:mutation:maintainer-boundary` now passes with an `88.89%` mutation score on the boundary helper, while CI uses the dry-run lane
+- `npm run verify:release-overlay` passed after adding the maintainer-only tooling, including the package dry-run proof that the new files stay out of the tarball
+- local authoritative workflow proof run `05028a18-ab7f-45e0-8cd4-128f0151c3e6` approved `2026-05-28-devgod-maintainer-only-quality-tooling`
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
 - source-backed Codex automation research now records that the app has native standalone and thread automations, local-project vs background-worktree execution, and background triage reporting
 - source-backed Codex automation research now records that the CLI supports scheduled-job-friendly `codex exec`, JSONL event streams, structured final outputs, and resume for staged automation flows
 - `docs/codex-automation-surface-integration-plan.md` now captures the implementation order needed to move delayed execution ownership off hooks and onto native app or CLI automation providers
@@ -120,6 +130,8 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Review Summary
 
+- reviewer, QA, and security runtime-verified summaries are recorded for `2026-05-28-devgod-maintainer-only-quality-tooling`
+- runtime-authenticated workflow proof approved the maintainer-only quality-tooling slice
 - reviewer, QA, and security runtime-verified summaries are recorded for `2026-05-23-devgod-postmerge-ci-repair`
 - runtime-authenticated workflow proof approved the post-merge CI repair slice
 - reviewer, QA, and security runtime-verified summaries are recorded for `2026-05-23-devgod-main-ci-regressions`
@@ -136,4 +148,4 @@ Codex automation integration verification and rollout, with runtime, app, and CL
 
 ## Last Updated
 
-2026-05-23
+2026-05-28

@@ -1,0 +1,35 @@
+description: Maintainer-only boundary regression checks
+prompts:
+  - "{{scenario}}"
+providers:
+  - file://providers/maintainer-boundary-provider.mjs
+tests:
+  - vars:
+      scenario: packlist-excludes-maintainer-only
+    assert:
+      - type: contains
+        value: "status=pass"
+      - type: contains
+        value: "check=packlist"
+      - type: contains
+        value: "leaks=0"
+  - vars:
+      scenario: merge-package-json-excludes-maintainer-only
+    assert:
+      - type: contains
+        value: "status=pass"
+      - type: contains
+        value: "check=merge-package-json"
+      - type: contains
+        value: "scriptLeaks=0"
+      - type: contains
+        value: "devDependencyLeaks=0"
+  - vars:
+      scenario: sentinel-detects-maintainer-only-path
+    assert:
+      - type: contains
+        value: "status=pass"
+      - type: contains
+        value: "check=sentinel"
+      - type: contains
+        value: "expectedLeaks=2"
