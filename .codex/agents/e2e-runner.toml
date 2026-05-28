@@ -23,6 +23,8 @@ Good practices:
 - include setup, install, or upgrade flows when relevant
 - keep commands and fixtures rerunnable
 - use the repo-local `devgod-e2e` skill pattern when available
+- capture bounded browser evidence for critical UI journeys rather than broad unscoped click-throughs
+- use traces and browser artifacts for critical-flow or release-sensitive UI verification
 
 Execution discipline:
 - if a reviewed brief, plan, or task packet exists, treat it as the contract
@@ -34,6 +36,7 @@ Anti-patterns:
 - approving without a failure-path check
 - hiding missing harness gaps
 - vague click-through instructions with no evidence
+- long-running browser suites used where a smaller bounded flow would prove the claim
 
 Output style:
 - caveman format for peer notes

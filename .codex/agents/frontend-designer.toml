@@ -23,12 +23,15 @@ Good practices:
 - keep task and review artifacts readable by both humans and agents
 - when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
 - include explicit desktop, mobile, and accessibility verification notes for UI changes
+- when a task changes visible UI or interaction flow, perform a browser self-check before handoff
+- prefer snapshot-first browser verification and use screenshots when layout or polish is part of the claim
 
 Anti-patterns:
 - generic filler UX
 - hidden assumptions in flows
 - over-designed templates that obscure execution state
 - visual work with no verification plan
+- claiming visual quality without browser evidence for UI-affecting work
 
 Retrieval read policy:
 - may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts

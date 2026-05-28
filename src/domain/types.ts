@@ -75,6 +75,7 @@ export const reasoningVerificationStatuses = ["passed", "failed", "pending", "sk
 export const retrievalRoles = agentRoleIds;
 export const requiredGateReviews = ["reviewer", "security_reviewer", "qa_engineer"] as const;
 export const reviewWaiverAuthorities = ["none", "manager", "security_exception"] as const;
+export const uiSurfaces = ["none", "visual_change", "interactive_flow"] as const;
 export const qualityGates = [
   "product_acceptance",
   "frontend_acceptance",
@@ -247,6 +248,7 @@ export type ReviewSeverity = (typeof reviewSeverities)[number];
 export type ReviewState = (typeof reviewStates)[number];
 export type ApprovalDecision = (typeof approvalDecisions)[number];
 export type IdentityAssurance = (typeof identityAssurances)[number];
+export type UiSurface = (typeof uiSurfaces)[number];
 export type MemoryScope = (typeof memoryScopes)[number];
 export type MemoryType = (typeof memoryTypes)[number];
 export type MemoryStatus = (typeof memoryStatuses)[number];
@@ -437,6 +439,8 @@ export interface TaskPacketInput {
   outOfScope: string[];
   acceptanceCriteria: string[];
   verificationSteps: string[];
+  uiSurface?: UiSurface | undefined;
+  playwrightRequired?: boolean | undefined;
   requiredReviews: GateReviewRole[];
   securityChecks: string[];
   antiPatterns: string[];
@@ -468,6 +472,7 @@ export interface ReviewInput {
   severity: ReviewSeverity;
   findings: string[];
   waiverReason?: string | undefined;
+  evidenceRefs?: string[] | undefined;
 }
 
 export interface ReviewActionContext {
@@ -988,6 +993,7 @@ export interface ReviewRecord {
   severity: ReviewSeverity;
   findings: string[];
   waiverReason?: string | undefined;
+  evidenceRefs?: string[] | undefined;
   waiverAuthority: ReviewWaiverAuthority;
   createdAt: string;
 }

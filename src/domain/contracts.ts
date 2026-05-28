@@ -23,6 +23,7 @@ import {
   type ReasoningVerification,
   type ReasoningVerdict,
   type QualityGate,
+  type UiSurface,
   completionStandards,
   identityAssurances,
   qualityGates,
@@ -37,6 +38,7 @@ import {
   reviewStates,
   reviewWaiverAuthorities,
   requiredGateReviews,
+  uiSurfaces,
   retrievalRoles,
   stopGoDecisions,
   type TaskPacketInput
@@ -51,6 +53,7 @@ const reviewStateSet = new Set<string>(reviewStates);
 const reviewWaiverAuthoritySet = new Set<string>(reviewWaiverAuthorities);
 const identityAssuranceSet = new Set<string>(identityAssurances);
 const completionStandardSet = new Set<string>(completionStandards);
+const uiSurfaceSet = new Set<string>(uiSurfaces);
 const qualityGateSet = new Set<string>(qualityGates);
 const reasoningConfidenceSet = new Set<string>(reasoningConfidenceLevels);
 const reasoningDecisionSet = new Set<string>(reasoningDecisions);
@@ -228,6 +231,10 @@ export function isCompletionStandard(value: string): value is CompletionStandard
   return completionStandardSet.has(value);
 }
 
+export function isUiSurface(value: string): value is UiSurface {
+  return uiSurfaceSet.has(value);
+}
+
 export function isReasoningConfidenceLevel(value: string): value is ReasoningConfidenceLevel {
   return reasoningConfidenceSet.has(value);
 }
@@ -242,6 +249,20 @@ export function isReasoningWorkflowMode(value: string): value is ReasoningPolicy
 
 export function isQualityGate(value: string): value is QualityGate {
   return qualityGateSet.has(value);
+}
+
+export function deriveTaskPacketUiSurface(packet: Pick<TaskPacketInput, "uiSurface">): UiSurface {
+  return packet.uiSurface ?? "none";
+}
+
+export function isPlaywrightRequiredForTask(
+  packet: Pick<TaskPacketInput, "uiSurface" | "playwrightRequired">
+): boolean {
+  if (packet.playwrightRequired !== undefined) {
+    return packet.playwrightRequired;
+  }
+
+  return deriveTaskPacketUiSurface(packet) !== "none";
 }
 
 function validateReasoningPolicy(policy: ReasoningPolicy | undefined, label: string): string[] {
@@ -558,6 +579,7 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
   const normalizedRequiredReviews = uniqueTrimmedItems(packet.requiredReviews);
   const normalizedSpecialistRoles = uniqueTrimmedItems(packet.requiredSpecialistRoles);
   const normalizedQualityGates = uniqueTrimmedItems(packet.qualityGates);
+  const normalizedUiSurface = packet.uiSurface?.trim();
 
   if (packet.taskId.trim().length === 0) {
     errors.push("taskId is required");
@@ -629,6 +651,27 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
 
   if (packet.verificationSteps.length === 0) {
     errors.push("verificationSteps is required");
+  }
+
+  if (normalizedUiSurface !== undefined && !isUiSurface(normalizedUiSurface)) {
+    errors.push(`uiSurface must be one of: ${uiSurfaces.join(", ")}`);
+  }
+
+  if (packet.playwrightRequired === true && normalizedUiSurface === undefined) {
+    errors.push("playwrightRequired tasks must declare uiSurface");
+  }
+
+  if (normalizedUiSurface !== undefined && isUiSurface(normalizedUiSurface)) {
+    if (normalizedUiSurface === "none" && packet.playwrightRequired === true) {
+      errors.push("uiSurface none cannot require Playwright");
+    }
+
+    if (
+      (normalizedUiSurface === "visual_change" || normalizedUiSurface === "interactive_flow") &&
+      packet.playwrightRequired === false
+    ) {
+      errors.push(`uiSurface ${normalizedUiSurface} must not disable Playwright`);
+    }
   }
 
   errors.push(
@@ -798,6 +841,17 @@ export function validateReviewAction(context: TrustedReviewActionContext, review
 
   if (review.findings.some((finding) => finding.trim().length === 0)) {
     errors.push("review findings must not contain empty items");
+  }
+
+  if (review.evidenceRefs !== undefined) {
+    if (!Array.isArray(review.evidenceRefs)) {
+      errors.push("review evidenceRefs must be an array");
+    } else {
+      const normalizedEvidenceRefs = uniqueTrimmedItems(review.evidenceRefs);
+      if (normalizedEvidenceRefs.length !== review.evidenceRefs.length) {
+        errors.push("review evidenceRefs must not contain empty or duplicate items");
+      }
+    }
   }
 
   if (review.state === "passed" && review.findings.length > 0) {

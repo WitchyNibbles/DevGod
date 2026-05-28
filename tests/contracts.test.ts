@@ -261,6 +261,34 @@ test("validateTaskPacket rejects duplicate gates, roles, and write scope", () =>
   assert.ok(errors.includes("duplicate write scope: src/core"));
 });
 
+test("validateTaskPacket rejects inconsistent UI surface and Playwright requirements", () => {
+  const errors = validateTaskPacket({
+    taskId: "task-ui",
+    title: "Broken UI task",
+    ownerRole: "frontend_designer",
+    completionStandard: "specialist_verified",
+    requiredSpecialistRoles: ["frontend_designer"],
+    qualityGates: ["frontend_acceptance"],
+    goal: "Ship a visible UI change",
+    inputs: ["brief"],
+    outputs: ["UI patch"],
+    dependencies: [],
+    allowedWriteScope: ["src/ui"],
+    outOfScope: ["deploy"],
+    acceptanceCriteria: ["desktop and mobile layout are updated"],
+    verificationSteps: ["run UI checks"],
+    uiSurface: "visual_change",
+    playwrightRequired: false,
+    requiredReviews: ["reviewer", "security_reviewer", "qa_engineer"],
+    securityChecks: ["no secrets"],
+    antiPatterns: ["code-only visual signoff"],
+    rollbackNotes: "revert patch",
+    handoffFormat: "summary"
+  });
+
+  assert.ok(errors.includes("uiSurface visual_change must not disable Playwright"));
+});
+
 test("validateHandoff rejects empty evidence fields", () => {
   const errors = validateHandoff({
     actor: "planner",

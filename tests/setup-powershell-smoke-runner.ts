@@ -117,10 +117,12 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       'if "%~1"=="install" exit /b 0',
       'if "%~1"=="run" (',
       '  if /i "%~2"=="devgod:setup:git-guard" exit /b 0',
+      '  if /i "%~2"=="devgod:setup:playwright" exit /b 0',
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',
       '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
       '  if /i "%~2"=="devgod:verify:setup" exit /b 0',
+      '  if /i "%~2"=="devgod:verify:playwright" exit /b 0',
       ")",
       "echo unexpected npm call: %* 1>&2",
       "exit /b 1"
@@ -143,10 +145,12 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
     assert.deepEqual(npmCalls, [
       "install",
       "run devgod:setup:git-guard",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);

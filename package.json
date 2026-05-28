@@ -61,6 +61,7 @@
     ".codex/config.toml",
     ".codex/hooks.json",
     ".devgod/memory/README.md",
+    ".devgod/playwright/",
     ".devgod/rules/",
     ".devgod/templates/",
     ".devgod/work/README.md",
@@ -114,6 +115,7 @@
     "src/install/cli.ts",
     "src/install/git-guard.ts",
     "src/install/merge.ts",
+    "src/install/setup-playwright.ts",
     "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
     "src/install/types.ts",
@@ -171,6 +173,8 @@
     "record:review": "node --experimental-strip-types src/admin.ts record-review --input .devgod/review-action.json",
     "mcp": "node --experimental-strip-types src/mcp/server.ts",
     "ui": "node --experimental-strip-types src/ui/server.ts",
+    "setup:playwright": "node --experimental-strip-types src/install/setup-playwright.ts",
+    "verify:playwright": "node --experimental-strip-types src/install/setup-playwright.ts --verify",
     "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
   },
   "dependencies": {

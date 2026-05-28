@@ -115,6 +115,7 @@ create table if not exists reviews (
   severity text not null check (severity in ('low', 'medium', 'high', 'critical')),
   findings text[] not null default '{}',
   waiver_reason text,
+  evidence_refs text[] not null default '{}',
   created_at timestamptz not null default now()
 );
 

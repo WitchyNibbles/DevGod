@@ -94,6 +94,8 @@ bindings_file="$repo_root/.devgod/review-identity-bindings.json"
 adapter_file="$repo_root/devgod/review-identity-adapter.ts"
 workflow_export_file="$repo_root/scripts/check-devgod-workflow.sh"
 package_file="$repo_root/package.json"
+playwright_config_file="$repo_root/.devgod/playwright/mcp.json"
+playwright_vision_config_file="$repo_root/.devgod/playwright/mcp.vision.json"
 
 [[ -f "$bindings_file" ]] || {
   printf 'bad review identity bindings export: missing %s\n' "${bindings_file#"$repo_root"/}" >&2
@@ -112,9 +114,27 @@ require_contains "$adapter_file" 'Implement devgod/review-identity-adapter.ts'
   exit 1
 }
 
+[[ -f "$playwright_config_file" ]] || {
+  printf 'missing Playwright MCP config export: %s\n' "${playwright_config_file#"$repo_root"/}" >&2
+  exit 1
+}
+
+[[ -f "$playwright_vision_config_file" ]] || {
+  printf 'missing Playwright vision MCP config export: %s\n' "${playwright_vision_config_file#"$repo_root"/}" >&2
+  exit 1
+}
+
 require_contains "$package_file" 'devgod:check:happy-path'
 if ! grep -Fq 'devgod:verify:setup' "$package_file"; then
   printf 'incomplete devgod setup: package.json lacks devgod:verify:setup\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'devgod:setup:playwright' "$package_file"; then
+  printf 'incomplete devgod setup: package.json lacks devgod:setup:playwright\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'devgod:verify:playwright' "$package_file"; then
+  printf 'incomplete devgod setup: package.json lacks devgod:verify:playwright\n' >&2
   exit 1
 fi
 

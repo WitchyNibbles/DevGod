@@ -170,6 +170,10 @@ run_devgod_npm_script() {
   npm run "$script_name"
 }
 
+has_npm_script() {
+  resolve_npm_script "$1" "$2" >/dev/null 2>&1
+}
+
 fail() {
   printf '%s\n' "$1" >&2
   exit 1
@@ -587,10 +591,17 @@ if [[ -f .devgod/install-manifest.json ]] && git rev-parse --show-toplevel >/dev
   npm run devgod:setup:git-guard
 fi
 
+if has_npm_script "devgod:setup:playwright" "setup:playwright"; then
+  npm run devgod:setup:playwright
+fi
+
 run_devgod_npm_script "devgod:migrate" "migrate"
 run_devgod_npm_script "devgod:bootstrap" "bootstrap"
 npm run devgod:refresh-retrieval
 run_devgod_npm_script "devgod:verify:setup" "verify:setup"
+if has_npm_script "devgod:verify:playwright" "verify:playwright"; then
+  npm run devgod:verify:playwright
+fi
 
 echo ""
 echo "devgod local setup complete"
@@ -599,3 +610,4 @@ echo "workspace: ${DEVGOD_WORKSPACE_SLUG:-default}"
 echo "project: ${DEVGOD_PROJECT_SLUG:-unknown}"
 echo "database: configured"
 echo "qdrant: configured"
+echo "playwright: configured"

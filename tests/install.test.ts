@@ -15,7 +15,8 @@ import {
   mergeAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
-  mergePackageJson
+  mergePackageJson,
+  playwrightCodexConfigFragment
 } from "../src/install/merge.ts";
 import {
   installDevgodIntoProject,
@@ -199,6 +200,19 @@ test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing p
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
+test("mergeCodexConfig adds Playwright MCP settings with standard and vision profiles", () => {
+  const merged = mergeCodexConfig(
+    'model = "gpt-5.4"\n',
+    playwrightCodexConfigFragment()
+  );
+
+  assert.match(merged, /\[mcp_servers\.playwright\]/);
+  assert.match(merged, /@playwright\/mcp@latest/);
+  assert.match(merged, /\.devgod\/playwright\/mcp\.json/);
+  assert.match(merged, /\[mcp_servers\.playwright_vision\]/);
+  assert.match(merged, /\.devgod\/playwright\/mcp\.vision\.json/);
+});
+
 test("mergeCodexConfig adds Grafana MCP settings without overwriting existing project config", () => {
   const merged = mergeCodexConfig(
     'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
@@ -349,6 +363,14 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
   assert.match(
     merged.scripts["devgod:setup:local"],
     /node_modules\/devgod\/src\/install\/setup-local\.ts/
+  );
+  assert.match(
+    merged.scripts["devgod:setup:playwright"],
+    /node_modules\/devgod\/src\/install\/setup-playwright\.ts/
+  );
+  assert.match(
+    merged.scripts["devgod:verify:playwright"],
+    /node_modules\/devgod\/src\/install\/setup-playwright\.ts --verify/
   );
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
@@ -548,6 +570,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     ".env.example",
     "README.md",
     "docker-compose.yml",
+    ".devgod/playwright/",
     "docs/global-setup.md",
     "scripts/check-devgod-commit-msg.sh",
     "scripts/check-devgod-git-guard.sh",
@@ -574,6 +597,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "src/install/merge.ts",
     "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
+    "src/install/setup-playwright.ts",
     "src/install/types.ts",
     "src/install/verify-git-guard.ts",
     "src/mcp/",
@@ -669,6 +693,42 @@ test("installDevgodIntoProject dry-run reports planned changes without writing",
     await assert.rejects(readFile(path.join(targetRoot, "AGENTS.md"), "utf8"));
     await assert.rejects(readFile(path.join(targetRoot, "scripts/devgod-setup.sh"), "utf8"));
     await assert.rejects(readFile(path.join(targetRoot, ".codex/config.toml"), "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installDevgodIntoProject ships Playwright MCP configs and setup wiring", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-playwright-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const playwrightConfig = await readFile(path.join(targetRoot, ".devgod", "playwright", "mcp.json"), "utf8");
+    const playwrightVisionConfig = await readFile(
+      path.join(targetRoot, ".devgod", "playwright", "mcp.vision.json"),
+      "utf8"
+    );
+
+    assert.match(codexConfig, /\[mcp_servers\.playwright\]/);
+    assert.match(codexConfig, /\[mcp_servers\.playwright_vision\]/);
+    assert.equal(
+      packageJson.scripts?.["devgod:setup:playwright"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts"
+    );
+    assert.equal(
+      packageJson.scripts?.["devgod:verify:playwright"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify"
+    );
+    assert.match(playwrightConfig, /"browserName": "chromium"/);
+    assert.match(playwrightVisionConfig, /"vision"/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1962,7 +2022,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -1989,10 +2049,12 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
@@ -2124,7 +2186,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2167,10 +2229,12 @@ test("installed setup script falls back to native Linux services when docker is 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
 
     const unitFiles = await readdir(unitDir);
@@ -2242,7 +2306,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:refresh-retrieval)",
+        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2271,10 +2335,12 @@ test("installed setup script honors managed runtime mode without taking service 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
       "run devgod:refresh-retrieval",
-      "run devgod:verify:setup"
+      "run devgod:verify:setup",
+      "run devgod:verify:playwright"
     ]);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });

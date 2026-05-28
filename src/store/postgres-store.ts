@@ -872,9 +872,9 @@ export class PostgresStore implements DevgodStore {
     await this.client.query(
       `insert into reviews (
          id, workspace_id, project_id, run_id, task_id, reviewer_role, actor, actor_role,
-         identity_assurance, state, severity, findings, waiver_reason, waiver_authority
+         identity_assurance, state, severity, findings, waiver_reason, evidence_refs, waiver_authority
        )
-       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+       select $1, r.workspace_id, r.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
        from runs r
        where r.id = $2`,
       [
@@ -889,6 +889,7 @@ export class PostgresStore implements DevgodStore {
         review.severity,
         review.findings,
         review.waiverReason ?? null,
+        review.evidenceRefs ?? [],
         review.waiverAuthority
       ]
     );
@@ -908,6 +909,7 @@ export class PostgresStore implements DevgodStore {
           'severity', severity,
           'findings', findings,
           'waiverReason', waiver_reason,
+          'evidenceRefs', evidence_refs,
           'waiverAuthority', waiver_authority,
           'createdAt', created_at
        ) as payload

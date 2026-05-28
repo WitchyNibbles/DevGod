@@ -41,7 +41,9 @@ Typical consuming-repo commands there:
 ```bash
 npm run devgod:setup:git-guard
 npm run devgod:verify:git-guard
+npm run devgod:setup:playwright
 npm run devgod:setup:local
+npm run devgod:verify:playwright
 npm run devgod:doctor
 npm run devgod:verify:setup
 npm run devgod:status
@@ -82,6 +84,14 @@ After install, a target repo can use the shipped local bootstrap path:
 - `npm run devgod:setup:local`
 - `npm run devgod:doctor`
 - `npm run devgod:verify:setup`
+
+For UI-affecting work, the shipped browser bootstrap path is now explicit:
+
+- `npm run devgod:setup:playwright`
+- `npm run devgod:verify:playwright`
+
+That provisions managed Chromium for the repo-owned Playwright MCP profiles under `.devgod/playwright/`.
+Screenshots, traces, and videos stay task-scoped under `.devgod/work/artifacts/playwright/`; do not promote them into durable memory.
 
 That path is the intended "make the repo operational" route when you want the packaged runtime flow.
 

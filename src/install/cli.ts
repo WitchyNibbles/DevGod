@@ -10,6 +10,7 @@ import {
   mergeCodexConfig,
   mergeGitignore,
   mergePackageJson,
+  playwrightCodexConfigFragment,
   stripGitNexusFromCodexConfig
 } from "./merge.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
@@ -675,7 +676,7 @@ async function readInstallManifest(targetRoot: string): Promise<InstallManifest 
 async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   const manifest: InstallFile[] = [];
 
-  const recursiveRoots = [".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
+  const recursiveRoots = [".devgod/playwright", ".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
 
   for (const relativeRoot of recursiveRoots) {
     const sourcePath = path.join(sourceRoot, relativeRoot);
@@ -825,7 +826,7 @@ async function buildInstallPlan(
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
   const baseCodexConfigSource = stripGitNexusFromCodexConfig(sourceConfig);
-  let codexConfigSource = baseCodexConfigSource;
+  let codexConfigSource = mergeCodexConfig(baseCodexConfigSource, playwrightCodexConfigFragment());
   if (options.withGitNexus) {
     codexConfigSource = mergeCodexConfig(codexConfigSource, gitNexusCodexConfigFragment());
   }

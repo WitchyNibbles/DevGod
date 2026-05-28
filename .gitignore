@@ -11,6 +11,8 @@ dist/
 .devgod/state/
 .devgod/cache/
 .devgod/tmp/
+.devgod/playwright/browsers/
+.devgod/work/artifacts/
 .devgod/work/briefs/*
 .devgod/work/plans/*
 .devgod/work/release/*

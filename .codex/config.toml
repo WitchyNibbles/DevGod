@@ -21,6 +21,14 @@ max_depth = 2
 command = "npx"
 args = ["--no-install", "gitnexus", "mcp"]
 
+[mcp_servers.playwright]
+command = "npx"
+args = ["--yes", "@playwright/mcp@latest", "--config", ".devgod/playwright/mcp.json"]
+
+[mcp_servers.playwright_vision]
+command = "npx"
+args = ["--yes", "@playwright/mcp@latest", "--config", ".devgod/playwright/mcp.vision.json"]
+
 # devgod keeps reviewed project memory in repo markdown and operational state in
 # the shared core service backed by Postgres + pgvector.
 #

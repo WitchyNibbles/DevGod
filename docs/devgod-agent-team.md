@@ -46,4 +46,5 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 - Repo-local workflow skills should be the default identity for roles with recurring `devgod`-specific decision loops; generic pattern skills remain secondary support.
 - Repo-wide policy belongs in `AGENTS.md`; specialist workflow details belong in role-specific skills and agent instructions.
 - Optional domain roles still stay intentionally thin until repeated repo-local workload justifies a dedicated `devgod-*` workflow skill.
+- UI-affecting tasks should declare their UI surface explicitly and carry browser evidence through `qa_engineer` before workflow-proof approval.
 - If a future role is added, update the catalog first, then the shipped agent artifact, then the package/tests/docs surfaces that verify drift.
