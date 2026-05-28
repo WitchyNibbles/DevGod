@@ -1918,7 +1918,7 @@ function buildReviewFromTemplate(
     )
     .replace(
       "## Verification evidence\n\nList exact commands, fixtures, or repro steps used for this gate.\n",
-      "## Verification evidence\n\nPending review execution.\n"
+      "## Verification evidence\n\nPending review execution. For Playwright-required QA reviews, cite Playwright evidence refs here.\n"
     )
     .replace(
       "## Waiver reason\n\nDo not waive a required gate without actor, actor role, authority, and explicit reason. Unauthorized waivers remain blocking.\n",

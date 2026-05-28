@@ -54,6 +54,8 @@ List exact commands, fixtures, or repro steps used for this gate.
 
 When `Provenance status` is `runtime_verified` for `specialist_verified` work, include at least one `Runtime proof:` line here that names the authenticated runtime artifact or check summarized by this markdown.
 
+For `qa_engineer` reviews on tasks with `playwright_required = true`, cite Playwright evidence refs here, including the desktop/mobile coverage and any browser artifact paths or runtime evidence refs used to support approval.
+
 ## Waiver authority
 
 `none | manager | security_exception`

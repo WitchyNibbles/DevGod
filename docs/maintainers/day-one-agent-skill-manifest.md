@@ -18,8 +18,9 @@ It is a maintainer rollout artifact, not a claim that every item below already s
 
 - `devgod` already ships a reviewed repo-local role catalog and default skill posture in [docs/devgod-agent-team.md](/home/gii/apps/lexer/DevGod/docs/devgod-agent-team.md) and [src/devgod/agent-catalog.ts](/home/gii/apps/lexer/DevGod/src/devgod/agent-catalog.ts).
 - `devgod` already requires the blocking review trio `reviewer`, `qa_engineer`, and `security_reviewer`.
-- `devgod` does not yet enforce a hard runtime rule that UI-affecting work must include browser evidence before approval.
-- The live Playwright MCP surface is useful and current, but local browser provisioning is not yet guaranteed. A browser launch in this environment failed because Chrome was missing.
+- `devgod` now enforces runtime and workflow-export rules that block UI-affecting approvals when the `qa_engineer` review does not cite Playwright evidence.
+- `devgod` now ships repo-local wrapper skills for planning, debugging, TDD, verification-completion, browser verification, MCP implementation, and git handoff hygiene.
+- `devgod` now ships repo-owned Playwright MCP profiles plus managed Chromium provisioning and verification during setup.
 
 ## Manifest rules
 

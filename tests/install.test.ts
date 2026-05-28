@@ -1749,6 +1749,13 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   );
   assert.match(productStateTemplate, /# Product State/);
 
+  const reviewGateTemplate = await readFile(
+    path.join(targetRoot, ".devgod", "templates", "review-gate.md"),
+    "utf8"
+  );
+  assert.match(reviewGateTemplate, /Playwright evidence refs/i);
+  assert.match(reviewGateTemplate, /desktop\/mobile coverage/i);
+
   const taskQueueTemplate = await readFile(
     path.join(targetRoot, ".devgod", "templates", "task-queue.json"),
     "utf8"
