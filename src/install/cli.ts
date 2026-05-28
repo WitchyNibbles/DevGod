@@ -1736,6 +1736,11 @@ function fillEmptySection(content: string, heading: string, body: string): strin
   return content.replace(new RegExp(`(${escaped}\n\n)(?=(?:## |### |$))`), `$1${body}\n\n`);
 }
 
+function replaceSectionBody(content: string, heading: string, body: string): string {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content.replace(new RegExp(`(${escaped}\n\n)([\\s\\S]*?)(?=\n## |\n### |$)`), `$1${body}\n`);
+}
+
 function buildTaskFromTemplate(templateContent: string, taskId: string): string {
   const scaffolded = replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
@@ -1776,7 +1781,7 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
       ].join("\n")
     );
 
-  return [
+  const hydrated = [
     ["## Goal", `Seed starter workflow metadata for \`${taskId}\` and replace these defaults before claiming completion.`],
     ["## Inputs", "- scaffold-workflow generated artifact set\n- repo-specific context to be filled before execution"],
     ["## Dependencies", "- none yet; add upstream tasks or runtime prerequisites before execution"],
@@ -1789,6 +1794,12 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ["## Allowed write scope", "- specialize this section before implementation; scaffold only covers workflow artifact setup"],
     ["## Out of scope", "- substantive product or code changes outside the eventual task-specific write scope"],
     ["## Acceptance criteria", "- replace scaffold defaults with task-specific completion criteria before execution"],
+    ["## UI surface", "`none`"],
+    ["## Playwright requirement", "`false`"],
+    [
+      "## Browser evidence expectations",
+      "- not required for the scaffolded default; replace this block if the task becomes UI-affecting"
+    ],
     ["## Verification steps", "- update with the exact commands, fixtures, and runtime proofs for this task"],
     ["## Security checks", "- confirm the scaffold does not widen trust boundaries or write scope unintentionally"],
     ["## Retrieval guidance", "- prefer runtime authority and task-local artifacts over narrative summaries when they disagree"],
@@ -1804,6 +1815,14 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ["### Verification plan", "- update the task packet with real scope and verification details\n- run the workflow checks after the packet is specialized"],
     ["### Research and debug budgets", "- implementation attempts: 1\n- verification passes: 1\n- repair loops: 1"]
   ].reduce((current, [heading, body]) => fillEmptySection(current, heading, body), scaffolded);
+
+  const withUiDefaults = replaceSectionBody(hydrated, "## UI surface", "`none`");
+  const withPlaywrightDefaults = replaceSectionBody(withUiDefaults, "## Playwright requirement", "`false`");
+  return replaceSectionBody(
+    withPlaywrightDefaults,
+    "## Browser evidence expectations",
+    "- not required for the scaffolded default; replace this block if the task becomes UI-affecting"
+  );
 }
 
 function extractMarkdownSection(content: string, heading: string): string | undefined {

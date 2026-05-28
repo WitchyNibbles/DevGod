@@ -1013,6 +1013,7 @@ test("PostgresStore.saveReview persists actor provenance and waiver authority", 
     "low",
     ["waiver recorded"],
     "managed exception",
+    [],
     "manager"
   ]);
 });
