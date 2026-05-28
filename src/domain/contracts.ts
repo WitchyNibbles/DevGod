@@ -973,6 +973,19 @@ export function hasFutureTenseClaim(content: string): boolean {
   return /\b(will always|automatically learns|guarantees future|self-modifies)\b/i.test(content);
 }
 
+const visualArtifactPatterns = [
+  /!\[[^\]]*\]\([^)]+\)/,
+  /\bdata:image\/[a-z0-9.+-]+;base64,/i,
+  /\b(?:artifact:\/\/|\.?\/)?(?:\.devgod\/)?work\/artifacts\/playwright\/[^\s)]+\.(?:png|jpe?g|webp|gif|mp4|webm|zip|trace)\b/i,
+  /\bplaywright:\/\/[^\s)]+\b/i
+];
+
+export function findVisualArtifactSignals(content: string): string[] {
+  return visualArtifactPatterns
+    .filter((pattern) => pattern.test(content))
+    .map((pattern) => pattern.source);
+}
+
 export function validateMemoryPromotion(input: MemoryPromotionInput): string[] {
   const errors: string[] = [];
 
@@ -982,6 +995,10 @@ export function validateMemoryPromotion(input: MemoryPromotionInput): string[] {
 
   if (hasFutureTenseClaim(input.content)) {
     errors.push("memory content contains speculative future claims");
+  }
+
+  if (findVisualArtifactSignals(input.content).length > 0) {
+    errors.push("memory content must not embed screenshots, traces, or Playwright visual artifacts");
   }
 
   if (input.reviewer.trim().length === 0) {

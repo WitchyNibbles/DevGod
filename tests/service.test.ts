@@ -1482,6 +1482,30 @@ test("searchMemory favors title matches over content-only matches", async () => 
   assert.equal(results[0]?.title, "Incident playbook");
 });
 
+test("promoteMemory rejects Playwright visual artifacts in durable memory content", async () => {
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await assert.rejects(
+    service.promoteMemory(run.id, {
+      scope: "project",
+      entryType: "lesson",
+      title: "UI note",
+      content: "artifact://.devgod/work/artifacts/playwright/task-7/home.png",
+      sourceRunId: run.id,
+      reviewer: "memory_curator",
+      actor: "memory_curator"
+    }),
+    /must not embed screenshots, traces, or Playwright visual artifacts/
+  );
+});
+
 test("searchMemory returns provenance, authority, freshness, and citation metadata", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store);

@@ -5,6 +5,7 @@ import {
   defaultRetrievalRoles,
   effectiveRequiredReviews,
   findSecretSignals,
+  findVisualArtifactSignals,
   hasFutureTenseClaim,
   isCompletionStandard,
   isGateReviewRole,
@@ -564,6 +565,21 @@ test("validateMemoryPromotion rejects secrets and speculative claims", () => {
 
   assert.ok(errors.some((error) => error.includes("secret")));
   assert.ok(errors.some((error) => error.includes("speculative")));
+});
+
+test("validateMemoryPromotion rejects visual artifacts in durable memory content", () => {
+  const errors = validateMemoryPromotion({
+    scope: "project",
+    entryType: "lesson",
+    title: "UI note",
+    content: "See ![screen](/tmp/ui.png) and artifact://playwright/task-1/home.png before approving.",
+    sourceRunId: "run-1",
+    reviewer: "qa_engineer",
+    actor: "memory_curator"
+  });
+
+  assert.ok(errors.some((error) => error.includes("visual artifacts")));
+  assert.ok(findVisualArtifactSignals("playwright://snapshot/home").length > 0);
 });
 
 test("normalizeRetrievalMetadata defaults roles and deduplicates metadata arrays", () => {

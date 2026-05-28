@@ -16,3 +16,4 @@ Rules:
 - update these files after meaningful work
 - prefer small edits over noisy append-only logs
 - include provenance from reviewed runs or tasks when relevant
+- do not embed screenshots, traces, videos, or Playwright artifact payloads here; keep them under `.devgod/work/artifacts/` and summarize them in text if needed
