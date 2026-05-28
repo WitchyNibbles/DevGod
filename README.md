@@ -185,6 +185,8 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod:focus
+npm run devgod:refresh-retrieval:fast
 ```
 
 ### If you want to install `devgod` into another repo
@@ -243,6 +245,7 @@ npm run devgod -- daemon --format text
 npm run devgod -- supervisor --format text
 npm run devgod -- supervisor-history --format text
 npm run devgod -- plan-context --query "what still matters here?"
+npm run devgod -- plan-context --query "what still matters here?" --auto-refresh-repo-context --auto-refresh-retrieval
 npm run export:docs
 npm run mcp
 npm run ui
@@ -277,6 +280,7 @@ npm run devgod:status
 npm run devgod:coverage
 npm run devgod:gaps
 npm run devgod:ops
+npm run devgod:focus
 npm run devgod:report
 npm run devgod:loop
 npm run devgod:daemon
@@ -298,6 +302,7 @@ Installed repos also get:
 - `devgod:sync-runtime-exports`
 - `devgod:plan-context`
 - `devgod:refresh-retrieval`
+- `devgod:refresh-retrieval:fast`
 - `devgod:autopilot-status`
 - `devgod:github-dispatch`
 - `devgod:mcp`
@@ -309,6 +314,12 @@ Installed repos also get:
 - `devgod:check:happy-path`
 - `devgod:check-workflow`
 - `devgod:verify:migrations:live`
+
+Planning and retrieval defaults are intentionally lighter now:
+
+- `devgod:focus` is a compact alias over the deterministic `ops --format text` surface
+- `devgod:refresh-retrieval:fast` refreshes markdown and artifact indexes first, then lets embeddings catch up separately
+- `plan-context` reports stale derived state immediately unless you explicitly pass `--auto-refresh-repo-context` and/or `--auto-refresh-retrieval`
 
 ### Optional Grafana log access
 

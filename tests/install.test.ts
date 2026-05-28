@@ -324,6 +324,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts report --format markdown"
   );
   assert.equal(
+    merged.scripts["devgod:focus"],
+    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts ops --format text"
+  );
+  assert.equal(
     merged.scripts["devgod:refresh-retrieval"],
     "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval"
   );

@@ -391,6 +391,7 @@ export function mergePackageJson(
   scripts["devgod:supervisor"] = `${devgodEntry} supervisor --format text`;
   scripts["devgod:supervisor-history"] = `${devgodEntry} supervisor-history --format text`;
   scripts["devgod:ops"] = `${devgodEntry} ops --format text`;
+  scripts["devgod:focus"] = `${devgodEntry} ops --format text`;
   scripts["devgod:loop"] = `${devgodEntry} loop --format text`;
   scripts["devgod:recover"] = `${devgodEntry} recover`;
   scripts["devgod:report"] = `${devgodEntry} report --format markdown`;

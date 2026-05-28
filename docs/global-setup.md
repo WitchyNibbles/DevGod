@@ -24,6 +24,7 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod:focus
 npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
 npm run devgod -- supervisor --format text
 npm run devgod -- supervisor-history --format text
@@ -50,6 +51,7 @@ npm run devgod:status
 npm run devgod:coverage
 npm run devgod:gaps
 npm run devgod:ops
+npm run devgod:focus
 npm run devgod:report
 npm run devgod:daemon
 npm run devgod:supervisor
@@ -103,11 +105,19 @@ Useful extra commands in consuming repos:
 - `npm run devgod:reconcile`
 - `npm run devgod:sync-runtime-exports`
 - `npm run devgod:refresh-retrieval`
+- `npm run devgod:refresh-retrieval:fast`
 - `npm run devgod:plan-context -- --query "what still matters here?"`
+- `npm run devgod:plan-context -- --query "what still matters here?" --auto-refresh-repo-context --auto-refresh-retrieval`
 - `npm run devgod:export-docs -- "summarize what we worked on today"`
 - `npm run devgod:seed-happy-path-fixture -- --task-id fixture-<name>` for synthetic install-proof only
 - `npm run devgod:seed-modernization-proof -- --task-id <task-id>` for local modernization-mode proof seeding
 - `npm run devgod:verify:review-identity` to replay local adapter fixtures
+
+The faster default operator path is:
+
+- `devgod:focus` for the compact deterministic `ops --format text` output
+- `devgod:refresh-retrieval:fast` for artifact and markdown refresh without waiting on embeddings
+- `devgod:plan-context` without auto-refresh flags when you want an immediate planning read; add the explicit refresh flags only when you need newly regenerated derived context in the same call
 
 ### Delayed follow-up behavior
 

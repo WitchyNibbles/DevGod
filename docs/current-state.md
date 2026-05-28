@@ -212,6 +212,8 @@ npm run setup:local
 npm run doctor
 npm run status
 npm run ops
+npm run devgod:focus
+npm run devgod:refresh-retrieval:fast
 npm run devgod -- report --run-id latest
 npm run devgod -- coverage --run-id latest --format text
 npm run devgod -- gaps --run-id latest --format text
@@ -222,6 +224,7 @@ npm run devgod -- daemon --format text
 npm run devgod -- supervisor --format text
 npm run devgod -- supervisor-history --format text
 npm run devgod -- plan-context --query "what still matters here?"
+npm run devgod -- plan-context --query "what still matters here?" --auto-refresh-repo-context --auto-refresh-retrieval
 npm run devgod -- refresh-repo-context
 npm run export:docs
 npm run mcp
@@ -252,6 +255,7 @@ npm run devgod:status
 npm run devgod:coverage
 npm run devgod:gaps
 npm run devgod:ops
+npm run devgod:focus
 npm run devgod:report
 npm run devgod:refresh-repo-context
 npm run devgod:repair-task-queue
@@ -274,6 +278,7 @@ The installed surface is broader than the sample above. Notable additional scrip
 - `devgod:sync-runtime-exports`
 - `devgod:plan-context`
 - `devgod:refresh-retrieval`
+- `devgod:refresh-retrieval:fast`
 - `devgod:autopilot-status`
 - `devgod:github-dispatch`
 - `devgod:mcp`
@@ -286,6 +291,12 @@ The installed surface is broader than the sample above. Notable additional scrip
 - `devgod:check-workflow`
 - `devgod:verify:migrations:live`
 - `devgod:export-docs`
+
+The faster operator path is now:
+
+- use `devgod:focus` for the compact deterministic `ops --format text` view
+- use `devgod:refresh-retrieval:fast` when you need repo indexes fresh without blocking on embeddings
+- let `plan-context` reuse stale derived state by default, and only opt into blocking refresh with `--auto-refresh-repo-context` and `--auto-refresh-retrieval`
 
 ## Important nuance: shipped truth vs consuming-repo truth
 
