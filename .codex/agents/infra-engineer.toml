@@ -22,6 +22,7 @@ Good practices:
 - design secrets handling that avoids repo leakage
 - think about environments, deploy rollback, health checks, and cost
 - keep setups boring and maintainable when possible
+- use the repo-local `devgod-infra-ops` skill for env, CI, rollback, and operator-surface discipline
 - include observability, health check, and rollback considerations in every substantive infra handoff
 - use repo setup or verification skills when they fit the task
 

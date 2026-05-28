@@ -83,3 +83,31 @@ test("reasoning-quality skills call for bounded skepticism and evidence discipli
   assert.match(review, /unsupported reasoning verdicts/i);
   assert.match(docsResearch, /unresolved drift/i);
 });
+
+test("expanded role-local workflow skills encode the new behavior loops", async () => {
+  const agentRuntime = await read(".agents/skills/devgod-agent-runtime/SKILL.md");
+  const productFraming = await read(".agents/skills/devgod-product-framing/SKILL.md");
+  const gitOperator = await read(".agents/skills/devgod-git-operator/SKILL.md");
+  const evalEngineering = await read(".agents/skills/devgod-eval-engineering/SKILL.md");
+  const skillEvals = await read(".agents/skills/devgod-skill-evals/SKILL.md");
+
+  assert.match(agentRuntime, /continuation/i);
+  assert.match(agentRuntime, /hook/i);
+  assert.match(productFraming, /smallest useful milestone/i);
+  assert.match(productFraming, /acceptance criteria/i);
+  assert.match(gitOperator, /Stage only files that belong/i);
+  assert.match(gitOperator, /do not use broad staging commands/i);
+  assert.match(evalEngineering, /deterministic checks/i);
+  assert.match(evalEngineering, /false-positive risk/i);
+  assert.match(skillEvals, /did the right skill trigger/i);
+  assert.match(skillEvals, /happy-path/i);
+});
+
+test("AGENTS routes recurring control-layer work through repo-local workflow skills first", async () => {
+  const agents = await read("AGENTS.md");
+
+  assert.match(agents, /repo-local `devgod-\*` workflow skill/i);
+  assert.match(agents, /agent runtime, hook, tool-contract, automation, or continuation changes/i);
+  assert.match(agents, /benchmark, grader, or skill-regression work/i);
+  assert.match(agents, /operator docs, migration notes, release notes, or workflow-document clarity/i);
+});

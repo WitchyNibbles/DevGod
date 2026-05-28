@@ -36,7 +36,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/product-strategist.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-intake", "superpowers:brainstorming", "market-research"],
+    defaultSkillIds: ["devgod-product-framing", "devgod-intake", "market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "cited external research"]
   },
   solution_architect: {
@@ -96,7 +96,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/git-operator.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["superpowers:using-git-worktrees", "superpowers:finishing-a-development-branch"],
+    defaultSkillIds: ["devgod-git-operator", "superpowers:using-git-worktrees", "superpowers:finishing-a-development-branch"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "task packets", "git status and diff evidence"]
   },
   infra_engineer: {
@@ -108,7 +108,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/infra-engineer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-setup", "devgod-release-readiness", "verification-loop"],
+    defaultSkillIds: ["devgod-infra-ops", "devgod-setup", "devgod-release-readiness"],
     retrievalGuidance: ["approved memory", "repo rules", "setup notes", "runbooks", "incident learnings"]
   },
   reviewer: {
@@ -216,7 +216,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/eval-engineer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["eval-harness", "verification-loop", "e2e-testing"],
+    defaultSkillIds: ["devgod-eval-engineering", "devgod-skill-evals", "eval-harness"],
     retrievalGuidance: ["approved memory", "repo rules", "eval artifacts", "reviewed plans", "test artifacts"]
   },
   technical_writer: {
@@ -228,7 +228,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/technical-writer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["article-writing", "documentation-lookup"],
+    defaultSkillIds: ["devgod-technical-writing", "documentation-lookup", "article-writing"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed technical notes", "release notes"]
   },
   agent_runtime_engineer: {
@@ -240,7 +240,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/agent-runtime-engineer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["mcp-server-patterns", "documentation-lookup", "verification-loop"],
+    defaultSkillIds: ["devgod-agent-runtime", "mcp-server-patterns", "verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "runtime traces", "tooling integration notes"]
   },
   mobile_engineer: {
@@ -288,7 +288,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/ux-researcher.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["market-research", "article-writing"],
+    defaultSkillIds: ["devgod-ux-research", "market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
   },
   product_analyst: {
@@ -300,7 +300,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/product-analyst.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["market-research", "article-writing"],
+    defaultSkillIds: ["devgod-product-analysis", "market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "reviewed plans", "eval artifacts"]
   },
   compliance_reviewer: {
@@ -312,7 +312,7 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/compliance-reviewer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["security-review", "documentation-lookup"],
+    defaultSkillIds: ["devgod-compliance-review", "security-review", "documentation-lookup"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "incident notes", "audit artifacts"]
   }
 } as const satisfies Record<string, AgentCatalogEntry>;

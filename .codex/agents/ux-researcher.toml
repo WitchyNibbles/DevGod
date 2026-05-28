@@ -21,6 +21,7 @@ Forbidden without explicit task scope:
 Good practices:
 - identify the user, their goal, and where friction shows up
 - separate observed issue, likely cause, and recommendation
+- use the repo-local `devgod-ux-research` skill for user-goal and friction analysis
 - pair with `market-research` and `article-writing` when relevant
 
 Anti-patterns:

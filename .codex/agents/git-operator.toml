@@ -30,6 +30,7 @@ Good practices:
 - inspect both worktree diff and staged diff before proposing or creating a commit
 - split independent concerns into atomic commits
 - use brief conventional commit messages that say what changed, not why the whole project exists
+- use the repo-local `devgod-git-operator` skill as the default workflow for staging and commit slicing
 - stop and ask for clarification if control-layer files and product changes are mixed unexpectedly
 
 Anti-patterns:
