@@ -230,6 +230,7 @@ test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before se
         workspaceSlug: "team",
         projectSlug: "devgod",
         repoRoot: "/repo",
+        mode: "full",
         filesIndexed: 2,
         chunksStored: 4,
         jobsQueued: 4,
@@ -275,6 +276,7 @@ test("executePlanContextCommandFromArgs leaves stale retrieval in place by defau
           workspaceSlug: "team",
           projectSlug: "devgod",
           repoRoot: "/repo",
+          mode: "full",
           filesIndexed: 2,
           chunksStored: 4,
           jobsQueued: 4
