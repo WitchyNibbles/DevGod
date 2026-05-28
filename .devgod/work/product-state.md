@@ -28,7 +28,7 @@ Make devgod’s shipped team shape manifest-driven through a canonical agent cat
 
 ## Current Milestone
 
-Optional Grafana log-query integration and maintainer-only package-quality hardening are complete
+The first consuming-repo repo-context memory slice is now implemented: queue compatibility repair ships for installed repos, deterministic repo-context profiling is live, and planning/setup surfaces now hydrate that context
 
 ## Completed Milestones
 
@@ -40,24 +40,28 @@ Optional Grafana log-query integration and maintainer-only package-quality harde
 - anti-stall routing and runtime recovery regressions stayed green after the catalog rollout
 - release proof closed with local workflow proof, PR publication, and a green hosted CI workflow on the final branch tip
 - maintainer-only regression tooling boundary for promptfoo, property tests, and mutation testing
+- research and proposal for smarter consuming-repo repo-context memory
+- first repo-context memory rollout with task-queue repair and repo-context hydration
 
 ## Current Task
 
-`none`
+`none; 2026-05-28-repo-context-memory-rollout is complete`
 
 ## Next Task
 
-`none queued`
+`follow-up slice: reviewed slot refinement, remember/replace flow, and richer git/PR convention capture`
 
 ## Blockers
 
-- no active blocker yet; current risk is choosing a Grafana query surface that stays aligned with the documented auth and Loki access model
+- no active blocker on the rollout; remaining work is follow-up depth rather than a blocker to the shipped first slice
 - maintainer-only tooling now has verified package/export boundaries, but `promptfoo` remains pinned until the repo runtime moves past the newer Node engine floor
+- richer repo preference capture and remember/replace prompts are still follow-up work
 
 ## Reasoning Debt
 
 - GitHub did not attach automatic `pull_request` status checks to PR #5 for this branch, so hosted verification was confirmed through the repo’s own `CI` workflow via `workflow_dispatch` on the exact PR head commit.
 - maintainer-only quality tooling now has boundary proof, but broader mutation and eval coverage can still expand incrementally from this baseline
+- the shipped repo-context slice is intentionally deterministic and narrow; reviewed slot refinements and git/PR convention capture are still pending
 
 ## Verification Summary
 
@@ -74,6 +78,15 @@ Optional Grafana log-query integration and maintainer-only package-quality harde
 - local authoritative workflow proof run `05028a18-ab7f-45e0-8cd4-128f0151c3e6` approved `2026-05-28-devgod-maintainer-only-quality-tooling`
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
+- repo-context memory proposal concludes that DevGod should add a derived repo-context profile in runtime registration metadata plus reviewed slot-aware memory for durable preferences and conventions
+- the recommended first slice avoids a schema migration and reuses `runtime_project_registrations.manifest`, `memory_entries.metadata`, existing retrieval freshness checks, and later optional Qdrant indexing for structured slots
+- branch `codex/repo-context-memory-rollout` now includes queue repair tooling, `refresh-repo-context`, planning-context hydration, and setup/install wiring
+- focused repo-context tests passed: `tests/repo-context-profile.test.ts` and `tests/plan-context-command.test.ts`
+- install/setup regressions passed in the full `tests/install.test.ts` suite after wiring `devgod:refresh-repo-context`
+- broader regression suites passed: `tests/admin.test.ts`, `tests/autopilot-status.test.ts`, and `tests/task-queue-repair.test.ts`
+- runtime workflow proof run `24201843-9778-4504-a39d-25a952ef1808` approved `2026-05-28-repo-context-memory-rollout`
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
 
 ## Review Summary
 

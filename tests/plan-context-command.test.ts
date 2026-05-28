@@ -289,3 +289,60 @@ test("executePlanContextCommandFromArgs can skip automatic retrieval refresh", a
   assert.equal(refreshCalls, 0);
   assert.equal(result.report.retrieval?.state, "stale");
 });
+
+test("executePlanContextCommandFromArgs includes repo context and auto-refreshes it when stale", async () => {
+  const callOrder: string[] = [];
+  let freshnessChecks = 0;
+
+  const result = await executePlanContextCommandFromArgs(["--query", "django database env"], {
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    async getRepoContext() {
+      callOrder.push(`repo:${freshnessChecks}`);
+      freshnessChecks += 1;
+      return freshnessChecks === 1
+        ? {
+            authorityLabel: "derived_only",
+            state: "stale",
+            summary: "repo context profile no longer matches the current repo snapshot",
+            items: []
+          }
+        : {
+            authorityLabel: "derived_only",
+            state: "fresh",
+            summary: "repo context profile matches the current repo snapshot",
+            items: [
+              {
+                slotKey: "django.dbEnvSelectorVariable",
+                title: "Django DB selector",
+                value: "DJANGO_DB_ENV",
+                sourceKind: "derived_file",
+                freshness: "fresh"
+              }
+            ]
+          };
+    },
+    async refreshRepoContext() {
+      callOrder.push("repo-refresh");
+      return {
+        authorityLabel: "runtime_authoritative",
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        repoRoot: "/repo",
+        slotCount: 1
+      };
+    },
+    async searchMemory() {
+      callOrder.push("search");
+      return [];
+    }
+  });
+
+  assert.deepEqual(callOrder, ["repo:0", "repo-refresh", "repo:1", "search"]);
+  assert.equal(result.report.repoContext?.state, "fresh");
+  assert.equal(result.report.repoContext?.items[0]?.slotKey, "django.dbEnvSelectorVariable");
+  assert.match(formatPlanningContextReportMarkdown(result.report), /Repo Context/);
+  assert.match(formatPlanningContextReportMarkdown(result.report), /DJANGO_DB_ENV/);
+});
