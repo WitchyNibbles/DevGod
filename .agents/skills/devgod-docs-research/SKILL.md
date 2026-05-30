@@ -15,7 +15,7 @@ Goal: current findings that are safe to use in planning or implementation.
 4. Separate sourced fact from inference.
 5. Record competing interpretations or unresolved drift when the docs are ambiguous or incomplete.
    - unresolved ambiguity
-6. When the optional Grafana MCP server is configured, use Grafana logs as advisory runtime evidence when they help validate incidents, regressions, or observed behavior.
+6. When repo-local Grafana configuration is present, use Grafana logs as advisory runtime evidence when they help validate incidents, regressions, or observed behavior. If the configuration is partial or the tool is unavailable, say that explicitly instead of acting like Grafana does not exist.
 7. If local repo context matters, read the repo evidence before or alongside external docs.
 
 ## Rules
@@ -23,6 +23,7 @@ Goal: current findings that are safe to use in planning or implementation.
 - no blog-first answers when primary docs exist
 - do not assume stale behavior is still current
 - cite the source used
+- do not make strong negative claims from a narrow pass when broader evidence or an alternate interpretation has not been checked
 - stop at the evidence boundary instead of filling gaps with confident guesses
 
 ## Output

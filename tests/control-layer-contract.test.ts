@@ -77,11 +77,15 @@ test("reasoning-quality skills call for bounded skepticism and evidence discipli
 
   assert.match(debugging, /next most plausible hypothesis/i);
   assert.match(debugging, /debug budget/i);
+  assert.match(debugging, /repo-local Grafana configuration/i);
+  assert.match(debugging, /counter-evidence/i);
   assert.match(planning, /reasoning-quality section/i);
   assert.match(planning, /strict.*default/i);
   assert.match(review, /low-confidence conclusions/i);
   assert.match(review, /unsupported reasoning verdicts/i);
   assert.match(docsResearch, /unresolved drift/i);
+  assert.match(docsResearch, /repo-local Grafana configuration/i);
+  assert.match(docsResearch, /stop at the evidence boundary/i);
 });
 
 test("expanded role-local workflow skills encode the new behavior loops", async () => {

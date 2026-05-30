@@ -26,10 +26,10 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 ## devgod
 
 - treat \`devgod\` as implicitly invoked on every prompt unless the user explicitly opts out
-- treat substantive requests as devgod work by default unless the user opts out
+- treat substantive requests as devgod work unless the user opts out
 - use \`devgod-intake\` as the default first skill for substantive work
-- keep canonical workflow state in runtime records, not repo markdown files
-- if devgod is not configured yet, run setup first
+- keep workflow state in runtime records, not repo markdown files
+- if devgod is not configured, run setup first
 
 ## Workflow contract
 
@@ -39,16 +39,17 @@ ${workflowContractBlock}
 
 ## Department Workflow
 
-- root Codex thread acts as engineering manager on first contact
+- root thread is engineering manager
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
-- manager/root must clarify ambiguous intent before planning with concise targeted questions or explicit assumptions
-- on the first substantive ask, clarify outcome, user, constraints/non-goals, and done criteria unless explicit assumptions are enough
-- task packets that inherit a brief or plan must carry explicit workflow artifact refs; only use \`review_exports=runtime_optional\` when runtime authority covers the review gate
+- manager/root must clarify ambiguous intent before planning with targeted questions or explicit assumptions
+- on first ask, clarify outcome, user, constraints, and done criteria unless assumptions are enough
+- inherited task packets must carry explicit workflow artifact refs; use \`review_exports=runtime_optional\` only when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
-- when the optional Grafana MCP server is configured, use Grafana logs as advisory debugging and research evidence
-- route evidence to \`solution_architect\`, then \`planner\`, then the named specialist owner
+- when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or the tool is unavailable, say so
+- avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
+- route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
-- use runtime-backed devgod commands for proof, status, and task advancement
+- use runtime-backed devgod commands for proof, status, and advancement
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
 
 ## Autonomy Loop
@@ -86,6 +87,8 @@ const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
 - package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
 - live work state belongs in \`.devgod/work/\`
 - reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there
+- when repo-local Grafana configuration is present, treat Grafana as advisory evidence for debugging and research; if configuration is partial or tools are unavailable, report that explicitly
+- avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
 - ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
 - use repo-local \`devgod\` skills and agents when they fit; use \`caveman\` for terse internal handoffs
 

@@ -15,6 +15,7 @@ import {
   stripGitNexusFromCodexConfig
 } from "./merge.ts";
 import { repoLocalSkillIdPrefixes } from "../devgod/repo-local-skill-surface.ts";
+import { detectGrafanaRepoConfig } from "../grafana/config.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
   InstallMode,
@@ -942,25 +943,8 @@ async function detectInstalledGitNexus(targetRoot: string): Promise<boolean> {
 }
 
 async function detectInstalledGrafana(targetRoot: string): Promise<boolean> {
-  const codexConfig = await readFileIfExists(path.join(targetRoot, ".codex/config.toml"));
-  if (codexConfig?.includes("[mcp_servers.grafana]")) {
-    return true;
-  }
-
-  const packageJsonContent = await readFileIfExists(path.join(targetRoot, "package.json"));
-  if (!packageJsonContent) {
-    return false;
-  }
-
-  try {
-    const packageJson = JSON.parse(packageJsonContent) as {
-      scripts?: Record<string, unknown>;
-    };
-
-    return typeof packageJson.scripts?.["devgod:grafana:mcp"] === "string";
-  } catch {
-    return false;
-  }
+  const detection = await detectGrafanaRepoConfig(targetRoot);
+  return detection.configured || detection.codex.hasGrafanaMcp || detection.packageJson.hasManagedScript;
 }
 
 async function backupExistingFile(
