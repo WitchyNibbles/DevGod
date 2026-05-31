@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadDevgodEnvFile, requireGrafanaConfig, resolveGrafanaConfig } from "../src/grafana/config.ts";
+import {
+  detectGrafanaRepoConfig,
+  loadDevgodEnvFile,
+  requireGrafanaConfig,
+  resolveGrafanaConfig
+} from "../src/grafana/config.ts";
 
 test("resolveGrafanaConfig accepts bearer-token auth and defaults timeout", () => {
   const result = resolveGrafanaConfig({
@@ -79,6 +84,82 @@ test("loadDevgodEnvFile loads grafana settings from .env.devgod without overwrit
     } else {
       process.env.DEVGOD_GRAFANA_TOKEN = originalToken;
     }
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("detectGrafanaRepoConfig reports repo-local env configuration and MCP wiring", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "devgod-grafana-detect-"));
+
+  try {
+    await writeFile(
+      path.join(cwd, ".env.devgod"),
+      [
+        "DEVGOD_GRAFANA_URL=https://grafana.example.com",
+        "DEVGOD_GRAFANA_TOKEN=env-file-token",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await mkdir(path.join(cwd, ".codex"), { recursive: true });
+    await writeFile(
+      path.join(cwd, ".codex", "config.toml"),
+      ['model = "gpt-5.4"', "", "[mcp_servers.grafana]", 'command = "node"', ""].join("\n"),
+      "utf8"
+    );
+
+    const result = await detectGrafanaRepoConfig(cwd);
+    assert.equal(result.hasAnySignal, true);
+    assert.equal(result.configured, true);
+    assert.equal(result.env.configured, true);
+    assert.equal(result.codex.hasGrafanaMcp, true);
+    assert.deepEqual(result.issues, []);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("detectGrafanaRepoConfig distinguishes missing, partial, and managed script signals", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "devgod-grafana-detect-state-"));
+
+  try {
+    const missing = await detectGrafanaRepoConfig(cwd);
+    assert.equal(missing.configured, false);
+    assert.equal(missing.hasAnySignal, false);
+
+    await writeFile(
+      path.join(cwd, ".env.devgod"),
+      [
+        "DEVGOD_GRAFANA_URL=https://grafana.example.com",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const partial = await detectGrafanaRepoConfig(cwd);
+    assert.equal(partial.hasAnySignal, true);
+    assert.equal(partial.configured, false);
+    assert.equal(partial.env.configured, false);
+    assert.match(partial.issues.join(" "), /DEVGOD_GRAFANA_TOKEN/);
+
+    await writeFile(
+      path.join(cwd, "package.json"),
+      JSON.stringify(
+        {
+          name: "fixture",
+          private: true,
+          scripts: {
+            "devgod:grafana:mcp": "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    const withScript = await detectGrafanaRepoConfig(cwd);
+    assert.equal(withScript.hasAnySignal, true);
+    assert.equal(withScript.packageJson.hasManagedScript, true);
+  } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });

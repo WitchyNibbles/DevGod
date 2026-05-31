@@ -121,24 +121,16 @@
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "legacy queue classes are compatible and repairable in consumed repos",
-        "repo-context profiling and planning hydration ship in the shared package",
-        "setup and install flows expose the new repair and context refresh tooling"
+        "workflow-proof resolves 2026-05-29-grafana-research-install-hardening from the latest runtime run",
+        "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "focused queue compatibility and repair command tests",
-        "focused repo-context probing and planning-context hydration tests",
-        "install and setup regression tests",
-        "broader devgod regression test pass before push",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-repo-context-memory-rollout",
-        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-repo-context-memory-rollout"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-29-grafana-research-install-hardening"
       ],
       "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-28-repo-context-memory-rollout.md",
-        "plan: .devgod/work/plans/plan-2026-05-28-repo-context-memory-rollout.md",
-        "task packet: .devgod/work/tasks/task-2026-05-28-repo-context-memory-rollout.md",
-        "branch: codex/repo-context-memory-rollout",
-        "runtime workflow proof: run 24201843-9778-4504-a39d-25a952ef1808 approved the task"
+        "task packet: 2026-05-29-grafana-research-install-hardening",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-29-grafana-research-install-hardening",
+        "quality gate: release_readiness_required"
       ],
       "blocker": null
     }

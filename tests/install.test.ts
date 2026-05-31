@@ -110,6 +110,9 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /clarify ambiguous intent before planning/i);
   assert.match(first, /do not wait for the user to say continue/i);
   assert.match(first, /runtime-backed devgod commands/i);
+  assert.match(first, /repo-local Grafana configuration/i);
+  assert.match(first, /avoid strong negative claims/i);
+  assert.match(first, /broader evidence/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -127,6 +130,8 @@ test("mergeDotAgentsMd appends and is idempotent", () => {
   assert.match(first, /Devgod Kernel/);
   assert.match(first, /devgod-intake/);
   assert.match(first, /specialist_verified/);
+  assert.match(first, /repo-local Grafana configuration/i);
+  assert.match(first, /avoid strong negative claims/i);
   assert.equal(first, second);
 });
 
@@ -1099,6 +1104,42 @@ test("installDevgodIntoProject opt-in Grafana setup adds MCP config, env guidanc
     assert.match(envExample, /DEVGOD_GRAFANA_URL=/);
     assert.match(envExample, /DEVGOD_GRAFANA_LOGS_DATASOURCE_UID=/);
     assert.match(summary.nextSteps.join("\n"), /DEVGOD_GRAFANA_URL/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installDevgodIntoProject auto-detects configured Grafana env and adds MCP wiring", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-grafana-detected-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await writeFile(
+      path.join(targetRoot, ".env.devgod"),
+      [
+        "DEVGOD_GRAFANA_URL=https://grafana.example.com",
+        "DEVGOD_GRAFANA_TOKEN=env-file-token",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    await installDevgodIntoProject({
+      sourceRoot,
+      targetRoot
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex/config.toml"), "utf8");
+
+    assert.equal(
+      packageJson.scripts["devgod:grafana:mcp"],
+      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+    );
+    assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }

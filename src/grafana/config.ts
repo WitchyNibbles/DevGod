@@ -29,6 +29,15 @@ export interface GrafanaConfigResolution {
   issues: string[];
 }
 
+export interface GrafanaRepoSignalResolution {
+  configured: boolean;
+  hasAnySignal: boolean;
+  issues: string[];
+  env: GrafanaConfigResolution & { presentKeys: string[] };
+  codex: { hasGrafanaMcp: boolean };
+  packageJson: { hasManagedScript: boolean };
+}
+
 function isSafeDevgodEnvKey(candidate: string): boolean {
   return /^DEVGOD_[A-Z0-9_]+$/.test(candidate);
 }
@@ -80,6 +89,19 @@ function parseDevgodEnvContent(content: string): NodeJS.ProcessEnv {
   return parsed;
 }
 
+async function readFileIfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error: unknown) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code === "ENOENT") {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
 export async function loadDevgodEnvFile(cwd = process.cwd()): Promise<void> {
   const envPath = path.join(cwd, ".env.devgod");
 
@@ -99,6 +121,47 @@ export async function loadDevgodEnvFile(cwd = process.cwd()): Promise<void> {
       throw error;
     }
   }
+}
+
+export async function detectGrafanaRepoConfig(cwd = process.cwd()): Promise<GrafanaRepoSignalResolution> {
+  const envContent = await readFileIfExists(path.join(cwd, ".env.devgod"));
+  const envVars = envContent ? parseDevgodEnvContent(envContent) : {};
+  const presentKeys = grafanaEnvKeys.filter((key) => typeof envVars[key] === "string");
+  const envResolution = resolveGrafanaConfig(envVars);
+
+  const codexConfig = await readFileIfExists(path.join(cwd, ".codex", "config.toml"));
+  const packageJsonContent = await readFileIfExists(path.join(cwd, "package.json"));
+
+  let hasManagedScript = false;
+  if (packageJsonContent) {
+    try {
+      const packageJson = JSON.parse(packageJsonContent) as {
+        scripts?: Record<string, unknown>;
+      };
+      hasManagedScript = typeof packageJson.scripts?.["devgod:grafana:mcp"] === "string";
+    } catch {
+      hasManagedScript = false;
+    }
+  }
+
+  const hasGrafanaMcp = codexConfig?.includes("[mcp_servers.grafana]") ?? false;
+  const hasAnySignal = presentKeys.length > 0 || hasGrafanaMcp || hasManagedScript;
+
+  return {
+    configured: envResolution.configured,
+    hasAnySignal,
+    issues: envResolution.configured ? [] : hasAnySignal ? envResolution.issues : [],
+    env: {
+      ...envResolution,
+      presentKeys
+    },
+    codex: {
+      hasGrafanaMcp
+    },
+    packageJson: {
+      hasManagedScript
+    }
+  };
 }
 
 function trimEnv(value: string | undefined): string | undefined {

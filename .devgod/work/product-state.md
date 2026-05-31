@@ -2,46 +2,31 @@
 
 ## Product Goal
 
-Make devgod’s shipped team shape manifest-driven through a canonical agent catalog that expands the day-one role roster, keeps explicit shipped artifacts, and proves stronger control without reintroducing continuation stalls, wait loops, or scope-stranding behavior.
+Keep `devgod` trustworthy in consuming repos by improving integration awareness, evidence-gathering skepticism, and installation reliability.
 
 ## Global Acceptance Criteria
 
-- one reviewed catalog defines the shipped role roster
-- role validation and retrieval guidance derive from that catalog
-- shipped `.codex/agents/*.toml` are verified against the catalog
-- the day-one roster includes new core roles and optional domain specialists
-- stricter control remains CI- and verification-oriented rather than creating unrelated runtime blockers
-- continuation and recoverable-blocker regressions remain green
-- the verified branch lands on `main` with passing CI
+- existing consuming-repo Grafana configuration is detectable by shared `devgod` behavior
+- managed debugging and research behavior avoids premature “no evidence” conclusions when broader investigation is warranted
+- packaged install and upgrade flows remain deterministic and replayable for consuming repos
+- verification includes installed-repo-style evidence, not only source-repo unit coverage
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Canonical role catalog | complete | `src/devgod/agent-catalog.ts`, `src/domain/types.ts`, `src/core/policy.ts`, focused contracts/policy/admin/report tests passed |
-| Catalog-derived validation and guidance | complete | retrieval guidance and role validation now derive from the catalog; focused tests passed |
-| Catalog-to-artifact drift verification | complete | `src/devgod/agent-artifact-verifier.ts`, deterministic drift test in `tests/install.test.ts` passed |
-| Expanded shipped day-one roster | complete | new `.codex/agents/*.toml`, `docs/devgod-agent-team.md`, package/install assertions passed |
-| Anti-stall continuation proof | complete | optional-role handoff regression plus runtime/admin/status/ops suites passed |
-| Release and PR CI proof | complete | local workflow proof/live proof passed for `2026-05-23-devgod-codex-automation-rollout-verification`, `main` was fast-forwarded to `b96327a`, and hosted `CI` run `26392030568` completed successfully on the merged commit |
-| Maintainer-only regression tooling boundary | complete | package/export boundary helper, promptfoo/property/mutation lanes, and release-overlay proof passed without shipping maintainer-only tooling to consuming repos |
+| Repo-aware Grafana detection | in_progress | intake brief and pending implementation for shared repo signal detection |
+| Skeptical research and debugging guidance | in_progress | managed kernel and skill/prompt surfaces under review |
+| Reliable consuming-repo install verification | in_progress | install harness and Grafana-enabled verification path under review |
 
 ## Current Milestone
 
-The first consuming-repo repo-context memory slice is now implemented: queue compatibility repair ships for installed repos, deterministic repo-context profiling is live, and planning/setup surfaces now hydrate that context
+Implement and verify Grafana detection, skepticism hardening, and install-path reliability for consuming repos.
 
 ## Completed Milestones
 
-- approved design and implementation plan
-- clean branch-from-main baseline verification
-- canonical catalog landed with derived validation and retrieval guidance
-- catalog-to-artifact verifier landed with deterministic drift coverage
-- expanded shipped day-one agent roster shipped explicitly in package/docs surfaces
-- anti-stall routing and runtime recovery regressions stayed green after the catalog rollout
-- release proof closed with local workflow proof, PR publication, and a green hosted CI workflow on the final branch tip
-- maintainer-only regression tooling boundary for promptfoo, property tests, and mutation testing
-- research and proposal for smarter consuming-repo repo-context memory
-- first repo-context memory rollout with task-queue repair and repo-context hydration
+- scoped intake and risk triage for the Grafana, research, and install reliability concerns
+- approved design direction to fix owning layers in package code plus installed-repo verification
 
 ## Current Task
 
@@ -58,9 +43,8 @@ The first consuming-repo repo-context memory slice is now implemented: queue com
 
 ## Reasoning Debt
 
-- GitHub did not attach automatic `pull_request` status checks to PR #5 for this branch, so hosted verification was confirmed through the repo’s own `CI` workflow via `workflow_dispatch` on the exact PR head commit.
-- maintainer-only quality tooling now has boundary proof, but broader mutation and eval coverage can still expand incrementally from this baseline
-- the shipped repo-context slice is intentionally deterministic and narrow; reviewed slot refinements and git/PR convention capture are still pending
+- existing install tests suggest some reliability already exists, so implementation should focus on the real gap between packaged capability and operator-visible behavior
+- Grafana detection must distinguish “repo is configured for Grafana” from “Grafana MCP is currently callable in this exact session”
 
 ## Verification Summary
 
@@ -92,9 +76,7 @@ The first consuming-repo repo-context memory slice is now implemented: queue com
 
 ## Review Summary
 
-- reviewer, QA, and security runtime-authenticated approvals now exist for `2026-05-27-grafana-logs-mcp-integration`
-- reviewer, QA, and security runtime-verified summaries are recorded for `2026-05-28-devgod-maintainer-only-quality-tooling`
-- runtime-authenticated workflow proof approved the maintainer-only quality-tooling slice
+- no review artifacts yet for this active slice
 
 ## Last Updated
 
