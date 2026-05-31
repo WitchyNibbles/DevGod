@@ -2,31 +2,35 @@
 
 ## Product Goal
 
-Keep `devgod` trustworthy in consuming repos by improving integration awareness, evidence-gathering skepticism, and installation reliability.
+Strengthen `devgod`'s design and architecture decision quality with a rotating, cross-functional council that prevents shallow design, reduces yes-man behavior, and keeps governance time-bounded.
 
 ## Global Acceptance Criteria
 
-- existing consuming-repo Grafana configuration is detectable by shared `devgod` behavior
-- managed debugging and research behavior avoids premature “no evidence” conclusions when broader investigation is warranted
-- packaged install and upgrade flows remain deterministic and replayable for consuming repos
-- verification includes installed-repo-style evidence, not only source-repo unit coverage
+- substantive roadmap and plan work has a clear trigger path into council review
+- council review requires explicit alternatives, documented dissent, and decision records
+- trivial work is not blocked by council process
+- the council can approve with conditions or bounded exceptions rather than blocking indefinitely
+- council governance fits the existing `devgod` review and workflow contract
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Repo-aware Grafana detection | in_progress | intake brief and pending implementation for shared repo signal detection |
-| Skeptical research and debugging guidance | in_progress | managed kernel and skill/prompt surfaces under review |
-| Reliable consuming-repo install verification | in_progress | install harness and Grafana-enabled verification path under review |
+| Council governance policy | done | `AGENTS.md`, `src/install/merge.ts`, and `.devgod/rules/design-council-policy.md` |
+| Council templates and decision packets | done | `.devgod/templates/dac-decision-packet.md`, `.devgod/templates/adr.md`, and updated workflow templates |
+| Manager and role routing into council review | done | updated `.codex/agents/*.toml` guidance and `docs/devgod-agent-team.md` |
+| Workflow-aware council quality gate | done | `src/domain/types.ts`, `scripts/check-devgod-workflow.sh`, and targeted tests |
 
 ## Current Milestone
 
-Implement and verify Grafana detection, skepticism hardening, and install-path reliability for consuming repos.
+Ship the `Design and Architecture Council` governance model for substantive `devgod` work.
 
 ## Completed Milestones
 
-- scoped intake and risk triage for the Grafana, research, and install reliability concerns
-- approved design direction to fix owning layers in package code plus installed-repo verification
+- clarified user goals, operator model, constraints, and acceptance bar for a `devgod` council
+- completed a repo-backed and source-backed governance research pass
+- produced a phased implementation plan for the `Design and Architecture Council`
+- shipped DAC policy, templates, agent guidance, and workflow-check support in package-controlled repo surfaces
 
 ## Current Task
 
@@ -38,47 +42,27 @@ Implement and verify Grafana detection, skepticism hardening, and install-path r
 
 ## Blockers
 
-- maintainer-only tooling now has verified package/export boundaries, but `promptfoo` remains pinned until the repo runtime moves past the newer Node engine floor
-- richer repo preference capture and remember/replace prompts are still follow-up work
+- none
 
 ## Reasoning Debt
 
-- existing install tests suggest some reliability already exists, so implementation should focus on the real gap between packaged capability and operator-visible behavior
-- Grafana detection must distinguish “repo is configured for Grafana” from “Grafana MCP is currently callable in this exact session”
+- the exact boundary between advisory rollout and hard workflow enforcement should be validated with a pilot before runtime checks become strict
+- the required-seat rules may need tuning once a few real `devgod` tasks run through the council
 
 ## Verification Summary
 
-- Grafana integration intake is approved for consuming-repo users who want DevGod to inspect Grafana-backed logs during debugging and research
-- the planned first slice is an opt-in consuming-repo install flag plus a DevGod-shipped Grafana MCP server, keeping runtime workflow authority separate from external log evidence
-- the Grafana slice is now implemented with opt-in installer wiring, `.env.devgod` Grafana settings, a Loki-only Grafana MCP server, and debugging/research guidance updates
-- focused verification passed for `tests/grafana-config.test.ts`, `tests/grafana-mcp-tools.test.ts`, `tests/install.test.ts`, and `tests/happy-path.test.ts`
-- runtime-authoritative workflow proof approved `2026-05-27-grafana-logs-mcp-integration`, and `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-27-grafana-logs-mcp-integration` passed
-- maintainer-only quality tooling now exists as a package-side hardening lane only, with explicit directories, scripts, and CI job boundaries
-- `src/install/maintainer-boundary.ts` plus focused unit/property tests now prove maintainer-only scripts, devDependencies, and published paths do not leak into target repos
-- `npm run eval:promptfoo:maintainer-boundary` now passes with three repo-local boundary scenarios and no model-key requirement
-- `npm run test:mutation:maintainer-boundary` now passes with an `88.89%` mutation score on the boundary helper, while CI uses the dry-run lane
-- `npm run verify:release-overlay` passed after adding the maintainer-only tooling, including the package dry-run proof that the new files stay out of the tarball
-- local authoritative workflow proof run `05028a18-ab7f-45e0-8cd4-128f0151c3e6` approved `2026-05-28-devgod-maintainer-only-quality-tooling`
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-devgod-maintainer-only-quality-tooling` passed
-- repo-context memory proposal concludes that DevGod should add a derived repo-context profile in runtime registration metadata plus reviewed slot-aware memory for durable preferences and conventions
-- the recommended first slice avoids a schema migration and reuses `runtime_project_registrations.manifest`, `memory_entries.metadata`, existing retrieval freshness checks, and later optional Qdrant indexing for structured slots
-- branch `codex/repo-context-memory-rollout` now includes queue repair tooling, `refresh-repo-context`, planning-context hydration, and setup/install wiring
-- focused repo-context tests passed: `tests/repo-context-profile.test.ts` and `tests/plan-context-command.test.ts`
-- install/setup regressions passed in the full `tests/install.test.ts` suite after wiring `devgod:refresh-repo-context`
-- broader regression suites passed: `tests/admin.test.ts`, `tests/autopilot-status.test.ts`, and `tests/task-queue-repair.test.ts`
-- runtime workflow proof run `24201843-9778-4504-a39d-25a952ef1808` approved `2026-05-28-repo-context-memory-rollout`
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
-- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
-- workflow integrity hardening is now implemented across proof seeding, contradiction reporting, recovery auditability, live workflow gates, service-level failure handling, Postgres persistence, and in-memory store semantics
-- focused workflow integrity regressions passed for admin, service, ops recovery, report, status, postgres-store, workflow-integrity, and workflow-check suites
-- combined verification passed with `334` tests green across `tests/admin.test.ts`, `tests/service.test.ts`, `tests/postgres-store.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts`, `tests/ops-recovery.test.ts`, `tests/workflow-integrity.test.ts`, and `tests/workflow-check.test.ts`
-- manager-thread workflow artifact discovery now has a local fallback for canonical `.devgod` workflow exports in `plan-context`, and `node --experimental-strip-types --test tests/plan-context-command.test.ts` passed with a regression covering the blind spot
-- runtime orphan-lock recovery released the stale `2026-05-29-grafana-research-install-hardening` write-scope lock, `seed-workflow-proof` approved `2026-05-31-manager-workflow-artifact-discovery-fix` in authoritative run `86e773f3-a3ce-4f86-bb9d-7230bcf98ddb`, and `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-31-manager-workflow-artifact-discovery-fix` passed
+- current repo rules confirm that a council should be modeled as a quality gate and planning artifact, not as a replacement for authenticated completion authority
+- prior `devgod` artifacts already show useful multi-role architecture synthesis, but without a reusable operating model
+- external research supports a rotating cross-functional board, written decision records, explicit dissent, timeboxing, documented decisions, and expiring exceptions
+- the recommended first slice is policy, templates, and routing guidance first; runtime hardening follows after a bounded pilot
+- `node --experimental-strip-types --test tests/contracts.test.ts` passed
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed
+- `node --experimental-strip-types --test tests/workflow-check.test.ts` passed, including the new missing-council-metadata rejection case
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-01-devgod-dac-rollout-execution` passed
 
 ## Review Summary
 
-- no review artifacts yet for this active slice
+- reviewer, QA, and security summary reviews are recorded for `2026-06-01-devgod-dac-rollout-execution`
 
 ## Last Updated
 

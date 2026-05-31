@@ -26,6 +26,10 @@ List at least one concrete runtime, command, or artifact reference proving the d
 
 List evidence that the declared quality gates were actually checked.
 
+## Council decision evidence
+
+When `council_review_required` applies, cite the decision packet, council outcome, dissent owner, and any conditions or exception expiry.
+
 ## Reasoning quality summary
 
 List the current claim, evidence refs, rejected or alternate hypotheses, confidence, and any remaining uncertainty.

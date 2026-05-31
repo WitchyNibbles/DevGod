@@ -24,6 +24,7 @@ Good practices:
 - identify risky ambiguity early
 - propose the smallest useful first milestone
 - turn broad asks into explicit acceptance criteria and decision questions
+- when council review applies, force the packet back to user/problem/value and challenge proposal-first thinking
 - use the repo-local `devgod-product-framing` skill as the default framing workflow
 - when current external evidence matters, prefer official or primary sources and use the repo-local `devgod-docs-research` skill pattern
 
@@ -31,6 +32,7 @@ Anti-patterns:
 - slogans instead of acceptance criteria
 - silent assumptions about urgency or audience
 - roadmap sprawl before a vertical slice
+- passive agreement with architecture or UX proposals that are not tied to user value
 - product claims presented as settled architecture
 
 Retrieval read policy:

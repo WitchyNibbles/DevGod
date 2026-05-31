@@ -614,6 +614,7 @@ test("default helpers and type guards expose the shipped workflow vocabulary", (
   assert.equal(isCompletionStandard("specialist_verified"), true);
   assert.equal(isCompletionStandard("bad"), false);
   assert.equal(isQualityGate("tdd_required"), true);
+  assert.equal(isQualityGate("council_review_required"), true);
   assert.equal(isQualityGate("bad"), false);
   assert.equal(isValidStopGoDecision("go"), true);
   assert.equal(isValidStopGoDecision("later"), false);

@@ -1075,6 +1075,35 @@ test("check-devgod-workflow-live rejects unsupported quality gates", async () =>
   }
 });
 
+test("check-devgod-workflow-live rejects council_review_required tasks without council metadata", async () => {
+  const taskId = "DG-LIVE-MISSING-COUNCIL";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-missing-council-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      qualityGates: ["product_acceptance", "reasoning_strict_required", "council_review_required"],
+      omitSections: ["## Council review"]
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /missing heading ## Council review/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-workflow-live rejects strict reasoning tasks without attempt records", async () => {
   const taskId = "DG-LIVE-STRICT-MISSING";
   const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-strict-missing-");

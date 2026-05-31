@@ -38,6 +38,7 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(intakeBrief, /## Bad-path or edge-case outcomes/);
 
   assert.match(taskPacket, /`regression_safety_required`/);
+  assert.match(taskPacket, /`council_review_required`/);
   assert.match(taskPacket, /`coverage_ledger_required`/);
   assert.match(taskPacket, /`progress_proof_required`/);
   assert.match(taskPacket, /`checkpoint_resume_required`/);
@@ -51,10 +52,13 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(taskPacket, /## Progress proof/);
   assert.match(taskPacket, /## Interrupt checkpoint policy/);
   assert.match(taskPacket, /## Workflow artifact refs/);
+  assert.match(taskPacket, /## Council review/);
+  assert.match(taskPacket, /### Dissent owner/);
   assert.match(taskPacket, /review_exports=required \| runtime_optional/);
   assert.match(taskPacket, /## Bad-path or edge-case checks/);
   assert.match(taskPacket, /## Residual risk disposition/);
 
+  assert.match(qualityMatrix, /### `council_review_required`/);
   assert.match(qualityMatrix, /refactors and rewrites must preserve intended behavior/i);
   assert.match(qualityMatrix, /### `regression_safety_required`/);
   assert.match(qualityMatrix, /### `coverage_ledger_required`/);
@@ -63,6 +67,7 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(qualityMatrix, /### `reasoning_strict_required`/);
   assert.match(qualityMatrix, /discovered `CRITICAL` or `HIGH` defects in touched scope/i);
   assert.match(reasoningQuality, /facts, assumptions, and guesses/i);
+  assert.match(reasoningQuality, /structured dissent pass/i);
   assert.match(reasoningQuality, /multiple plausible hypotheses/i);
   assert.match(reasoningQuality, /strict is the default reasoning mode/i);
   assert.match(reasoningQuality, /dual mode is the migration bridge/i);

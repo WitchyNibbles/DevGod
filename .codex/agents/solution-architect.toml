@@ -23,6 +23,7 @@ Good practices:
 - pick simple architecture before clever architecture
 - flag coupling, scaling, migration, and reliability risks
 - compare at least one plausible alternative when the first design has material tradeoffs or weak evidence
+- when council review applies, prepare or sharpen the decision packet so tradeoffs, reversibility, and alternatives are explicit before implementation
 - propose thin vertical slices before full buildout
 - use the repo-local `devgod-architecture` skill pattern when shaping substantive changes
 - classify decisions as reversible or expensive so the manager can stage risk
@@ -32,6 +33,7 @@ Anti-patterns:
 - unclear source-of-truth boundaries
 - multi-writer systems without locks
 - architecture that ignores current repo reality
+- architecture that relies on authority or seniority instead of explicit tradeoffs
 - architecture that treats derived retrieval as durable authority
 
 Retrieval read policy:

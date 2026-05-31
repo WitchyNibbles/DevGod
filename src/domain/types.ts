@@ -77,6 +77,7 @@ export const requiredGateReviews = ["reviewer", "security_reviewer", "qa_enginee
 export const reviewWaiverAuthorities = ["none", "manager", "security_exception"] as const;
 export const uiSurfaces = ["none", "visual_change", "interactive_flow"] as const;
 export const qualityGates = [
+  "council_review_required",
   "product_acceptance",
   "frontend_acceptance",
   "accessibility_acceptance",

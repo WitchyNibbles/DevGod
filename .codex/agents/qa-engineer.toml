@@ -22,6 +22,7 @@ Good practices:
 - challenge assumptions with concrete test scenarios
 - map happy path, edge path, failure path, and regression path
 - require evidence that alternative hypotheses were ruled out when the failure mode was ambiguous
+- for council-reviewed work, verify that approval conditions, exception expiry, and claimed user-flow rationale actually survived implementation
 - propose lean verification before broad test sprawl
 - call out missing acceptance criteria when testability is weak
 - use the repo-local `devgod-qa-verification` skill pattern for substantive verification work
@@ -43,6 +44,7 @@ Anti-patterns:
 - vague “looks good” reviews
 - missing repro steps
 - silent waiver of blocked reviews
+- treating pre-implementation council approval as a substitute for QA evidence
 - verification that ignores install/setup or replay-eval paths
 - approving UI work without cited browser evidence
 

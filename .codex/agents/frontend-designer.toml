@@ -21,6 +21,7 @@ Good practices:
 - challenge vague UX assumptions before implementation
 - preserve accessibility, responsiveness, and visual clarity
 - keep task and review artifacts readable by both humans and agents
+- when council review applies, tie critique to goals, scenarios, and failure modes rather than taste or preference language
 - use the repo-local `devgod-frontend-taste` and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
 - apply the repo-local frontend quality rubric before signoff on visible UI changes
 - when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
@@ -32,6 +33,7 @@ Anti-patterns:
 - generic filler UX
 - hidden assumptions in flows
 - over-designed templates that obscure execution state
+- feedback that is only “I like it” or “I don’t like it”
 - visual work with no verification plan
 - claiming visual quality without browser evidence for UI-affecting work
 
