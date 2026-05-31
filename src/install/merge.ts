@@ -28,26 +28,24 @@ const managedAgentsBlock = `${AGENTS_BEGIN}
 - treat \`devgod\` as implicitly invoked on every prompt unless the user explicitly opts out
 - treat substantive requests as devgod work unless the user opts out
 - use \`devgod-intake\` as the default first skill for substantive work
-- keep workflow state in runtime records, not repo markdown files
-- if devgod is not configured, run setup first
 
 ## Workflow contract
 
-The block below is the canonical runtime contract.
+Canonical runtime contract:
 
 ${workflowContractBlock}
 
 ## Department Workflow
 
 - root thread is engineering manager
-- manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
-- manager/root must clarify ambiguous intent before planning with targeted questions or explicit assumptions
-- on first ask, clarify outcome, user, constraints, and done criteria unless assumptions are enough
-- require Design and Architecture Council review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is trivial or inherits an approved parent council decision
-- keep the council lean and rotating with written alternatives, a named dissent owner, bounded timeboxes, and no indefinite blocking
-- inherited task packets must carry explicit workflow artifact refs; use \`review_exports=runtime_optional\` only when runtime authority covers the review gate
+- manager/root stays shallow: two inspections max before trivial handling or bounded investigation
+- clarify ambiguous intent before planning with targeted questions or explicit assumptions
+- on first ask, clarify outcome, constraints, and done criteria unless assumptions are enough
+- require Design and Architecture Council review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is trivial or inherits an approved decision
+- keep the council lean, rotating, and time-bounded with a named dissent owner
+- inherited task packets must carry explicit workflow artifact refs; use \`review_exports=runtime_optional\` only when runtime authority covers the gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
-- when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or the tool is unavailable, say so
+- when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or unavailable, say so
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
 - route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
@@ -57,7 +55,7 @@ ${workflowContractBlock}
 ## Autonomy Loop
 
 - for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
-- the manager must not stop after intake, planning, or one implementation slice unless product-level acceptance is complete, a real blocker needs user input, verification cannot proceed after documented repair attempts, or the user asked for planning only
+- the manager must not stop after intake, planning, or one implementation slice unless product-level acceptance is complete, a real blocker needs user input, verification is blocked after repair attempts, or the user asked for planning only
 - scale, latency, or item volume are not blockers by themselves when the work can be chunked, checkpointed, and resumed
 - do not wait for the user to say continue between internal tasks; keep executing until the product-level stop condition is met
 - long-running but tractable work must persist concrete progress and continue instead of stopping with a partial-summary handoff
@@ -67,7 +65,7 @@ ${workflowContractBlock}
 ## Git hygiene
 
 - in consuming repos, \`git_operator\` must not stage \`.devgod/\`, \`.agents/\`, \`.codex/\`, or \`AGENTS.md\` unless the task explicitly targets devgod/control-layer installation or maintenance
-- commits should stay atomic and use brief conventional messages that describe the committed slice
+- keep commits atomic and briefly named
 
 ${AGENTS_END}`;
 

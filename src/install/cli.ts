@@ -1737,40 +1737,7 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     .replace("`<owner-role>`", "`planner`")
     .replace("`artifact_complete | specialist_verified`", "`artifact_complete`")
     .replace("`strict | dual | legacy`", "`strict`")
-    .replace("review_exports=required | runtime_optional", "review_exports=required")
-    .replace(
-      [
-        "List the specialist roles whose execution must be evidenced before completion.",
-        "",
-        "## Quality gates",
-        "",
-        "List the task-type gates that apply, for example:",
-        "",
-        "Only assign file-backed gates when the task can actually produce or update the required artifacts inside its allowed write scope.",
-        "",
-        "- `product_acceptance`",
-        "- `frontend_acceptance`",
-        "- `accessibility_acceptance`",
-        "- `responsive_acceptance`",
-        "- `tdd_required`",
-        "- `e2e_required`",
-        "- `regression_safety_required`",
-        "- `release_readiness_required`",
-        "- `performance_check_required`",
-        "- `setup_replay_required`",
-        "- `coverage_ledger_required`",
-        "- `progress_proof_required`",
-        "- `checkpoint_resume_required`",
-        "- `memory_compaction_required`"
-      ].join("\n"),
-      [
-        "- `planner`",
-        "",
-        "## Quality gates",
-        "",
-        "- `product_acceptance`"
-      ].join("\n")
-    );
+    .replace("review_exports=required | runtime_optional", "review_exports=required");
 
   const hydrated = [
     ["## Goal", `Seed starter workflow metadata for \`${taskId}\` and replace these defaults before claiming completion.`],
@@ -1807,7 +1774,21 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ["### Research and debug budgets", "- implementation attempts: 1\n- verification passes: 1\n- repair loops: 1"]
   ].reduce((current, [heading, body]) => fillEmptySection(current, heading, body), scaffolded);
 
-  const withUiDefaults = replaceSectionBody(hydrated, "## UI surface", "`none`");
+  const withRoleDefaults = replaceSectionBody(hydrated, "## Required specialist roles", "- `planner`");
+  const withQualityGateDefaults = replaceSectionBody(withRoleDefaults, "## Quality gates", "- `product_acceptance`");
+  const withCouncilDefaults = [
+    ["### Required", "`false`"],
+    [
+      "### Trigger rationale",
+      "- scaffold-only default: replace this once the task is specialized enough to know whether council review applies"
+    ],
+    ["### Decision packet", "`none`"],
+    ["### Council members", "`none`"],
+    ["### Dissent owner", "`none`"],
+    ["### Outcome", "`inherited`"],
+    ["### Exception expiry", "`none`"]
+  ].reduce((current, [heading, body]) => replaceSectionBody(current, heading, body), withQualityGateDefaults);
+  const withUiDefaults = replaceSectionBody(withCouncilDefaults, "## UI surface", "`none`");
   const withPlaywrightDefaults = replaceSectionBody(withUiDefaults, "## Playwright requirement", "`false`");
   return replaceSectionBody(
     withPlaywrightDefaults,

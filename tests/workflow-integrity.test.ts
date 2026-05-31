@@ -404,7 +404,8 @@ test("workflow integrity: doctor repair safely resyncs contradictory local expor
           runId: run.id,
           taskId: "task-owner",
           reason: "synthetic persisted seed failure",
-          failedAt: "2026-05-31T10:00:00.000Z"
+          failedAt: "2026-05-31T10:00:00.000Z",
+          recoveryState: "requires_reproof"
         }
       },
       updatedAt: new Date().toISOString()
@@ -646,7 +647,8 @@ test("workflow integrity: doctor repair clears stale persisted seed failure meta
           runId: run.id,
           taskId: "task-proof",
           reason: "stale residue after proof",
-          failedAt: "2026-05-31T10:00:00.000Z"
+          failedAt: "2026-05-31T10:00:00.000Z",
+          recoveryState: "stale_metadata"
         }
       },
       updatedAt: new Date().toISOString()

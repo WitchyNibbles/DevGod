@@ -1534,7 +1534,8 @@ export class DevgodCoreService {
           runId,
           taskId,
           reason,
-          failedAt
+          failedAt,
+          recoveryState: "requires_reproof"
         }
       },
       createdAt: existingState?.createdAt ?? failedAt,

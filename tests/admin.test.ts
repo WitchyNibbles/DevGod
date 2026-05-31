@@ -961,7 +961,8 @@ test("executeWorkflowProofCommandFromArgs rejects stale persisted seed failure m
         runId: run.id,
         taskId: "plan",
         reason: "seed failure residue should have been cleared",
-        failedAt: "2026-05-31T11:00:00.000Z"
+        failedAt: "2026-05-31T11:00:00.000Z",
+        recoveryState: "stale_metadata"
       }
     },
     createdAt: new Date().toISOString(),
@@ -1513,7 +1514,8 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
         runId: "stale-seed-run",
         taskId: "active-proof-task",
         reason: "stale interrupted proof seed",
-        failedAt: "2026-05-31T09:00:00.000Z"
+        failedAt: "2026-05-31T09:00:00.000Z",
+        recoveryState: "stale_metadata"
       }
     },
     createdAt: new Date().toISOString(),
@@ -1649,7 +1651,8 @@ test("executeSeedModernizationProofCommandFromArgs seeds a ready modernization r
         runId: "stale-modernization-seed-run",
         taskId: "active-modernization-task",
         reason: "stale interrupted modernization proof seed",
-        failedAt: "2026-05-31T10:00:00.000Z"
+        failedAt: "2026-05-31T10:00:00.000Z",
+        recoveryState: "stale_metadata"
       }
     },
     createdAt: new Date().toISOString(),

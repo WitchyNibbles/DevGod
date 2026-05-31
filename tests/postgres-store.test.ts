@@ -467,8 +467,8 @@ test("PostgresStore.saveProjectRuntimeState and getProjectRuntimeState round-tri
   const state: ProjectRuntimeStateRecord = {
     projectId: "project:team:devgod",
     workspaceId: "workspace:team",
-    activeRunId: null,
-    activeTaskId: null,
+    activeRunId: undefined,
+    activeTaskId: undefined,
     taskQueue: {
       project_status: "ready",
       current_task_id: null,
@@ -484,7 +484,8 @@ test("PostgresStore.saveProjectRuntimeState and getProjectRuntimeState round-tri
         runId: "run-seed-failed",
         taskId: "task-modernization",
         reason: "modernization configuration exploded",
-        failedAt: "2026-05-31T10:00:00.000Z"
+        failedAt: "2026-05-31T10:00:00.000Z",
+        recoveryState: "requires_reproof"
       },
       lastIntegrityRepair: {
         source: "doctor_repair",

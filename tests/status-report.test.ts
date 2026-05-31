@@ -3035,7 +3035,8 @@ test("executeStatusCommandFromArgs treats stale persisted seed failure metadata 
           runId: run.id,
           taskId: "task-proof",
           reason: "seed failure residue should have been cleared",
-          failedAt: "2026-05-31T10:00:00.000Z"
+          failedAt: "2026-05-31T10:00:00.000Z",
+          recoveryState: "stale_metadata"
         }
       },
       createdAt: new Date().toISOString(),

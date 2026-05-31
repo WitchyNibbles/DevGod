@@ -28,6 +28,19 @@ This report mixes repo-verified \`devgod\` runtime proof with reviewed comparati
 Replay boundary: Replay-grade cases exercise broader multi-step degradation scenarios and should be read as stronger repo-local evidence, not external certification.
 `;
 
+const frontierBenchmarkSource = `# Frontier Model Benchmark
+
+Generated: 2026-05-31T12:00:00.000Z
+
+Configured default model: \`gpt-5.4\`
+Configured in: \`.codex/config.toml\`
+Primary public benchmark: SWE-Bench Pro (Public) (57.7% for the configured default).
+
+- This report is reviewed external evidence, not repo-local runtime proof.
+- Scores are vendor-published public benchmark values and may not have been reproduced under a single neutral harness by this repo.
+- The report intentionally stores only benchmark metadata and published scores, not benchmark tasks, gold patches, or answer-bearing artifacts.
+`;
+
 const goalGapHistorical = `# DevGod Goal Gap Audit
 
 Generated: \`2026-05-20\`
@@ -50,12 +63,19 @@ Command families include \`coverage\`, \`gaps\`, and \`report\`.
 test("check-docs-runtime-drift passes when benchmark and historical docs are aligned", async () => {
   const fixtureRoot = await createFixture();
   const benchmarkSourcePath = path.join(fixtureRoot, "benchmark-source.md");
+  const frontierBenchmarkSourcePath = path.join(fixtureRoot, "frontier-benchmark-source.md");
 
   try {
     await writeFile(benchmarkSourcePath, benchmarkSource, "utf8");
+    await writeFile(frontierBenchmarkSourcePath, frontierBenchmarkSource, "utf8");
     await writeFile(
       path.join(fixtureRoot, "docs", "benchmarks", "orchestration-benchmark.md"),
       benchmarkSource.replace("2026-05-20T16:50:16.106Z", "2026-05-20T17:00:00.000Z"),
+      "utf8"
+    );
+    await writeFile(
+      path.join(fixtureRoot, "docs", "benchmarks", "frontier-model-benchmark.md"),
+      frontierBenchmarkSource.replace("2026-05-31T12:00:00.000Z", "2026-05-31T12:15:00.000Z"),
       "utf8"
     );
     await writeFile(path.join(fixtureRoot, "docs", "devgod-goal-gap-audit.md"), goalGapHistorical, "utf8");
@@ -65,7 +85,15 @@ test("check-docs-runtime-drift passes when benchmark and historical docs are ali
 
     const { stdout } = await execFileAsync(
       "bash",
-      [driftScript, "--repo-root", fixtureRoot, "--benchmark-source", benchmarkSourcePath],
+      [
+        driftScript,
+        "--repo-root",
+        fixtureRoot,
+        "--benchmark-source",
+        benchmarkSourcePath,
+        "--frontier-benchmark-source",
+        frontierBenchmarkSourcePath
+      ],
       { cwd: repoRoot }
     );
 
@@ -78,14 +106,24 @@ test("check-docs-runtime-drift passes when benchmark and historical docs are ali
 test("check-docs-runtime-drift fails on stale benchmark or stale goal-gap claims", async () => {
   const fixtureRoot = await createFixture();
   const benchmarkSourcePath = path.join(fixtureRoot, "benchmark-source.md");
+  const frontierBenchmarkSourcePath = path.join(fixtureRoot, "frontier-benchmark-source.md");
 
   try {
     await writeFile(benchmarkSourcePath, benchmarkSource, "utf8");
+    await writeFile(frontierBenchmarkSourcePath, frontierBenchmarkSource, "utf8");
     await writeFile(
       path.join(fixtureRoot, "docs", "benchmarks", "orchestration-benchmark.md"),
       benchmarkSource.replace(
         "Local proof: 14/14 repo-local baseline cases passed (100%).",
         "Runtime proof: 14/14 baseline cases passed (100%)."
+      ),
+      "utf8"
+    );
+    await writeFile(
+      path.join(fixtureRoot, "docs", "benchmarks", "frontier-model-benchmark.md"),
+      frontierBenchmarkSource.replace(
+        "Primary public benchmark: SWE-Bench Pro (Public) (57.7% for the configured default).",
+        "Primary public benchmark: SWE-Bench Pro (Public) (57.6% for the configured default)."
       ),
       "utf8"
     );
@@ -103,7 +141,15 @@ autonomous.configured=false
     await assert.rejects(
       execFileAsync(
         "bash",
-        [driftScript, "--repo-root", fixtureRoot, "--benchmark-source", benchmarkSourcePath],
+        [
+          driftScript,
+          "--repo-root",
+          fixtureRoot,
+          "--benchmark-source",
+          benchmarkSourcePath,
+          "--frontier-benchmark-source",
+          frontierBenchmarkSourcePath
+        ],
         { cwd: repoRoot }
       ),
       /docs\/runtime drift check failed: benchmark markdown is stale/

@@ -22,6 +22,7 @@ This repo keeps its improvement and anti-regression tooling on the maintainer pa
 - `npm run eval:promptfoo:maintainer-boundary`
 - `npm run test:mutation:maintainer-boundary`
 - `npm run test:mutation:maintainer-boundary:dry-run`
+- `npm run benchmark:frontier-models`
 
 ## CI jobs
 
