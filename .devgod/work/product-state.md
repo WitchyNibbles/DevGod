@@ -73,6 +73,8 @@ Implement and verify Grafana detection, skepticism hardening, and install-path r
 - workflow integrity hardening is now implemented across proof seeding, contradiction reporting, recovery auditability, live workflow gates, service-level failure handling, Postgres persistence, and in-memory store semantics
 - focused workflow integrity regressions passed for admin, service, ops recovery, report, status, postgres-store, workflow-integrity, and workflow-check suites
 - combined verification passed with `334` tests green across `tests/admin.test.ts`, `tests/service.test.ts`, `tests/postgres-store.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts`, `tests/ops-recovery.test.ts`, `tests/workflow-integrity.test.ts`, and `tests/workflow-check.test.ts`
+- manager-thread workflow artifact discovery now has a local fallback for canonical `.devgod` workflow exports in `plan-context`, and `node --experimental-strip-types --test tests/plan-context-command.test.ts` passed with a regression covering the blind spot
+- runtime orphan-lock recovery released the stale `2026-05-29-grafana-research-install-hardening` write-scope lock, `seed-workflow-proof` approved `2026-05-31-manager-workflow-artifact-discovery-fix` in authoritative run `86e773f3-a3ce-4f86-bb9d-7230bcf98ddb`, and `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-31-manager-workflow-artifact-discovery-fix` passed
 
 ## Review Summary
 
