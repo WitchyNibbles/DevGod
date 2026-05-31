@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { DevgodCoreService } from "../src/core/service.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 import { buildPlanContextRefreshArgs, executePlanContextCommandFromArgs } from "../src/admin.ts";
 import { formatPlanningContextReportMarkdown } from "../src/admin/planning-context.ts";
 import type { RetrievalRole } from "../src/domain/types.ts";
 import { buildPlanningContextReport } from "../src/admin/planning-context.ts";
+
+const isolatedCwd = path.join(tmpdir(), "devgod-plan-context-isolated");
 
 test("executePlanContextCommandFromArgs returns ranked planning context and markdown output", async () => {
   const service = new DevgodCoreService(new MemoryStore());
@@ -39,6 +44,7 @@ test("executePlanContextCommandFromArgs returns ranked planning context and mark
   const result = await executePlanContextCommandFromArgs(
     ["--query", "incident playbook", "--role", "planner", "--format", "markdown"],
     {
+      cwd: isolatedCwd,
       env: {
         DEVGOD_WORKSPACE_SLUG: "team",
         DEVGOD_PROJECT_SLUG: "devgod"
@@ -76,6 +82,7 @@ test("executePlanContextCommandFromArgs honors --project-only when querying memo
   let includeGlobal = true;
 
   await executePlanContextCommandFromArgs(["--query", "scope", "--project-only"], {
+    cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"
@@ -87,6 +94,68 @@ test("executePlanContextCommandFromArgs honors --project-only when querying memo
   });
 
   assert.equal(includeGlobal, false);
+});
+
+test("executePlanContextCommandFromArgs includes local workflow artifacts in planning context", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-plan-context-workflow-"));
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work", "briefs"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "ACTIVE"),
+      "task_id=2026-05-31-manager-workflow-artifact-discovery-fix\nworkflow=devgod\nstate=active\n"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "product-state.md"),
+      "# Product State\n\nThis workflow artifact awareness slice restores manager visibility into local workflow exports.\n"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "2026-05-31-manager-workflow-artifact-discovery-fix",
+          tasks: []
+        },
+        null,
+        2
+      )
+    );
+    await writeFile(
+      path.join(
+        directory,
+        ".devgod",
+        "work",
+        "briefs",
+        "brief-2026-05-31-manager-workflow-artifact-discovery-fix.md"
+      ),
+      "# Brief\n\nThis workflow artifact awareness brief explains the manager discovery failure.\n"
+    );
+
+    const result = await executePlanContextCommandFromArgs(["--query", "workflow artifact awareness"], {
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      async searchMemory() {
+        return [];
+      }
+    });
+
+    assert.ok(result.report.totalResults >= 2);
+    assert.ok(
+      result.report.items.some((item) =>
+        item.citation.includes(".devgod/work/briefs/brief-2026-05-31-manager-workflow-artifact-discovery-fix.md")
+      )
+    );
+    assert.ok(
+      result.report.items.some((item) => item.citation.includes(".devgod/work/product-state.md"))
+    );
+    assert.equal(result.report.items[0]?.authority, "repo_artifact:repo_context");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("buildPlanningContextReport flags stale and conflicting evidence for review", () => {
@@ -168,6 +237,7 @@ test("executePlanContextCommandFromArgs derives a query embedding when an embedd
     | undefined;
 
   await executePlanContextCommandFromArgs(["--query", "qdrant retrieval"], {
+    cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod",
@@ -203,6 +273,7 @@ test("executePlanContextCommandFromArgs auto-refreshes stale retrieval before se
   let refreshCalls = 0;
 
   const result = await executePlanContextCommandFromArgs(["--query", "retrieval freshness", "--auto-refresh-retrieval"], {
+    cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"
@@ -258,6 +329,7 @@ test("executePlanContextCommandFromArgs leaves stale retrieval in place by defau
   const result = await executePlanContextCommandFromArgs(
     ["--query", "retrieval freshness"],
     {
+      cwd: isolatedCwd,
       env: {
         DEVGOD_WORKSPACE_SLUG: "team",
         DEVGOD_PROJECT_SLUG: "devgod"
@@ -300,6 +372,7 @@ test("executePlanContextCommandFromArgs includes repo context and auto-refreshes
   const result = await executePlanContextCommandFromArgs(
     ["--query", "django database env", "--auto-refresh-repo-context"],
     {
+    cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"
@@ -357,6 +430,7 @@ test("executePlanContextCommandFromArgs leaves stale repo context in place by de
   let refreshCalls = 0;
 
   const result = await executePlanContextCommandFromArgs(["--query", "django database env"], {
+    cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod"

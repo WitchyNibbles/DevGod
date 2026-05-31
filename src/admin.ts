@@ -39,6 +39,7 @@ import {
 import {
   buildPlanningContextReport,
   formatPlanningContextReportMarkdown,
+  searchLocalWorkflowArtifacts,
   type PlanningContextRepoContextState,
   type PlanningContextRetrievalState
 } from "./admin/planning-context.ts";
@@ -90,7 +91,9 @@ import {
   type ExecuteDirectiveStepOptions
 } from "./core/service.ts";
 import { evaluateReviewDecision } from "./core/policy.ts";
+import { compareMemorySearchResults } from "./core/policy.ts";
 import type { ResolveReviewActionContext } from "./core/review-context.ts";
+import { annotateConflictSignals } from "./core/search-memory-results.ts";
 import type {
   ApprovalRecord,
   ArchitectureDecisionRecord,
@@ -1491,6 +1494,7 @@ function sameStringArray(left: readonly string[], right: readonly string[]): boo
 }
 
 interface ExecutePlanContextCommandOptions {
+  cwd?: string | undefined;
   env?: EnvShape | undefined;
   searchMemory: (input: {
     workspaceSlug: string;
@@ -11461,6 +11465,7 @@ export async function executePlanContextCommandFromArgs(
 
   const format = resolveMarkdownFormatFlag(args);
   const includeGlobal = !args.includes("--project-only");
+  const cwd = options.cwd ?? process.cwd();
   const repoContext = await resolvePlanningRepoContextState(args, env, options);
   const retrieval = await resolvePlanningRetrievalState(args, env, options);
   const embeddingModel = env.DEVGOD_EMBEDDING_MODEL?.trim();
@@ -11471,16 +11476,30 @@ export async function executePlanContextCommandFromArgs(
           text: query
         })
       : undefined;
-  const results = await options.searchMemory({
-    workspaceSlug,
-    projectSlug,
-    query,
-    limit,
-    includeGlobal,
-    queryEmbedding,
-    embeddingModel,
-    requesterRole: roleCandidate
-  });
+  const [retrievedResults, localWorkflowResults] = await Promise.all([
+    options.searchMemory({
+      workspaceSlug,
+      projectSlug,
+      query,
+      limit,
+      includeGlobal,
+      queryEmbedding,
+      embeddingModel,
+      requesterRole: roleCandidate
+    }),
+    searchLocalWorkflowArtifacts({
+      cwd,
+      query,
+      projectSlug,
+      requesterRole: roleCandidate,
+      limit
+    })
+  ]);
+  const results = annotateConflictSignals(
+    dedupePlanningContextResults([...retrievedResults, ...localWorkflowResults])
+      .sort(compareMemorySearchResults)
+      .slice(0, limit)
+  );
 
   return {
     format,
@@ -11492,6 +11511,18 @@ export async function executePlanContextCommandFromArgs(
       results
     })
   };
+}
+
+function dedupePlanningContextResults(results: readonly SearchMemoryResult[]): SearchMemoryResult[] {
+  const unique = new Map<string, SearchMemoryResult>();
+  for (const result of results) {
+    const key = result.citation.canonicalRef.trim().length > 0 ? result.citation.canonicalRef : result.id;
+    if (!unique.has(key)) {
+      unique.set(key, result);
+    }
+  }
+
+  return [...unique.values()];
 }
 
 async function planContextCommand(args: readonly string[]) {

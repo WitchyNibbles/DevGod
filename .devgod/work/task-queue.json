@@ -1,135 +1,23 @@
 {
-  "project_status": "idle",
+  "project_status": "done",
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-31-workflow-integrity-hardening-execution",
-      "title": "Execute workflow integrity hardening plan",
-      "status": "done",
-      "class": "runtime",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "workflow trust risks are reproduced in tests before fixes",
-        "runtime and recovery fixes are implemented against those tests",
-        "targeted verification passes for the executed slices"
-      ],
-      "verification": [
-        "targeted adversarial and runtime workflow test suites"
-      ],
-      "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-31-workflow-integrity-hardening-execution.md",
-        "task packet: .devgod/work/tasks/task-2026-05-31-workflow-integrity-hardening-execution.md",
-        "plan: docs/plans/2026-05-31-workflow-integrity-hardening-implementation.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-31-workflow-integrity-hardening-plan",
-      "title": "Plan workflow integrity hardening with risk research and adversarial validation",
-      "status": "done",
-      "class": "planning",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "saved implementation plan exists under docs/plans",
-        "plan includes research tasks for risk management",
-        "plan includes adversarial tests that reproduce known workflow trust failures",
-        "plan covers prevention, recovery, and reporting hardening"
-      ],
-      "verification": [
-        "manual review of plan completeness against discovered risks"
-      ],
-      "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-31-workflow-integrity-hardening-plan.md",
-        "task packet: .devgod/work/tasks/task-2026-05-31-workflow-integrity-hardening-plan.md",
-        "plan: docs/plans/2026-05-31-workflow-integrity-hardening-implementation.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-31-runtime-stale-write-scope-lock-investigation",
-      "title": "Investigate stale runtime write-scope lock from grafana hardening task",
-      "status": "done",
-      "class": "analysis",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "stale-lock behavior is reproduced against runtime authority",
-        "the locking run/task state is identified",
-        "the root cause is narrowed to state drift or lock-release logic",
-        "a repair or fix path is recommended"
-      ],
-      "verification": [
-        "runtime status/inspection commands for the locking task"
-      ],
-      "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-31-runtime-stale-write-scope-lock-investigation.md",
-        "task packet: .devgod/work/tasks/task-2026-05-31-runtime-stale-write-scope-lock-investigation.md",
-        "runtime status: run 0a1cea7f-22f0-46af-bdc3-c033ba41a467 shows orphan lock for 2026-05-29-grafana-research-install-hardening",
-        "runtime report: run 8f300281-3e87-4150-905b-277203aa5e46 remains review_blocked with one handoff, zero reviews, and an active .devgod/work lock",
-        "db query: active lock f4a4c6b5-b020-44bb-be66-0d5844615db4 belongs to run 8f300281-3e87-4150-905b-277203aa5e46"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-31-devgod-structured-hook-blocker-state",
-      "title": "Implement structured hook blocker persistence and stop-loop suppression",
-      "status": "done",
-      "class": "runtime",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "trusted structured blocker state is persisted for recurring hook-observable runtime failures",
-        "Stop consults structured blocker state before transcript heuristics",
-        "repeat continuation loops for the same blocker are suppressed",
-        "focused regression tests fail first and then pass"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/hooks.test.ts"
-      ],
-      "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-31-devgod-structured-hook-blocker-state.md",
-        "task packet: .devgod/work/tasks/task-2026-05-31-devgod-structured-hook-blocker-state.md",
-        "design: docs/plans/2026-05-31-structured-hook-blocker-state-design.md",
-        "focused verification: node --experimental-strip-types --test tests/hooks.test.ts"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-31-devgod-hook-blocker-intelligence-research",
-      "title": "Research smarter hook blocker handling for recurring environment failures",
-      "status": "done",
-      "class": "analysis",
-      "depends_on": [],
-      "acceptance_criteria": [
-        "current loop failure mode is identified",
-        "existing machine-readable blocker surfaces are identified",
-        "upstream Codex hook constraints are identified",
-        "a smallest robust fix path is recommended"
-      ],
-      "verification": [
-        "repo inspection of stop hook, hook utilities, and daemon/operator blocker state",
-        "upstream Codex hook capability review"
-      ],
-      "evidence": [
-        "brief: .devgod/work/briefs/brief-2026-05-31-devgod-hook-blocker-intelligence-research.md",
-        "task packet: .devgod/work/tasks/task-2026-05-31-devgod-hook-blocker-intelligence-research.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-05-28-repo-context-memory-rollout",
-      "title": "Queue compatibility repair and repo-context memory rollout",
+      "id": "2026-05-31-manager-workflow-artifact-discovery-fix",
+      "title": "Local workflow proof seed for 2026-05-31-manager-workflow-artifact-discovery-fix",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "workflow-proof resolves 2026-05-29-grafana-research-install-hardening from the latest runtime run",
+        "workflow-proof resolves 2026-05-31-manager-workflow-artifact-discovery-fix from the latest runtime run",
         "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-29-grafana-research-install-hardening"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-manager-workflow-artifact-discovery-fix"
       ],
       "evidence": [
-        "task packet: 2026-05-29-grafana-research-install-hardening",
-        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-29-grafana-research-install-hardening",
+        "task packet: 2026-05-31-manager-workflow-artifact-discovery-fix",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-manager-workflow-artifact-discovery-fix",
         "quality gate: release_readiness_required"
       ],
       "blocker": null
