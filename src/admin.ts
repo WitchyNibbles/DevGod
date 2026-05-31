@@ -1338,6 +1338,7 @@ interface DaemonPromptMetadata {
 interface ExecuteDaemonCommandOptions extends ExecuteAdvanceActiveTaskCommandOptions, ExecuteLoopCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
   runCodexTurn?: ((input: RunCodexTurnInput) => Promise<RunCodexTurnResult>) | undefined;
   upsertCoverageGaps?: ((runId: string, gaps: CoverageGapRecord[]) => Promise<unknown>) | undefined;
   checkpointRun?: ((
@@ -2104,7 +2105,7 @@ function withLastIntegrityRepairMetadata(
 }
 
 async function clearStaleSeedFailureRuntimeMetadata(input: {
-  report: DoctorReport;
+  report: DoctorCommandReport;
   options: ExecuteDoctorRepairCommandOptions;
 }): Promise<boolean> {
   if (!input.options.getProjectRuntimeState || !input.options.saveProjectRuntimeState) {
@@ -2129,7 +2130,7 @@ async function clearStaleSeedFailureRuntimeMetadata(input: {
 }
 
 async function persistIntegrityRepairRuntimeMetadata(input: {
-  report: DoctorReport;
+  report: DoctorCommandReport;
   options: ExecuteDoctorRepairCommandOptions;
   source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
   kind:
@@ -6674,7 +6675,7 @@ export async function executeDoctorRepairCommandFromArgs(
   }
 
   const syncOptions = report ? resolveDoctorRepairSyncOptions(options) : undefined;
-  if (report && report.run && buildDoctorExecutionReady(report) && syncOptions && options.getStatusSnapshot) {
+  if (report && report.run && buildDoctorExecutionReady(report) && syncOptions) {
     const statusReport = await executeStatusCommandFromArgs(resolveStatusArgs(report.run.id), options);
     const runtimeIntegrity = statusReport.integrity.runtimeState;
     const seedFailure = runtimeIntegrity?.seedFailure;

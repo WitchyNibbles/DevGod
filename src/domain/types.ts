@@ -894,6 +894,27 @@ export interface AutonomousExecutionSnapshot {
 
 export interface ProjectRuntimeMetadata extends Record<string, unknown> {
   autonomousExecution?: AutonomousExecutionState | undefined;
+  seedFailure?:
+    | {
+        runId: string;
+        taskId: string;
+        reason: string;
+        failedAt?: string | undefined;
+        recoveryState: "requires_reproof" | "stale_metadata";
+      }
+    | undefined;
+  lastIntegrityRepair?:
+    | {
+        source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+        kind:
+          | "local_export_resync"
+          | "runtime_metadata_cleanup"
+          | "runtime_task_reconcile"
+          | "recovery_action_apply";
+        summary: string;
+        repairedAt: string;
+      }
+    | undefined;
   devgodDaemon?: {
     sessionId?: string | undefined;
     lastRunId?: string | undefined;

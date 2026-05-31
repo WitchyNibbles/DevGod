@@ -2,35 +2,33 @@
 
 ## Product Goal
 
-Strengthen `devgod`'s design and architecture decision quality with a rotating, cross-functional council that prevents shallow design, reduces yes-man behavior, and keeps governance time-bounded.
+Add a source-backed public frontier-model benchmark surface so `devgod` can compare its configured default model against the best available public agentic software-engineering scores without embedding benchmark answers.
 
 ## Global Acceptance Criteria
 
-- substantive roadmap and plan work has a clear trigger path into council review
-- council review requires explicit alternatives, documented dissent, and decision records
-- trivial work is not blocked by council process
-- the council can approve with conditions or bounded exceptions rather than blocking indefinitely
-- council governance fits the existing `devgod` review and workflow contract
+- `devgod` exposes a generated public benchmark report anchored on the best current public software-engineering benchmark fit
+- the report compares the configured default model against current frontier peers with source URLs and dates
+- benchmark contamination or memorization caveats are explicit
+- committed benchmark markdown is generated and freshness-checked, not hand-maintained
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Council governance policy | done | `AGENTS.md`, `src/install/merge.ts`, and `.devgod/rules/design-council-policy.md` |
-| Council templates and decision packets | done | `.devgod/templates/dac-decision-packet.md`, `.devgod/templates/adr.md`, and updated workflow templates |
-| Manager and role routing into council review | done | updated `.codex/agents/*.toml` guidance and `docs/devgod-agent-team.md` |
-| Workflow-aware council quality gate | done | `src/domain/types.ts`, `scripts/check-devgod-workflow.sh`, and targeted tests |
+| Public benchmark selection rationale | done | `docs/benchmarks/frontier-model-benchmark.md` |
+| Configured default model detection | done | `src/evals/frontier-model-benchmark.ts` |
+| Generated frontier comparison markdown | done | `docs/benchmarks/frontier-model-benchmark.md` |
+| Benchmark freshness verification | done | `scripts/check-docs-runtime-drift.sh`, `tests/frontier-model-benchmark.test.ts`, and `tests/docs-runtime-drift-check.test.ts` |
 
 ## Current Milestone
 
-Ship the `Design and Architecture Council` governance model for substantive `devgod` work.
+Ship the public frontier-model benchmark comparison for `devgod`.
 
 ## Completed Milestones
 
-- clarified user goals, operator model, constraints, and acceptance bar for a `devgod` council
-- completed a repo-backed and source-backed governance research pass
-- produced a phased implementation plan for the `Design and Architecture Council`
-- shipped DAC policy, templates, agent guidance, and workflow-check support in package-controlled repo surfaces
+- identified `SWE-Bench Pro (Public)` as the best current public benchmark fit for `devgod`'s agentic software-engineering comparison surface
+- confirmed `SWE-Bench Verified` is no longer the right primary frontier benchmark because contamination risk is publicly documented
+- confirmed the shipped default model is currently `gpt-5.4` via `.codex/config.toml`
 
 ## Current Task
 
@@ -46,23 +44,25 @@ Ship the `Design and Architecture Council` governance model for substantive `dev
 
 ## Reasoning Debt
 
-- the exact boundary between advisory rollout and hard workflow enforcement should be validated with a pilot before runtime checks become strict
-- the required-seat rules may need tuning once a few real `devgod` tasks run through the council
+- some competitor scores may only be available through cross-vendor published comparison tables rather than each vendor's own release page
+- the public split of `SWE-Bench Pro` is stronger than older public SWE-bench variants, but still not a clean-room benchmark
 
 ## Verification Summary
 
-- current repo rules confirm that a council should be modeled as a quality gate and planning artifact, not as a replacement for authenticated completion authority
-- prior `devgod` artifacts already show useful multi-role architecture synthesis, but without a reusable operating model
-- external research supports a rotating cross-functional board, written decision records, explicit dissent, timeboxing, documented decisions, and expiring exceptions
-- the recommended first slice is policy, templates, and routing guidance first; runtime hardening follows after a bounded pilot
-- `node --experimental-strip-types --test tests/contracts.test.ts` passed
-- `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed
-- `node --experimental-strip-types --test tests/workflow-check.test.ts` passed, including the new missing-council-metadata rejection case
-- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-01-devgod-dac-rollout-execution` passed
+- source-backed research identified `SWE-Bench Pro (Public)` as the best public benchmark fit for repo-based software engineering comparison
+- the repo already has a generated benchmark pattern and a docs/runtime drift check that can be extended for this benchmark
+- `node --experimental-strip-types --test tests/frontier-model-benchmark.test.ts` passed
+- `node --experimental-strip-types --test tests/docs-runtime-drift-check.test.ts` passed
+- `bash scripts/check-docs-runtime-drift.sh` passed
+- `npm run benchmark:frontier-models -- --format markdown` passed
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-05-31-public-frontier-model-benchmark` passed
+- `npm run devgod:seed-workflow-proof -- --task-id 2026-05-31-public-frontier-model-benchmark` seeded authoritative runtime proof run `fd249dba-258b-42a6-9761-84c72e72ec0e`
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-31-public-frontier-model-benchmark` passed
+- `npm run typecheck` still fails on pre-existing repo issues outside this slice
 
 ## Review Summary
 
-- reviewer, QA, and security summary reviews are recorded for `2026-06-01-devgod-dac-rollout-execution`
+- runtime-authenticated reviewer, QA, and security approvals were seeded for `2026-05-31-public-frontier-model-benchmark`
 
 ## Last Updated
 

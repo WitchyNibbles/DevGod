@@ -20,6 +20,9 @@ npm run eval:orchestration
 echo "orchestration benchmark"
 npm run benchmark:orchestration >/dev/null
 
+echo "frontier model benchmark"
+npm run benchmark:frontier-models >/dev/null
+
 echo "docs/runtime drift"
 bash scripts/check-docs-runtime-drift.sh
 

@@ -20,6 +20,11 @@ export {
   renderOrchestrationBenchmarkMarkdown,
   runOrchestrationBenchmark
 } from "./evals/orchestration-benchmark.ts";
+export {
+  detectConfiguredDefaultModel,
+  renderFrontierModelBenchmarkMarkdown,
+  runFrontierModelBenchmark
+} from "./evals/frontier-model-benchmark.ts";
 export { runRetrievalMemoryBaseline } from "./evals/retrieval-memory-baseline.ts";
 export { buildEmbeddingText, embedQueryText, runEmbeddingJobs } from "./runtime/embedding-runner.ts";
 export { assessFreshness, runWithFreshnessGate } from "./runtime/freshness-gate.ts";

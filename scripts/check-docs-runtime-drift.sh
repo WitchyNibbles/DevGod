@@ -5,6 +5,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 benchmark_doc="$repo_root/docs/benchmarks/orchestration-benchmark.md"
 benchmark_source=""
+frontier_benchmark_doc="$repo_root/docs/benchmarks/frontier-model-benchmark.md"
+frontier_benchmark_source=""
 goal_gap_audit="$repo_root/docs/devgod-goal-gap-audit.md"
 current_state_doc="$repo_root/docs/current-state.md"
 redesign_doc="$repo_root/docs/autonomous-execution-redesign.md"
@@ -16,6 +18,7 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
       repo_root="$2"
       benchmark_doc="$repo_root/docs/benchmarks/orchestration-benchmark.md"
+      frontier_benchmark_doc="$repo_root/docs/benchmarks/frontier-model-benchmark.md"
       goal_gap_audit="$repo_root/docs/devgod-goal-gap-audit.md"
       current_state_doc="$repo_root/docs/current-state.md"
       redesign_doc="$repo_root/docs/autonomous-execution-redesign.md"
@@ -30,6 +33,16 @@ while [[ $# -gt 0 ]]; do
     --benchmark-source)
       [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
       benchmark_source="$2"
+      shift 2
+      ;;
+    --frontier-benchmark-doc)
+      [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
+      frontier_benchmark_doc="$2"
+      shift 2
+      ;;
+    --frontier-benchmark-source)
+      [[ $# -ge 2 ]] || { printf 'missing value for %s\n' "$1" >&2; exit 2; }
+      frontier_benchmark_source="$2"
       shift 2
       ;;
     --goal-gap-audit)
@@ -75,15 +88,20 @@ EOF
 }
 
 require_file "$benchmark_doc"
+require_file "$frontier_benchmark_doc"
 require_file "$goal_gap_audit"
 require_file "$current_state_doc"
 require_file "$redesign_doc"
 require_file "$readme_doc"
 
 benchmark_reference_file=""
+frontier_benchmark_reference_file=""
 cleanup() {
   if [[ -n "$benchmark_reference_file" && -f "$benchmark_reference_file" ]]; then
     python3 -c "from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)" "$benchmark_reference_file"
+  fi
+  if [[ -n "$frontier_benchmark_reference_file" && -f "$frontier_benchmark_reference_file" ]]; then
+    python3 -c "from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)" "$frontier_benchmark_reference_file"
   fi
 }
 trap cleanup EXIT
@@ -99,6 +117,18 @@ fi
 expected_benchmark="$(normalize_benchmark "$benchmark_reference_file")"
 actual_benchmark="$(normalize_benchmark "$benchmark_doc")"
 [[ "$actual_benchmark" == "$expected_benchmark" ]] || fail "benchmark markdown is stale: $benchmark_doc"
+
+if [[ -n "$frontier_benchmark_source" ]]; then
+  require_file "$frontier_benchmark_source"
+  frontier_benchmark_reference_file="$frontier_benchmark_source"
+else
+  frontier_benchmark_reference_file="$(mktemp)"
+  npm run benchmark:frontier-models -- --format markdown > "$frontier_benchmark_reference_file"
+fi
+
+expected_frontier_benchmark="$(normalize_benchmark "$frontier_benchmark_reference_file")"
+actual_frontier_benchmark="$(normalize_benchmark "$frontier_benchmark_doc")"
+[[ "$actual_frontier_benchmark" == "$expected_frontier_benchmark" ]] || fail "benchmark markdown is stale: $frontier_benchmark_doc"
 
 grep -Fq 'historical context' "$goal_gap_audit" || fail "goal gap audit must declare itself historical context"
 for forbidden in   "It is not yet at the stronger goal described"   "autonomous.configured=false"   "Runtime proof: 14/14 baseline cases passed (100%)."; do

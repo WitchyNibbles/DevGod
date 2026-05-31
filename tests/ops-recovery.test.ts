@@ -699,7 +699,8 @@ test("executeOpsCommandFromArgs surfaces persisted workflow seed failure residue
         runId: run.id,
         taskId: "plan",
         reason: "synthetic review persistence failure",
-        failedAt: "2026-05-31T10:00:00.000Z"
+        failedAt: "2026-05-31T10:00:00.000Z",
+        recoveryState: "requires_reproof"
       }
     },
     createdAt: new Date().toISOString(),
