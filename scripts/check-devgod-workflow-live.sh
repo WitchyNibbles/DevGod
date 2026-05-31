@@ -104,6 +104,49 @@ if [[ -z "$requested_task_id" ]]; then
 fi
 
 devgod_cli="$(resolve_devgod_cli)"
-node --experimental-strip-types "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest
+workflow_proof_json="$(
+  node --experimental-strip-types "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest --format json
+)"
+
+proof_run_id="$(
+  node --input-type=module - "$workflow_proof_json" <<'EOF'
+const payload = JSON.parse(process.argv[2]);
+if (typeof payload?.runId === "string" && payload.runId.length > 0) {
+  process.stdout.write(`${payload.runId}\n`);
+}
+EOF
+)"
+
+if [[ -n "$proof_run_id" ]]; then
+  status_json="$(
+    node --experimental-strip-types "$devgod_cli" status --run-id "$proof_run_id" --format json
+  )"
+  node --input-type=module - "$status_json" <<'EOF'
+const payload = JSON.parse(process.argv[2]);
+const integrity = payload?.integrity;
+
+if (!integrity || typeof integrity !== "object") {
+  process.exit(0);
+}
+
+const contradictions = Array.isArray(integrity.contradictions)
+  ? integrity.contradictions.filter((item) => typeof item === "string" && item.length > 0)
+  : [];
+
+if (integrity.status === "contradicted" || contradictions.length > 0) {
+  const summary = contradictions.length > 0 ? contradictions.join("; ") : "runtime integrity is contradicted";
+  process.stderr.write(`live workflow integrity contradicted after authoritative proof: ${summary}\n`);
+  process.exit(1);
+}
+
+const seedFailure = integrity.runtimeState?.seedFailure;
+if (seedFailure?.recoveryState === "stale_metadata") {
+  process.stderr.write(
+    `live workflow integrity contradicted after authoritative proof: stale persisted seed failure metadata for ${seedFailure.taskId ?? "unknown task"}\n`
+  );
+  process.exit(1);
+}
+EOF
+fi
 
 bash "$repo_root/scripts/check-devgod-workflow.sh" --live --external-review-authority --repo-root "$repo_root" --task-id "$requested_task_id"

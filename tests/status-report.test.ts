@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1511,6 +1511,70 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
   }
 });
 
+test("executeStatusCommandFromArgs surfaces contradictory local completion claims against unverified runtime state", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-integrity-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Integrity drift",
+    request: "Detect local exports that overstate runtime completion."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+  await service.claimTask(run.id, "plan", "planner");
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  await store.saveProjectRuntimeState({
+    projectId: context.project.id,
+    workspaceId: context.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: []
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(path.join(directory, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      `${JSON.stringify({ project_status: "complete", current_task_id: null, tasks: [] }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      inspectGitNexus: async () => gitNexusObservation()
+    });
+
+    assert.equal(report.integrity.status, "contradicted");
+    assert.equal(report.integrity.runtimeState?.lastVerifiedRunId, null);
+    assert.equal(report.integrity.localExports?.activeState, "complete");
+    assert.match(report.integrity.contradictions.join(" | "), /local exports claim complete/i);
+    assert.match(report.integrity.contradictions.join(" | "), /runtime run status is in_progress/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeStatusCommandFromArgs marks advisory continuation as operator-required when an execution plan is available", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({
@@ -2645,6 +2709,14 @@ test("executeDoctorRepairCommandFromArgs applies safe runtime reconcile after ru
     assert.equal(result.executionReady, true);
     assert.equal(result.repair.status, "repaired");
     assert.deepEqual(result.repair.stepsApplied, ["reconcile authoritative runtime task state"]);
+    assert.deepEqual(result.repair.integrityRepairsAttempted, ["reconcile authoritative runtime task state"]);
+    assert.deepEqual(result.repair.integrityRepairsApplied, ["reconcile authoritative runtime task state"]);
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.source, "doctor_repair");
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "runtime_task_reconcile");
+    assert.match(
+      String(runtimeState?.metadata?.lastIntegrityRepair?.summary ?? ""),
+      /reconcile authoritative runtime task state/i
+    );
     assert.equal(runtimeState?.activeTaskId, "task-owner");
     assert.equal((runtimeState?.taskQueue as { current_task_id?: string | null }).current_task_id, "task-owner");
   } finally {
@@ -2812,6 +2884,179 @@ test("executeDoctorRepairCommandFromArgs keeps execution blocked when semantic d
       /runtime reconcile requires operator review: cleared a stale active task from a completed runtime run/
     );
     assert.equal(runtimeState?.activeTaskId, "task-stale");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeDoctorRepairCommandFromArgs resyncs contradictory local exports from runtime state", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-doctor-repair-export-sync-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Repair export drift",
+      request: "Resync local workflow exports when runtime authority is healthy."
+    });
+    await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+    await service.claimTask(run.id, "task-owner", "planner");
+
+    const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(context);
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await mkdir(path.join(directory, "runtime-root"), { recursive: true });
+    await writeFile(path.join(directory, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      `${JSON.stringify({ project_status: "complete", current_task_id: null, tasks: [] }, null, 2)}\n`,
+      "utf8"
+    );
+    await store.saveProjectRuntimeRegistration(
+      runtimeRegistration({
+        projectId: context.project.id,
+        workspaceId: context.workspace.id,
+        repoPath: directory,
+        dataRoot: path.join(directory, "runtime-root")
+      })
+    );
+    const existingRuntimeState = await store.getProjectRuntimeState(context.project.id);
+    assert.ok(existingRuntimeState);
+    await store.saveProjectRuntimeState({
+      ...existingRuntimeState,
+      activeRunId: run.id,
+      activeTaskId: "task-owner",
+      lastVerifiedRunId: undefined,
+      updatedAt: new Date().toISOString()
+    });
+
+    const result = await executeDoctorRepairCommandFromArgs(["--repair"], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      findLatestRun(workspaceSlug, projectSlug) {
+        return store.findLatestRun({ workspaceSlug, projectSlug });
+      },
+      async findProjectContext(workspaceSlug, projectSlug) {
+        return store.getProjectContext({ workspaceSlug, projectSlug });
+      },
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      getProjectRuntimeRegistration(projectId) {
+        return store.getProjectRuntimeRegistration(projectId);
+      },
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: path.join(directory, ".devgod/review-identity-bindings.json"),
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectQdrant: async () => ({
+        ok: true,
+        summary: "qdrant reachable"
+      })
+    });
+
+    const activeExport = await readFile(path.join(directory, ".devgod", "ACTIVE"), "utf8");
+    const queueExport = JSON.parse(
+      await readFile(path.join(directory, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { project_status?: string; current_task_id?: string | null };
+    assert.equal(result.ok, true);
+    assert.equal(result.executionReady, true);
+    assert.equal(result.repair.status, "repaired");
+    assert.ok(result.repair.stepsApplied.includes("sync local workflow exports from runtime state"));
+    assert.equal(activeExport, "task_id=task-owner\nworkflow=devgod\nstate=active\n");
+    assert.equal(queueExport.project_status, "in_progress");
+    assert.equal(queueExport.current_task_id, "task-owner");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeStatusCommandFromArgs treats stale persisted seed failure metadata after proof as an integrity contradiction", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-stale-seed-failure-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+
+  try {
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Stale seed failure metadata",
+      request: "Surface persisted seed failure residue that survived authoritative proof."
+    });
+    await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-proof", allowedWriteScope: ["src/runtime"] })]);
+    await service.claimTask(run.id, "task-proof", "planner");
+
+    const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(context);
+    await store.saveProjectRuntimeState({
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      activeRunId: run.id,
+      activeTaskId: undefined,
+      taskQueue: {
+        project_status: "done",
+        current_task_id: null,
+        tasks: []
+      },
+      productState: { status: "done", items: [] },
+      lastVerifiedRunId: run.id,
+      metadata: {
+        seedFailure: {
+          runId: run.id,
+          taskId: "task-proof",
+          reason: "seed failure residue should have been cleared",
+          failedAt: "2026-05-31T10:00:00.000Z"
+        }
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      }
+    });
+
+    assert.equal(report.integrity.status, "contradicted");
+    assert.equal(report.integrity.runtimeState?.seedFailure?.recoveryState, "stale_metadata");
+    assert.match(report.integrity.contradictions.join(" | "), /still carries persisted seed failure metadata/i);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -1494,6 +1494,54 @@ export class DevgodCoreService {
     };
   }
 
+  async failTask(runId: string, taskId: string, reason: string) {
+    const task = await this.requireTask(runId, taskId);
+    const failedAt = timestamp();
+    const updatedTask: TaskRecord = {
+      ...task,
+      status: "blocked",
+      claimedBy: undefined,
+      updatedAt: failedAt
+    };
+
+    await this.store.releaseLocksForTask(runId, taskId, failedAt);
+    await this.store.updateTask(updatedTask);
+
+    const allTasks = await this.store.getTasksByRun(runId);
+    const syncedTasks = allTasks.map((candidate) =>
+      candidate.packet.taskId === taskId ? updatedTask : candidate
+    );
+    const nextRunStatus = deriveRunStatus(syncedTasks);
+    const run = await this.requireRun(runId);
+    await this.store.updateRun({
+      ...run,
+      status: nextRunStatus,
+      updatedAt: failedAt
+    });
+
+    const existingState = await this.store.getProjectRuntimeState(task.projectId);
+    await this.store.saveProjectRuntimeState({
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      activeRunId: runId,
+      activeTaskId: undefined,
+      taskQueue: buildRuntimeTaskQueue(nextRunStatus, syncedTasks),
+      productState: existingState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: existingState?.lastVerifiedRunId,
+      metadata: {
+        ...(existingState?.metadata ?? {}),
+        seedFailure: {
+          runId,
+          taskId,
+          reason,
+          failedAt
+        }
+      },
+      createdAt: existingState?.createdAt ?? failedAt,
+      updatedAt: failedAt
+    });
+  }
+
   async promoteMemory(runId: string, input: MemoryPromotionInput) {
     const run = await this.requireRun(runId);
     const errors = validateMemoryPromotion(input);
@@ -2398,7 +2446,11 @@ export class DevgodCoreService {
       }
 
       if (action.kind === "release_orphan_lock") {
-        await this.store.releaseLocksForTask(runId, action.taskId, appliedAt);
+        const run = await this.requireRun(runId);
+        const ownerLock = (await this.store.getActiveLocks(run.projectId)).find(
+          (lock) => lock.taskId === action.taskId && lock.status === "active"
+        );
+        await this.store.releaseLocksForTask(ownerLock?.runId ?? runId, action.taskId, appliedAt);
         appliedActionIds.push(actionId);
         continue;
       }

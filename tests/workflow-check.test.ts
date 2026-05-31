@@ -44,6 +44,9 @@ async function attachWorkflowProofStub(
   options: {
     exitCode?: number;
     stderr?: string;
+    statusStdout?: string;
+    statusExitCode?: number;
+    statusStderr?: string;
   } = {}
 ): Promise<string> {
   const stubRoot = await mkdtemp(join(tmpdir(), "devgod-workflow-proof-stub-"));
@@ -62,6 +65,17 @@ async function attachWorkflowProofStub(
       'if (logPath) {',
       '  writeFileSync(logPath, args.join(" "), "utf8");',
       '}',
+      'if (args[0] === "status") {',
+      `  if (${JSON.stringify(options.statusExitCode ?? 0)} !== 0) {`,
+      `    process.stderr.write(${JSON.stringify(options.statusStderr ?? "status command failed")});`,
+      `    process.exit(${JSON.stringify(options.statusExitCode ?? 0)});`,
+      "  }",
+      `  process.stdout.write(${JSON.stringify(
+        options.statusStdout ?? JSON.stringify({ integrity: { status: "consistent", contradictions: [] } })
+      )});`,
+      "  process.stdout.write(\"\\n\");",
+      "  process.exit(0);",
+      "}",
       'if (args[0] !== "workflow-proof") {',
       '  throw new Error(`unexpected command: ${args[0] ?? ""}`);',
       '}',
@@ -69,7 +83,7 @@ async function attachWorkflowProofStub(
       `  process.stderr.write(${JSON.stringify(options.stderr ?? "runtime workflow proof failed")});`,
       `  process.exit(${JSON.stringify(options.exitCode ?? 0)});`,
       '}',
-      'process.stdout.write(JSON.stringify({ authorityLabel: "runtime_authoritative", taskStatus: "approved" }) + "\\n");'
+      'process.stdout.write(JSON.stringify({ authorityLabel: "runtime_authoritative", taskStatus: "approved", runId: "stub-run-1" }) + "\\n");'
     ].join("\n"),
     "utf8"
   );
@@ -736,6 +750,47 @@ test("check-devgod-workflow-live rejects tasks without authoritative runtime pro
         cwd: targetRoot
       }),
       /Command failed: bash scripts\/check-devgod-workflow-live\.sh/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects contradicted runtime integrity after authoritative proof succeeds", async () => {
+  const taskId = "DG-LIVE-INTEGRITY-CONTRADICTION";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-integrity-contradiction-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot, {
+      statusStdout: JSON.stringify({
+        integrity: {
+          status: "contradicted",
+          contradictions: ["runtime state still carries persisted seed failure metadata after authoritative workflow proof"],
+          runtimeState: {
+            seedFailure: {
+              taskId,
+              runId: "stub-run-1",
+              reason: "seed failure residue should have been cleared",
+              recoveryState: "stale_metadata"
+            }
+          }
+        }
+      })
+    });
+    await writeLiveTaskPacket(targetRoot, taskId);
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /live workflow integrity contradicted after authoritative proof/i
     );
   } finally {
     if (stubRoot) {

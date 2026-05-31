@@ -462,6 +462,67 @@ test("PostgresStore.saveProjectRuntimeState and getProjectRuntimeState round-tri
   assert.deepEqual(must(capture[1]).values, [state.projectId]);
 });
 
+test("PostgresStore.saveProjectRuntimeState and getProjectRuntimeState round-trip integrity metadata", async () => {
+  const capture: QueryCapture[] = [];
+  const state: ProjectRuntimeStateRecord = {
+    projectId: "project:team:devgod",
+    workspaceId: "workspace:team",
+    activeRunId: null,
+    activeTaskId: null,
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: {
+      currentTask: null,
+      blockers: []
+    },
+    lastVerifiedRunId: "run-recovered",
+    metadata: {
+      seedFailure: {
+        runId: "run-seed-failed",
+        taskId: "task-modernization",
+        reason: "modernization configuration exploded",
+        failedAt: "2026-05-31T10:00:00.000Z"
+      },
+      lastIntegrityRepair: {
+        source: "doctor_repair",
+        kind: "runtime_metadata_cleanup",
+        summary: "cleared stale persisted seed failure metadata after authoritative proof",
+        repairedAt: "2026-05-31T11:00:00.000Z"
+      }
+    },
+    createdAt: "2026-05-31T10:00:00.000Z",
+    updatedAt: "2026-05-31T11:00:00.000Z"
+  };
+  const store = new PostgresStore(
+    sqlClientWithRows(
+      [
+        [],
+        [{ payload: state }]
+      ],
+      capture
+    )
+  );
+
+  await store.saveProjectRuntimeState(state);
+  const loaded = await store.getProjectRuntimeState(state.projectId);
+
+  assert.deepEqual(loaded, state);
+  assert.deepEqual(must(capture[0]).values, [
+    state.projectId,
+    state.workspaceId,
+    null,
+    null,
+    JSON.stringify(state.taskQueue),
+    JSON.stringify(state.productState),
+    state.lastVerifiedRunId,
+    JSON.stringify(state.metadata)
+  ]);
+  assert.deepEqual(must(capture[1]).values, [state.projectId]);
+});
+
 test("PostgresStore.saveWorkflowDocument and listWorkflowDocuments honor run, task, and kind filters", async () => {
   const capture: QueryCapture[] = [];
   const document = {

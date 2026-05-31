@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,6 +118,14 @@ const continuationIntentValues = new Set([
   "blocked_external",
   "unknown"
 ]);
+const hookBlockerKinds = new Set([
+  "command_not_found",
+  "environment_missing",
+  "runtime_preflight",
+  "connection_refused",
+  "permission_denied",
+  "generic_nonzero_bash"
+]);
 
 export async function readHookPayload() {
   let content = "";
@@ -160,6 +169,177 @@ async function readJsonIfExists(filePath) {
   } catch {
     return undefined;
   }
+}
+
+function hookBlockerStatePath(resolvedRepoRoot) {
+  return path.join(resolvedRepoRoot, ".devgod", "work", "daemon", "hook-blocker-state.json");
+}
+
+function firstNonEmptyLine(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeToolOutput(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter((entry) => typeof entry === "string").join("\n");
+  }
+
+  return "";
+}
+
+function buildCommandFingerprint(command) {
+  return createHash("sha1").update(typeof command === "string" ? command : "").digest("hex");
+}
+
+export function classifyBashFailure(payload) {
+  const toolResponse =
+    payload?.tool_response && typeof payload.tool_response === "object" && !Array.isArray(payload.tool_response)
+      ? payload.tool_response
+      : {};
+  const exitCode = getBashExitCode(toolResponse);
+  if (typeof exitCode !== "number" || exitCode === 0) {
+    return undefined;
+  }
+
+  const command = extractToolCommand(payload);
+  const stdout = normalizeToolOutput(toolResponse.stdout);
+  const stderr = normalizeToolOutput(toolResponse.stderr);
+  const combined = `${stderr}\n${stdout}`.trim();
+  const normalized = combined.toLowerCase();
+
+  let blockerKind = "generic_nonzero_bash";
+  if (
+    /\b(command not found|not found|enoent|no such file or directory)\b/i.test(combined)
+  ) {
+    blockerKind = "command_not_found";
+  } else if (
+    /\b(runtime execution preflight failed|runtime preflight)\b/i.test(combined)
+  ) {
+    blockerKind = "runtime_preflight";
+  } else if (
+    /\b(connection refused|econnrefused|daemon unavailable)\b/i.test(combined)
+  ) {
+    blockerKind = "connection_refused";
+  } else if (/\b(permission denied|eacces)\b/i.test(combined)) {
+    blockerKind = "permission_denied";
+  } else if (
+    /\bdocker\b/i.test(command) &&
+    /\b(unavailable|missing|not installed|cannot connect)\b/i.test(combined)
+  ) {
+    blockerKind = "environment_missing";
+  } else if (
+    /\b(environment missing|missing dependency|required dependency)\b/i.test(normalized)
+  ) {
+    blockerKind = "environment_missing";
+  }
+
+  const summary =
+    firstNonEmptyLine(stderr) ??
+    firstNonEmptyLine(stdout) ??
+    `bash command failed with exit code ${exitCode}`;
+
+  return {
+    toolName: "Bash",
+    command,
+    commandFingerprint: buildCommandFingerprint(command),
+    exitCode,
+    blockerKind,
+    summary,
+    details: combined
+  };
+}
+
+export function persistHookBlockerState(repoRootPath, input) {
+  const targetPath = hookBlockerStatePath(repoRootPath);
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  writeFileSync(
+    targetPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        activeTaskId: input.activeTaskId,
+        queueCurrentTaskId: input.queueCurrentTaskId,
+        turnId: input.turnId,
+        toolName: input.toolName,
+        command: input.command,
+        commandFingerprint: input.commandFingerprint,
+        exitCode: input.exitCode,
+        blockerKind: input.blockerKind,
+        summary: input.summary,
+        details: input.details,
+        recordedAt: input.recordedAt
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+}
+
+export function clearHookBlockerState(repoRootPath) {
+  try {
+    rmSync(hookBlockerStatePath(repoRootPath), { force: true });
+  } catch {
+    // ignore hook cleanup failures
+  }
+}
+
+async function readHookBlockerState(resolvedRepoRoot, activeTaskId, queueCurrentTaskId) {
+  const parsed = await readJsonIfExists(hookBlockerStatePath(resolvedRepoRoot));
+  if (!parsed) {
+    return undefined;
+  }
+
+  const blockerKind =
+    typeof parsed.blockerKind === "string" && hookBlockerKinds.has(parsed.blockerKind)
+      ? parsed.blockerKind
+      : undefined;
+  const summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0 ? parsed.summary : undefined;
+  const recordTaskId =
+    typeof parsed.activeTaskId === "string" && parsed.activeTaskId.trim().length > 0
+      ? parsed.activeTaskId.trim()
+      : undefined;
+  const effectiveTaskId = activeTaskId ?? (typeof queueCurrentTaskId === "string" ? queueCurrentTaskId : undefined);
+
+  if (!blockerKind || !summary || !recordTaskId || !effectiveTaskId || recordTaskId !== effectiveTaskId) {
+    return undefined;
+  }
+
+  return {
+    version: parsed.version === 1 ? 1 : 1,
+    activeTaskId: recordTaskId,
+    queueCurrentTaskId:
+      typeof parsed.queueCurrentTaskId === "string" && parsed.queueCurrentTaskId.trim().length > 0
+        ? parsed.queueCurrentTaskId.trim()
+        : undefined,
+    turnId: typeof parsed.turnId === "string" ? parsed.turnId : undefined,
+    toolName: parsed.toolName === "Bash" ? "Bash" : "Bash",
+    command: typeof parsed.command === "string" ? parsed.command : "",
+    commandFingerprint:
+      typeof parsed.commandFingerprint === "string" && parsed.commandFingerprint.trim().length > 0
+        ? parsed.commandFingerprint
+        : buildCommandFingerprint(typeof parsed.command === "string" ? parsed.command : ""),
+    exitCode: typeof parsed.exitCode === "number" ? parsed.exitCode : undefined,
+    blockerKind,
+    summary,
+    details: typeof parsed.details === "string" ? parsed.details : "",
+    recordedAt: typeof parsed.recordedAt === "string" ? parsed.recordedAt : undefined
+  };
 }
 
 async function readDaemonContinuationIntent(resolvedRepoRoot, activeTaskId) {
@@ -376,6 +556,7 @@ export async function readActiveTaskContext(options = {}) {
     allowedWriteScope: [],
     allowedTaskHandoffScope: [],
     continuationIntent: undefined,
+    hookBlockerState: undefined,
     queueCurrentTaskId: undefined,
     authorityMismatches: []
   };
@@ -500,6 +681,11 @@ export async function readActiveTaskContext(options = {}) {
       context.activeTaskId
     );
   }
+  context.hookBlockerState = await readHookBlockerState(
+    resolvedRepoRoot,
+    context.activeTaskId,
+    context.queueCurrentTaskId
+  );
   return context;
 }
 

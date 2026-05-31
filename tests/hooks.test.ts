@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 // @ts-ignore internal hook policy module is a runtime .mjs helper without TypeScript declarations
 import {
+  evaluatePostToolUse,
   evaluatePreToolUse,
   evaluateSessionStart,
   evaluateStop,
@@ -267,6 +268,99 @@ test("stop hook still blocks completion summaries without an external closure ca
   assert.ok(parsed);
   assert.equal(parsed.decision, "block");
   assert.match(parsed.reason, /state the real blocker explicitly/i);
+});
+
+test("post-tool-use persists structured blocker state for non-zero Bash failures", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-blocker-state-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "daemon"), { recursive: true });
+
+    const parsed = evaluatePostToolUse(
+      {
+        tool_name: "Bash",
+        turn_id: "turn-hook-blocker-1",
+        tool_input: {
+          command: "docker compose up devgod"
+        },
+        tool_response: {
+          exitCode: 127,
+          stdout: "",
+          stderr: "bash: docker: command not found"
+        }
+      },
+      {
+        repoRoot,
+        activeTaskId: "task-hook-blocker-state",
+        allowedWriteScope: ["src/core"],
+        queueCurrentTaskId: "task-hook-blocker-state"
+      }
+    );
+
+    assert.equal(parsed, undefined);
+
+    const recorded = JSON.parse(
+      await readFile(join(repoRoot, ".devgod", "work", "daemon", "hook-blocker-state.json"), "utf8")
+    );
+
+    assert.equal(recorded.activeTaskId, "task-hook-blocker-state");
+    assert.equal(recorded.turnId, "turn-hook-blocker-1");
+    assert.equal(recorded.exitCode, 127);
+    assert.equal(recorded.blockerKind, "command_not_found");
+    assert.match(recorded.summary, /docker|command not found/i);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("stop hook blocks once from trusted structured blocker state before transcript heuristics", () => {
+  const parsed = evaluateStop(
+    {
+      stop_hook_active: false,
+      last_assistant_message: "The current turn is complete."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-structured-blocker",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: "task-hook-structured-blocker",
+      hookBlockerState: {
+        activeTaskId: "task-hook-structured-blocker",
+        turnId: "turn-structured-1",
+        blockerKind: "command_not_found",
+        summary: "docker command not found",
+        exitCode: 127
+      }
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /docker command not found/i);
+});
+
+test("stop hook suppresses repeated continuation when the same structured blocker is already active", () => {
+  const parsed = evaluateStop(
+    {
+      stop_hook_active: true,
+      last_assistant_message: "The current turn is complete."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-structured-blocker-repeat",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: "task-hook-structured-blocker-repeat",
+      hookBlockerState: {
+        activeTaskId: "task-hook-structured-blocker-repeat",
+        turnId: "turn-structured-2",
+        blockerKind: "command_not_found",
+        summary: "docker command not found",
+        exitCode: 127
+      }
+    }
+  );
+
+  assert.equal(parsed, undefined);
 });
 
 test("session-start hook stays silent when it would only repeat generic devgod policy", () => {

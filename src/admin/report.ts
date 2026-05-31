@@ -238,7 +238,65 @@ export function formatRunEvidenceReportMarkdown(report: RunEvidenceReport): stri
   lines.push(`- loop executions: ${report.summary.totalLoopExecutions}`);
   lines.push(`- recovery issues: ${report.recovery.summary.totalIssues}`);
   lines.push(`- reasoning-quality: ${report.reasoningQuality.status} (${report.reasoningQuality.warningCount} warnings)`);
+  lines.push(`- integrity: ${report.status.integrity.status}`);
   lines.push("");
+
+  if (report.status.integrity.contradictions.length > 0) {
+    lines.push(`## Integrity`);
+    lines.push("");
+    for (const contradiction of report.status.integrity.contradictions) {
+      lines.push(`- ${contradiction}`);
+    }
+    lines.push("");
+  }
+
+  if (report.status.integrity.runtimeState?.seedFailure) {
+    const seedFailure = report.status.integrity.runtimeState.seedFailure;
+    if (report.status.integrity.contradictions.length === 0) {
+      lines.push(`## Integrity`);
+      lines.push("");
+    }
+    lines.push(
+      `- persisted seed failure: task=${seedFailure.taskId} run=${seedFailure.runId} reason=${seedFailure.reason}`
+    );
+    lines.push(`- seed failure recovery state: ${seedFailure.recoveryState}`);
+    if (seedFailure.failedAt) {
+      lines.push(`- persisted seed failure at: \`${seedFailure.failedAt}\``);
+    }
+    if (seedFailure.recoveryState === "requires_reproof") {
+      lines.push(
+        `- rerun authoritative workflow proof after repair: \`node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id ${seedFailure.runId} --task-id ${seedFailure.taskId}\``
+      );
+    } else {
+      lines.push(`- authoritative workflow proof exists, so this residue should be investigated as stale metadata`);
+    }
+    lines.push("");
+  }
+
+  if (report.status.integrity.runtimeState?.lastIntegrityRepair) {
+    const lastIntegrityRepair = report.status.integrity.runtimeState.lastIntegrityRepair;
+    if (
+      report.status.integrity.contradictions.length === 0 &&
+      !report.status.integrity.runtimeState?.seedFailure
+    ) {
+      lines.push(`## Integrity`);
+      lines.push("");
+    }
+    lines.push(
+      `- last integrity repair: source=${lastIntegrityRepair.source} kind=${lastIntegrityRepair.kind} summary=${lastIntegrityRepair.summary}`
+    );
+    lines.push(
+      `- integrity repair interpretation: ${lastIntegrityRepair.source === "sync_runtime_exports"
+        ? "local workflow export cleanup only; runtime authority was not changed by this repair"
+        : lastIntegrityRepair.source === "reconcile_runtime_state"
+          ? "runtime reconcile updated authoritative task-state alignment before syncing exports"
+          : lastIntegrityRepair.source === "recover_apply"
+            ? "runtime recovery applied a safe authoritative state transition"
+            : "doctor-guided repair applied a verified integrity-healing step"}`
+    );
+    lines.push(`- last integrity repair at: \`${lastIntegrityRepair.repairedAt}\``);
+    lines.push("");
+  }
 
   if (report.plan) {
     lines.push(`## Plan`);
