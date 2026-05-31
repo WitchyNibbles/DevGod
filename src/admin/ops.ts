@@ -16,6 +16,21 @@ export interface OperatorDashboardReport {
   nextActions: string[];
 }
 
+function describeIntegrityRepairSource(
+  source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports"
+): string {
+  switch (source) {
+    case "doctor_repair":
+      return "doctor-guided integrity repair";
+    case "recover_apply":
+      return "runtime recovery action";
+    case "reconcile_runtime_state":
+      return "runtime reconcile command";
+    case "sync_runtime_exports":
+      return "local export resync";
+  }
+}
+
 export function buildOperatorDashboardReport(input: {
   status: OperatorStatusReport;
   executionPlan: RunExecutionPlan;
@@ -35,6 +50,37 @@ export function buildOperatorDashboardReport(input: {
 
   if (input.status.gitNexus.state === "invalid_metadata") {
     alerts.push("gitnexus advisory metadata is invalid");
+  }
+
+  if (input.status.integrity.status === "contradicted") {
+    alerts.push(...input.status.integrity.contradictions.map((item) => `workflow integrity: ${item}`));
+    nextActions.push(
+      "inspect runtime-vs-export drift with `npm run devgod:status -- --run-id latest`",
+      "repair trusted runtime drift before accepting local completion signals"
+    );
+  }
+  if (input.status.integrity.runtimeState?.seedFailure) {
+    const seedFailure = input.status.integrity.runtimeState.seedFailure;
+    if (seedFailure.recoveryState === "requires_reproof") {
+      alerts.push(`workflow seed failure residue: ${seedFailure.taskId}`);
+      nextActions.push(
+        `inspect persisted seed failure for ${seedFailure.taskId}: ${seedFailure.reason}`,
+        "run `npm run devgod:doctor -- --repair` to resync local workflow exports from authoritative runtime state",
+        `rerun authoritative workflow proof after repair: node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id ${seedFailure.runId} --task-id ${seedFailure.taskId}`
+      );
+    } else {
+      alerts.push(`stale workflow seed failure metadata: ${seedFailure.taskId}`);
+      nextActions.push(
+        `inspect stale seed failure metadata for ${seedFailure.taskId}: ${seedFailure.reason}`,
+        "authoritative workflow proof exists, so investigate metadata cleanup before trusting the integrity report"
+      );
+    }
+  }
+  if (input.status.integrity.runtimeState?.lastIntegrityRepair) {
+    const lastIntegrityRepair = input.status.integrity.runtimeState.lastIntegrityRepair;
+    const sourceLabel = describeIntegrityRepairSource(lastIntegrityRepair.source);
+    alerts.push(`integrity repair applied: ${lastIntegrityRepair.kind} via ${sourceLabel}`);
+    nextActions.push(`review recent integrity repair evidence (${sourceLabel}): ${lastIntegrityRepair.summary}`);
   }
 
   for (const issue of input.recovery.issues) {
@@ -215,6 +261,7 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   lines.push(`execution-directive: ${report.executionPlan.directive.kind}`);
   lines.push(`next-ready: ${report.status.orchestration.nextTaskIds.join(", ") || "none"}`);
   lines.push(`gitnexus: ${report.status.gitNexus.state}`);
+  lines.push(`integrity: ${report.status.integrity.status}`);
   if (report.status.gitNexus.configuredScopes.length > 0) {
     lines.push(`gitnexus-config: ${report.status.gitNexus.configuredScopes.join(", ")}`);
   }
@@ -242,6 +289,12 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
           )
           .join(", ")}`
       );
+    }
+  }
+  if (report.status.integrity.contradictions.length > 0) {
+    lines.push("integrity-contradictions:");
+    for (const contradiction of report.status.integrity.contradictions) {
+      lines.push(`- ${contradiction}`);
     }
   }
 

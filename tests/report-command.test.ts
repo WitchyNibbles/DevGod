@@ -2133,3 +2133,359 @@ test("executeReportCommandFromArgs surfaces daemon supervisor state in json and 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("executeReportCommandFromArgs surfaces contradictory local completion claims in json and markdown", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-integrity-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Integrity report",
+    request: "Expose contradictory authority through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      allowedWriteScope: ["src/core"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner-owner");
+
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  await store.saveProjectRuntimeState({
+    projectId: context.project.id,
+    workspaceId: context.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: []
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(path.join(directory, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      `${JSON.stringify({ project_status: "complete", current_task_id: null, tasks: [] }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.integrity.status, "contradicted");
+    assert.match(
+      result.report.status.integrity.contradictions.join(" | "),
+      /local exports claim complete but runtime state has no authoritative workflow proof/i
+    );
+
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /- integrity: contradicted/);
+    assert.match(markdown, /## Integrity/);
+    assert.match(markdown, /local exports claim complete but runtime state has no authoritative workflow proof/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeReportCommandFromArgs surfaces persisted workflow seed failure residue in json and markdown", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-seed-failure-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Seed failure report",
+    request: "Expose persisted seed failure residue through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      allowedWriteScope: ["src/core"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner-owner");
+
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  await store.saveProjectRuntimeState({
+    projectId: context.project.id,
+    workspaceId: context.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "blocked",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "blocked", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {
+      seedFailure: {
+        runId: run.id,
+        taskId: "plan",
+        reason: "synthetic review persistence failure",
+        failedAt: "2026-05-31T10:00:00.000Z"
+      }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.integrity.runtimeState?.seedFailure?.taskId, "plan");
+    assert.equal(result.report.status.integrity.runtimeState?.seedFailure?.recoveryState, "requires_reproof");
+
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /## Integrity/);
+    assert.match(markdown, /persisted seed failure: task=plan run=/i);
+    assert.match(markdown, /seed failure recovery state: requires_reproof/i);
+    assert.match(markdown, /synthetic review persistence failure/i);
+    assert.match(markdown, /workflow-proof --run-id .* --task-id plan/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeReportCommandFromArgs surfaces persisted integrity repair evidence in json and markdown", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-integrity-repair-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Integrity repair report",
+    request: "Expose persisted integrity repair evidence through the report surface."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "plan",
+      ownerRole: "planner",
+      requiredSpecialistRoles: ["planner"],
+      allowedWriteScope: ["src/core"]
+    })
+  ]);
+  await service.claimTask(run.id, "plan", "planner-owner");
+
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  await store.saveProjectRuntimeState({
+    projectId: context.project.id,
+    workspaceId: context.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: run.id,
+    metadata: {
+      lastIntegrityRepair: {
+        source: "doctor_repair",
+        kind: "runtime_metadata_cleanup",
+        summary: "cleared stale persisted seed failure metadata after authoritative proof",
+        repairedAt: "2026-05-31T10:30:00.000Z"
+      }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.integrity.runtimeState?.lastIntegrityRepair?.kind, "runtime_metadata_cleanup");
+    assert.equal(result.report.status.integrity.runtimeState?.lastIntegrityRepair?.source, "doctor_repair");
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /last integrity repair: source=doctor_repair kind=runtime_metadata_cleanup/i);
+    assert.match(markdown, /integrity repair interpretation: doctor-guided repair applied a verified integrity-healing step/i);
+    assert.match(markdown, /last integrity repair at: `2026-05-31T10:30:00.000Z`/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeReportCommandFromArgs distinguishes local export cleanup from authoritative runtime repair", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-report-local-export-cleanup-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Local export cleanup report",
+    request: "Explain when integrity repair evidence reflects local export cleanup only."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/core"] })]);
+  await service.claimTask(run.id, "plan", "planner");
+
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  await store.saveProjectRuntimeState({
+    projectId: context.project.id,
+    workspaceId: context.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: run.id,
+    metadata: {
+      lastIntegrityRepair: {
+        source: "sync_runtime_exports",
+        kind: "local_export_resync",
+        summary: "sync-runtime-exports resynced local workflow exports from authoritative runtime state",
+        repairedAt: "2026-05-31T10:45:00.000Z"
+      }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+
+    const result = await executeReportCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      },
+      getHandoffs(runId, taskId) {
+        return store.getHandoffs(runId, taskId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      }
+    });
+
+    assert.equal(result.report.status.integrity.runtimeState?.lastIntegrityRepair?.source, "sync_runtime_exports");
+    const markdown = formatRunEvidenceReportMarkdown(result.report);
+    assert.match(markdown, /last integrity repair: source=sync_runtime_exports kind=local_export_resync/i);
+    assert.match(
+      markdown,
+      /integrity repair interpretation: local workflow export cleanup only; runtime authority was not changed by this repair/i
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

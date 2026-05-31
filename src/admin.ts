@@ -804,6 +804,7 @@ interface ExecuteStatusCommandOptions {
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
   getExecutionPlan?: ((runId: string, staleAfterHours: number) => Promise<RunExecutionPlan>) | undefined;
+  getProjectRuntimeState?: ((projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>) | undefined;
 }
 
 interface ExecuteDoctorCommandOptions extends ExecuteStatusCommandOptions {
@@ -885,6 +886,8 @@ interface DoctorRepairObservation {
   executionReady: boolean;
   stepsAttempted: string[];
   stepsApplied: string[];
+  integrityRepairsAttempted: string[];
+  integrityRepairsApplied: string[];
   skippedReasons: string[];
   failure?: string | undefined;
 }
@@ -982,6 +985,7 @@ interface ExecuteLoopCommandOptions extends ExecuteStatusCommandOptions {
 interface ExecuteRecoverCommandOptions extends ExecuteStatusCommandOptions {
   inspectRecovery: (runId: string, staleAfterHours: number) => Promise<RecoveryInspectionReport>;
   applyRecovery: (runId: string, actionIds: readonly string[], staleAfterHours: number) => Promise<RecoveryApplyResult>;
+  saveProjectRuntimeState?: ((state: ProjectRuntimeStateRecord) => Promise<void>) | undefined;
 }
 
 interface ExecuteReportCommandOptions extends ExecuteStatusCommandOptions {
@@ -1009,6 +1013,7 @@ interface ExecuteWorkflowProofCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
   allowQueueContinuation?: boolean | undefined;
+  integrityCheckMode?: "strict" | "allow_seed_failure_recovery" | undefined;
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   findLatestRunForTask?: ((
     workspaceSlug: string,
@@ -1052,6 +1057,7 @@ interface ExecuteSeedWorkflowProofCommandOptions extends ExecuteWorkflowProofCom
   claimTask: (runId: string, taskId: string, actor: string) => Promise<unknown>;
   submitHandoff: (runId: string, taskId: string, handoff: HandoffInput) => Promise<unknown>;
   recordReview: (runId: string, taskId: string, actor: string, review: ReviewInput) => Promise<unknown>;
+  failTask?: ((runId: string, taskId: string, reason: string) => Promise<unknown>) | undefined;
 }
 
 export interface SeedWorkflowProofResult extends WorkflowProofResult {
@@ -1124,6 +1130,7 @@ interface ExecuteSyncRuntimeExportsCommandOptions {
     projectSlug: string;
   }) => Promise<{ workspace: WorkspaceRecord; project: ProjectRecord } | undefined>;
   getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+  saveProjectRuntimeState?: ((state: ProjectRuntimeStateRecord) => Promise<void>) | undefined;
 }
 
 export interface AdvanceActiveTaskCommandResult {
@@ -1905,6 +1912,309 @@ async function resolveActiveTaskIdFromFile(cwd = process.cwd()): Promise<string 
   } catch {
     return undefined;
   }
+}
+
+async function readActiveWorkflowExport(cwd = process.cwd()): Promise<{
+  activeState: "active" | "idle" | "complete" | "unknown";
+  activeTaskId: string | null;
+}> {
+  try {
+    const activeContent = await readFile(path.join(cwd, ".devgod", "ACTIVE"), "utf8");
+    const lines = activeContent.split(/\r?\n/).map((line) => line.trim());
+    const taskIdLine = lines.find((line) => line.startsWith("task_id="));
+    const stateLine = lines.find((line) => line.startsWith("state="));
+    const activeTaskId = taskIdLine ? taskIdLine.slice("task_id=".length).trim() || null : null;
+    const rawState = stateLine ? stateLine.slice("state=".length).trim().toLowerCase() : "";
+    const activeState =
+      rawState === "active" || rawState === "idle" || rawState === "complete" ? rawState : "unknown";
+    return {
+      activeState,
+      activeTaskId
+    };
+  } catch {
+    return {
+      activeState: "unknown",
+      activeTaskId: null
+    };
+  }
+}
+
+async function readTaskQueueExport(cwd = process.cwd()): Promise<TaskQueue> {
+  try {
+    const queueContent = await readFile(path.join(cwd, ".devgod", "work", "task-queue.json"), "utf8");
+    return parseTaskQueueContent(queueContent);
+  } catch {
+    return buildDefaultTaskQueue();
+  }
+}
+
+function readSeedFailureMetadata(
+  runtimeState:
+    | {
+        metadata?: Record<string, unknown> | undefined;
+        lastVerifiedRunId?: string | null | undefined;
+      }
+    | undefined
+):
+  | {
+      runId: string;
+      taskId: string;
+      reason: string;
+      failedAt?: string | undefined;
+      recoveryState: "requires_reproof" | "stale_metadata";
+    }
+  | undefined {
+  const candidate = runtimeState?.metadata?.seedFailure;
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+
+  const record = candidate as Record<string, unknown>;
+  if (
+    typeof record.runId !== "string" ||
+    typeof record.taskId !== "string" ||
+    typeof record.reason !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    runId: record.runId,
+    taskId: record.taskId,
+    reason: record.reason,
+    failedAt: typeof record.failedAt === "string" ? record.failedAt : undefined,
+    recoveryState: runtimeState?.lastVerifiedRunId ? "stale_metadata" : "requires_reproof"
+  };
+}
+
+function readLastIntegrityRepairMetadata(
+  runtimeState:
+    | {
+        metadata?: Record<string, unknown> | undefined;
+      }
+    | undefined
+):
+  | {
+      source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+      kind:
+        | "local_export_resync"
+        | "runtime_metadata_cleanup"
+        | "runtime_task_reconcile"
+        | "recovery_action_apply";
+      summary: string;
+      repairedAt: string;
+    }
+  | undefined {
+  const candidate = runtimeState?.metadata?.lastIntegrityRepair;
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+
+  const record = candidate as Record<string, unknown>;
+  if (
+    (record.source !== "doctor_repair" &&
+      record.source !== "recover_apply" &&
+      record.source !== "reconcile_runtime_state" &&
+      record.source !== "sync_runtime_exports") ||
+    (record.kind !== "local_export_resync" &&
+      record.kind !== "runtime_metadata_cleanup" &&
+      record.kind !== "runtime_task_reconcile" &&
+      record.kind !== "recovery_action_apply") ||
+    typeof record.summary !== "string" ||
+    typeof record.repairedAt !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    source: record.source,
+    kind: record.kind,
+    summary: record.summary,
+    repairedAt: record.repairedAt
+  };
+}
+
+function hasLocalWorkflowExportDrift(input: {
+  runtimeState: {
+    activeTaskId: string | null;
+    projectStatus: string;
+  };
+  localExports:
+    | {
+        activeState: "active" | "idle" | "complete" | "unknown";
+        activeTaskId: string | null;
+        queueProjectStatus: string;
+        queueCurrentTaskId: string | null;
+      }
+    | undefined;
+}): boolean {
+  const expectedActiveState =
+    input.runtimeState.activeTaskId !== null
+      ? "active"
+      : isCompleteProjectStatus(input.runtimeState.projectStatus)
+        ? "complete"
+        : "idle";
+
+  if (!input.localExports) {
+    return true;
+  }
+
+  return (
+    input.localExports.activeState !== expectedActiveState ||
+    (input.localExports.activeTaskId ?? null) !== input.runtimeState.activeTaskId ||
+    (input.localExports.queueCurrentTaskId ?? null) !== input.runtimeState.activeTaskId ||
+    input.localExports.queueProjectStatus !== input.runtimeState.projectStatus
+  );
+}
+
+function clearSeedFailureMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!metadata || !("seedFailure" in metadata)) {
+    return metadata ?? {};
+  }
+
+  const { seedFailure: _seedFailure, ...rest } = metadata;
+  return rest;
+}
+
+function withLastIntegrityRepairMetadata(
+  metadata: Record<string, unknown> | undefined,
+  input: {
+    source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+    kind:
+      | "local_export_resync"
+      | "runtime_metadata_cleanup"
+      | "runtime_task_reconcile"
+      | "recovery_action_apply";
+    summary: string;
+  }
+): Record<string, unknown> {
+  return {
+    ...(metadata ?? {}),
+    lastIntegrityRepair: {
+      source: input.source,
+      kind: input.kind,
+      summary: input.summary,
+      repairedAt: new Date().toISOString()
+    }
+  };
+}
+
+async function clearStaleSeedFailureRuntimeMetadata(input: {
+  report: DoctorReport;
+  options: ExecuteDoctorRepairCommandOptions;
+}): Promise<boolean> {
+  if (!input.options.getProjectRuntimeState || !input.options.saveProjectRuntimeState) {
+    return false;
+  }
+
+  const runtimeState = await input.options.getProjectRuntimeState(input.report.project.projectId);
+  if (!runtimeState?.metadata?.seedFailure || !runtimeState.lastVerifiedRunId) {
+    return false;
+  }
+
+  await input.options.saveProjectRuntimeState({
+    ...runtimeState,
+    metadata: withLastIntegrityRepairMetadata(clearSeedFailureMetadata(runtimeState.metadata), {
+      source: "doctor_repair",
+      kind: "runtime_metadata_cleanup",
+      summary: "cleared stale persisted seed failure metadata after authoritative proof"
+    }),
+    updatedAt: new Date().toISOString()
+  });
+  return true;
+}
+
+async function persistIntegrityRepairRuntimeMetadata(input: {
+  report: DoctorReport;
+  options: ExecuteDoctorRepairCommandOptions;
+  source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+  kind:
+    | "local_export_resync"
+    | "runtime_metadata_cleanup"
+    | "runtime_task_reconcile"
+    | "recovery_action_apply";
+  summary: string;
+}): Promise<boolean> {
+  if (!input.options.getProjectRuntimeState || !input.options.saveProjectRuntimeState) {
+    return false;
+  }
+
+  const runtimeState = await input.options.getProjectRuntimeState(input.report.project.projectId);
+  if (!runtimeState) {
+    return false;
+  }
+
+  await input.options.saveProjectRuntimeState({
+    ...runtimeState,
+    metadata: withLastIntegrityRepairMetadata(runtimeState.metadata, {
+      source: input.source,
+      kind: input.kind,
+      summary: input.summary
+    }),
+    updatedAt: new Date().toISOString()
+  });
+  return true;
+}
+
+async function persistRecoverIntegrityRepairMetadata(input: {
+  runId: string;
+  options: ExecuteRecoverCommandOptions;
+  appliedActionIds: readonly string[];
+}): Promise<boolean> {
+  if (
+    input.appliedActionIds.length === 0 ||
+    !input.options.getStatusSnapshot ||
+    !input.options.getProjectRuntimeState ||
+    !input.options.saveProjectRuntimeState
+  ) {
+    return false;
+  }
+
+  const snapshot = await input.options.getStatusSnapshot(input.runId);
+  const runtimeState = await input.options.getProjectRuntimeState(snapshot.run.projectId);
+  if (!runtimeState) {
+    return false;
+  }
+
+  await input.options.saveProjectRuntimeState({
+    ...runtimeState,
+    metadata: withLastIntegrityRepairMetadata(runtimeState.metadata, {
+      source: "recover_apply",
+      kind: "recovery_action_apply",
+      summary: `recover applied safe runtime recovery actions: ${input.appliedActionIds.join(", ")}`
+    }),
+    updatedAt: new Date().toISOString()
+  });
+  return true;
+}
+
+async function persistProjectIntegrityRepairMetadata(input: {
+  projectId: string;
+  getProjectRuntimeState: (projectId: string) => Promise<ProjectRuntimeStateRecord | undefined>;
+  saveProjectRuntimeState: (state: ProjectRuntimeStateRecord) => Promise<void>;
+  source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+  kind:
+    | "local_export_resync"
+    | "runtime_metadata_cleanup"
+    | "runtime_task_reconcile"
+    | "recovery_action_apply";
+  summary: string;
+}): Promise<boolean> {
+  const runtimeState = await input.getProjectRuntimeState(input.projectId);
+  if (!runtimeState) {
+    return false;
+  }
+
+  await input.saveProjectRuntimeState({
+    ...runtimeState,
+    metadata: withLastIntegrityRepairMetadata(runtimeState.metadata, {
+      source: input.source,
+      kind: input.kind,
+      summary: input.summary
+    }),
+    updatedAt: new Date().toISOString()
+  });
+  return true;
 }
 
 function buildDefaultTaskQueue(): TaskQueue {
@@ -5117,12 +5427,52 @@ export async function executeStatusCommandFromArgs(
     options.getStatusSnapshot(runId),
     options.getExecutionPlan ? options.getExecutionPlan(runId, staleAfterDays * 24) : Promise.resolve(undefined)
   ]);
+  const [runtimeState, localActiveExport, localQueueExport] = await Promise.all([
+    options.getProjectRuntimeState ? options.getProjectRuntimeState(snapshot.run.projectId) : Promise.resolve(undefined),
+    readActiveWorkflowExport(options.cwd ?? process.cwd()),
+    readTaskQueueExport(options.cwd ?? process.cwd())
+  ]);
   const daemonContinuation = await readDaemonContinuationStatus(options.cwd ?? process.cwd());
   const daemonHandoff = await readDaemonOperatorHandoff(options.cwd ?? process.cwd());
   const daemonSupervisor = await readDaemonSupervisorStatus(
     options.cwd ?? process.cwd(),
     daemonSupervisorHistoryOptions
   );
+  const contradictions: string[] = [];
+  const seedFailure = readSeedFailureMetadata(runtimeState);
+  const lastIntegrityRepair = readLastIntegrityRepairMetadata(runtimeState);
+  if (runtimeState) {
+    const runtimeQueue = parseTaskQueueRecordOrDefault(runtimeState.taskQueue);
+    const runtimeActiveTaskId = runtimeState.activeTaskId ?? null;
+    const localClaimsComplete =
+      localActiveExport.activeState === "complete" || isCompleteProjectStatus(localQueueExport.project_status);
+
+    if (seedFailure?.recoveryState === "stale_metadata") {
+      contradictions.push(
+        "runtime state still carries persisted seed failure metadata after authoritative workflow proof"
+      );
+    }
+
+    if (localClaimsComplete && !runtimeState.lastVerifiedRunId) {
+      contradictions.push("local exports claim complete but runtime state has no authoritative workflow proof");
+    }
+    if (localClaimsComplete && snapshot.run.status !== "approved" && snapshot.run.status !== "done") {
+      contradictions.push(`local exports claim complete while runtime run status is ${snapshot.run.status}`);
+    }
+    if ((localActiveExport.activeTaskId ?? localQueueExport.current_task_id ?? null) !== runtimeActiveTaskId) {
+      const localTaskId = localActiveExport.activeTaskId ?? localQueueExport.current_task_id ?? null;
+      if (localTaskId || runtimeActiveTaskId) {
+        contradictions.push(
+          `local active task ${localTaskId ?? "none"} disagrees with runtime active task ${runtimeActiveTaskId ?? "none"}`
+        );
+      }
+    }
+    if ((localQueueExport.current_task_id ?? null) !== (runtimeQueue.current_task_id ?? null)) {
+      contradictions.push(
+        `local queue current task ${localQueueExport.current_task_id ?? "none"} disagrees with runtime queue current task ${runtimeQueue.current_task_id ?? "none"}`
+      );
+    }
+  }
 
   return buildOperatorStatusReport({
     snapshot,
@@ -5132,6 +5482,32 @@ export async function executeStatusCommandFromArgs(
     daemonSupervisor,
     reviewIdentity,
     gitNexus,
+    integrity: runtimeState
+      ? {
+          authorityLabel: "derived_only",
+          status: contradictions.length > 0 ? "contradicted" : "consistent",
+          contradictions,
+          runtimeState: {
+            authorityLabel: "runtime_authoritative",
+            activeTaskId: runtimeState.activeTaskId ?? null,
+            projectStatus: parseTaskQueueRecordOrDefault(runtimeState.taskQueue).project_status,
+            lastVerifiedRunId: runtimeState.lastVerifiedRunId ?? null,
+            seedFailure,
+            lastIntegrityRepair
+          },
+          localExports: {
+            authorityLabel: "derived_only",
+            activeState: localActiveExport.activeState,
+            activeTaskId: localActiveExport.activeTaskId,
+            queueProjectStatus: localQueueExport.project_status,
+            queueCurrentTaskId: localQueueExport.current_task_id
+          }
+        }
+      : {
+          authorityLabel: "derived_only",
+          status: "unavailable",
+          contradictions: []
+        },
     staleAfterDays
   });
 }
@@ -6074,6 +6450,41 @@ function resolveDoctorRepairReconcileOptions(
   };
 }
 
+function resolveDoctorRepairSyncOptions(
+  options: ExecuteDoctorRepairCommandOptions
+): ExecuteSyncRuntimeExportsCommandOptions | undefined {
+  const getProjectContext =
+    options.getProjectContext ??
+    (options.findProjectContext
+      ? async (params: { workspaceSlug: string; projectSlug: string }) =>
+          options.findProjectContext!(params.workspaceSlug, params.projectSlug)
+      : undefined);
+
+  if (!getProjectContext || !options.getProjectRuntimeState) {
+    return undefined;
+  }
+
+  return {
+    cwd: options.cwd,
+    env: options.env,
+    getProjectContext,
+    getProjectRuntimeState: options.getProjectRuntimeState
+  };
+}
+
+function isIntegrityRepairStepLabel(stepLabel: string): boolean {
+  return (
+    stepLabel === "sync local workflow exports from runtime state" ||
+    stepLabel === "sync local workflow exports from runtime state after persisted seed failure" ||
+    stepLabel === "clear stale persisted seed failure metadata after authoritative proof" ||
+    stepLabel === "reconcile authoritative runtime task state"
+  );
+}
+
+function deriveIntegrityRepairSteps(stepLabels: readonly string[]): string[] {
+  return stepLabels.filter((stepLabel) => isIntegrityRepairStepLabel(stepLabel));
+}
+
 export async function executeDoctorRepairCommandFromArgs(
   args: readonly string[],
   options: ExecuteDoctorRepairCommandOptions
@@ -6081,6 +6492,8 @@ export async function executeDoctorRepairCommandFromArgs(
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const cleanArgs = stripCommandFlag(args, "--repair");
+  const resolveStatusArgs = (runId: string) =>
+    hasCommandFlag(cleanArgs, "--run-id") ? cleanArgs : (["--run-id", runId, ...cleanArgs] as const);
   const runBootstrapRepair = options.runBootstrapRepair ?? runBootstrapAndVerifySetupRepair;
   const runSetupRepair = options.runSetupRepair ?? runLocalDoctorSetupRepair;
   const repairStepsAttempted: string[] = [];
@@ -6106,6 +6519,8 @@ export async function executeDoctorRepairCommandFromArgs(
     executionReady: initialReport ? buildDoctorExecutionReady(initialReport) : false,
     stepsAttempted: repairStepsAttempted,
     stepsApplied: repairStepsApplied,
+    integrityRepairsAttempted: deriveIntegrityRepairSteps(repairStepsAttempted),
+    integrityRepairsApplied: deriveIntegrityRepairSteps(repairStepsApplied),
     skippedReasons: [...plan.skippedReasons]
   };
 
@@ -6159,6 +6574,8 @@ export async function executeDoctorRepairCommandFromArgs(
             executionReady,
             stepsAttempted: repairStepsAttempted,
             stepsApplied: repairStepsApplied,
+            integrityRepairsAttempted: deriveIntegrityRepairSteps(repairStepsAttempted),
+            integrityRepairsApplied: deriveIntegrityRepairSteps(repairStepsApplied),
             skippedReasons,
             failure: `safe repair did not clear ${finalPlan.step}`
           }
@@ -6176,6 +6593,8 @@ export async function executeDoctorRepairCommandFromArgs(
           executionReady: false,
           stepsAttempted: repairStepsAttempted,
           stepsApplied: repairStepsApplied,
+          integrityRepairsAttempted: deriveIntegrityRepairSteps(repairStepsAttempted),
+          integrityRepairsApplied: deriveIntegrityRepairSteps(repairStepsApplied),
           skippedReasons,
           failure: extractRuntimeExecutionErrorMessage(error)
         }
@@ -6206,6 +6625,13 @@ export async function executeDoctorRepairCommandFromArgs(
           ],
           reconcileOptions
         );
+        await persistIntegrityRepairRuntimeMetadata({
+          report,
+          options,
+          source: "doctor_repair",
+          kind: "runtime_task_reconcile",
+          summary: reconcileStepLabel
+        });
         repairStepsApplied.push(reconcileStepLabel);
         report = await executeDoctorCommandFromArgs(cleanArgs, options);
       } else {
@@ -6217,6 +6643,91 @@ export async function executeDoctorRepairCommandFromArgs(
           ])
         ];
       }
+    }
+  }
+
+  if (report && report.run && buildDoctorExecutionReady(report)) {
+    const statusReport = await executeStatusCommandFromArgs(resolveStatusArgs(report.run.id), options);
+    if (statusReport.integrity.runtimeState?.seedFailure?.recoveryState === "stale_metadata") {
+      const clearStepLabel = "clear stale persisted seed failure metadata after authoritative proof";
+      repairStepsAttempted.push(clearStepLabel);
+      const cleared = await clearStaleSeedFailureRuntimeMetadata({
+        report,
+        options
+      });
+      if (cleared) {
+        repairStepsApplied.push(clearStepLabel);
+        report = await executeDoctorCommandFromArgs(cleanArgs, options);
+      } else {
+        skippedReasons = [
+          ...new Set([
+            ...skippedReasons,
+            "stale persisted seed failure metadata could not be auto-cleared"
+          ])
+        ];
+      }
+    }
+  }
+
+  const syncOptions = report ? resolveDoctorRepairSyncOptions(options) : undefined;
+  if (report && report.run && buildDoctorExecutionReady(report) && syncOptions && options.getStatusSnapshot) {
+    const statusReport = await executeStatusCommandFromArgs(resolveStatusArgs(report.run.id), options);
+    const runtimeIntegrity = statusReport.integrity.runtimeState;
+    const seedFailure = runtimeIntegrity?.seedFailure;
+    let runtimeQueueTrusted = false;
+    if (runtimeIntegrity) {
+      try {
+        const runtimeState = await options.getProjectRuntimeState?.(report.project.projectId);
+        parseTaskQueueRecord(runtimeState?.taskQueue);
+        runtimeQueueTrusted = true;
+      } catch {
+        runtimeQueueTrusted = false;
+      }
+    }
+    const localWorkflowExportDrift =
+      runtimeIntegrity !== undefined &&
+      hasLocalWorkflowExportDrift({
+        runtimeState: {
+          activeTaskId: runtimeIntegrity.activeTaskId,
+          projectStatus: runtimeIntegrity.projectStatus
+        },
+        localExports: statusReport.integrity.localExports
+      });
+    const safeToResyncLocalExports =
+      ((statusReport.integrity.status === "contradicted") || (seedFailure !== undefined && localWorkflowExportDrift)) &&
+      runtimeIntegrity !== undefined &&
+      runtimeQueueTrusted &&
+      (runtimeIntegrity.lastVerifiedRunId !== null || !isCompleteProjectStatus(runtimeIntegrity.projectStatus));
+
+    if (safeToResyncLocalExports) {
+      const syncStepLabel = seedFailure
+        ? "sync local workflow exports from runtime state after persisted seed failure"
+        : "sync local workflow exports from runtime state";
+      repairStepsAttempted.push(syncStepLabel);
+      const syncArgs = [
+        "--workspace-slug",
+        report.project.workspaceSlug,
+        "--project-slug",
+        report.project.projectSlug,
+        "--format",
+        "json"
+      ] as const;
+      await executeSyncRuntimeExportsCommandFromArgs(syncArgs, syncOptions);
+      await persistIntegrityRepairRuntimeMetadata({
+        report,
+        options,
+        source: "doctor_repair",
+        kind: "local_export_resync",
+        summary: syncStepLabel
+      });
+      repairStepsApplied.push(syncStepLabel);
+    } else if (statusReport.integrity.status === "contradicted") {
+      skippedReasons = [
+        ...new Set([
+          ...skippedReasons,
+          "local workflow exports contradict runtime authority and could not be safely auto-repaired"
+        ])
+      ];
     }
   }
 
@@ -6232,6 +6743,8 @@ export async function executeDoctorRepairCommandFromArgs(
         executionReady: false,
         stepsAttempted: repairStepsAttempted,
         stepsApplied: repairStepsApplied,
+        integrityRepairsAttempted: deriveIntegrityRepairSteps(repairStepsAttempted),
+        integrityRepairsApplied: deriveIntegrityRepairSteps(repairStepsApplied),
         skippedReasons,
         failure: "doctor did not produce a report after repair"
       }
@@ -6253,6 +6766,8 @@ export async function executeDoctorRepairCommandFromArgs(
       executionReady,
       stepsAttempted: repairStepsAttempted,
       stepsApplied: repairStepsApplied,
+      integrityRepairsAttempted: deriveIntegrityRepairSteps(repairStepsAttempted),
+      integrityRepairsApplied: deriveIntegrityRepairSteps(repairStepsApplied),
       skippedReasons
     }
   };
@@ -6405,6 +6920,9 @@ async function statusCommand(args: readonly string[]) {
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
       getExecutionPlan(runId, staleAfterHours) {
         return service.getExecutionPlan(runId, { staleAfterHours });
       }
@@ -6555,6 +7073,9 @@ async function opsCommand(args: readonly string[]) {
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
       getExecutionPlan(runId, staleAfterHours) {
         return service.getExecutionPlan(runId, { staleAfterHours });
       },
@@ -6599,7 +7120,13 @@ export async function executeRecoverCommandFromArgs(
     return options.inspectRecovery(runId, staleAfterHours);
   }
 
-  return options.applyRecovery(runId, applyValues, staleAfterHours);
+  const result = await options.applyRecovery(runId, applyValues, staleAfterHours);
+  await persistRecoverIntegrityRepairMetadata({
+    runId,
+    options,
+    appliedActionIds: result.appliedActionIds
+  });
+  return result;
 }
 
 async function recoverCommand(args: readonly string[]) {
@@ -6619,6 +7146,12 @@ async function recoverCommand(args: readonly string[]) {
       },
       applyRecovery(runId, actionIds, staleAfterHours) {
         return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
       }
     });
     console.log(JSON.stringify(result));
@@ -7042,6 +7575,19 @@ export async function executeWorkflowProofCommandFromArgs(
     );
   }
 
+  if (options.getProjectRuntimeState) {
+    const runtimeState = await options.getProjectRuntimeState(snapshot.run.projectId);
+    const seedFailure = readSeedFailureMetadata(runtimeState);
+    if (
+      seedFailure?.recoveryState === "stale_metadata" &&
+      options.integrityCheckMode !== "allow_seed_failure_recovery"
+    ) {
+      throw new Error(
+        `Task ${taskId} runtime integrity is contradicted: stale persisted seed failure metadata remains after authoritative workflow proof`
+      );
+    }
+  }
+
   const continuation = await maybeContinueWorkflowAfterProof(
     {
       runId,
@@ -7159,7 +7705,7 @@ async function maybeContinueWorkflowAfterProof(
     taskQueue: advanced.queue,
     productState: runtimeState.productState ?? buildDefaultProductState(),
     lastVerifiedRunId: proof.runId,
-    metadata: runtimeState.metadata ?? {},
+    metadata: clearSeedFailureMetadata(runtimeState.metadata),
     createdAt: runtimeState.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -7416,72 +7962,80 @@ export async function executeSeedWorkflowProofCommandFromArgs(
     request: `Create a local authoritative runtime workflow proof run for ${resolvedTaskId}.`
   });
 
-  await options.createTaskGraph(run.id, [buildWorkflowProofSeedTaskPacket(resolvedTaskId)]);
-  await options.claimTask(run.id, resolvedTaskId, "planner");
-  await options.submitHandoff(run.id, resolvedTaskId, {
-    actor: "planner",
-    ownerRole: "planner",
-    completionStandard: "specialist_verified",
-    summary: `Seeded local workflow proof runtime state for ${resolvedTaskId}.`,
-    changedFiles: [".devgod/ACTIVE"],
-    blockers: [],
-    verificationNotes: ["runtime workflow proof seeded locally"],
-    executionEvidence: ["task graph created", "task claimed", "handoff submitted"],
-    qualityGateEvidence: ["seed command test coverage", "local runtime proof replay path"],
-    contextRefs: [`brief://${resolvedTaskId}`, "seed://workflow-proof"]
-  });
+  try {
+    await options.createTaskGraph(run.id, [buildWorkflowProofSeedTaskPacket(resolvedTaskId)]);
+    await options.claimTask(run.id, resolvedTaskId, "planner");
+    await options.submitHandoff(run.id, resolvedTaskId, {
+      actor: "planner",
+      ownerRole: "planner",
+      completionStandard: "specialist_verified",
+      summary: `Seeded local workflow proof runtime state for ${resolvedTaskId}.`,
+      changedFiles: [".devgod/ACTIVE"],
+      blockers: [],
+      verificationNotes: ["runtime workflow proof seeded locally"],
+      executionEvidence: ["task graph created", "task claimed", "handoff submitted"],
+      qualityGateEvidence: ["seed command test coverage", "local runtime proof replay path"],
+      contextRefs: [`brief://${resolvedTaskId}`, "seed://workflow-proof"]
+    });
 
-  await options.recordReview(run.id, resolvedTaskId, "reviewer-actor", {
-    reviewerRole: "reviewer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
-  await options.recordReview(run.id, resolvedTaskId, "security-actor", {
-    reviewerRole: "security_reviewer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
-  await options.recordReview(run.id, resolvedTaskId, "qa-actor", {
-    reviewerRole: "qa_engineer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
+    await options.recordReview(run.id, resolvedTaskId, "reviewer-actor", {
+      reviewerRole: "reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await options.recordReview(run.id, resolvedTaskId, "security-actor", {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await options.recordReview(run.id, resolvedTaskId, "qa-actor", {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
 
-  const proof = await executeWorkflowProofCommandFromArgs(
-    ["--run-id", run.id, "--task-id", resolvedTaskId],
-    {
-      env,
-      getStatusSnapshot: options.getStatusSnapshot,
-      getReviews: options.getReviews,
-      getApprovals: options.getApprovals
-    }
-  );
+    const proof = await executeWorkflowProofCommandFromArgs(
+      ["--run-id", run.id, "--task-id", resolvedTaskId],
+      {
+        env,
+        integrityCheckMode: "allow_seed_failure_recovery",
+        getProjectRuntimeState: options.getProjectRuntimeState,
+        getStatusSnapshot: options.getStatusSnapshot,
+        getReviews: options.getReviews,
+        getApprovals: options.getApprovals
+      }
+    );
 
-  const refreshedRuntimeState = (await options.getProjectRuntimeState(projectContext.project.id)) ?? projectRuntimeState;
-  const nextRuntimeState: ProjectRuntimeStateRecord = {
-    projectId: projectContext.project.id,
-    workspaceId: projectContext.workspace.id,
-    activeRunId: run.id,
-    activeTaskId: resolvedTaskId,
-    taskQueue: alignQueueToActiveTask(refreshedRuntimeState?.taskQueue, resolvedTaskId),
-    productState: refreshedRuntimeState?.productState ?? buildDefaultProductState(),
-    lastVerifiedRunId: proof.runId,
-    metadata: refreshedRuntimeState?.metadata ?? {},
-    createdAt: refreshedRuntimeState?.createdAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  await options.saveProjectRuntimeState(nextRuntimeState);
-  await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
+    const refreshedRuntimeState = (await options.getProjectRuntimeState(projectContext.project.id)) ?? projectRuntimeState;
+    const nextRuntimeState: ProjectRuntimeStateRecord = {
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      activeRunId: run.id,
+      activeTaskId: resolvedTaskId,
+      taskQueue: alignQueueToActiveTask(refreshedRuntimeState?.taskQueue, resolvedTaskId),
+      productState: refreshedRuntimeState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: proof.runId,
+      metadata: clearSeedFailureMetadata(refreshedRuntimeState?.metadata),
+      createdAt: refreshedRuntimeState?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await options.saveProjectRuntimeState(nextRuntimeState);
+    await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
 
-  return {
-    mode: "local_workflow_proof_seed",
-    workspaceSlug,
-    projectSlug,
-    ...proof
-  };
+    return {
+      mode: "local_workflow_proof_seed",
+      workspaceSlug,
+      projectSlug,
+      ...proof
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await options.failTask?.(run.id, resolvedTaskId, `workflow proof seed failed: ${reason}`);
+    throw error;
+  }
 }
 
 export async function executeSeedModernizationProofCommandFromArgs(
@@ -7519,142 +8073,150 @@ export async function executeSeedModernizationProofCommandFromArgs(
     title: `Seed modernization proof for ${resolvedTaskId}`,
     request: `Create a local authoritative modernization-proof runtime run for ${resolvedTaskId}.`
   });
+  try {
+    await options.createTaskGraph(run.id, [buildModernizationProofSeedTaskPacket(resolvedTaskId)]);
+    await options.claimTask(run.id, resolvedTaskId, "qa_engineer");
+    await options.submitHandoff(run.id, resolvedTaskId, {
+      actor: "qa_engineer",
+      ownerRole: "qa_engineer",
+      completionStandard: "specialist_verified",
+      summary: `Seeded local modernization-proof runtime state for ${resolvedTaskId}.`,
+      changedFiles: [".devgod/ACTIVE"],
+      blockers: [],
+      verificationNotes: ["runtime modernization proof seeded locally"],
+      executionEvidence: ["task graph created", "task claimed", "handoff submitted", "autonomous evidence seeded"],
+      qualityGateEvidence: ["seed command test coverage", "installed repo modernization replay path"],
+      contextRefs: [`brief://${resolvedTaskId}`, "seed://modernization-proof"]
+    });
 
-  await options.createTaskGraph(run.id, [buildModernizationProofSeedTaskPacket(resolvedTaskId)]);
-  await options.claimTask(run.id, resolvedTaskId, "qa_engineer");
-  await options.submitHandoff(run.id, resolvedTaskId, {
-    actor: "qa_engineer",
-    ownerRole: "qa_engineer",
-    completionStandard: "specialist_verified",
-    summary: `Seeded local modernization-proof runtime state for ${resolvedTaskId}.`,
-    changedFiles: [".devgod/ACTIVE"],
-    blockers: [],
-    verificationNotes: ["runtime modernization proof seeded locally"],
-    executionEvidence: ["task graph created", "task claimed", "handoff submitted", "autonomous evidence seeded"],
-    qualityGateEvidence: ["seed command test coverage", "installed repo modernization replay path"],
-    contextRefs: [`brief://${resolvedTaskId}`, "seed://modernization-proof"]
-  });
+    await options.recordReview(run.id, resolvedTaskId, "reviewer-actor", {
+      reviewerRole: "reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await options.recordReview(run.id, resolvedTaskId, "security-actor", {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await options.recordReview(run.id, resolvedTaskId, "qa-actor", {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
 
-  await options.recordReview(run.id, resolvedTaskId, "reviewer-actor", {
-    reviewerRole: "reviewer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
-  await options.recordReview(run.id, resolvedTaskId, "security-actor", {
-    reviewerRole: "security_reviewer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
-  await options.recordReview(run.id, resolvedTaskId, "qa-actor", {
-    reviewerRole: "qa_engineer",
-    state: "passed",
-    severity: "low",
-    findings: []
-  });
-
-  const now = new Date().toISOString();
-  await options.configureAutonomousExecution(run.id, {
-    profile: "modernization_program",
-    phase: "modernization_strategy",
-    manifest: {
-      runId: run.id,
+    const now = new Date().toISOString();
+    await options.configureAutonomousExecution(run.id, {
       profile: "modernization_program",
-      requiredCategories: ["services"],
-      thresholds: {
-        criticalItemCoverage: 0.9,
-        criticalItemValidation: 0.75,
-        callsiteCoverage: 0.9,
-        runtimeTraceCoverage: 0.85,
-        inventoryCompleteness: 1,
-        businessRuleCoverage: 0.9,
-        maxContradictionGapCount: 0,
-        maxOpenBlockers: 0
+      phase: "modernization_strategy",
+      manifest: {
+        runId: run.id,
+        profile: "modernization_program",
+        requiredCategories: ["services"],
+        thresholds: {
+          criticalItemCoverage: 0.9,
+          criticalItemValidation: 0.75,
+          callsiteCoverage: 0.9,
+          runtimeTraceCoverage: 0.85,
+          inventoryCompleteness: 1,
+          businessRuleCoverage: 0.9,
+          maxContradictionGapCount: 0,
+          maxOpenBlockers: 0
+        }
       }
-    }
-  });
-  await options.upsertCoverageItems(run.id, buildModernizationCoverageItems(now));
-  await options.upsertUnderstandingMaps(run.id, buildModernizationUnderstandingMaps(now));
-  await options.upsertRuntimeTraces(run.id, [
-    {
-      traceId: "trace:modernization-proof-core",
-      targetId: "service:modernization-proof-core",
-      kind: "side_effect",
-      risky: true,
-      sideEffects: ["persists modernization artifact evidence"],
-      evidenceRefs: ["seed://modernization-proof"],
-      createdAt: now
-    }
-  ]);
-  await options.upsertDuplicateFamilies(run.id, buildModernizationDuplicateFamilies(now));
-  await options.upsertArchitectureDecisions(run.id, buildModernizationArchitectureDecisions(now));
-  await options.upsertMigrationLedgerEntries(run.id, buildModernizationMigrationLedger(now));
-  await options.upsertParityRequirements(run.id, buildModernizationParityRequirements(now));
+    });
+    await options.upsertCoverageItems(run.id, buildModernizationCoverageItems(now));
+    await options.upsertUnderstandingMaps(run.id, buildModernizationUnderstandingMaps(now));
+    await options.upsertRuntimeTraces(run.id, [
+      {
+        traceId: "trace:modernization-proof-core",
+        targetId: "service:modernization-proof-core",
+        kind: "side_effect",
+        risky: true,
+        sideEffects: ["persists modernization artifact evidence"],
+        evidenceRefs: ["seed://modernization-proof"],
+        createdAt: now
+      }
+    ]);
+    await options.upsertDuplicateFamilies(run.id, buildModernizationDuplicateFamilies(now));
+    await options.upsertArchitectureDecisions(run.id, buildModernizationArchitectureDecisions(now));
+    await options.upsertMigrationLedgerEntries(run.id, buildModernizationMigrationLedger(now));
+    await options.upsertParityRequirements(run.id, buildModernizationParityRequirements(now));
 
-  const proof = await executeWorkflowProofCommandFromArgs(
-    ["--run-id", run.id, "--task-id", resolvedTaskId],
-    {
-      env,
-      getStatusSnapshot: options.getStatusSnapshot,
-      getReviews: options.getReviews,
-      getApprovals: options.getApprovals
-    }
-  );
-
-  const status = await options.getStatusSnapshot(run.id);
-  const comprehensionSummary = status.autonomousExecution?.comprehensionSummary;
-  const phaseReadiness = status.autonomousExecution?.phaseReadiness;
-  if (!status.autonomousExecution || !comprehensionSummary || !phaseReadiness) {
-    throw new Error("seed-modernization-proof expected autonomous execution to be configured");
-  }
-  if (status.autonomousExecution.state.profile !== "modernization_program") {
-    throw new Error(
-      `seed-modernization-proof expected modernization_program profile, found ${status.autonomousExecution.state.profile}`
+    const proof = await executeWorkflowProofCommandFromArgs(
+      ["--run-id", run.id, "--task-id", resolvedTaskId],
+      {
+        env,
+        integrityCheckMode: "allow_seed_failure_recovery",
+        getProjectRuntimeState: options.getProjectRuntimeState,
+        getStatusSnapshot: options.getStatusSnapshot,
+        getReviews: options.getReviews,
+        getApprovals: options.getApprovals
+      }
     );
-  }
-  if (comprehensionSummary.rewriteReadiness !== "ready") {
-    throw new Error(
-      `seed-modernization-proof expected ready rewrite readiness, found ${comprehensionSummary.rewriteReadiness}: ${comprehensionSummary.missingEvidence.join("; ")}`
-    );
-  }
-  if (phaseReadiness.status !== "ready") {
-    throw new Error(`seed-modernization-proof expected ready phase readiness, found ${phaseReadiness.status}`);
-  }
 
-  const refreshedRuntimeState = (await options.getProjectRuntimeState(projectContext.project.id)) ?? projectRuntimeState;
-  const nextRuntimeState: ProjectRuntimeStateRecord = {
-    projectId: projectContext.project.id,
-    workspaceId: projectContext.workspace.id,
-    activeRunId: run.id,
-    activeTaskId: resolvedTaskId,
-    taskQueue: alignQueueToActiveTask(refreshedRuntimeState?.taskQueue, resolvedTaskId),
-    productState: refreshedRuntimeState?.productState ?? buildDefaultProductState(),
-    lastVerifiedRunId: proof.runId,
-    metadata: refreshedRuntimeState?.metadata ?? {},
-    createdAt: refreshedRuntimeState?.createdAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  await options.saveProjectRuntimeState(nextRuntimeState);
-  await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
+    const status = await options.getStatusSnapshot(run.id);
+    const comprehensionSummary = status.autonomousExecution?.comprehensionSummary;
+    const phaseReadiness = status.autonomousExecution?.phaseReadiness;
+    if (!status.autonomousExecution || !comprehensionSummary || !phaseReadiness) {
+      throw new Error("seed-modernization-proof expected autonomous execution to be configured");
+    }
+    if (status.autonomousExecution.state.profile !== "modernization_program") {
+      throw new Error(
+        `seed-modernization-proof expected modernization_program profile, found ${status.autonomousExecution.state.profile}`
+      );
+    }
+    if (comprehensionSummary.rewriteReadiness !== "ready") {
+      throw new Error(
+        `seed-modernization-proof expected ready rewrite readiness, found ${comprehensionSummary.rewriteReadiness}: ${comprehensionSummary.missingEvidence.join("; ")}`
+      );
+    }
+    if (phaseReadiness.status !== "ready") {
+      throw new Error(`seed-modernization-proof expected ready phase readiness, found ${phaseReadiness.status}`);
+    }
 
-  return {
-    mode: "local_modernization_proof_seed",
-    workspaceSlug,
-    projectSlug,
-    autonomous: {
-      profile: status.autonomousExecution.state.profile,
-      phase: status.autonomousExecution.state.phase,
-      readinessScope: comprehensionSummary.readinessScope,
-      rewriteReadiness: comprehensionSummary.rewriteReadiness,
-      missingArtifactKinds: comprehensionSummary.missingArtifactKinds,
-      duplicateFamilyCount: comprehensionSummary.duplicateFamilyCount,
-      architectureDecisionCount: comprehensionSummary.architectureDecisionCount,
-      migrationLedgerCount: comprehensionSummary.migrationLedgerCount,
-      parityRequirementCount: comprehensionSummary.parityRequirementCount
-    },
-    ...proof
-  };
+    const refreshedRuntimeState =
+      (await options.getProjectRuntimeState(projectContext.project.id)) ?? projectRuntimeState;
+    const nextRuntimeState: ProjectRuntimeStateRecord = {
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      activeRunId: run.id,
+      activeTaskId: resolvedTaskId,
+      taskQueue: alignQueueToActiveTask(refreshedRuntimeState?.taskQueue, resolvedTaskId),
+      productState: refreshedRuntimeState?.productState ?? buildDefaultProductState(),
+      lastVerifiedRunId: proof.runId,
+      metadata: clearSeedFailureMetadata(refreshedRuntimeState?.metadata),
+      createdAt: refreshedRuntimeState?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await options.saveProjectRuntimeState(nextRuntimeState);
+    await syncRuntimeWorkflowExports(options.cwd, nextRuntimeState);
+
+    return {
+      mode: "local_modernization_proof_seed",
+      workspaceSlug,
+      projectSlug,
+      autonomous: {
+        profile: status.autonomousExecution.state.profile,
+        phase: status.autonomousExecution.state.phase,
+        readinessScope: comprehensionSummary.readinessScope,
+        rewriteReadiness: comprehensionSummary.rewriteReadiness,
+        missingArtifactKinds: comprehensionSummary.missingArtifactKinds,
+        duplicateFamilyCount: comprehensionSummary.duplicateFamilyCount,
+        architectureDecisionCount: comprehensionSummary.architectureDecisionCount,
+        migrationLedgerCount: comprehensionSummary.migrationLedgerCount,
+        parityRequirementCount: comprehensionSummary.parityRequirementCount
+      },
+      ...proof
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await options.failTask?.(run.id, resolvedTaskId, `modernization proof seed failed: ${reason}`);
+    throw error;
+  }
 }
 
 function normalizeWorkflowExportState(queue: TaskQueue, taskId: string | null): "active" | "idle" | "complete" {
@@ -7678,6 +8240,11 @@ function formatActiveWorkflowContent(taskId: string | null, queue: TaskQueue): s
   lines.push("workflow=devgod");
   lines.push(`state=${normalizeWorkflowExportState(queue, taskId)}`);
   return `${lines.join("\n")}\n`;
+}
+
+function isCompleteProjectStatus(projectStatus: string | undefined): boolean {
+  const normalized = projectStatus?.trim().toLowerCase();
+  return normalized === "complete" || normalized === "completed" || normalized === "done";
 }
 
 async function writeFileIfChanged(filePath: string, content: string): Promise<boolean> {
@@ -7705,6 +8272,7 @@ async function syncRuntimeWorkflowExports(
   runtimeState: {
     activeTaskId?: string | null | undefined;
     taskQueue: ProjectRuntimeStateRecord["taskQueue"];
+    lastVerifiedRunId?: string | null | undefined;
   }
 ): Promise<boolean> {
   if (!cwd) {
@@ -7712,6 +8280,9 @@ async function syncRuntimeWorkflowExports(
   }
 
   const queue = parseTaskQueueRecord(runtimeState.taskQueue);
+  if (isCompleteProjectStatus(queue.project_status) && !runtimeState.lastVerifiedRunId) {
+    throw new Error("Cannot sync complete workflow exports without authoritative runtime proof (missing last verified run)");
+  }
   const activeTaskId =
     runtimeState.activeTaskId && runtimeState.activeTaskId.trim().length > 0
       ? runtimeState.activeTaskId.trim()
@@ -7828,7 +8399,8 @@ export async function executeReconcileRuntimeStateCommandFromArgs(
       apply &&
       await syncRuntimeWorkflowExports(options.cwd, {
         activeTaskId: existingState?.activeTaskId ?? null,
-        taskQueue: existingState?.taskQueue ?? existingQueue
+        taskQueue: existingState?.taskQueue ?? existingQueue,
+        lastVerifiedRunId: existingState?.lastVerifiedRunId
       });
     return {
       format,
@@ -7932,13 +8504,32 @@ export async function executeReconcileRuntimeStateCommandFromArgs(
 
   if (apply && runtimeStateChanged) {
     await options.saveProjectRuntimeState(nextState);
+    await persistProjectIntegrityRepairMetadata({
+      projectId: projectContext.project.id,
+      getProjectRuntimeState: options.getProjectRuntimeState,
+      saveProjectRuntimeState: options.saveProjectRuntimeState,
+      source: "reconcile_runtime_state",
+      kind: "runtime_task_reconcile",
+      summary: `${normalizedRepairAction}: ${reason}`
+    });
   }
   const localExportsSynced =
     apply &&
     await syncRuntimeWorkflowExports(options.cwd, {
       activeTaskId: nextState.activeTaskId ?? null,
-      taskQueue: nextState.taskQueue
+      taskQueue: nextState.taskQueue,
+      lastVerifiedRunId: nextState.lastVerifiedRunId
     });
+  if (apply && !runtimeStateChanged && localExportsSynced) {
+    await persistProjectIntegrityRepairMetadata({
+      projectId: projectContext.project.id,
+      getProjectRuntimeState: options.getProjectRuntimeState,
+      saveProjectRuntimeState: options.saveProjectRuntimeState,
+      source: "reconcile_runtime_state",
+      kind: "local_export_resync",
+      summary: "reconcile command resynced local workflow exports from authoritative runtime state"
+    });
+  }
 
   return {
     format,
@@ -7981,10 +8572,21 @@ export async function executeSyncRuntimeExportsCommandFromArgs(
   const runtimeState = await options.getProjectRuntimeState(projectContext.project.id);
   const queue = parseTaskQueueRecord(runtimeState?.taskQueue);
   const activeTaskId = runtimeState?.activeTaskId ?? null;
-  await syncRuntimeWorkflowExports(options.cwd, {
+  const synced = await syncRuntimeWorkflowExports(options.cwd, {
     activeTaskId,
-    taskQueue: queue
+    taskQueue: queue,
+    lastVerifiedRunId: runtimeState?.lastVerifiedRunId
   });
+  if (synced && runtimeState && options.saveProjectRuntimeState) {
+    await persistProjectIntegrityRepairMetadata({
+      projectId: projectContext.project.id,
+      getProjectRuntimeState: options.getProjectRuntimeState,
+      saveProjectRuntimeState: options.saveProjectRuntimeState,
+      source: "sync_runtime_exports",
+      kind: "local_export_resync",
+      summary: "sync-runtime-exports resynced local workflow exports from authoritative runtime state"
+    });
+  }
 
   return {
     format: resolveFormatFlag(args),
@@ -8068,7 +8670,7 @@ export async function executeAdvanceActiveTaskCommandFromArgs(
     taskQueue: advanced.queue,
     productState: projectRuntimeState?.productState ?? buildDefaultProductState(),
     lastVerifiedRunId: proof.runId,
-    metadata: projectRuntimeState?.metadata ?? {},
+    metadata: clearSeedFailureMetadata(projectRuntimeState?.metadata),
     createdAt: projectRuntimeState?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -10171,6 +10773,9 @@ async function reportCommand(args: readonly string[]) {
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
       getExecutionPlan(runId, staleAfterHours) {
         return service.getExecutionPlan(runId, { staleAfterHours });
       },
@@ -10301,6 +10906,9 @@ async function seedWorkflowProofCommand(args: readonly string[]) {
       recordReview(runId, taskId, actor, review) {
         return service.recordReview(runId, taskId, actor, review);
       },
+      failTask(runId, taskId, reason) {
+        return service.failTask(runId, taskId, reason);
+      },
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -10348,6 +10956,9 @@ async function seedModernizationProofCommand(args: readonly string[]) {
       },
       recordReview(runId, taskId, actor, review) {
         return service.recordReview(runId, taskId, actor, review);
+      },
+      failTask(runId, taskId, reason) {
+        return service.failTask(runId, taskId, reason);
       },
       configureAutonomousExecution(runId, input) {
         return service.configureAutonomousExecution(runId, input);
@@ -10441,6 +11052,9 @@ async function syncRuntimeExportsCommand(args: readonly string[]) {
       },
       getProjectRuntimeState(projectId) {
         return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
       }
     });
 

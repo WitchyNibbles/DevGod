@@ -84,6 +84,12 @@ function matchesWorkflowDocumentQuery(document: WorkflowDocumentRecord, query: s
   );
 }
 
+function cloneProjectRuntimeState(
+  state: ProjectRuntimeStateRecord | undefined
+): ProjectRuntimeStateRecord | undefined {
+  return state ? structuredClone(state) : undefined;
+}
+
 export class MemoryStore implements DevgodStore {
   private readonly workspaces = new Map<string, WorkspaceRecord>();
   private readonly projects = new Map<string, ProjectRecord>();
@@ -170,11 +176,11 @@ export class MemoryStore implements DevgodStore {
   }
 
   async saveProjectRuntimeState(state: ProjectRuntimeStateRecord): Promise<void> {
-    this.projectRuntimeStates.set(state.projectId, state);
+    this.projectRuntimeStates.set(state.projectId, cloneProjectRuntimeState(state)!);
   }
 
   async getProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStateRecord | undefined> {
-    return this.projectRuntimeStates.get(projectId);
+    return cloneProjectRuntimeState(this.projectRuntimeStates.get(projectId));
   }
 
   async saveWorkflowDocument(document: WorkflowDocumentRecord): Promise<void> {

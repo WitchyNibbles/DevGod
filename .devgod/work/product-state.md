@@ -45,15 +45,14 @@ The first consuming-repo repo-context memory slice is now implemented: queue com
 
 ## Current Task
 
-`none; 2026-05-28-repo-context-memory-rollout is complete`
+`none`
 
 ## Next Task
 
-`follow-up slice: reviewed slot refinement, remember/replace flow, and richer git/PR convention capture`
+`none queued`
 
 ## Blockers
 
-- no active blocker on the rollout; remaining work is follow-up depth rather than a blocker to the shipped first slice
 - maintainer-only tooling now has verified package/export boundaries, but `promptfoo` remains pinned until the repo runtime moves past the newer Node engine floor
 - richer repo preference capture and remember/replace prompts are still follow-up work
 
@@ -87,6 +86,9 @@ The first consuming-repo repo-context memory slice is now implemented: queue com
 - runtime workflow proof run `24201843-9778-4504-a39d-25a952ef1808` approved `2026-05-28-repo-context-memory-rollout`
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
 - `bash scripts/check-devgod-workflow-live.sh --task-id 2026-05-28-repo-context-memory-rollout` passed
+- workflow integrity hardening is now implemented across proof seeding, contradiction reporting, recovery auditability, live workflow gates, service-level failure handling, Postgres persistence, and in-memory store semantics
+- focused workflow integrity regressions passed for admin, service, ops recovery, report, status, postgres-store, workflow-integrity, and workflow-check suites
+- combined verification passed with `334` tests green across `tests/admin.test.ts`, `tests/service.test.ts`, `tests/postgres-store.test.ts`, `tests/status-report.test.ts`, `tests/report-command.test.ts`, `tests/ops-recovery.test.ts`, `tests/workflow-integrity.test.ts`, and `tests/workflow-check.test.ts`
 
 ## Review Summary
 
@@ -96,4 +98,4 @@ The first consuming-repo repo-context memory slice is now implemented: queue com
 
 ## Last Updated
 
-2026-05-28
+2026-05-31

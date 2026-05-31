@@ -1,4 +1,6 @@
 import {
+  classifyBashFailure,
+  clearHookBlockerState,
   buildAdditionalContext,
   buildPermissionDeny,
   buildPostToolBlock,
@@ -13,6 +15,7 @@ import {
   isTaskPacketPath,
   isVerificationCommand,
   parseApplyPatchTargets,
+  persistHookBlockerState,
   shouldHoldStop
 } from "./hook-utils.mjs";
 
@@ -130,9 +133,35 @@ export function evaluatePostToolUse(payload, context) {
     return undefined;
   }
 
-  const command = extractToolCommand(payload);
   const exitCode = getBashExitCode(payload?.tool_response);
-  if (typeof exitCode !== "number" || exitCode === 0 || !isVerificationCommand(command)) {
+  if (typeof exitCode !== "number") {
+    return undefined;
+  }
+
+  if (exitCode === 0) {
+    clearHookBlockerState(context.repoRoot);
+    return undefined;
+  }
+
+  const classification = classifyBashFailure(payload);
+  if (classification && context.repoRoot && context.activeTaskId) {
+    persistHookBlockerState(context.repoRoot, {
+      activeTaskId: context.activeTaskId,
+      queueCurrentTaskId: context.queueCurrentTaskId,
+      turnId: typeof payload?.turn_id === "string" ? payload.turn_id : undefined,
+      toolName: classification.toolName,
+      command: classification.command,
+      commandFingerprint: classification.commandFingerprint,
+      exitCode: classification.exitCode,
+      blockerKind: classification.blockerKind,
+      summary: classification.summary,
+      details: classification.details,
+      recordedAt: new Date().toISOString()
+    });
+  }
+
+  const command = extractToolCommand(payload);
+  if (!isVerificationCommand(command)) {
     return undefined;
   }
 
@@ -206,6 +235,7 @@ export function evaluateUserPromptSubmit(payload, context) {
 export function evaluateStop(payload, context) {
   const lastAssistantMessage =
     typeof payload?.last_assistant_message === "string" ? payload.last_assistant_message : "";
+  const stopHookActive = payload?.stop_hook_active === true;
 
   if (Array.isArray(context.authorityMismatches) && context.authorityMismatches.length > 0) {
     return undefined;
@@ -219,8 +249,22 @@ export function evaluateStop(payload, context) {
     return undefined;
   }
 
+  const hookBlockerState =
+    context.hookBlockerState && typeof context.hookBlockerState === "object" ? context.hookBlockerState : undefined;
+  const activeTaskId = context.activeTaskId ?? context.queueCurrentTaskId;
+  if (hookBlockerState && activeTaskId && hookBlockerState.activeTaskId === activeTaskId) {
+    if (stopHookActive) {
+      return undefined;
+    }
+
+    return {
+      decision: "block",
+      reason: hookBlockerState.summary
+    };
+  }
+
   if ((context.activeTaskId || context.queueCurrentTaskId) && shouldHoldStop(lastAssistantMessage)) {
-    const taskId = context.activeTaskId ?? context.queueCurrentTaskId;
+    const taskId = activeTaskId;
     return {
       decision: "block",
       reason: `active devgod task ${taskId} remains in progress; continue execution or state the real blocker explicitly`

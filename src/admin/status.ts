@@ -216,6 +216,45 @@ export interface OperatorStatusReport {
   };
   reviewIdentity: ReviewIdentityStatusObservation;
   gitNexus: GitNexusStatusObservation;
+  integrity: {
+    authorityLabel: "derived_only";
+    status: "consistent" | "contradicted" | "unavailable";
+    contradictions: string[];
+    runtimeState?: {
+      authorityLabel: "runtime_authoritative";
+      activeTaskId: string | null;
+      projectStatus: string;
+      lastVerifiedRunId: string | null;
+      seedFailure?:
+        | {
+            runId: string;
+            taskId: string;
+            reason: string;
+            failedAt?: string | undefined;
+            recoveryState: "requires_reproof" | "stale_metadata";
+          }
+        | undefined;
+      lastIntegrityRepair?:
+        | {
+            source: "doctor_repair" | "recover_apply" | "reconcile_runtime_state" | "sync_runtime_exports";
+            kind:
+              | "local_export_resync"
+              | "runtime_metadata_cleanup"
+              | "runtime_task_reconcile"
+              | "recovery_action_apply";
+            summary: string;
+            repairedAt: string;
+          }
+        | undefined;
+    } | undefined;
+    localExports?: {
+      authorityLabel: "derived_only";
+      activeState: "active" | "idle" | "complete" | "unknown";
+      activeTaskId: string | null;
+      queueProjectStatus: string;
+      queueCurrentTaskId: string | null;
+    } | undefined;
+  };
 }
 
 function emptyTaskBuckets(): Record<TaskStatus, string[]> {
@@ -248,6 +287,7 @@ export function buildOperatorStatusReport(input: {
   daemonSupervisor?: DaemonSupervisorStatusObservation | undefined;
   reviewIdentity: ReviewIdentityStatusObservation;
   gitNexus: GitNexusStatusObservation;
+  integrity?: OperatorStatusReport["integrity"] | undefined;
   now?: string | undefined;
   staleAfterDays?: number | undefined;
 }): OperatorStatusReport {
@@ -363,6 +403,11 @@ export function buildOperatorStatusReport(input: {
       supervisor: input.daemonSupervisor
     },
     reviewIdentity: input.reviewIdentity,
-    gitNexus: input.gitNexus
+    gitNexus: input.gitNexus,
+    integrity: input.integrity ?? {
+      authorityLabel: "derived_only",
+      status: "unavailable",
+      contradictions: []
+    }
   };
 }

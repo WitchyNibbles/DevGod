@@ -19,6 +19,7 @@ import {
   executeReportCommandFromArgs,
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs,
+  executeRepairTaskQueueCommandFromArgs,
   executeResumeCommandFromArgs,
   executeSeedModernizationProofCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
@@ -869,6 +870,123 @@ test("executeWorkflowProofCommandFromArgs accepts UI tasks when QA review cites 
   assert.equal(result.taskId, "ui-task");
 });
 
+test("executeWorkflowProofCommandFromArgs rejects stale persisted seed failure metadata after runtime approval", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Guard stale workflow residue",
+    request: "Fail workflow proof when runtime integrity is contradicted after approval."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared runtime workflow proof slice.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["verified command boundaries"],
+    executionEvidence: ["task packet written"],
+    qualityGateEvidence: ["tdd scenarios listed"],
+    contextRefs: ["brief://workflow-proof"]
+  });
+
+  await service.recordReview(run.id, "plan", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "complete",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "complete", items: [] },
+    lastVerifiedRunId: run.id,
+    metadata: {
+      seedFailure: {
+        runId: run.id,
+        taskId: "plan",
+        reason: "seed failure residue should have been cleared",
+        failedAt: "2026-05-31T11:00:00.000Z"
+      }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  await assert.rejects(
+    executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "plan"], {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      }
+    }),
+    /runtime integrity is contradicted: stale persisted seed failure metadata/i
+  );
+});
+
 test("executeAdvanceActiveTaskCommandFromArgs previews and applies runtime-gated queue rollover", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
@@ -1390,7 +1508,14 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     },
     productState: { status: "ready", items: [] },
     lastVerifiedRunId: undefined,
-    metadata: {},
+    metadata: {
+      seedFailure: {
+        runId: "stale-seed-run",
+        taskId: "active-proof-task",
+        reason: "stale interrupted proof seed",
+        failedAt: "2026-05-31T09:00:00.000Z"
+      }
+    },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
@@ -1424,6 +1549,9 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
           recordReview(runId, taskId, actor, review) {
             return service.recordReview(runId, taskId, actor, review);
           },
+          failTask(runId, taskId, reason) {
+            return service.failTask(runId, taskId, reason);
+          },
           getStatusSnapshot(runId) {
             return service.getStatus(runId);
           },
@@ -1450,6 +1578,7 @@ test("executeSeedWorkflowProofCommandFromArgs seeds an approved latest runtime r
     const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
     assert.equal(runtimeState?.activeTaskId, "active-proof-task");
     assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
+    assert.equal(runtimeState?.metadata?.seedFailure, undefined);
     const queue = runtimeState?.taskQueue as
       | { current_task_id?: string | null; project_status?: string; tasks?: Array<{ id: string; status: string }> }
       | undefined;
@@ -1515,7 +1644,14 @@ test("executeSeedModernizationProofCommandFromArgs seeds a ready modernization r
     },
     productState: { status: "ready", items: [] },
     lastVerifiedRunId: undefined,
-    metadata: {},
+    metadata: {
+      seedFailure: {
+        runId: "stale-modernization-seed-run",
+        taskId: "active-modernization-task",
+        reason: "stale interrupted modernization proof seed",
+        failedAt: "2026-05-31T10:00:00.000Z"
+      }
+    },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
@@ -1603,6 +1739,7 @@ test("executeSeedModernizationProofCommandFromArgs seeds a ready modernization r
     const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
     assert.equal(runtimeState?.activeTaskId, "active-modernization-task");
     assert.equal(runtimeState?.lastVerifiedRunId, result.runId);
+    assert.equal(runtimeState?.metadata?.seedFailure, undefined);
 
     const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
     assert.equal(exportedActive, "task_id=active-modernization-task\nworkflow=devgod\nstate=active\n");
@@ -1656,6 +1793,9 @@ test("executeSeedWorkflowProofCommandFromArgs requires a task id when no active 
         recordReview(runId, taskId, actor, review) {
           return service.recordReview(runId, taskId, actor, review);
         },
+        failTask(runId, taskId, reason) {
+          return service.failTask(runId, taskId, reason);
+        },
         getStatusSnapshot(runId) {
           return service.getStatus(runId);
         },
@@ -1668,6 +1808,254 @@ test("executeSeedWorkflowProofCommandFromArgs requires a task id when no active 
       }),
       /requires --task-id or an active runtime task/
     );
+});
+
+test("executeSeedWorkflowProofCommandFromArgs does not strand a review-blocked locked run when review recording fails", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "devgod-local-seed", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "devgod-local-seed",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-seed-interrupt-export-"));
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: undefined,
+    activeTaskId: "interrupted-proof-task",
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  let reviewCalls = 0;
+
+  try {
+    await assert.rejects(
+      executeSeedWorkflowProofCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod"], {
+        cwd: exportCwd,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        intakeRequest(input) {
+          return service.intakeRequest(input);
+        },
+        createTaskGraph(runId, taskPackets) {
+          return service.createTaskGraph(runId, taskPackets);
+        },
+        claimTask(runId, taskId, actor) {
+          return service.claimTask(runId, taskId, actor);
+        },
+        submitHandoff(runId, taskId, handoff) {
+          return service.submitHandoff(runId, taskId, handoff);
+        },
+        recordReview() {
+          reviewCalls += 1;
+          throw new Error("synthetic review failure after handoff");
+        },
+        failTask(runId, taskId, reason) {
+          return service.failTask(runId, taskId, reason);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }),
+      /synthetic review failure after handoff/
+    );
+
+    assert.equal(reviewCalls, 1);
+
+    const latestRun = await store.findLatestRun({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(latestRun);
+    const snapshot = await service.getStatus(latestRun.id);
+    const seededTask = snapshot.tasks.find((task) => task.packet.taskId === "interrupted-proof-task");
+    assert.ok(seededTask);
+    assert.notEqual(seededTask.status, "review_blocked");
+    assert.deepEqual(snapshot.activeLocks, []);
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSeedModernizationProofCommandFromArgs does not strand a review-blocked locked run when modernization seeding fails", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "devgod-local-seed", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "devgod-local-seed", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "devgod-local-seed",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-modernization-seed-interrupt-export-"));
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: undefined,
+    activeTaskId: "interrupted-modernization-task",
+    taskQueue: {
+      project_status: "ready",
+      current_task_id: null,
+      tasks: []
+    },
+    productState: { status: "ready", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  let configureCalls = 0;
+
+  try {
+    await assert.rejects(
+      executeSeedModernizationProofCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod"], {
+        cwd: exportCwd,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        intakeRequest(input) {
+          return service.intakeRequest(input);
+        },
+        createTaskGraph(runId, taskPackets) {
+          return service.createTaskGraph(runId, taskPackets);
+        },
+        claimTask(runId, taskId, actor) {
+          return service.claimTask(runId, taskId, actor);
+        },
+        submitHandoff(runId, taskId, handoff) {
+          return service.submitHandoff(runId, taskId, handoff);
+        },
+        recordReview(runId, taskId, actor, review) {
+          return service.recordReview(runId, taskId, actor, review);
+        },
+        failTask(runId, taskId, reason) {
+          return service.failTask(runId, taskId, reason);
+        },
+        configureAutonomousExecution() {
+          configureCalls += 1;
+          throw new Error("synthetic modernization configuration failure");
+        },
+        upsertCoverageItems() {
+          throw new Error("unexpected coverage upsert after synthetic failure");
+        },
+        upsertUnderstandingMaps() {
+          throw new Error("unexpected understanding upsert after synthetic failure");
+        },
+        upsertRuntimeTraces() {
+          throw new Error("unexpected trace upsert after synthetic failure");
+        },
+        upsertDuplicateFamilies() {
+          throw new Error("unexpected duplicate-family upsert after synthetic failure");
+        },
+        upsertArchitectureDecisions() {
+          throw new Error("unexpected architecture-decision upsert after synthetic failure");
+        },
+        upsertMigrationLedgerEntries() {
+          throw new Error("unexpected migration-ledger upsert after synthetic failure");
+        },
+        upsertParityRequirements() {
+          throw new Error("unexpected parity upsert after synthetic failure");
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        }
+      }),
+      /synthetic modernization configuration failure/
+    );
+
+    assert.equal(configureCalls, 1);
+
+    const latestRun = await store.findLatestRun({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(latestRun);
+    const snapshot = await service.getStatus(latestRun.id);
+    const seededTask = snapshot.tasks.find((task) => task.packet.taskId === "interrupted-modernization-task");
+    assert.ok(seededTask);
+    assert.notEqual(seededTask.status, "review_blocked");
+    assert.deepEqual(snapshot.activeLocks, []);
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
 });
 
 test("executeSyncRuntimeExportsCommandFromArgs rewrites stale local workflow exports from runtime state", async () => {
@@ -1736,6 +2124,9 @@ test("executeSyncRuntimeExportsCommandFromArgs rewrites stale local workflow exp
         },
         getProjectRuntimeState(projectId) {
           return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
         }
       }
     );
@@ -1753,8 +2144,141 @@ test("executeSyncRuntimeExportsCommandFromArgs rewrites stale local workflow exp
     assert.equal(exportedActive, "workflow=devgod\nstate=complete\n");
     assert.equal(exportedQueue.project_status, "complete");
     assert.equal(exportedQueue.current_task_id, null);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.source, "sync_runtime_exports");
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "local_export_resync");
+    assert.match(
+      String(runtimeState?.metadata?.lastIntegrityRepair?.summary ?? ""),
+      /sync-runtime-exports resynced local workflow exports/i
+    );
   } finally {
     await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeSyncRuntimeExportsCommandFromArgs rejects complete exports without authoritative runtime proof", async () => {
+  const store = new MemoryStore();
+  const projectContext = await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: "run-unverified",
+    activeTaskId: undefined,
+    taskQueue: {
+      project_status: "complete",
+      current_task_id: null,
+      tasks: [
+        {
+          id: "task-finished",
+          title: "Finished task",
+          status: "done",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "complete", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-sync-unverified-complete-"));
+  try {
+    await mkdir(path.join(exportCwd, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(exportCwd, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(exportCwd, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-stale",
+          tasks: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeSyncRuntimeExportsCommandFromArgs(
+        ["--workspace-slug", "team", "--project-slug", "devgod"],
+        {
+          cwd: exportCwd,
+          getProjectContext(params) {
+            return store.getProjectContext(params);
+          },
+          getProjectRuntimeState(projectId) {
+            return store.getProjectRuntimeState(projectId);
+          }
+        }
+      ),
+      /runtime proof|last verified/i
+    );
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeRepairTaskQueueCommandFromArgs stays explicitly derived-only when repairing local queue aliases", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-repair-task-queue-"));
+  const queuePath = path.join(directory, ".devgod", "work", "task-queue.json");
+
+  try {
+    await mkdir(path.dirname(queuePath), { recursive: true });
+    await writeFile(
+      queuePath,
+      `${JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: null,
+          tasks: [
+            {
+              id: "task-001",
+              title: "Legacy slice",
+              status: "pending",
+              class: "implementation_slice",
+              depends_on: [],
+              acceptance_criteria: [],
+              verification: [],
+              evidence: [],
+              blocker: null
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await executeRepairTaskQueueCommandFromArgs([], {
+      cwd: directory
+    });
+
+    assert.equal(result.authorityLabel, "derived_only");
+    assert.equal(result.changed, true);
+    assert.equal(result.repairedTasks, 1);
+
+    const content = await readFile(queuePath, "utf8");
+    assert.match(content, /"class": "prototype_slice"/);
+    assert.doesNotMatch(content, /implementation_slice/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -1829,6 +2353,12 @@ test("executeReconcileRuntimeStateCommandFromArgs activates the unique owner-dis
     const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
     assert.equal(runtimeState?.activeTaskId, "task-owner");
     assert.equal((runtimeState?.taskQueue as TaskQueue).current_task_id, "task-owner");
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.source, "reconcile_runtime_state");
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "runtime_task_reconcile");
+    assert.match(
+      String(runtimeState?.metadata?.lastIntegrityRepair?.summary ?? ""),
+      /activate_owner_dispatch_target: activated the unique owner-dispatch target task-owner/i
+    );
 
     const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
     assert.equal(exportedActive, "task_id=task-owner\nworkflow=devgod\nstate=active\n");
@@ -1900,6 +2430,13 @@ test("executeReconcileRuntimeStateCommandFromArgs aligns a stale active task to 
   assert.equal(reconciled.result.repairAction, "sync_active_task_to_in_progress");
   assert.equal(reconciled.result.activeTaskId, "task-owner");
   assert.equal(reconciled.result.queue.current_task_id, "task-owner");
+  const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+  assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.source, "reconcile_runtime_state");
+  assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "runtime_task_reconcile");
+  assert.match(
+    String(runtimeState?.metadata?.lastIntegrityRepair?.summary ?? ""),
+    /sync_active_task_to_in_progress: runtime active task drifted from the authoritative in-progress task task-owner/i
+  );
   assert.equal(reconciled.result.queue.tasks[0]?.status, "in_progress");
 });
 
