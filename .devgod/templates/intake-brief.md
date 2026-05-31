@@ -32,6 +32,12 @@ Original user ask:
 
 ## Clarifying questions
 
+## Council need
+
+`required | not_required | inherited`
+
+## Council rationale
+
 ## Assumptions
 
 ### Approved assumptions
@@ -65,6 +71,10 @@ Original user ask:
 ## Non-goals
 
 ## Out of scope
+
+## Council handoff target
+
+`none | solution_architect | product_strategist | planner`
 
 ## Trust boundaries
 

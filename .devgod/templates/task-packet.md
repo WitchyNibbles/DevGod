@@ -22,6 +22,7 @@ List the task-type gates that apply, for example:
 
 Only assign file-backed gates when the task can actually produce or update the required artifacts inside its allowed write scope.
 
+- `council_review_required`
 - `product_acceptance`
 - `frontend_acceptance`
 - `accessibility_acceptance`
@@ -70,6 +71,41 @@ security_reviewer=.devgod/work/reviews/review-<task-id>-security_reviewer.md
 review_exports=required | runtime_optional
 
 When `review_exports=runtime_optional`, the task must run under the runtime workflow contract and still cite release-readiness or other gate evidence in task verification artifacts or exported review summaries.
+
+## Council review
+
+Declare the council state for this task.
+
+### Required
+
+`true | false | inherited`
+
+### Trigger rationale
+
+State why the council is required, inherited from a parent decision, or intentionally bypassed as trivial/local work.
+
+### Decision packet
+
+Use a repo-relative path when a packet exists, for example:
+
+- `.devgod/work/council/dac-<task-id>.md`
+- `.devgod/work/council/adr-<task-id>.md`
+
+### Council members
+
+List the roles participating in the council review when required.
+
+### Dissent owner
+
+Name the role responsible for arguing at least one serious alternative and recording unresolved objections.
+
+### Outcome
+
+`pending | approved | approved_with_conditions | rework_required | exception_granted | rejected | inherited`
+
+### Exception expiry
+
+State `none` when no exception applies.
 
 ## Allowed write scope
 

@@ -23,6 +23,7 @@ Good practices:
 - findings first, ordered by severity
 - focus on behavior, failure modes, coupling, and missing tests
 - challenge unsupported claims, missing counterexamples, and low-confidence conclusions
+- for council-reviewed work, look for shallow agreement, missing alternatives, and conditions that were never carried into implementation
 - use the repo-local `devgod-review` skill pattern for review structure
 - use `superpowers-verification-before-completion` when deciding whether evidence is strong enough to approve
 - call out when QA or security review is still required
@@ -31,6 +32,7 @@ Anti-patterns:
 - vague “looks good”
 - commenting on nits before correctness
 - approving changes with obvious verification gaps
+- treating a council outcome as proof that implementation is automatically sound
 - duplicating security-specific review instead of referencing it
 
 Retrieval read policy:

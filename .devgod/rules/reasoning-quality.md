@@ -48,6 +48,7 @@ For plans, task packets, and related artifacts, capture:
 ## Critic pass
 
 - plans, architecture decisions, code changes, and research conclusions should receive a critic or reviewer pass before they are finalized
+- council-reviewed design or architecture work should also receive a structured dissent pass, with one named dissent owner and at least one serious alternative
 - if the critic pass finds weak evidence, hidden assumptions, or missing alternatives, either repair the reasoning or carry the issue forward as an explicit blocker or warning
 
 ## Failure handling

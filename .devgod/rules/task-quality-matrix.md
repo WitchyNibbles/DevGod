@@ -18,6 +18,12 @@ Use task-type quality gates in addition to the generic review trio.
 - use for ambiguous, customer-facing, or flow-heavy work
 - requires user/problem/value framing and measurable success criteria
 
+### `council_review_required`
+
+- use for substantive roadmap, governance, architecture-significant, or user-flow-heavy work that needs cross-functional critique before implementation
+- requires a council decision packet, rotating council membership, a named dissent owner, and a recorded outcome
+- should not be applied to trivial work, tightly local bug fixes, or implementation tasks already covered by an approved parent council decision
+
 ### `frontend_acceptance`
 
 - use for UI or human-facing artifact work

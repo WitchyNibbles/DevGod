@@ -40,6 +40,8 @@ List the evidence used to trust the claimed specialist ownership for this task.
 
 List the evidence used to trust the declared quality gates for this task.
 
+When `council_review_required` applies, cite the DAC decision packet, recorded outcome, dissent owner, and any approval conditions or exception expiry carried into implementation.
+
 ## Reasoning quality findings
 
 Call out weak assumptions, missing alternatives, contradictory evidence, low confidence, or exhausted budgets here.

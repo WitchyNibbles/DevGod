@@ -1080,6 +1080,31 @@ if [[ -f "$task_file" ]]; then
       fail "ui surface ${task_ui_surface} must require Playwright in ${task_file#"$repo_root"/}"
   fi
 
+  if printf '%s\n' "${task_quality_gates[@]}" | grep -Fxq "council_review_required"; then
+    require_heading "## Council review" "$task_file"
+    require_heading "### Required" "$task_file"
+    require_heading "### Trigger rationale" "$task_file"
+    require_heading "### Decision packet" "$task_file"
+    require_heading "### Council members" "$task_file"
+    require_heading "### Dissent owner" "$task_file"
+    require_heading "### Outcome" "$task_file"
+    require_heading "### Exception expiry" "$task_file"
+
+    council_required="$(normalize_value "$(extract_section_value "### Required" "$task_file")")"
+    council_outcome="$(normalize_value "$(extract_section_value "### Outcome" "$task_file")")"
+    council_dissent_owner="$(normalize_value "$(extract_section_value "### Dissent owner" "$task_file")")"
+    council_packet_block="$(extract_section_block "### Decision packet" "$task_file")"
+    council_members_block="$(extract_section_block "### Council members" "$task_file")"
+    council_trigger_block="$(extract_section_block "### Trigger rationale" "$task_file")"
+
+    require_allowed_value "$council_required" "$task_file" "true" "false" "inherited"
+    require_allowed_value "$council_outcome" "$task_file" "pending" "approved" "approved_with_conditions" "rework_required" "exception_granted" "rejected" "inherited"
+    [[ -n "$council_dissent_owner" ]] || fail "council_review_required tasks must name a dissent owner in ${task_file#"$repo_root"/}"
+    [[ -n "$(normalize_value "$council_packet_block")" ]] || fail "council_review_required tasks must cite a decision packet in ${task_file#"$repo_root"/}"
+    [[ -n "$(normalize_value "$council_members_block")" ]] || fail "council_review_required tasks must list council members in ${task_file#"$repo_root"/}"
+    [[ -n "$(normalize_value "$council_trigger_block")" ]] || fail "council_review_required tasks must record trigger rationale in ${task_file#"$repo_root"/}"
+  fi
+
   coverage_manifest_file="$repo_root/.devgod/work/coverage/coverage-${artifact_task_id}.json"
   coverage_items_file="$repo_root/.devgod/work/coverage/items-${artifact_task_id}.json"
   coverage_gaps_file="$repo_root/.devgod/work/coverage/gaps-${artifact_task_id}.json"

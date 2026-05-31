@@ -7,6 +7,7 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 ## Control Model
 
 - The universal blocking review trio remains `reviewer`, `qa_engineer`, and `security_reviewer`.
+- The `Design and Architecture Council` is a quality gate for substantive roadmap and plan work, not a fourth blocking review role.
 - Optional or domain-specific roles are valid for ownership and specialist evidence when chosen, but they are not silent global blockers.
 - Catalog drift is a verification failure, not a runtime continuation deadlock.
 
@@ -47,6 +48,7 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 - Frontend-facing roles now use repo-local wrappers for visual taste, design-system discipline, and accessibility gating so UI quality does not depend on ambient global skill installs.
 - Planning, debugging, TDD, review-completion discipline, browser verification, MCP implementation, and git handoff hygiene now also ship as repo-local wrapper skills instead of relying on ambient global installs.
 - Repo-wide policy belongs in `AGENTS.md`; specialist workflow details belong in role-specific skills and agent instructions.
+- Roles that participate in the `Design and Architecture Council` should critique with explicit alternatives, dissent ownership, and user/problem/value framing rather than taste-only feedback or passive agreement.
 - Optional domain roles still stay intentionally thin until repeated repo-local workload justifies a dedicated `devgod-*` workflow skill.
 - UI-affecting tasks should declare their UI surface explicitly and carry browser evidence through `qa_engineer` before workflow-proof approval.
 - If a future role is added, update the catalog first, then the shipped agent artifact, then the package/tests/docs surfaces that verify drift.

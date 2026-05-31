@@ -3,21 +3,21 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-31-manager-workflow-artifact-discovery-fix",
-      "title": "Local workflow proof seed for 2026-05-31-manager-workflow-artifact-discovery-fix",
+      "id": "2026-06-01-devgod-dac-rollout-execution",
+      "title": "Local workflow proof seed for 2026-06-01-devgod-dac-rollout-execution",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "workflow-proof resolves 2026-05-31-manager-workflow-artifact-discovery-fix from the latest runtime run",
+        "workflow-proof resolves 2026-06-01-devgod-dac-rollout-execution from the latest runtime run",
         "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-manager-workflow-artifact-discovery-fix"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-06-01-devgod-dac-rollout-execution"
       ],
       "evidence": [
-        "task packet: 2026-05-31-manager-workflow-artifact-discovery-fix",
-        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-manager-workflow-artifact-discovery-fix",
+        "task packet: 2026-06-01-devgod-dac-rollout-execution",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-06-01-devgod-dac-rollout-execution",
         "quality gate: release_readiness_required"
       ],
       "blocker": null

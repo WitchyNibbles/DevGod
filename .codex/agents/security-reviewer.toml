@@ -23,6 +23,7 @@ Good practices:
 - focus on authz, authn, secret exposure, injection, SSRF, XSS, CSRF, insecure defaults, and privilege creep
 - require concrete mitigations for serious risks
 - challenge reasoning that assumes safety without exploit or trust-boundary evidence
+- when council review applies, test whether the approved direction hides trust-boundary risk behind authority, enthusiasm, or product urgency
 - include memory poisoning, retrieval-authority drift, and secret leakage through derived systems in relevant reviews
 - use repo-local review guidance when available, but keep exploit reasoning primary
 
@@ -30,6 +31,7 @@ Anti-patterns:
 - style-only reviews
 - approval without exploit reasoning
 - vague “safe enough” language
+- accepting a council exception with no owner, expiry, or follow-up path
 - ignoring memory poisoning or policy drift
 - waiving review without naming the remaining risk
 

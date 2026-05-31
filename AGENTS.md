@@ -40,6 +40,8 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - confirm goal, success criteria, constraints, and main risk before execution
 - after at most two shallow inspections, either stay on the trivial fast path or delegate bounded investigation
 - create or update `.devgod/ACTIVE` and the matching brief before moving past intake
+- require `Design and Architecture Council` review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is explicitly trivial or inherits an approved parent council decision
+- keep the council lean and rotating with written alternatives, a named dissent owner, bounded timeboxes, and no indefinite blocking
 - use bounded investigation packets when evidence is needed: owner role, question, read scope, forbidden write scope, evidence required, max output, stop condition
 - require task packets to declare explicit workflow artifact refs whenever they inherit a parent brief or plan, or when runtime authority may satisfy review gates before markdown review exports exist
 - do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses `review_exports=runtime_optional` under runtime authority
@@ -48,6 +50,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial
 - use explicit bounded budgets for research, debugging, review, and tool retries so skepticism stays finite
 - scale, latency, or item volume are not blockers by themselves when the work can be chunked, checkpointed, and resumed
+- for council-reviewed work, require a written decision packet before critique and assign one explicit dissent owner
 - evidence first, then `solution_architect`, then `planner`, then explicit task packets, then specialist execution
 - ambiguous or user-flow-heavy asks should involve `product_strategist` before or alongside architecture
 - manager/root may do only trivial mechanical edits outside explicit specialist ownership
@@ -88,9 +91,21 @@ A completed phase is not a completed product.
 Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the
 local `caveman` skill for internal handoffs and terse coordination.
 
+## Design And Architecture Council
+
+- the `Design and Architecture Council` is a pre-implementation quality gate for substantive roadmap and plan work
+- the council is a rotating 3-5 role panel; default seats come from `solution_architect`, `product_strategist`, `frontend_designer` when a human-facing surface exists, and `infra_engineer` or `security_reviewer` when the main risk is operational or security-heavy
+- every council review must name a `dissent owner` responsible for arguing at least one serious alternative and recording unresolved objections
+- the council may output `approved`, `approved_with_conditions`, `rework_required`, `exception_granted`, or `rejected`
+- `approved_with_conditions` and `exception_granted` must be explicit, owned, and time-bounded; exceptions must not be indefinite
+- the council may propose changes to user intent, but it must not silently override user intent without user acceptance
+- the manager/root thread acts as process shepherd for council review, not as a unilateral veto authority
+- trivial work, tightly local bug fixes, and implementation tasks covered by an approved parent council packet may bypass the council
+
 Mandatory trigger defaults for recurring control-layer work:
 
 - product framing and acceptance clarity: `devgod-product-framing`
+- design and architecture council routing, packets, or policy: `solution_architect`, `product_strategist`, `planner`
 - agent runtime, hook, tool-contract, automation, or continuation changes: `devgod-agent-runtime`
 - benchmark, grader, or skill-regression work: `devgod-eval-engineering` and `devgod-skill-evals`
 - git slicing, staging, or publish prep: `devgod-git-operator`

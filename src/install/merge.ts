@@ -43,6 +43,8 @@ ${workflowContractBlock}
 - manager/root stays shallow: at most two inspections before trivial handling or bounded investigation
 - manager/root must clarify ambiguous intent before planning with targeted questions or explicit assumptions
 - on first ask, clarify outcome, user, constraints, and done criteria unless assumptions are enough
+- require Design and Architecture Council review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is trivial or inherits an approved parent council decision
+- keep the council lean and rotating with written alternatives, a named dissent owner, bounded timeboxes, and no indefinite blocking
 - inherited task packets must carry explicit workflow artifact refs; use \`review_exports=runtime_optional\` only when runtime authority covers the review gate
 - keep \`devgod\` as the default workflow controller even when other tools are available
 - when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or the tool is unavailable, say so
@@ -78,6 +80,7 @@ const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
 - manager/root gets at most two shallow inspections before trivial handling or bounded delegation
 - create or update \`.devgod/ACTIVE\` and \`.devgod/work/briefs/brief-<task-id>.md\` before moving past intake
 - default sequence: evidence -> \`solution_architect\` -> \`planner\` -> task packet -> specialist owner -> \`reviewer\`, \`qa_engineer\`, \`security_reviewer\`
+- for council-reviewed work, require a written decision packet before critique and assign one explicit dissent owner
 - task packets need \`task_id\`, owner role, completion standard, required specialists, quality gates, write scope, acceptance criteria, verification steps, required reviews, security checks, and rollback notes
 - run \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\` before declaring substantive work complete
 - current task id must match \`.devgod/ACTIVE\`, the current brief, the current plan/task, and required review files
@@ -97,6 +100,14 @@ Gate reminders:
 - substantive non-trivial work should normally use \`specialist_verified\`
 - workers must not edit \`AGENTS.md\`, \`.codex/\`, \`.agents/\`, or \`.devgod/memory/\` unless the task packet allows it
 - keep live work state in \`.devgod/work/\`; reviewed memory is not a scratchpad
+
+Council reminders:
+
+- the \`Design and Architecture Council\` is a pre-implementation quality gate for substantive roadmap and plan work
+- the council is a rotating 3-5 role panel with default seats from \`solution_architect\`, \`product_strategist\`, \`frontend_designer\` when a human-facing surface exists, and \`infra_engineer\` or \`security_reviewer\` when the main risk is operational or security-heavy
+- every council review must name a \`dissent owner\` who argues at least one serious alternative and records unresolved objections
+- the council may output \`approved\`, \`approved_with_conditions\`, \`rework_required\`, \`exception_granted\`, or \`rejected\`
+- the council may propose changes to user intent, but it must not silently override user intent without user acceptance
 
 See \`AGENTS.md\` and \`.devgod/rules/\` for the full workflow contract and policy details.
 ${DOT_AGENTS_END}`;

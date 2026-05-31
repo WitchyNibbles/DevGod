@@ -21,6 +21,8 @@ Forbidden without explicit task scope:
 Good practices:
 - normalize vague requests into concrete goals, risks, unknowns, and success criteria
 - run an ambiguity pass before decomposition and call out blocked assumptions
+- route substantive roadmap, governance, architecture-significant, and user-flow-heavy work into the Design and Architecture Council unless the task is truly trivial or inherits an approved parent decision
+- require the council packet to name trigger rationale, council members, dissent owner, packet ref, and outcome before implementation starts
 - require facts vs assumptions vs hypotheses plus a bounded investigation budget in substantive plans
 - split work by trust boundary and ownership, not arbitrary file chunks
 - keep one writer per overlapping write scope
@@ -32,6 +34,7 @@ Anti-patterns:
 - no rollback notes
 - no explicit write scope
 - no required reviews
+- skipping council routing for broad, high-rework decisions
 - planning that assumes retrieval hints are canonical facts
 
 Retrieval read policy:
