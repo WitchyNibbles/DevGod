@@ -58,6 +58,19 @@ const blockerMessagePatterns = [
   /blocked on approval/i,
   /cannot continue without/i
 ];
+const transientModelCapacityPatterns = [
+  /\bhigh usage\b/i,
+  /\bheavy traffic\b/i,
+  /\btraffic is high\b/i,
+  /\brate limit(?:ed|ing)?\b/i,
+  /\btoo many requests\b/i
+];
+const modelSwitchPromptPatterns = [
+  /\bselect another model\b/i,
+  /\bchoose another model\b/i,
+  /\btry another model\b/i,
+  /\bswitch(?:ing)? to another model\b/i
+];
 const explicitBlockerVerbPatterns = [
   /\bblocked\b/i,
   /cannot continue/i,
@@ -868,6 +881,16 @@ export function getBashExitCode(toolResponse) {
 
 export function shouldHoldStop(lastAssistantMessage) {
   if (typeof lastAssistantMessage !== "string" || lastAssistantMessage.trim().length === 0) {
+    return true;
+  }
+
+  const hasTransientModelCapacitySignal = transientModelCapacityPatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+  const hasModelSwitchPrompt = modelSwitchPromptPatterns.some((pattern) =>
+    pattern.test(lastAssistantMessage)
+  );
+  if (hasTransientModelCapacitySignal && hasModelSwitchPrompt) {
     return true;
   }
 
