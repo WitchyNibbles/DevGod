@@ -252,6 +252,25 @@ test("stop hook still blocks vague blocker summaries without a concrete devgod c
   assert.match(parsed.reason, /state the real blocker explicitly/i);
 });
 
+test("stop hook treats transient model high-usage prompts as continueable work", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message:
+        "I need user input because this model is seeing high usage right now. Please select another model to continue."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-high-usage",
+      allowedWriteScope: ["src/core"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /active devgod task task-hook-high-usage remains in progress/i);
+});
+
 test("stop hook still blocks completion summaries without an external closure cause", () => {
   const parsed = evaluateStop(
     {
