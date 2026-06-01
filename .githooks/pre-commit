@@ -4,4 +4,5 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
+bash scripts/check-devgod-branch-name.sh
 bash scripts/check-devgod-git-guard.sh

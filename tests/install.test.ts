@@ -113,12 +113,16 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /repo-local Grafana configuration/i);
   assert.match(first, /avoid strong negative claims/i);
   assert.match(first, /broader evidence/i);
+  assert.match(first, /branch from updated `origin\/main`/i);
+  assert.match(first, /default branch prefixes are `feature\/`, `bugfix\/`, `hotfix\/`, `release\/`, `chore\/`, `refactor\/`, `docs\/`, `test\/`, `ci\/`, and `perf\/`/i);
+  assert.match(first, /overrides GitHub MCP naming suggestions/i);
+  assert.match(first, /do not use `codex` in branch names, commit subjects, PR titles, or PR bodies/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
-  assert.ok(managedWordCount < 480, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
+  assert.ok(managedWordCount < 540, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
@@ -132,6 +136,8 @@ test("mergeDotAgentsMd appends and is idempotent", () => {
   assert.match(first, /specialist_verified/);
   assert.match(first, /repo-local Grafana configuration/i);
   assert.match(first, /avoid strong negative claims/i);
+  assert.match(first, /branch from updated `origin\/main`/i);
+  assert.match(first, /keep `codex` out of branch names, commit subjects, PR titles, and PR bodies/i);
   assert.equal(first, second);
 });
 
@@ -650,6 +656,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "docker-compose.yml",
     ".devgod/playwright/",
     "docs/global-setup.md",
+    "scripts/check-devgod-branch-name.sh",
     "scripts/check-devgod-commit-msg.sh",
     "scripts/check-devgod-git-guard.sh",
     "scripts/check-quality.sh",
@@ -2623,9 +2630,24 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
       }
     });
 
+    await execFileAsync("git", ["switch", "-c", "codex/bad-branch"], { cwd: targetRoot });
     await mkdir(path.join(targetRoot, "src"), { recursive: true });
     await writeFile(path.join(targetRoot, "src", "app.ts"), "export const value = 1;\n", "utf8");
     await execFileAsync("git", ["add", "src/app.ts"], { cwd: targetRoot });
+    await assert.rejects(
+      execFileAsync("git", ["commit", "-m", "feat: add app stub"], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /devgod branch guard: do not use 'codex' in branch names/
+        );
+        return true;
+      }
+    );
+
+    await execFileAsync("git", ["switch", "-c", "feature/add-app-stub"], { cwd: targetRoot });
     await execFileAsync("git", ["commit", "-m", "feat: add app stub"], { cwd: targetRoot });
 
     const agentsMd = await readFile(path.join(targetRoot, "AGENTS.md"), "utf8");
@@ -2647,6 +2669,19 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
 
     await writeFile(path.join(targetRoot, "notes.md"), "guard check\n", "utf8");
     await execFileAsync("git", ["add", "notes.md"], { cwd: targetRoot });
+    await assert.rejects(
+      execFileAsync("git", ["commit", "-m", "chore: codex cleanup"], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        assert.match(
+          String((error as { stderr?: string }).stderr ?? ""),
+          /do not use 'codex' in the commit subject/
+        );
+        return true;
+      }
+    );
+
     await assert.rejects(
       execFileAsync("git", ["commit", "-m", "bad message"], { cwd: targetRoot }),
       (error: unknown) => {
@@ -2746,6 +2781,7 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     ".devgod/templates/task-queue.json",
     ".devgod/templates/review-identity-bindings.json",
     ".devgod/templates/review-identity-adapter.fixture.json",
+    "scripts/check-devgod-branch-name.sh",
     "scripts/check-devgod-commit-msg.sh",
     "scripts/check-devgod-git-guard.sh",
     "scripts/check-devgod-workflow.sh",
