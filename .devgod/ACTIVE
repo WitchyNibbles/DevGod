@@ -1,6 +1,2 @@
 workflow=devgod
-state=in_progress
-task_id=2026-06-01-devgod-git-flow-defaults
-brief=.devgod/work/briefs/brief-2026-06-01-devgod-git-flow-defaults.md
-plan=.devgod/work/plans/plan-2026-06-01-devgod-git-flow-defaults.md
-task=.devgod/work/tasks/task-2026-06-01-devgod-git-flow-defaults.md
+state=complete
