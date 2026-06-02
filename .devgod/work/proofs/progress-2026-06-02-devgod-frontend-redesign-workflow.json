@@ -1,0 +1,67 @@
+{
+  "task_id": "2026-06-02-devgod-frontend-redesign-workflow",
+  "captured_at": "2026-06-02T08:10:00.000Z",
+  "status": "verified",
+  "summary": "Devgod now ships a stronger frontend redesign contract, a frontend direction package in task planning, a stronger frontend role posture, and drift tests that keep the install overlay and control-layer prompts aligned.",
+  "verification": [
+    {
+      "command": "npm ci",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/control-layer-contract.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/install.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "npm run bootstrap",
+      "status": "passed",
+      "notes": "re-registered the runtime project to the worktree path /home/eimi/projects/devgod-frontend-beauty"
+    },
+    {
+      "command": "npm run verify:setup",
+      "status": "passed"
+    },
+    {
+      "command": "npm run devgod:seed-workflow-proof -- --workspace-slug default --project-slug devgod --task-id 2026-06-02-devgod-frontend-redesign-workflow",
+      "status": "passed",
+      "notes": "Runtime-authoritative proof run 0e13e842-7881-4150-84db-3eb225488a12"
+    },
+    {
+      "command": "npm run devgod -- workflow-proof --run-id 0e13e842-7881-4150-84db-3eb225488a12 --task-id 2026-06-02-devgod-frontend-redesign-workflow --format json",
+      "status": "passed"
+    }
+  ],
+  "evidence_refs": [
+    ".devgod/rules/frontend-redesign-contract.md",
+    ".devgod/templates/task-packet.md",
+    ".agents/skills/devgod-frontend-taste/SKILL.md",
+    ".codex/agents/frontend-designer.toml",
+    ".codex/agents/planner.toml",
+    "src/devgod/agent-catalog.ts",
+    "src/install/merge.ts",
+    "AGENTS.md",
+    "docs/devgod-agent-team.md",
+    "tests/control-layer-contract.test.ts",
+    "tests/install.test.ts",
+    ".devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-reviewer.md",
+    ".devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-qa_engineer.md",
+    ".devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-security_reviewer.md"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 5
+  },
+  "blocking_gap_delta": {
+    "closed": 4,
+    "opened": 0
+  },
+  "next_target": "live-workflow-check",
+  "why_next": "the implementation and authoritative proof are complete; the remaining step is export-level live workflow validation",
+  "cycle": 1,
+  "residual_risk": [
+    "No real consuming-repo screen was redesigned in this package-only slice, so the next real UI task must still prove the upgraded contract on actual browser-rendered output."
+  ]
+}

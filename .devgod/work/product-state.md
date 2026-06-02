@@ -54,11 +54,14 @@ Ship the frontend redesign workflow hardening slice.
 - `npm ci` passed in the isolated worktree
 - `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed
 - `node --experimental-strip-types --test tests/install.test.ts` passed
+- runtime setup repair passed via `npm run bootstrap` and `npm run verify:setup`
+- authoritative proof run `0e13e842-7881-4150-84db-3eb225488a12` passed `workflow-proof` for `2026-06-02-devgod-frontend-redesign-workflow`
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-06-02-devgod-frontend-redesign-workflow` passed
 
 ## Review Summary
 
 - Design and Architecture Council packet recorded with `approved_with_conditions`
-- runtime-authenticated reviewer, QA, and security review gates were not run in this branch-local implementation pass
+- runtime-authenticated reviewer, QA, and security approvals passed in authoritative run `0e13e842-7881-4150-84db-3eb225488a12`
 
 ## Last Updated
 

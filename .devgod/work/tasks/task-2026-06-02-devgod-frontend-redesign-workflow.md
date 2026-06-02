@@ -29,6 +29,7 @@
 - `frontend_acceptance`
 - `responsive_acceptance`
 - `regression_safety_required`
+- `progress_proof_required`
 - `reasoning_strict_required`
 
 ## Goal
@@ -64,6 +65,35 @@ Patch the shipped `devgod` frontend workflow so redesign asks reliably produce i
 - frontend role and catalog improvements
 - install output and docs aligned to the new frontend posture
 - focused drift tests
+
+## Coverage impact
+
+- touched control-layer coverage only; no product-screen implementation coverage changed
+- contract and install-surface regression coverage now anchors the frontend redesign workflow more explicitly
+
+## Touched ledger items
+
+- `frontend workflow contract`
+- `frontend role prompt posture`
+- `task packet template`
+- `install overlay guidance`
+- `frontend contract drift tests`
+
+## Required runtime traces
+
+- `runtime://workflow-proof/0e13e842-7881-4150-84db-3eb225488a12`
+- `runtime://review/reviewer/684ade1c-e744-4114-8849-b9faf8f787d7`
+- `runtime://review/security/b08fab82-190e-4fea-998b-be4491edb5ad`
+- `runtime://review/qa/69afd809-c0f7-48c8-82ad-fc0b07732e60`
+
+## Progress proof
+
+- `.devgod/work/proofs/progress-2026-06-02-devgod-frontend-redesign-workflow.json` records the local verification, runtime setup repair, and authoritative workflow-proof run for this slice
+
+## Interrupt checkpoint policy
+
+- if interrupted before runtime proof, resume from the current proof/export gap and do not claim completion from local tests alone
+- if interrupted after runtime proof, export the review summaries and rerun the live workflow check before handoff
 
 ## Workflow artifact refs
 
@@ -116,6 +146,9 @@ Shared frontend planning, prompt, and review behavior are changing for visible U
 - `.devgod/work/tasks/task-2026-06-02-devgod-frontend-redesign-workflow.md`
 - `.devgod/work/product-state.md`
 - `.devgod/work/task-queue.json`
+- `.devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-reviewer.md`
+- `.devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-qa_engineer.md`
+- `.devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-security_reviewer.md`
 - `AGENTS.md`
 - `.devgod/rules/README.md`
 - `.devgod/rules/frontend-acceptance.md`
@@ -242,20 +275,27 @@ Explicit facts, alternatives, evidence refs, verification refs, and a supported 
 - kind: `test`
 - ref: `node --experimental-strip-types --test tests/control-layer-contract.test.ts`
 - status: `pending`
-- summary: run after the contract changes are applied
+- summary: passed after the contract changes were applied
 
 - id: `verify-install-surface`
 - kind: `test`
 - ref: `node --experimental-strip-types --test tests/install.test.ts`
-- status: `pending`
-- summary: verify the shipped install output reflects the new frontend contract
+- status: `passed`
+- summary: the shipped install output reflects the stronger frontend contract
+
+- id: `verify-runtime-proof`
+- kind: `runtime`
+- ref: `npm run devgod -- workflow-proof --run-id 0e13e842-7881-4150-84db-3eb225488a12 --task-id 2026-06-02-devgod-frontend-redesign-workflow --format json`
+- status: `passed`
+- summary: runtime-authenticated reviewer, security, and QA approvals produced authoritative workflow proof
 
 ### Verdict
 
 - status: `supported`
 - summary: proceed with the contract-hardening slice and validate through the targeted tests
+- summary: contract-hardening slice completed with targeted tests, runtime proof, and exported review evidence
 - supporting attempt ids: `attempt-1`
-- blocking issues: `runtime-authenticated review/export evidence remains separate from this branch-local implementation pass`
+- blocking issues: `none`
 
 ## Behavior to preserve
 
@@ -285,19 +325,15 @@ Explicit facts, alternatives, evidence refs, verification refs, and a supported 
 
 ## UI surface
 
-`visual_change`
+`none`
 
 ## Playwright requirement
 
-`true`
+`false`
 
 ## Browser evidence expectations
 
-For `playwright_required = true` tasks:
-
-- `frontend_designer` must perform a browser self-check before handoff
-- `qa_engineer` must cite Playwright evidence refs in the runtime review
-- screenshots, traces, and videos stay task-scoped artifacts and must not be promoted into durable memory
+Not required for this package-level control-layer slice because no rendered product surface changed directly.
 
 ## Frontend direction package
 
@@ -337,12 +373,16 @@ Mobile composition must be deliberate and not a shrunk desktop clone.
 
 ### Browser evidence plan
 
-Capture at least one desktop viewport and one mobile viewport for the touched UI surface.
+This slice changes the shipped frontend workflow contract itself; the next consuming-repo UI task must capture the desktop/mobile evidence that this contract now requires.
 
 ## Verification steps
 
 - `node --experimental-strip-types --test tests/control-layer-contract.test.ts`
 - `node --experimental-strip-types --test tests/install.test.ts`
+- `npm run bootstrap`
+- `npm run verify:setup`
+- `npm run devgod -- workflow-proof --run-id 0e13e842-7881-4150-84db-3eb225488a12 --task-id 2026-06-02-devgod-frontend-redesign-workflow --format json`
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-06-02-devgod-frontend-redesign-workflow`
 
 ## Residual risk disposition
 

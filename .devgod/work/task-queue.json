@@ -17,7 +17,11 @@
       "verification": [
         "npm ci",
         "node --experimental-strip-types --test tests/control-layer-contract.test.ts",
-        "node --experimental-strip-types --test tests/install.test.ts"
+        "node --experimental-strip-types --test tests/install.test.ts",
+        "npm run bootstrap",
+        "npm run verify:setup",
+        "npm run devgod -- workflow-proof --run-id 0e13e842-7881-4150-84db-3eb225488a12 --task-id 2026-06-02-devgod-frontend-redesign-workflow --format json",
+        "bash scripts/check-devgod-workflow-live.sh --task-id 2026-06-02-devgod-frontend-redesign-workflow"
       ],
       "evidence": [
         "brief: .devgod/work/briefs/brief-2026-06-02-devgod-frontend-redesign-workflow.md",
@@ -25,7 +29,12 @@
         "plan: .devgod/work/plans/plan-2026-06-02-devgod-frontend-redesign-workflow.md",
         "task: .devgod/work/tasks/task-2026-06-02-devgod-frontend-redesign-workflow.md",
         "verification: node --experimental-strip-types --test tests/control-layer-contract.test.ts",
-        "verification: node --experimental-strip-types --test tests/install.test.ts"
+        "verification: node --experimental-strip-types --test tests/install.test.ts",
+        "progress proof: .devgod/work/proofs/progress-2026-06-02-devgod-frontend-redesign-workflow.json",
+        "runtime proof run: 0e13e842-7881-4150-84db-3eb225488a12",
+        "review summary: .devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-reviewer.md",
+        "review summary: .devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-qa_engineer.md",
+        "review summary: .devgod/work/reviews/review-2026-06-02-devgod-frontend-redesign-workflow-security_reviewer.md"
       ],
       "blocker": null
     }
