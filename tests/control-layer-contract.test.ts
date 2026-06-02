@@ -115,16 +115,38 @@ test("expanded role-local workflow skills encode the new behavior loops", async 
 test("frontend quality controls reject generic AI UI and require browser-backed proof", async () => {
   const frontendTaste = await read(".agents/skills/devgod-frontend-taste/SKILL.md");
   const frontendRubric = await read(".devgod/rules/frontend-quality-rubric.md");
+  const frontendAcceptance = await read(".devgod/rules/frontend-acceptance.md");
+  const frontendRedesign = await read(".devgod/rules/frontend-redesign-contract.md");
   const frontendDesigner = await read(".codex/agents/frontend-designer.toml");
+  const planner = await read(".codex/agents/planner.toml");
+  const taskPacket = await read(".devgod/templates/task-packet.md");
+  const agentCatalog = await read("src/devgod/agent-catalog.ts");
 
   assert.match(frontendTaste, /generic gradient hero/i);
+  assert.match(frontendTaste, /content or asset plan/i);
+  assert.match(frontendTaste, /same weak hierarchy/i);
   assert.match(frontendTaste, /mobile layout must feel composed/i);
   assert.match(frontendRubric, /generic AI-generated UI output/i);
+  assert.match(frontendRubric, /same layout, hierarchy, or known misplaced controls/i);
+  assert.match(frontendRubric, /palette choices that lack surface logic/i);
   assert.match(frontendRubric, /default font stack/i);
   assert.match(frontendRubric, /one desktop viewport/i);
   assert.match(frontendRubric, /one mobile viewport/i);
   assert.match(frontendRubric, /cited Playwright evidence refs/i);
+  assert.match(frontendAcceptance, /redesign delta/i);
+  assert.match(frontendAcceptance, /content strategy/i);
+  assert.match(frontendRedesign, /preserve_and_polish/i);
+  assert.match(frontendRedesign, /content and asset plan/i);
+  assert.match(frontendRedesign, /same weak hierarchy/i);
   assert.match(frontendDesigner, /frontend quality rubric/i);
+  assert.match(frontendDesigner, /frontend direction package/i);
+  assert.match(frontendDesigner, /frontend-design/i);
+  assert.match(planner, /frontend direction package/i);
+  assert.match(planner, /must materially change/i);
+  assert.match(taskPacket, /## Frontend direction package/);
+  assert.match(taskPacket, /### Redesign intent/);
+  assert.match(taskPacket, /### Content and asset plan/);
+  assert.match(agentCatalog, /"frontend-design"/i);
 });
 
 test("AGENTS routes recurring control-layer work through repo-local workflow skills first", async () => {
