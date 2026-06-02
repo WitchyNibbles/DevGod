@@ -250,6 +250,67 @@ For `playwright_required = true` tasks:
 - `qa_engineer` must cite Playwright evidence refs in the runtime review
 - screenshots, traces, and videos stay task-scoped artifacts and must not be promoted into durable memory
 
+## Frontend direction package
+
+Required for `ui_surface = visual_change` or `ui_surface = interactive_flow`.
+
+### Redesign intent
+
+Declare one:
+
+- `preserve_and_polish`
+- `refresh`
+- `redesign`
+- `reimagine`
+
+### Current surface failures to correct
+
+List the layout, hierarchy, content, or affordance issues that must materially improve.
+
+### Intended visual direction
+
+State the concept in one or two sentences:
+
+- typography direction
+- palette or surface mood
+- density and spacing posture
+- motion tone when motion exists
+
+### Layout and hierarchy changes
+
+State what must change structurally, not only cosmetically.
+
+### Content and asset plan
+
+State whether the surface uses or intentionally omits:
+
+- imagery
+- illustration or iconography
+- empty-state graphics
+- animation assets or GIF-like motion moments
+
+Also state whether assets are generated, sourced, reused, deferred, or intentionally absent.
+
+### Motion plan
+
+State what motion clarifies:
+
+- entry hierarchy
+- state change
+- interaction affordance
+
+### Theme, palette, and contrast strategy
+
+State the surface roles, accents, and contrast intent instead of relying on ad hoc component colors.
+
+### Mobile composition notes
+
+State how the mobile version is composed intentionally rather than as a compressed desktop layout.
+
+### Browser evidence plan
+
+Name the desktop viewport, mobile viewport, and the visible claims that browser evidence must prove.
+
 ## Verification steps
 
 ## Residual risk disposition

@@ -1,2 +1,6 @@
 workflow=devgod
 state=complete
+task_id=2026-06-02-devgod-frontend-redesign-workflow
+brief=.devgod/work/briefs/brief-2026-06-02-devgod-frontend-redesign-workflow.md
+plan=.devgod/work/plans/plan-2026-06-02-devgod-frontend-redesign-workflow.md
+task=.devgod/work/tasks/task-2026-06-02-devgod-frontend-redesign-workflow.md
