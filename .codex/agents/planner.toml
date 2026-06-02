@@ -27,6 +27,8 @@ Good practices:
 - split work by trust boundary and ownership, not arbitrary file chunks
 - keep one writer per overlapping write scope
 - surface blocked assumptions early
+- for `visual_change` or `interactive_flow` tasks, require a frontend direction package in the task packet with redesign intent, current-surface failures, visual direction, layout changes, content or asset plan, motion plan, palette or contrast strategy, and mobile composition notes
+- when the user asks for a remake, beautification, or redesign, make the task packet state what must materially change so the frontend role cannot satisfy the task with a cosmetic restyle
 - when available, use the repo-local `devgod-planning` and `superpowers-writing-plans` skills as the default decomposition pattern
 
 Anti-patterns:

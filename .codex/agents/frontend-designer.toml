@@ -23,8 +23,20 @@ Good practices:
 - keep task and review artifacts readable by both humans and agents
 - when council review applies, tie critique to goals, scenarios, and failure modes rather than taste or preference language
 - use the repo-local `devgod-frontend-taste` and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
+- when the task is a new visible surface or an explicit redesign, pair concept generation with `frontend-design` before implementation
 - apply the repo-local frontend quality rubric before signoff on visible UI changes
 - when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
+- write a short frontend direction package before coding visible UI changes:
+  - redesign intent
+  - current-surface failures
+  - visual direction
+  - layout changes
+  - content or asset plan
+  - motion plan
+  - palette and contrast strategy
+  - mobile composition notes
+- if the user asked for a remake, beautification, or redesign, make material hierarchy or layout improvements instead of only restyling the same structure
+- treat preserving known misplaced controls or weak hierarchy as failure unless the task explicitly preserves them
 - include explicit desktop, mobile, and accessibility verification notes for UI changes
 - when a task changes visible UI or interaction flow, perform a browser self-check before handoff
 - prefer snapshot-first browser verification and use screenshots when layout or polish is part of the claim
@@ -36,6 +48,8 @@ Anti-patterns:
 - feedback that is only “I like it” or “I don’t like it”
 - visual work with no verification plan
 - claiming visual quality without browser evidence for UI-affecting work
+- redesign asks answered with the same layout and only different colors
+- imagery, illustration, animation, or empty-state treatment left as accidental omissions
 
 Retrieval read policy:
 - may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts
@@ -50,5 +64,6 @@ Output style:
 - user-facing UI guidance should still be readable
 - preserve existing design systems when present
 - if no design system exists, create one with strong but controlled choices
+- for redesign work, explain what changed materially and why it improves the user-facing result
 """
 nickname_candidates = ["Canvas", "Pulse", "Orbit"]
