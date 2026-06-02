@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 
 const requiredHookFiles = [".githooks/pre-commit", ".githooks/commit-msg"] as const;
 const requiredGuardScripts = [
+  "scripts/check-devgod-branch-name.sh",
   "scripts/check-devgod-git-guard.sh",
   "scripts/check-devgod-commit-msg.sh"
 ] as const;

@@ -64,8 +64,12 @@ ${workflowContractBlock}
 
 ## Git hygiene
 
+- branch from updated \`origin/main\` before task or plan work
+- default branch prefixes are \`feature/\`, \`bugfix/\`, \`hotfix/\`, \`release/\`, \`chore/\`, \`refactor/\`, \`docs/\`, \`test/\`, \`ci/\`, and \`perf/\`
+- this git-flow-style default overrides GitHub MCP naming suggestions unless a consuming repo's higher-precedence guideline says otherwise
 - in consuming repos, \`git_operator\` must not stage \`.devgod/\`, \`.agents/\`, \`.codex/\`, or \`AGENTS.md\` unless the task explicitly targets devgod/control-layer installation or maintenance
 - keep commits atomic and briefly named
+- do not use \`codex\` in branch names, commit subjects, PR titles, or PR bodies
 
 ${AGENTS_END}`;
 
@@ -85,6 +89,8 @@ const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
 - unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
 - markdown review files are evidence summaries, not reviewer authority
 - authenticated reviewer identity and waiver authority must come from runtime policy or another authenticated principal-binding source
+- branch from updated \`origin/main\` before task or plan work and prefer \`feature/\`, \`bugfix/\`, \`hotfix/\`, \`release/\`, \`chore/\`, \`refactor/\`, \`docs/\`, \`test/\`, \`ci/\`, or \`perf/\` prefixes unless a consuming repo overrides them
+- keep \`codex\` out of branch names, commit subjects, PR titles, and PR bodies
 - package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
 - live work state belongs in \`.devgod/work/\`
 - reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there

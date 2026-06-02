@@ -102,6 +102,7 @@
     "plugins/devgod/scripts/user-prompt-submit.mjs",
     "scripts/check-quality.sh",
     "scripts/check-devgod-happy-path.sh",
+    "scripts/check-devgod-branch-name.sh",
     "scripts/check-devgod-commit-msg.sh",
     "scripts/check-devgod-git-guard.sh",
     "scripts/check-devgod-workflow-live.sh",

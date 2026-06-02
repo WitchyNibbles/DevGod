@@ -3,22 +3,27 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-05-31-public-frontier-model-benchmark",
-      "title": "Local workflow proof seed for 2026-05-31-public-frontier-model-benchmark",
+      "id": "2026-06-01-devgod-git-flow-defaults",
+      "title": "Ship git-flow default branch naming and git metadata hygiene",
       "status": "done",
-      "class": "release_candidate",
+      "class": "governance",
       "depends_on": [],
       "acceptance_criteria": [
-        "workflow-proof resolves 2026-05-31-public-frontier-model-benchmark from the latest runtime run",
-        "required reviewer, qa, and security reviews are recorded as authenticated approvals"
+        "shared policy text defines the approved git-flow-style prefixes and updated-origin-main branching requirement",
+        "local git guardrails reject invalid branch names or codex-containing commit subjects",
+        "focused tests cover the updated policy and git guard behavior"
       ],
       "verification": [
-        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-public-frontier-model-benchmark"
+        "node --experimental-strip-types --test tests/install.test.ts",
+        "npm test"
       ],
       "evidence": [
-        "task packet: 2026-05-31-public-frontier-model-benchmark",
-        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-05-31-public-frontier-model-benchmark",
-        "quality gate: release_readiness_required"
+        "brief: .devgod/work/briefs/brief-2026-06-01-devgod-git-flow-defaults.md",
+        "council: .devgod/work/council/dac-2026-06-01-devgod-git-flow-defaults.md",
+        "task: .devgod/work/tasks/task-2026-06-01-devgod-git-flow-defaults.md",
+        "commit: 05d38a8 docs: define git-flow default policy",
+        "commit: 3bdbabf feat: enforce git-flow branch guardrails",
+        "push: origin/feature/git-flow-defaults"
       ],
       "blocker": null
     }

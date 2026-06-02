@@ -771,6 +771,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
       overwriteManaged: true
     },
     {
+      source: path.join(sourceRoot, "scripts/check-devgod-branch-name.sh"),
+      target: "scripts/check-devgod-branch-name.sh",
+      overwriteManaged: true
+    },
+    {
       source: path.join(sourceRoot, "scripts/check-devgod-git-guard.sh"),
       target: "scripts/check-devgod-git-guard.sh",
       overwriteManaged: true

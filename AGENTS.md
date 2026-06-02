@@ -115,8 +115,12 @@ Mandatory trigger defaults for recurring control-layer work:
 ## Git hygiene
 
 - use `git_operator` for staging, commit slicing, and commit-message prep when git work is part of the task
+- branch from updated `origin/main` before task or plan work: `git fetch origin main` then create a fresh branch from `origin/main`
+- default branch prefixes are `feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`, `refactor/`, `docs/`, `test/`, `ci/`, and `perf/`
+- this git-flow-style default takes priority over GitHub MCP naming suggestions unless a consuming repo's higher-precedence guideline overrides it
 - in consuming repos, `git_operator` must not stage `.devgod/`, `.agents/`, `.codex/`, or `AGENTS.md` unless the task explicitly targets devgod/control-layer installation or maintenance
 - commits should stay atomic and use brief conventional messages that describe the slice being committed
+- do not use `codex` in branch names, commit subjects, PR titles, or PR bodies
 
 ## Package boundary
 
