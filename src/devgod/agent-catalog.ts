@@ -84,7 +84,13 @@ export const agentCatalog = {
     artifactPath: ".codex/agents/frontend-designer.toml",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "web-design-guidelines"],
+    defaultSkillIds: [
+      "devgod-frontend-taste",
+      "devgod-design-system",
+      "frontend-design",
+      "frontend-patterns",
+      "web-design-guidelines"
+    ],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
   },
   git_operator: {

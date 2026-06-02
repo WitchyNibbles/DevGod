@@ -14,3 +14,9 @@ Do not use this directory for:
 - raw logs
 - speculative architecture
 - secrets
+
+Notable UI-facing rules:
+
+- `frontend-acceptance.md`
+- `frontend-quality-rubric.md`
+- `frontend-redesign-contract.md`

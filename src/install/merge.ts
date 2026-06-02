@@ -52,6 +52,13 @@ ${workflowContractBlock}
 - use runtime-backed devgod commands for proof, status, and advancement
 - substantive work completes only after \`reviewer\`, \`qa_engineer\`, and \`security_reviewer\` gates plus runtime workflow proof
 
+## Frontend delivery
+
+- route visible UI work through \`frontend_designer\`
+- before code, record a frontend direction package: redesign intent, failures to fix, visual direction, structural changes, asset and motion plan, palette or contrast strategy, and mobile notes
+- remake or beautify asks fail if weak hierarchy, same misplaced controls, or stock layouts stay unchanged unless preservation is explicit
+- visible UI quality claims require desktop and mobile browser evidence
+
 ## Autonomy Loop
 
 - for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
@@ -98,6 +105,7 @@ const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
 - ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
 - use repo-local \`devgod\` skills and agents when they fit; use \`caveman\` for terse internal handoffs
+- for visible UI work, require the frontend direction package before implementation; redesign asks fail if weak hierarchy or misplaced controls stay unchanged
 
 Gate reminders:
 

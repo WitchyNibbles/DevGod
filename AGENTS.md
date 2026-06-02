@@ -112,6 +112,13 @@ Mandatory trigger defaults for recurring control-layer work:
 - setup, CI, env, deploy-surface, or rollback work: `devgod-infra-ops`
 - operator docs, migration notes, release notes, or workflow-document clarity: `devgod-technical-writing`
 
+## Frontend delivery
+
+- visible UI work should route through `frontend_designer` with the repo-local frontend rules and quality rubric
+- before code on `visual_change` or `interactive_flow` tasks, create a frontend direction package with redesign intent, current-surface failures, visual direction, layout changes, content or asset plan, motion plan, palette or contrast strategy, and mobile composition notes
+- when the user asks for a remake, redesign, or beautification pass, preserving the same weak hierarchy, same misplaced controls, or same stock layout counts as failure unless the task explicitly preserves them
+- visible UI claims require desktop and mobile browser evidence before polish or beauty claims are accepted
+
 ## Git hygiene
 
 - use `git_operator` for staging, commit slicing, and commit-message prep when git work is part of the task

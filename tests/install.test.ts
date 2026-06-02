@@ -122,7 +122,7 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
-  assert.ok(managedWordCount < 540, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
+  assert.ok(managedWordCount < 600, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
@@ -1772,6 +1772,8 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(agentsMd, /workflow-proof --run-id latest --task-id/);
   assert.match(agentsMd, /explicit workflow artifact refs/);
   assert.match(agentsMd, /review_exports=runtime_optional/);
+  assert.match(agentsMd, /frontend direction package/i);
+  assert.match(agentsMd, /same misplaced controls/i);
 
   const memoryReadme = await readFile(path.join(targetRoot, ".devgod/memory/README.md"), "utf8");
   assert.match(memoryReadme, /devgod memory/i);

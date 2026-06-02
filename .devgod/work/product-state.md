@@ -2,33 +2,35 @@
 
 ## Product Goal
 
-Make git-flow-style branch naming, branch-from-updated-main workflow, and no-`codex` git metadata the default reusable `devgod` git policy.
+Make `devgod` frontend work produce stronger, more intentional visual results by default, especially for remake and redesign asks.
 
 ## Global Acceptance Criteria
 
-- `devgod` ships explicit reusable branch naming defaults using the approved git-flow-style prefixes
-- shared prompts, rules, and install output prioritize that default over GitHub MCP naming habits unless a consuming repo overrides it
-- local git guardrails reject invalid branch names or commit metadata that violates the new default
-- focused tests cover the shipped policy text and git-guard behavior
+- `devgod` ships a reusable frontend redesign contract for visible UI work
+- planners and task packets require explicit redesign intent, visual direction, asset strategy, motion intent, and palette or contrast decisions before code
+- shipped frontend role defaults and prompts push toward meaningful redesigns instead of cosmetic restyles
+- consuming-repo install output inherits the same frontend expectations
+- focused tests fail if the stronger frontend contract drifts
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Shared git naming policy | done | `AGENTS.md`, `src/install/merge.ts`, `.devgod/rules/git-conventions.md` |
-| Deterministic local guardrails | done | `src/install/git-guard.ts`, `.githooks/pre-commit`, `scripts/check-devgod-branch-name.sh`, `scripts/check-devgod-commit-msg.sh` |
-| Install/setup compatibility | done | `tests/install.test.ts` |
-| Branch-from-main workflow guidance | done | `AGENTS.md`, `src/install/merge.ts` |
+| Frontend redesign contract | done | `.devgod/rules/frontend-redesign-contract.md`, `AGENTS.md`, `src/install/merge.ts` |
+| Frontend planning package | done | `.devgod/templates/task-packet.md`, `.codex/agents/planner.toml` |
+| Stronger frontend role posture | done | `.agents/skills/devgod-frontend-taste/SKILL.md`, `.codex/agents/frontend-designer.toml`, `src/devgod/agent-catalog.ts`, `docs/devgod-agent-team.md` |
+| Drift protection | done | `tests/control-layer-contract.test.ts`, `tests/install.test.ts` |
 
 ## Current Milestone
 
-Ship the reusable git-flow default naming and git metadata hygiene slice.
+Ship the frontend redesign workflow hardening slice.
 
 ## Completed Milestones
 
-- clarified operator intent and done criteria on 2026-06-01
-- created a clean worktree from updated `origin/main` at commit `558ed5b`
-- completed baseline dependency install and test-start verification in the isolated worktree
+- confirmed the current shipped frontend contract mostly blocked obvious slop after the fact instead of forcing a strong design package before code
+- confirmed the maintainer manifest already described a richer anti-generic frontend posture than the shipped frontend role visibly enforced
+- created a clean worktree from updated `origin/main` at commit `9e6d44e`
+- implemented the redesign contract, prompt, template, catalog, and install-surface changes
 
 ## Current Task
 
@@ -44,19 +46,22 @@ Ship the reusable git-flow default naming and git metadata hygiene slice.
 
 ## Reasoning Debt
 
-- local hooks can only guide PR metadata indirectly through policy text unless a future GitHub integration surface is added
+- stronger contract language improves repeatability but still depends on the operator prompt and target repo constraints for the final visual outcome
+- no direct consuming-repo proof run against `../hexchange` was executed in this package-level slice
 
 ## Verification Summary
 
 - `npm ci` passed in the isolated worktree
-- `npm test` baseline started on the clean branch before implementation edits
-- `node --experimental-strip-types --test tests/install.test.ts` passed after the policy and git-guard updates
-- `npm test` passed after the policy and git-guard updates
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts` passed
+- `node --experimental-strip-types --test tests/install.test.ts` passed
+- runtime setup repair passed via `npm run bootstrap` and `npm run verify:setup`
+- authoritative proof run `0e13e842-7881-4150-84db-3eb225488a12` passed `workflow-proof` for `2026-06-02-devgod-frontend-redesign-workflow`
+- `bash scripts/check-devgod-workflow-live.sh --task-id 2026-06-02-devgod-frontend-redesign-workflow` passed
 
 ## Review Summary
 
 - Design and Architecture Council packet recorded with `approved_with_conditions`
-- runtime-authenticated reviewer, QA, and security review gates were not run in this branch-local implementation pass
+- runtime-authenticated reviewer, QA, and security approvals passed in authoritative run `0e13e842-7881-4150-84db-3eb225488a12`
 
 ## Last Updated
 
