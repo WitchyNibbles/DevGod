@@ -39,7 +39,7 @@ Replace the list with the consuming repo's approved prefixes.
 - keep the subject at 72 characters or fewer
 - omit the trailing period
 - describe the slice being committed, not the whole project
-- do not use `codex` in the subject
+- do not use `codex` or `devgod` as the sole subject
 
 ## Pull requests
 

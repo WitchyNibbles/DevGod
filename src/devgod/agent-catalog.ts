@@ -8,6 +8,8 @@ export interface AgentCatalogEntry {
   availability: AgentRoleAvailability;
   shipsAgentArtifact: boolean;
   artifactPath: string;
+  model: "gpt-5.5" | "gpt-5.4" | "gpt-4.5";
+  effort: "high" | "medium" | "low";
   canOwnTasks: boolean;
   canSatisfySpecialistRequirement: boolean;
   defaultSkillIds: readonly string[];
@@ -22,9 +24,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/planner.toml",
+    model: "gpt-5.5",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-planning", "superpowers-writing-plans"],
+    defaultSkillIds: ["devgod-planning", "devgod-intake", "superpowers-writing-plans"],
     retrievalGuidance: ["approved memory", "reviewed briefs", "reviewed plans", "repo rules"]
   },
   product_strategist: {
@@ -34,6 +38,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/product-strategist.toml",
+    model: "gpt-5.5",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-product-framing", "devgod-intake", "market-research"],
@@ -46,9 +52,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/solution-architect.toml",
+    model: "gpt-5.5",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-architecture", "backend-patterns", "security-review"],
+    defaultSkillIds: ["devgod-architecture", "backend-patterns", "security-review", "agentic-engineering"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "architecture notes"]
   },
   docs_researcher: {
@@ -58,9 +66,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/docs-researcher.toml",
+    model: "gpt-4.5",
+    effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-docs-research", "documentation-lookup"],
+    defaultSkillIds: ["devgod-docs-research", "documentation-lookup", "search-first"],
     retrievalGuidance: ["approved memory", "repo rules", "approved briefs", "local technical notes"]
   },
   backend_engineer: {
@@ -70,9 +80,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/backend-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-execution", "backend-patterns", "api-design"],
+    defaultSkillIds: ["devgod-execution", "backend-patterns", "api-design", "tdd-workflow"],
     retrievalGuidance: ["approved memory", "repo rules", "runbooks", "reviewed retrieval notes"]
   },
   frontend_designer: {
@@ -82,10 +94,12 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/frontend-designer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "web-design-guidelines"],
-    retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
+    defaultSkillIds: ["devgod-ui-art-direction", "devgod-frontend-taste", "devgod-design-system", "devgod-visual-standards", "frontend-patterns", "web-design-guidelines"],
+    retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts", "reviewed inspiration registry and cited references"]
   },
   git_operator: {
     label: "Git Operator",
@@ -94,6 +108,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/git-operator.toml",
+    model: "gpt-4.5",
+    effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: [
@@ -110,9 +126,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/infra-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-infra-ops", "devgod-setup", "devgod-release-readiness"],
+    defaultSkillIds: ["devgod-infra-ops", "devgod-setup", "devgod-release-readiness", "deployment-patterns", "docker-patterns"],
     retrievalGuidance: ["approved memory", "repo rules", "setup notes", "runbooks", "incident learnings"]
   },
   reviewer: {
@@ -122,9 +140,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/reviewer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-review", "superpowers-verification-before-completion"],
+    defaultSkillIds: ["devgod-review", "superpowers-verification-before-completion", "verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "task packets", "review artifacts"]
   },
   build_resolver: {
@@ -134,6 +154,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/build-resolver.toml",
+    model: "gpt-5.4",
+    effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-debugging", "superpowers-systematic-debugging"],
@@ -146,9 +168,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/security-reviewer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["security-review", "devgod-docs-research"],
+    defaultSkillIds: ["security-review", "security-scan", "devgod-docs-research"],
     retrievalGuidance: ["approved memory", "repo rules", "incident notes", "review artifacts"]
   },
   qa_engineer: {
@@ -158,6 +182,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/qa-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: [
@@ -176,9 +202,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/tdd-guide.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-tdd", "superpowers-test-driven-development"],
+    defaultSkillIds: ["devgod-tdd", "superpowers-test-driven-development", "tdd-workflow"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "task packets", "verification artifacts"]
   },
   "e2e-runner": {
@@ -188,6 +216,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/e2e-runner.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-e2e", "anthropic-webapp-testing", "e2e-testing"],
@@ -200,6 +230,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/release-readiness.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-release-readiness", "verification-loop"],
@@ -212,6 +244,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/memory-curator.toml",
+    model: "gpt-4.5",
+    effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-memory", "strategic-compact"],
@@ -224,6 +258,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/eval-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-eval-engineering", "devgod-skill-evals", "eval-harness"],
@@ -236,6 +272,8 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/technical-writer.toml",
+    model: "gpt-4.5",
+    effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-technical-writing", "documentation-lookup", "article-writing"],
@@ -248,9 +286,11 @@ export const agentCatalog = {
     availability: "core_required",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/agent-runtime-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-agent-runtime", "anthropic-mcp-builder", "mcp-server-patterns", "verification-loop"],
+    defaultSkillIds: ["devgod-agent-runtime", "anthropic-mcp-builder", "mcp-server-patterns", "verification-loop", "agentic-engineering"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "runtime traces", "tooling integration notes"]
   },
   mobile_engineer: {
@@ -260,6 +300,8 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/mobile-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "e2e-testing"],
@@ -272,9 +314,11 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/ml-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["documentation-lookup", "verification-loop"],
+    defaultSkillIds: ["devgod-eval-engineering", "documentation-lookup", "verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "model evaluations", "integration notes"]
   },
   data_engineer: {
@@ -284,9 +328,11 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/data-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["backend-patterns", "verification-loop"],
+    defaultSkillIds: ["backend-patterns", "postgres-patterns", "database-migrations", "verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "schema notes", "runbooks"]
   },
   ux_researcher: {
@@ -296,6 +342,8 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/ux-researcher.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-ux-research", "devgod-frontend-taste", "market-research"],
@@ -308,6 +356,8 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/product-analyst.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-product-analysis", "market-research"],
@@ -320,10 +370,82 @@ export const agentCatalog = {
     availability: "domain_optional",
     shipsAgentArtifact: true,
     artifactPath: ".codex/agents/compliance-reviewer.toml",
+    model: "gpt-5.4",
+    effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-compliance-review", "security-review", "documentation-lookup"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "incident notes", "audit artifacts"]
+  },
+  accessibility_engineer: {
+    label: "Accessibility Engineer",
+    description: "Owns accessibility_acceptance gate: semantic HTML, keyboard navigation, ARIA discipline, contrast, and focus management.",
+    class: "quality",
+    availability: "core_required",
+    shipsAgentArtifact: true,
+    artifactPath: ".codex/agents/accessibility-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
+    canOwnTasks: true,
+    canSatisfySpecialistRequirement: true,
+    defaultSkillIds: ["devgod-accessibility-gate", "e2e-testing", "web-design-guidelines"],
+    retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "test artifacts", "reviewed UI artifacts"]
+  },
+  database_specialist: {
+    label: "Database Specialist",
+    description: "Owns schema migrations, query optimization, index design, and data-system correctness for PostgreSQL-backed workflows.",
+    class: "quality",
+    availability: "core_required",
+    shipsAgentArtifact: true,
+    artifactPath: ".codex/agents/database-specialist.toml",
+    model: "gpt-5.4",
+    effort: "high",
+    canOwnTasks: true,
+    canSatisfySpecialistRequirement: true,
+    defaultSkillIds: ["postgres-patterns", "database-migrations", "verification-loop"],
+    retrievalGuidance: ["approved memory", "repo rules", "schema notes", "reviewed plans", "migration artifacts"]
+  },
+  performance_engineer: {
+    label: "Performance Engineer",
+    description: "Owns performance_check_required gate: profiling, latency analysis, query cost, throughput verification, and regression blocking.",
+    class: "quality",
+    availability: "core_required",
+    shipsAgentArtifact: true,
+    artifactPath: ".codex/agents/performance-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
+    canOwnTasks: true,
+    canSatisfySpecialistRequirement: true,
+    defaultSkillIds: ["devgod-performance", "verification-loop", "backend-patterns"],
+    retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "benchmark artifacts", "profiling notes"]
+  },
+  context_manager: {
+    label: "Context Manager",
+    description: "Assembles retrieval context for agents from the correct authority layer: .devgod/memory/, Postgres runtime, and Qdrant semantic index.",
+    class: "knowledge",
+    availability: "core_required",
+    shipsAgentArtifact: true,
+    artifactPath: ".codex/agents/context-manager.toml",
+    model: "gpt-4.5",
+    effort: "medium",
+    canOwnTasks: true,
+    canSatisfySpecialistRequirement: true,
+    defaultSkillIds: ["devgod-context-retrieval", "devgod-memory", "search-first"],
+    retrievalGuidance: ["all retrieval layers", ".devgod/memory/", "Postgres runtime records", "Qdrant semantic index"]
+  },
+  observability_engineer: {
+    label: "Observability Engineer",
+    description: "Owns observability gate: Grafana dashboards, distributed tracing, SLI/SLO design, alerting, and log-signal quality.",
+    class: "quality",
+    availability: "core_optional",
+    shipsAgentArtifact: true,
+    artifactPath: ".codex/agents/observability-engineer.toml",
+    model: "gpt-5.4",
+    effort: "high",
+    canOwnTasks: true,
+    canSatisfySpecialistRequirement: true,
+    defaultSkillIds: ["devgod-performance", "verification-loop", "backend-patterns"],
+    retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "runbooks", "benchmark artifacts", "Grafana config at src/grafana/"]
   }
 } as const satisfies Record<string, AgentCatalogEntry>;
 
