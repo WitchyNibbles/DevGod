@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$script_repo_root"
 requested_task_id=""
 live_mode=0
 external_review_authority=0
@@ -364,17 +365,36 @@ require_runtime_proof_reference() {
     fail "specialist_verified runtime_verified summaries must cite Runtime proof in ${heading} of ${path#"$repo_root"/}"
 }
 
-load_supported_quality_gates() {
-  local rules_path="$repo_root/.devgod/rules/task-quality-matrix.md"
-  [[ -f "$rules_path" ]] || fail "missing quality gate rules: ${rules_path#"$repo_root"/}"
-  awk '
-    /^### `/ {
-      line=$0
-      gsub(/^### `/, "", line)
-      gsub(/`$/, "", line)
-      print line
-    }
-  ' "$rules_path"
+load_schema_list() {
+  local key="$1"
+  local schema_path="$repo_root/.devgod/templates/workflow-schema.json"
+  [[ -f "$schema_path" ]] || fail "missing workflow schema template: ${schema_path#"$repo_root"/}"
+  node --input-type=module - "$schema_path" "$key" <<'EOF'
+import fs from "node:fs";
+
+const [schemaPath, key] = process.argv.slice(2);
+const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+const schemaKey = key.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+const values = schema[schemaKey];
+if (!Array.isArray(values)) {
+  console.error(`devgod workflow check failed: workflow schema key ${key} is missing or not a list`);
+  process.exit(1);
+}
+process.stdout.write(`${values.join("\n")}\n`);
+EOF
+}
+
+build_schema_csv() {
+  local first=1
+  local value
+  for value in "$@"; do
+    if [[ "$first" -eq 1 ]]; then
+      printf '%s' "$value"
+      first=0
+    else
+      printf ',%s' "$value"
+    fi
+  done
 }
 
 extract_list_items() {
@@ -724,8 +744,33 @@ else
   fi
 fi
 
+mapfile -t schema_review_roles < <(load_schema_list "workflow-template-review-roles")
+mapfile -t schema_review_filename_alias_pairs < <(load_schema_list "workflow-review-filename-aliases")
+mapfile -t schema_review_actor_roles < <(load_schema_list "workflow-review-actor-roles")
+mapfile -t schema_review_provenance_statuses < <(load_schema_list "workflow-review-provenance-statuses")
+mapfile -t schema_review_export_policies < <(load_schema_list "workflow-review-export-policies")
+
+declare -A schema_review_alias_by_role=()
+schema_review_aliases_contract=""
+for pair in "${schema_review_filename_alias_pairs[@]}"; do
+  full_role="${pair%%:*}"
+  short_role="${pair#*:}"
+  schema_review_alias_by_role["$full_role"]="$short_role"
+  contract_entry="${full_role}:${short_role}"
+  if [[ "$short_role" != "$full_role" ]]; then
+    contract_entry="${full_role}:${short_role}|${full_role}"
+  fi
+  if [[ -z "$schema_review_aliases_contract" ]]; then
+    schema_review_aliases_contract="$contract_entry"
+  else
+    schema_review_aliases_contract="${schema_review_aliases_contract};${contract_entry}"
+  fi
+done
+
+schema_review_roles_csv="$(build_schema_csv "${schema_review_roles[@]}")"
+
 require_contract_equals "workflow" "devgod" "$agents_file"
-require_contract_equals "required_review_roles" "reviewer,qa_engineer,security_reviewer" "$agents_file"
+require_contract_equals "required_review_roles" "$schema_review_roles_csv" "$agents_file"
 require_contract_equals "release_candidate_quality_gate" "release_readiness_required" "$agents_file"
 require_contract_equals "local_live_check" "bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]" "$agents_file"
 
@@ -738,7 +783,7 @@ if [[ "$contract_mode" == "legacy" ]]; then
   require_contract_equals "brief_template" ".devgod/templates/intake-brief.md" "$agents_file"
   require_contract_equals "task_template" ".devgod/templates/task-packet.md" "$agents_file"
   require_contract_equals "review_template" ".devgod/templates/review-gate.md" "$agents_file"
-  require_contract_equals "review_aliases" "reviewer:reviewer;qa_engineer:qa|qa_engineer;security_reviewer:security|security_reviewer" "$agents_file"
+  require_contract_equals "review_aliases" "$schema_review_aliases_contract" "$agents_file"
   require_contract_equals "workflow_check" "bash scripts/check-devgod-workflow.sh --task-id <task-id>" "$agents_file"
   require_contract_equals "workflow_check_scope" "artifact_contract_only" "$agents_file"
   require_contract_equals "review_artifact_trust" "manager_summary_evidence_only" "$agents_file"
@@ -762,51 +807,17 @@ require_section_equals "## Task ID" "<task-id>" "$brief_template"
 require_heading "## Success Criteria" "$brief_template"
 require_heading "## Stop Go" "$brief_template"
 require_section_equals "## Stop Go" "go | needs_review | stop" "$brief_template"
-
-require_section_equals "## Task ID" "<task-id>" "$task_template"
-require_section_equals "## Owner role" "<owner-role>" "$task_template"
-require_section_equals "## Completion standard" "artifact_complete | specialist_verified" "$task_template"
-require_heading "## Required specialist roles" "$task_template"
-require_heading "## Quality gates" "$task_template"
-require_heading "## Acceptance criteria" "$task_template"
-require_heading "## Verification steps" "$task_template"
-require_heading "## Required reviews" "$task_template"
-require_heading "## Reasoning quality" "$task_template"
-require_heading "## Reasoning policy" "$task_template"
-require_heading "## Reasoning attempts" "$task_template"
-require_heading "## Coverage impact" "$task_template"
-require_heading "## Touched ledger items" "$task_template"
-require_heading "## Required runtime traces" "$task_template"
-require_heading "## Progress proof" "$task_template"
-require_heading "## Interrupt checkpoint policy" "$task_template"
-require_grep '`reviewer`' "$task_template"
-require_grep '`qa_engineer`' "$task_template"
-require_grep '`security_reviewer`' "$task_template"
-require_heading "## Rollback notes" "$task_template"
-
-require_section_equals "## Task ID" "<task-id>" "$review_template"
-require_section_equals "## Reviewer role" "reviewer | qa_engineer | security_reviewer" "$review_template"
-require_section_equals "## Actor" "<recorded-actor-id>" "$review_template"
-require_section_equals "## Actor role" "reviewer | qa_engineer | security_reviewer | planner | solution_architect" "$review_template"
-require_section_equals "## Provenance status" "summary_only | runtime_verified | legacy_backfill" "$review_template"
-require_section_equals "## Review state" "pending | passed | blocked | waived" "$review_template"
-require_section_equals "## Severity" "low | medium | high | critical" "$review_template"
-require_heading "## Specialist execution evidence" "$review_template"
-require_heading "## Quality gate evidence" "$review_template"
-require_heading "## Reasoning quality findings" "$review_template"
-require_heading "## Verification evidence" "$review_template"
-require_section_equals "## Waiver authority" "none | manager | security_exception" "$review_template"
-require_section_equals "## Decision" "approved | blocked | waived" "$review_template"
-require_heading "## Source handoff" "$review_template"
+require_file "$repo_root/.devgod/templates/workflow-schema.json"
 
 artifact_task_id="$task_id"
 brief_rel=".devgod/work/briefs/brief-${artifact_task_id}.md"
 plan_rel=".devgod/work/plans/plan-${artifact_task_id}.md"
 task_rel=".devgod/work/tasks/task-${artifact_task_id}.md"
 task_file="$repo_root/$task_rel"
-reviewer_rel=""
-qa_engineer_rel=""
-security_reviewer_rel=""
+declare -A review_rel_by_role=()
+for role in "${schema_review_roles[@]}"; do
+  review_rel_by_role["$role"]=""
+done
 review_export_policy="required"
 
 if [[ -f "$repo_root/$plan_rel" ]]; then
@@ -824,9 +835,14 @@ if [[ -f "$task_file" ]]; then
   require_allowed_value "$task_completion_standard" "$task_file" "artifact_complete" "specialist_verified"
 
   if grep -Fq "## Workflow artifact refs" "$task_file"; then
-    for key in brief plan task reviewer qa_engineer security_reviewer; do
+    mapfile -t workflow_artifact_ref_keys < <(load_schema_list "workflow-artifact-ref-keys")
+    for key in "${workflow_artifact_ref_keys[@]}"; do
       value="$(normalize_value "$(extract_section_key_value "## Workflow artifact refs" "$key" "$task_file")")"
       [[ -n "$value" ]] || continue
+      if [[ "$key" == "review_exports" ]]; then
+        review_export_policy="$value"
+        continue
+      fi
       require_artifact_ref_path "$key" "$value" "$task_file"
       case "$key" in
         brief)
@@ -839,23 +855,18 @@ if [[ -f "$task_file" ]]; then
           [[ "$value" == "$task_rel" ]] ||
             fail "workflow artifact ref task must match current task artifact in ${task_file#"$repo_root"/}: ${task_rel}"
           ;;
-        reviewer)
-          reviewer_rel="$value"
-          ;;
-        qa_engineer)
-          qa_engineer_rel="$value"
-          ;;
-        security_reviewer)
-          security_reviewer_rel="$value"
+        *)
+          if [[ -n "${review_rel_by_role[$key]+set}" ]]; then
+            review_rel_by_role["$key"]="$value"
+          fi
           ;;
       esac
     done
 
-    review_export_policy="$(normalize_value "$(extract_section_key_value "## Workflow artifact refs" "review_exports" "$task_file")")"
     if [[ -z "$review_export_policy" ]]; then
       review_export_policy="required"
     fi
-    require_allowed_value "$review_export_policy" "$task_file" "required" "runtime_optional"
+    require_allowed_value "$review_export_policy" "$task_file" "${schema_review_export_policies[@]}"
     if [[ "$review_export_policy" == "runtime_optional" && "$contract_mode" != "runtime" ]]; then
       fail "review_exports=runtime_optional requires runtime workflow contract in ${task_file#"$repo_root"/}"
     fi
@@ -900,67 +911,31 @@ fi
 if [[ "$live_mode" -eq 1 ]]; then
   [[ -f "$task_file" ]] || fail "live workflow requires current task artifact for ${task_id}"
 
-  for heading in \
-    "## Owner role" \
-    "## Completion standard" \
-    "## Required specialist roles" \
-    "## Quality gates" \
-    "## Reasoning quality" \
-    "## Goal" \
-    "## Inputs" \
-    "## Dependencies" \
-    "## Outputs" \
-    "## Coverage impact" \
-    "## Touched ledger items" \
-    "## Required runtime traces" \
-    "## Progress proof" \
-    "## Interrupt checkpoint policy" \
-    "## Workflow artifact refs" \
-    "## Allowed write scope" \
-    "## Out of scope" \
-    "## Assumptions" \
-    "## Acceptance criteria" \
-    "## Verification steps" \
-    "## Required reviews" \
-    "## Security checks" \
-    "## Retrieval guidance" \
-    "## Anti-patterns to avoid" \
-    "## Rollback notes" \
-    "## Handoff format"; do
+  mapfile -t live_required_headings < <(load_schema_list "live-task-required-headings")
+  for heading in "${live_required_headings[@]}"; do
     require_heading "$heading" "$task_file"
   done
 
-  require_heading "### Approved assumptions" "$task_file"
-  require_heading "### Blocked assumptions" "$task_file"
-  require_heading "### Claim" "$task_file"
-  require_heading "### Facts" "$task_file"
-  require_heading "### Assumptions" "$task_file"
-  require_heading "### Hypotheses and alternatives" "$task_file"
-  require_heading "### Evidence refs" "$task_file"
-  require_heading "### Counter-evidence" "$task_file"
-  require_heading "### Confidence" "$task_file"
-  require_heading "### Open questions" "$task_file"
-  require_heading "### Verification plan" "$task_file"
-  require_heading "### Research and debug budgets" "$task_file"
+  mapfile -t live_reasoning_headings < <(load_schema_list "live-task-required-reasoning-headings")
+  for heading in "${live_reasoning_headings[@]}"; do
+    require_heading "$heading" "$task_file"
+  done
 
   reasoning_mode="legacy"
   if grep -Fq "## Reasoning policy" "$task_file"; then
     reasoning_mode_raw="$(extract_section_value "### Mode" "$task_file")"
     if [[ -n "$reasoning_mode_raw" ]]; then
       reasoning_mode="$(normalize_value "$reasoning_mode_raw")"
-      require_allowed_value "$reasoning_mode" "$task_file" "legacy" "dual" "strict"
+      mapfile -t supported_reasoning_modes < <(load_schema_list "reasoning-workflow-modes")
+      require_allowed_value "$reasoning_mode" "$task_file" "${supported_reasoning_modes[@]}"
     fi
   fi
 
   if [[ "$reasoning_mode" != "legacy" ]]; then
-    require_heading "## Reasoning policy" "$task_file"
-    require_heading "### Mode" "$task_file"
-    require_heading "### Requirements" "$task_file"
-    require_heading "### Max attempts" "$task_file"
-    require_heading "## Reasoning attempts" "$task_file"
-    require_heading "### Attempt records" "$task_file"
-    require_heading "### Verification records" "$task_file"
-    require_heading "### Verdict" "$task_file"
+    mapfile -t live_policy_headings < <(load_schema_list "live-task-reasoning-policy-headings")
+    for heading in "${live_policy_headings[@]}"; do
+      require_heading "$heading" "$task_file"
+    done
     require_nonempty_section_block "### Mode" "$task_file"
     require_nonempty_section_block "### Requirements" "$task_file"
     require_nonempty_section_block "### Max attempts" "$task_file"
@@ -972,51 +947,23 @@ if [[ "$live_mode" -eq 1 ]]; then
     require_nonempty_section_block "### Verdict" "$task_file"
   fi
 
-  for heading in \
-    "## Required specialist roles" \
-    "## Quality gates" \
-    "## Goal" \
-    "## Inputs" \
-    "## Dependencies" \
-    "## Outputs" \
-    "## Coverage impact" \
-    "## Touched ledger items" \
-    "## Required runtime traces" \
-    "## Progress proof" \
-    "## Interrupt checkpoint policy" \
-    "## Workflow artifact refs" \
-    "## Allowed write scope" \
-    "## Out of scope" \
-    "## Acceptance criteria" \
-    "## Verification steps" \
-    "## Required reviews" \
-    "## Security checks" \
-    "## Retrieval guidance" \
-    "## Anti-patterns to avoid" \
-    "## Rollback notes" \
-    "## Handoff format"; do
+  mapfile -t live_nonempty_headings < <(load_schema_list "live-task-required-nonempty-headings")
+  for heading in "${live_nonempty_headings[@]}"; do
     require_nonempty_section_block "$heading" "$task_file"
   done
 
-  for heading in \
-    "### Claim" \
-    "### Facts" \
-    "### Assumptions" \
-    "### Hypotheses and alternatives" \
-    "### Evidence refs" \
-    "### Counter-evidence" \
-    "### Confidence" \
-    "### Verification plan" \
-    "### Research and debug budgets"; do
+  mapfile -t live_nonempty_reasoning_headings < <(load_schema_list "live-task-required-nonempty-reasoning-headings")
+  for heading in "${live_nonempty_reasoning_headings[@]}"; do
     require_nonempty_section_block "$heading" "$task_file"
   done
 
   required_reviews_block="$(extract_section_block "## Required reviews" "$task_file")"
-  printf '%s\n' "$required_reviews_block" | grep -Fq 'reviewer' || fail "missing reviewer required review in ${task_file#"$repo_root"/}"
-  printf '%s\n' "$required_reviews_block" | grep -Fq 'qa_engineer' || fail "missing qa_engineer required review in ${task_file#"$repo_root"/}"
-  printf '%s\n' "$required_reviews_block" | grep -Fq 'security_reviewer' || fail "missing security_reviewer required review in ${task_file#"$repo_root"/}"
+  for required_role in "${schema_review_roles[@]}"; do
+    printf '%s\n' "$required_reviews_block" | grep -Fq "$required_role" ||
+      fail "missing ${required_role} required review in ${task_file#"$repo_root"/}"
+  done
 
-  mapfile -t supported_quality_gates < <(load_supported_quality_gates)
+  mapfile -t supported_quality_gates < <(load_schema_list "quality-gates")
   declare -A supported_quality_gate_map=()
   for gate in "${supported_quality_gates[@]}"; do
     supported_quality_gate_map["$gate"]=1
@@ -1046,15 +993,21 @@ if [[ -f "$task_file" ]]; then
     has_reasoning_strict_gate=0
     has_stronger_artifact_gate=0
 
+    mapfile -t stronger_artifact_gates < <(load_schema_list "stronger-artifact-quality-gates")
+    declare -A stronger_artifact_gate_map=()
+    for gate in "${stronger_artifact_gates[@]}"; do
+      stronger_artifact_gate_map["$gate"]=1
+    done
+
     for gate in "${task_quality_gates[@]}"; do
       case "$gate" in
         reasoning_strict_required)
           has_reasoning_strict_gate=1
           ;;
-        coverage_ledger_required|progress_proof_required|checkpoint_resume_required|memory_compaction_required)
-          has_stronger_artifact_gate=1
-          ;;
       esac
+      if [[ -n "${stronger_artifact_gate_map[$gate]:-}" ]]; then
+          has_stronger_artifact_gate=1
+      fi
     done
 
     [[ "$has_reasoning_strict_gate" -eq 1 ]] ||
@@ -1067,12 +1020,14 @@ if [[ -f "$task_file" ]]; then
 
   if grep -Fq "## UI surface" "$task_file"; then
     task_ui_surface="$(normalize_value "$(extract_section_value "## UI surface" "$task_file")")"
-    require_allowed_value "$task_ui_surface" "$task_file" "none" "visual_change" "interactive_flow"
+    mapfile -t supported_ui_surfaces < <(load_schema_list "ui-surfaces")
+    require_allowed_value "$task_ui_surface" "$task_file" "${supported_ui_surfaces[@]}"
   fi
 
   if grep -Fq "## Playwright requirement" "$task_file"; then
     task_playwright_required="$(normalize_value "$(extract_section_value "## Playwright requirement" "$task_file")")"
-    require_allowed_value "$task_playwright_required" "$task_file" "true" "false"
+    mapfile -t supported_playwright_states < <(load_schema_list "playwright-requirement-states")
+    require_allowed_value "$task_playwright_required" "$task_file" "${supported_playwright_states[@]}"
   fi
 
   if [[ "$task_ui_surface" == "visual_change" || "$task_ui_surface" == "interactive_flow" ]]; then
@@ -1197,23 +1152,9 @@ for (const task of tasks) {
 EOF
 fi
 
-roles=("reviewer" "qa" "security")
-
-for role in "${roles[@]}"; do
-  case "$role" in
-    reviewer)
-      expected_role="reviewer"
-      review_file="$(resolve_review_file "$reviewer_rel" "$artifact_task_id" "reviewer" "reviewer")"
-      ;;
-    qa)
-      expected_role="qa_engineer"
-      review_file="$(resolve_review_file "$qa_engineer_rel" "$artifact_task_id" "qa" "qa_engineer")"
-      ;;
-    security)
-      expected_role="security_reviewer"
-      review_file="$(resolve_review_file "$security_reviewer_rel" "$artifact_task_id" "security" "security_reviewer")"
-      ;;
-  esac
+for expected_role in "${schema_review_roles[@]}"; do
+  short_role="${schema_review_alias_by_role[$expected_role]}"
+  review_file="$(resolve_review_file "${review_rel_by_role[$expected_role]}" "$artifact_task_id" "$short_role" "$expected_role")"
 
   if [[ -z "$review_file" ]]; then
     continue
@@ -1232,7 +1173,8 @@ for role in "${roles[@]}"; do
 
   [[ -n "$actor" ]] || fail "missing actor in ${review_file#"$repo_root"/}"
   [[ -n "$actor_role" ]] || fail "missing actor role in ${review_file#"$repo_root"/}"
-  require_allowed_value "$provenance_status" "$review_file" "summary_only" "runtime_verified" "legacy_backfill"
+  require_allowed_value "$actor_role" "$review_file" "${schema_review_actor_roles[@]}"
+  require_allowed_value "$provenance_status" "$review_file" "${schema_review_provenance_statuses[@]}"
   if [[ "$external_review_authority" -eq 1 ]]; then
     require_allowed_value "$review_state" "$review_file" "pending" "passed" "blocked" "waived"
     require_allowed_value "$decision" "$review_file" "approved" "blocked" "waived"
@@ -1311,7 +1253,7 @@ done
 
 if [[ -f "$task_file" ]]; then
   if [[ "$task_playwright_required" == "true" ]]; then
-    qa_review_file="$(resolve_review_file "$qa_engineer_rel" "$artifact_task_id" "qa" "qa_engineer")"
+    qa_review_file="$(resolve_review_file "${review_rel_by_role[qa_engineer]}" "$artifact_task_id" "${schema_review_alias_by_role[qa_engineer]}" "qa_engineer")"
     [[ -n "$qa_review_file" ]] || fail "playwright-required task is missing qa review export for ${artifact_task_id}"
     qa_verification_block="$(extract_section_block "## Verification evidence" "$qa_review_file")"
     qa_source_handoff_block="$(extract_section_block "## Source handoff" "$qa_review_file")"
@@ -1322,18 +1264,9 @@ if [[ -f "$task_file" ]]; then
 
   if printf '%s\n' "${task_quality_gates[@]}" | grep -Fxq "release_readiness_required"; then
     release_readiness_evidence_found=0
-    for role in "${roles[@]}"; do
-      case "$role" in
-        reviewer)
-          review_file="$(resolve_review_file "$reviewer_rel" "$artifact_task_id" "reviewer" "reviewer")"
-          ;;
-        qa)
-          review_file="$(resolve_review_file "$qa_engineer_rel" "$artifact_task_id" "qa" "qa_engineer")"
-          ;;
-        security)
-          review_file="$(resolve_review_file "$security_reviewer_rel" "$artifact_task_id" "security" "security_reviewer")"
-          ;;
-      esac
+    for expected_role in "${schema_review_roles[@]}"; do
+      short_role="${schema_review_alias_by_role[$expected_role]}"
+      review_file="$(resolve_review_file "${review_rel_by_role[$expected_role]}" "$artifact_task_id" "$short_role" "$expected_role")"
 
       if [[ -z "$review_file" ]]; then
         continue
@@ -1347,7 +1280,7 @@ if [[ -f "$task_file" ]]; then
     done
 
     if [[ "$release_readiness_evidence_found" -eq 0 ]]; then
-      for heading in "## Verification steps" "## Good-path checks" "## Progress proof"; do
+      for heading in "## Verification steps" "## Progress proof"; do
         evidence_block="$(extract_section_block "$heading" "$task_file")"
         if printf '%s\n' "$evidence_block" | grep -Eqi 'release[-_ ]readiness|release overlay|setup replay|rollout'; then
           release_readiness_evidence_found=1

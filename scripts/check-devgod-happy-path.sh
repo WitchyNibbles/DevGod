@@ -78,7 +78,16 @@ if [[ -f "$active_file" ]] && grep -Fq "task_id=$requested_task_id" "$active_fil
   exit 1
 fi
 
-for role in reviewer qa_engineer security_reviewer; do
+mapfile -t review_roles < <(
+  node --input-type=module <<EOF
+import { readFileSync } from "node:fs";
+const schema = JSON.parse(readFileSync(${repo_root@Q} + "/.devgod/templates/workflow-schema.json", "utf8"));
+for (const role of schema.workflowTemplateReviewRoles ?? []) {
+  console.log(role);
+}
+EOF
+)
+for role in "${review_roles[@]}"; do
   review_file="$review_dir/review-${requested_task_id}-${role}.md"
   require_file "$review_file"
   require_contains "$review_file" '`summary_only`'

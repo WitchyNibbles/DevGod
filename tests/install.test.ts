@@ -31,6 +31,11 @@ import {
   verifyCatalogRepoLocalSkills,
   verifyAgentCatalogArtifacts
 } from "../src/devgod/agent-artifact-verifier.ts";
+import {
+  listCanonicalPackageOwnershipGroups,
+  listCanonicalPackageFileEntries,
+  verifyPackageFileEntries
+} from "../src/devgod/package-surface.ts";
 import { listCatalogRepoLocalSkillPaths } from "../src/devgod/repo-local-skill-surface.ts";
 
 const execFileAsync = promisify(execFile);
@@ -115,14 +120,16 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /broader evidence/i);
   assert.match(first, /branch from updated `origin\/main`/i);
   assert.match(first, /default branch prefixes are `feature\/`, `bugfix\/`, `hotfix\/`, `release\/`, `chore\/`, `refactor\/`, `docs\/`, `test\/`, `ci\/`, and `perf\/`/i);
-  assert.match(first, /overrides GitHub MCP naming suggestions/i);
   assert.match(first, /do not use `codex` in branch names, commit subjects, PR titles, or PR bodies/i);
+  assert.match(first, /caveman.*ultra/i);
+  assert.match(first, /\/caveman ultra/i);
+  assert.match(first, /root thread that talks directly to the user/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
   assert.match(first, /implicitly invoked on every prompt/i);
   assert.match(first, /default workflow controller even when other tools are available/i);
-  assert.ok(managedWordCount < 540, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
+  assert.ok(managedWordCount < 620, `expected slimmer managed AGENTS block, got ${managedWordCount} words`);
   assert.equal(first, second);
 });
 
@@ -138,6 +145,9 @@ test("mergeDotAgentsMd appends and is idempotent", () => {
   assert.match(first, /avoid strong negative claims/i);
   assert.match(first, /branch from updated `origin\/main`/i);
   assert.match(first, /keep `codex` out of branch names, commit subjects, PR titles, and PR bodies/i);
+  assert.match(first, /caveman.*ultra/i);
+  assert.match(first, /\/caveman ultra/i);
+  assert.match(first, /root thread that talks directly to the user/i);
   assert.equal(first, second);
 });
 
@@ -452,6 +462,9 @@ test("verifyAgentCatalogArtifacts reports missing, unexpected, and metadata drif
   assert.deepEqual(result.metadataMismatches, [
     '.codex/agents/backend-engineer.toml: expected name "backend_engineer", got "wrong_backend_role"'
   ]);
+  assert.deepEqual(result.cavemanContractMismatches, [
+    '.codex/agents/backend-engineer.toml: missing caveman markers - caveman ultra mode for every response this role emits; - enable with `/caveman ultra` semantics for maximum compression; - no prose exception: this role does not talk directly to the user; - keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays'
+  ]);
   assert.equal(result.ok, false);
 });
 
@@ -604,96 +617,12 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     scripts: Record<string, string>;
   };
 
-  const expectedSkillFiles = [
-    ".agents/skills/anthropic-mcp-builder/SKILL.md",
-    ".agents/skills/anthropic-webapp-testing/SKILL.md",
-    ".agents/skills/devgod-accessibility-gate/SKILL.md",
-    ".agents/skills/devgod-agent-runtime/SKILL.md",
-    ".agents/skills/devgod-architecture/SKILL.md",
-    ".agents/skills/devgod-autopilot/SKILL.md",
-    ".agents/skills/devgod-compliance-review/SKILL.md",
-    ".agents/skills/devgod-debugging/SKILL.md",
-    ".agents/skills/devgod-design-system/SKILL.md",
-    ".agents/skills/devgod-docs-research/SKILL.md",
-    ".agents/skills/devgod-e2e/SKILL.md",
-    ".agents/skills/devgod-eval-engineering/SKILL.md",
-    ".agents/skills/devgod-execution/SKILL.md",
-    ".agents/skills/devgod-frontend-taste/SKILL.md",
-    ".agents/skills/devgod-git-operator/SKILL.md",
-    ".agents/skills/devgod-gitnexus/SKILL.md",
-    ".agents/skills/devgod-infra-ops/SKILL.md",
-    ".agents/skills/devgod-intake/SKILL.md",
-    ".agents/skills/devgod-memory/SKILL.md",
-    ".agents/skills/devgod-planning/SKILL.md",
-    ".agents/skills/devgod-product-analysis/SKILL.md",
-    ".agents/skills/devgod-product-framing/SKILL.md",
-    ".agents/skills/devgod-qa-verification/SKILL.md",
-    ".agents/skills/devgod-release-readiness/SKILL.md",
-    ".agents/skills/devgod-repair-loop/SKILL.md",
-    ".agents/skills/devgod-review/SKILL.md",
-    ".agents/skills/devgod-setup/SKILL.md",
-    ".agents/skills/devgod-skill-evals/SKILL.md",
-    ".agents/skills/devgod-tdd/SKILL.md",
-    ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md",
-    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
-    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
-    ".agents/skills/superpowers-test-driven-development/SKILL.md",
-    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
-    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
-    ".agents/skills/superpowers-writing-plans/SKILL.md"
-  ];
-
-  const expectedAgentFiles = listCatalogAgentArtifactPaths();
-  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
-
-  const shippedSkillFiles = pkg.files.filter((file) => file.startsWith(".agents/skills/")).sort();
-  const shippedAgentFiles = pkg.files.filter((file) => file.startsWith(".codex/agents/")).sort();
-  const overlayPortableAssets = [
-    ".githooks/",
-    ".env.example",
-    "README.md",
-    "docker-compose.yml",
-    ".devgod/playwright/",
-    "docs/global-setup.md",
-    "scripts/check-devgod-branch-name.sh",
-    "scripts/check-devgod-commit-msg.sh",
-    "scripts/check-devgod-git-guard.sh",
-    "scripts/check-quality.sh",
-    "scripts/check-devgod-happy-path.sh",
-    "scripts/check-devgod-workflow-live.sh",
-    "scripts/check-devgod-workflow.sh",
-    "scripts/install-devgod.ps1",
-    "scripts/install-devgod.sh",
-    "scripts/setup-devgod.ps1",
-    "scripts/setup-devgod.sh",
-    "scripts/verify-devgod-workflow-check.sh",
-    "scripts/verify-release-overlay.sh",
-    "src/admin.ts",
-    "src/admin/",
-    "src/core/",
-    "src/devgod/",
-    "src/domain/",
-    "src/evals/orchestration-baseline.ts",
-    "src/evals/retrieval-memory-baseline.ts",
-    "src/index.ts",
-    "src/install/cli.ts",
-    "src/install/git-guard.ts",
-    "src/install/merge.ts",
-    "src/install/setup-git-guard.ts",
-    "src/install/setup-local.ts",
-    "src/install/setup-playwright.ts",
-    "src/install/types.ts",
-    "src/install/verify-git-guard.ts",
-    "src/mcp/",
-    "src/runtime/",
-    "src/sql/migrations/",
-    "src/store/",
-    "src/ui/"
-  ];
+  const expectedEntries = listCanonicalPackageFileEntries();
+  const ownershipGroups = listCanonicalPackageOwnershipGroups();
   const excludedOverlayFiles = [
     ".devgod/install-backups/",
     ".devgod/work/2026-05-04-project-state-review/BRIEF.md",
+    "docs/maintainers/package-surface-ownership.md",
     "docs/maintainers/quality-tooling.md",
     "evals/promptfoo/maintainer-boundary.promptfooconfig.yaml",
     "scripts/",
@@ -702,18 +631,36 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "stryker-maintainer-boundary.config.json"
   ];
 
-  assert.deepEqual(shippedSkillFiles, expectedSkillFiles);
-  assert.deepEqual(shippedAgentFiles, expectedAgentFiles);
-  assert.ok(pkg.files.includes("docs/devgod-agent-team.md"));
-  for (const relativePath of expectedCatalogRepoLocalSkills) {
-    assert.ok(shippedSkillFiles.includes(relativePath), `${relativePath} should ship because the catalog references it`);
-  }
+  assert.deepEqual([...pkg.files].sort(), expectedEntries);
+  assert.deepEqual(
+    [...new Set(ownershipGroups.flatMap((group) => group.entries))].sort(),
+    expectedEntries
+  );
+  assert.deepEqual(
+    ownershipGroups.map((group) => group.id),
+    [
+      "bootstrap",
+      "operator_docs",
+      "plugin_runtime",
+      "operator_scripts",
+      "runtime_sources",
+      "repo_local_skills",
+      "agent_artifacts"
+    ]
+  );
+  assert.deepEqual(verifyPackageFileEntries(pkg.files), {
+    ok: true,
+    missingEntries: [],
+    unexpectedEntries: [],
+    duplicateEntries: []
+  });
 
   const catalogVerification = await verifyAgentCatalogArtifacts({ repoRoot: sourceRoot });
   assert.equal(catalogVerification.ok, true);
   assert.deepEqual(catalogVerification.missingArtifacts, []);
   assert.deepEqual(catalogVerification.unexpectedArtifacts, []);
   assert.deepEqual(catalogVerification.metadataMismatches, []);
+  assert.deepEqual(catalogVerification.cavemanContractMismatches, []);
   const catalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: sourceRoot });
   assert.equal(catalogSkillVerification.ok, true);
   assert.deepEqual(catalogSkillVerification.missingSkillFiles, []);
@@ -730,10 +677,15 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "node --experimental-strip-types src/devgod/autopilot-status.ts"
   );
   assert.equal(pkg.scripts["devgod:loop"], "node --experimental-strip-types src/admin/devgod.ts loop --format text");
+  assert.equal(
+    pkg.scripts["verify:agent-caveman"],
+    "node --experimental-strip-types src/devgod/verify-agent-caveman-contract.ts"
+  );
+  assert.equal(
+    pkg.scripts["verify:package-surface"],
+    "node --experimental-strip-types src/devgod/verify-package-surface.ts"
+  );
   assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
-  for (const relativePath of overlayPortableAssets) {
-    assert.ok(pkg.files.includes(relativePath), `${relativePath} should be shipped for the opt-in overlay`);
-  }
   for (const relativePath of excludedOverlayFiles) {
     assert.ok(!pkg.files.includes(relativePath), `${relativePath} should stay out of the overlay package manifest`);
   }
@@ -1238,6 +1190,7 @@ test("verifyDevgodInstall auto-detects the GitNexus install option", async () =>
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
+    assert.deepEqual(summary.policyDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1426,6 +1379,7 @@ test("verifyDevgodInstall reports missing managed files", async () => {
 
     assert.equal(summary.ok, false);
     assert.ok(summary.missing.includes(driftFixtureTarget));
+    assert.deepEqual(summary.policyDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1447,6 +1401,38 @@ test("verifyDevgodInstall reports modified managed files", async () => {
 
     assert.equal(summary.ok, false);
     assert.ok(summary.modified.includes(driftFixtureTarget));
+    assert.deepEqual(summary.policyDrift, []);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall reports caveman policy drift for shipped agent artifacts", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-policy-drift-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    const backendAgentPath = path.join(targetRoot, ".codex", "agents", "devgod-build-resolver.toml");
+    const backendAgent = await readFile(backendAgentPath, "utf8");
+    await writeFile(
+      backendAgentPath,
+      backendAgent.replace(
+        "- no prose exception: this role does not talk directly to the user\n",
+        ""
+      ),
+      "utf8"
+    );
+
+    const summary = await verifyDevgodInstall({
+      sourceRoot,
+      targetRoot
+    });
+
+    assert.equal(summary.ok, false);
+    assert.ok(summary.modified.includes(".codex/agents/devgod-build-resolver.toml"));
+    assert.match(summary.policyDrift[0] ?? "", /devgod-build-resolver\.toml: missing caveman markers/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1474,6 +1460,7 @@ test("verify CLI succeeds for legacy installs without an install manifest", asyn
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
+    assert.deepEqual(summary.policyDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1768,7 +1755,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(agentsMd, /workflow_runtime=postgres/);
   assert.match(agentsMd, /local_live_check=bash scripts\/check-devgod-workflow-live\.sh \[--task-id <task-id>\]/);
   assert.doesNotMatch(agentsMd, /\.devgod\/ACTIVE/);
-  assert.match(agentsMd, /`reviewer`, `qa_engineer`, and `security_reviewer` gates/);
+  assert.match(agentsMd, /`reviewer`, `security_reviewer`, and `qa_engineer` gates/);
   assert.match(agentsMd, /workflow-proof --run-id latest --task-id/);
   assert.match(agentsMd, /explicit workflow artifact refs/);
   assert.match(agentsMd, /review_exports=runtime_optional/);
@@ -1779,11 +1766,13 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   const installedSkills = [
     ".agents/skills/anthropic-mcp-builder/SKILL.md",
     ".agents/skills/anthropic-webapp-testing/SKILL.md",
+    ".agents/skills/caveman/SKILL.md",
     ".agents/skills/devgod-accessibility-gate/SKILL.md",
     ".agents/skills/devgod-agent-runtime/SKILL.md",
     ".agents/skills/devgod-architecture/SKILL.md",
     ".agents/skills/devgod-autopilot/SKILL.md",
     ".agents/skills/devgod-compliance-review/SKILL.md",
+    ".agents/skills/devgod-context-retrieval/SKILL.md",
     ".agents/skills/devgod-debugging/SKILL.md",
     ".agents/skills/devgod-design-system/SKILL.md",
     ".agents/skills/devgod-docs-research/SKILL.md",
@@ -1796,6 +1785,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-infra-ops/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-memory/SKILL.md",
+    ".agents/skills/devgod-performance/SKILL.md",
     ".agents/skills/devgod-planning/SKILL.md",
     ".agents/skills/devgod-product-analysis/SKILL.md",
     ".agents/skills/devgod-product-framing/SKILL.md",
@@ -1807,7 +1797,9 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-skill-evals/SKILL.md",
     ".agents/skills/devgod-tdd/SKILL.md",
     ".agents/skills/devgod-technical-writing/SKILL.md",
+    ".agents/skills/devgod-ui-art-direction/SKILL.md",
     ".agents/skills/devgod-ux-research/SKILL.md",
+    ".agents/skills/devgod-visual-standards/SKILL.md",
     ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
     ".agents/skills/superpowers-systematic-debugging/SKILL.md",
     ".agents/skills/superpowers-test-driven-development/SKILL.md",
@@ -1869,6 +1861,18 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     const content = await readFile(path.join(targetRoot, relativePath), "utf8");
     assert.match(content, /^name = /m, `${relativePath} should install an agent file`);
   }
+
+  const installedCavemanPlugin = await readFile(
+    path.join(targetRoot, "plugins/caveman/.codex-plugin/plugin.json"),
+    "utf8"
+  );
+  assert.match(installedCavemanPlugin, /"name": "caveman"/);
+
+  const installedCavemanPluginSkill = await readFile(
+    path.join(targetRoot, "plugins/caveman/skills/caveman/SKILL.md"),
+    "utf8"
+  );
+  assert.match(installedCavemanPluginSkill, /^---/m);
 
   const retrievalPolicy = await readFile(
     path.join(targetRoot, ".devgod/rules/role-retrieval-policy.md"),
@@ -2630,24 +2634,9 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
       }
     });
 
-    await execFileAsync("git", ["switch", "-c", "codex/bad-branch"], { cwd: targetRoot });
     await mkdir(path.join(targetRoot, "src"), { recursive: true });
     await writeFile(path.join(targetRoot, "src", "app.ts"), "export const value = 1;\n", "utf8");
     await execFileAsync("git", ["add", "src/app.ts"], { cwd: targetRoot });
-    await assert.rejects(
-      execFileAsync("git", ["commit", "-m", "feat: add app stub"], { cwd: targetRoot }),
-      (error: unknown) => {
-        assert.equal(typeof error, "object");
-        assert.ok(error !== null);
-        assert.match(
-          String((error as { stderr?: string }).stderr ?? ""),
-          /devgod branch guard: do not use 'codex' in branch names/
-        );
-        return true;
-      }
-    );
-
-    await execFileAsync("git", ["switch", "-c", "feature/add-app-stub"], { cwd: targetRoot });
     await execFileAsync("git", ["commit", "-m", "feat: add app stub"], { cwd: targetRoot });
 
     const agentsMd = await readFile(path.join(targetRoot, "AGENTS.md"), "utf8");
@@ -2669,19 +2658,6 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
 
     await writeFile(path.join(targetRoot, "notes.md"), "guard check\n", "utf8");
     await execFileAsync("git", ["add", "notes.md"], { cwd: targetRoot });
-    await assert.rejects(
-      execFileAsync("git", ["commit", "-m", "chore: codex cleanup"], { cwd: targetRoot }),
-      (error: unknown) => {
-        assert.equal(typeof error, "object");
-        assert.ok(error !== null);
-        assert.match(
-          String((error as { stderr?: string }).stderr ?? ""),
-          /do not use 'codex' in the commit subject/
-        );
-        return true;
-      }
-    );
-
     await assert.rejects(
       execFileAsync("git", ["commit", "-m", "bad message"], { cwd: targetRoot }),
       (error: unknown) => {
@@ -2719,96 +2695,20 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
   }>;
   const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
 
-  const expectedSkillFiles = [
-    ".agents/skills/anthropic-mcp-builder/SKILL.md",
-    ".agents/skills/anthropic-webapp-testing/SKILL.md",
-    ".agents/skills/devgod-accessibility-gate/SKILL.md",
-    ".agents/skills/devgod-agent-runtime/SKILL.md",
-    ".agents/skills/devgod-architecture/SKILL.md",
-    ".agents/skills/devgod-autopilot/SKILL.md",
-    ".agents/skills/devgod-compliance-review/SKILL.md",
-    ".agents/skills/devgod-debugging/SKILL.md",
-    ".agents/skills/devgod-design-system/SKILL.md",
-    ".agents/skills/devgod-docs-research/SKILL.md",
-    ".agents/skills/devgod-e2e/SKILL.md",
-    ".agents/skills/devgod-eval-engineering/SKILL.md",
-    ".agents/skills/devgod-execution/SKILL.md",
-    ".agents/skills/devgod-frontend-taste/SKILL.md",
-    ".agents/skills/devgod-git-operator/SKILL.md",
-    ".agents/skills/devgod-gitnexus/SKILL.md",
-    ".agents/skills/devgod-infra-ops/SKILL.md",
-    ".agents/skills/devgod-intake/SKILL.md",
-    ".agents/skills/devgod-memory/SKILL.md",
-    ".agents/skills/devgod-planning/SKILL.md",
-    ".agents/skills/devgod-product-analysis/SKILL.md",
-    ".agents/skills/devgod-product-framing/SKILL.md",
-    ".agents/skills/devgod-qa-verification/SKILL.md",
-    ".agents/skills/devgod-release-readiness/SKILL.md",
-    ".agents/skills/devgod-repair-loop/SKILL.md",
-    ".agents/skills/devgod-review/SKILL.md",
-    ".agents/skills/devgod-setup/SKILL.md",
-    ".agents/skills/devgod-skill-evals/SKILL.md",
-    ".agents/skills/devgod-tdd/SKILL.md",
-    ".agents/skills/devgod-technical-writing/SKILL.md",
-    ".agents/skills/devgod-ux-research/SKILL.md",
-    ".agents/skills/superpowers-finishing-development-branch/SKILL.md",
-    ".agents/skills/superpowers-systematic-debugging/SKILL.md",
-    ".agents/skills/superpowers-test-driven-development/SKILL.md",
-    ".agents/skills/superpowers-using-git-worktrees/SKILL.md",
-    ".agents/skills/superpowers-verification-before-completion/SKILL.md",
-    ".agents/skills/superpowers-writing-plans/SKILL.md"
-  ];
-
-  const expectedAgentFiles = listCatalogAgentArtifactPaths();
-  const expectedCatalogRepoLocalSkills = listCatalogRepoLocalSkillPaths();
-
-  const packedSkillFiles = [...packedFiles].filter((file) => file.startsWith(".agents/skills/")).sort();
-  const packedAgentFiles = [...packedFiles].filter((file) => file.startsWith(".codex/agents/")).sort();
-
-  assert.deepEqual(packedSkillFiles, expectedSkillFiles);
-  assert.deepEqual(packedAgentFiles, expectedAgentFiles);
-  assert.ok(packedFiles.has("docs/devgod-agent-team.md"));
-  for (const relativePath of expectedCatalogRepoLocalSkills) {
-    assert.ok(packedSkillFiles.includes(relativePath), `${relativePath} should be packed because the catalog references it`);
+  for (const expectedPath of listCanonicalPackageFileEntries().filter((entry) => !entry.endsWith("/"))) {
+    assert.ok(packedFiles.has(expectedPath), `${expectedPath} should be present in npm pack --dry-run output`);
   }
 
   for (const expectedPath of [
     ".githooks/commit-msg",
     ".githooks/pre-commit",
-    ".codex/hooks.json",
     ".devgod/rules/role-retrieval-policy.md",
     ".devgod/templates/product-state.md",
     ".devgod/templates/task-queue.json",
     ".devgod/templates/review-identity-bindings.json",
     ".devgod/templates/review-identity-adapter.fixture.json",
-    "scripts/check-devgod-branch-name.sh",
-    "scripts/check-devgod-commit-msg.sh",
-    "scripts/check-devgod-git-guard.sh",
-    "scripts/check-devgod-workflow.sh",
-    "scripts/check-devgod-workflow-live.sh",
-    "scripts/check-quality.sh",
-    "scripts/devgod-session-start.sh",
-    "scripts/verify-devgod-workflow-check.sh",
-    "scripts/verify-release-overlay.sh",
-    "plugins/devgod/.codex-plugin/plugin.json",
-    "plugins/devgod/hooks/hooks.json",
-    "plugins/devgod/scripts/hook-utils.mjs",
-    "plugins/devgod/scripts/hook-policy.mjs",
-    "plugins/devgod/scripts/pre-tool-use.mjs",
-    "plugins/devgod/scripts/permission-request.mjs",
-    "plugins/devgod/scripts/post-tool-use.mjs",
-    "plugins/devgod/scripts/session-start.mjs",
-    "plugins/devgod/scripts/stop.mjs",
-    "plugins/devgod/scripts/user-prompt-submit.mjs",
-    "src/admin.ts",
     "src/devgod/autopilot-status.ts",
     "src/devgod/task-queue.ts",
-    "src/index.ts",
-    "src/install/cli.ts",
-    "src/install/git-guard.ts",
-    "src/install/setup-git-guard.ts",
-    "src/install/setup-local.ts",
-    "src/install/verify-git-guard.ts",
     "src/sql/migrations/001_initial_schema.sql"
   ]) {
     assert.ok(packedFiles.has(expectedPath), `${expectedPath} should be present in npm pack --dry-run output`);

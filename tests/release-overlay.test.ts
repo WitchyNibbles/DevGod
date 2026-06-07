@@ -43,6 +43,7 @@ test("release overlay verification script stays aligned with CI", async () => {
 
   assert.match(releaseOverlayScript, /npm test/);
   assert.match(releaseOverlayScript, /npm run check:quality/);
+  assert.match(releaseOverlayScript, /npm run verify:agent-caveman/);
   assert.match(releaseOverlayScript, /npm run verify:review-identity/);
   assert.match(releaseOverlayScript, /npm run check:coverage|npm run check:quality/);
 

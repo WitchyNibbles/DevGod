@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { installDevgodIntoProject } from "../src/install/cli.ts";
+import { workflowTemplateReviewRoles } from "../src/devgod/workflow-schema.ts";
 import { buildCoverageLedgerArtifacts } from "../src/runtime/coverage-ledger.ts";
 
 const execFileAsync = promisify(execFile);
@@ -142,22 +143,23 @@ async function writeLiveTaskPacket(
       : []),
     `review_exports=${reviewExports}`
   ];
+  const reviewRoleLines = workflowTemplateReviewRoles.map((role) => `- ${role}`);
+  const specialistRoleLines = ["- `qa_engineer`", ...workflowTemplateReviewRoles
+    .filter((role) => role !== "qa_engineer")
+    .map((role) => `- \`${role}\``)];
 
   const sections: Array<[string, string[]]> = [
     ["## Task ID", [`\`${taskId}\``]],
     ["## Owner role", ["`qa_engineer`"]],
     ["## Completion standard", [`\`${completionStandard}\``]],
-    ["## Required specialist roles", ["- `qa_engineer`", "- `reviewer`", "- `security_reviewer`"]],
+    ["## Required specialist roles", specialistRoleLines],
     ["## Quality gates", qualityGates.map((gate) => `- \`${gate}\``)],
     ["## Goal", ["- prove live workflow policy enforcement"]],
     ["## Inputs", inputs],
     ["## Dependencies", dependencies],
     ["## Outputs", ["- validated live task packet"]],
-    ["## Coverage impact", ["- touched analysis coverage must be tracked explicitly"]],
-    ["## Touched ledger items", ["- `service:workflow-checker`"]],
     ["## Required runtime traces", ["- `trace://workflow-proof/live-check`"]],
     ["## Progress proof", ["- `.devgod/work/proofs/progress-task.json` records measurable deltas"]],
-    ["## Interrupt checkpoint policy", ["- checkpoint before yielding when state changes"]],
     ["## Workflow artifact refs", workflowArtifactRefLines],
     ["## Allowed write scope", ["- `scripts/`", "- `tests/`"]],
     ["## Out of scope", ["- historical artifact cleanup"]],
@@ -196,12 +198,9 @@ async function writeLiveTaskPacket(
       : []),
     ["## Acceptance criteria", ["- live workflow validation passes only with strong proof"]],
     ["## Verification steps", [`- ${verificationCommand}`]],
-    ["## Required reviews", ["- reviewer", "- qa_engineer", "- security_reviewer"]],
+    ["## Required reviews", reviewRoleLines],
     ["## Security checks", ["- require explicit live-proof references"]],
-    ["## Retrieval guidance", ["- use direct workflow artifacts only"]],
-    ["## Anti-patterns to avoid", ["- summary-only live approvals"]],
-    ["## Rollback notes", ["- delete the fixture"]],
-    ["## Handoff format", ["- concise summary plus cited verification evidence"]]
+    ["## Rollback notes", ["- delete the fixture"]]
   ];
 
   const content = sections

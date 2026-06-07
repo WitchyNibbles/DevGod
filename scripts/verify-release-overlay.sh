@@ -11,6 +11,9 @@ npm test
 echo "repo-local package checks"
 npm run check:quality
 
+echo "agent caveman contract"
+npm run verify:agent-caveman
+
 echo "review identity"
 npm run verify:review-identity
 

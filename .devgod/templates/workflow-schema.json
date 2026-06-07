@@ -1,0 +1,163 @@
+{
+  "qualityGates": [
+    "council_review_required",
+    "product_acceptance",
+    "frontend_acceptance",
+    "accessibility_acceptance",
+    "responsive_acceptance",
+    "tdd_required",
+    "e2e_required",
+    "regression_safety_required",
+    "release_readiness_required",
+    "performance_check_required",
+    "setup_replay_required",
+    "coverage_ledger_required",
+    "progress_proof_required",
+    "checkpoint_resume_required",
+    "memory_compaction_required",
+    "reasoning_dual_required",
+    "reasoning_strict_required"
+  ],
+  "uiSurfaces": [
+    "none",
+    "visual_change",
+    "interactive_flow"
+  ],
+  "reasoningWorkflowModes": [
+    "legacy",
+    "dual",
+    "strict"
+  ],
+  "workflowTemplateReviewRoles": [
+    "reviewer",
+    "qa_engineer",
+    "security_reviewer"
+  ],
+  "workflowReviewFilenameAliases": [
+    "reviewer:reviewer",
+    "qa_engineer:qa",
+    "security_reviewer:security"
+  ],
+  "workflowReviewActorRoles": [
+    "reviewer",
+    "qa_engineer",
+    "security_reviewer",
+    "planner",
+    "solution_architect"
+  ],
+  "workflowReviewProvenanceStatuses": [
+    "summary_only",
+    "runtime_verified",
+    "legacy_backfill"
+  ],
+  "workflowReviewExportPolicies": [
+    "required",
+    "runtime_optional"
+  ],
+  "workflowArtifactRefKeys": [
+    "brief",
+    "plan",
+    "task",
+    "reviewer",
+    "qa_engineer",
+    "security_reviewer",
+    "review_exports"
+  ],
+  "workflowArtifactRefGuidanceLine": "Declare explicit workflow artifact ownership whenever the task inherits a parent brief or plan, or when authenticated runtime review authority is allowed to satisfy completion before markdown review exports exist.",
+  "workflowArtifactRefFormatIntroLine": "Use repo-relative `key=value` lines:",
+  "workflowArtifactRefExampleLines": [
+    "brief=.devgod/work/briefs/brief-<task-id>.md",
+    "plan=.devgod/work/plans/plan-<task-id>.md",
+    "task=.devgod/work/tasks/task-<task-id>.md",
+    "reviewer=.devgod/work/reviews/review-<task-id>-reviewer.md",
+    "qa_engineer=.devgod/work/reviews/review-<task-id>-qa_engineer.md",
+    "security_reviewer=.devgod/work/reviews/review-<task-id>-security_reviewer.md",
+    "review_exports=required | runtime_optional"
+  ],
+  "workflowReviewExportsRuntimeOptionalGuidanceLine": "When `review_exports=runtime_optional`, the task must run under the runtime workflow contract and still cite release-readiness or other gate evidence in task verification artifacts or exported review summaries.",
+  "playwrightRequirementStates": [
+    "true",
+    "false"
+  ],
+  "strongerArtifactQualityGates": [
+    "coverage_ledger_required",
+    "progress_proof_required",
+    "checkpoint_resume_required",
+    "memory_compaction_required"
+  ],
+  "liveTaskRequiredHeadings": [
+    "## Owner role",
+    "## Completion standard",
+    "## Required specialist roles",
+    "## Quality gates",
+    "## Reasoning quality",
+    "## Goal",
+    "## Inputs",
+    "## Dependencies",
+    "## Outputs",
+    "## Required runtime traces",
+    "## Progress proof",
+    "## Workflow artifact refs",
+    "## Allowed write scope",
+    "## Out of scope",
+    "## Assumptions",
+    "## Acceptance criteria",
+    "## Verification steps",
+    "## Required reviews",
+    "## Security checks",
+    "## Rollback notes"
+  ],
+  "liveTaskRequiredReasoningHeadings": [
+    "### Approved assumptions",
+    "### Blocked assumptions",
+    "### Claim",
+    "### Facts",
+    "### Assumptions",
+    "### Hypotheses and alternatives",
+    "### Evidence refs",
+    "### Counter-evidence",
+    "### Confidence",
+    "### Open questions",
+    "### Verification plan",
+    "### Research and debug budgets"
+  ],
+  "liveTaskReasoningPolicyHeadings": [
+    "## Reasoning policy",
+    "### Mode",
+    "### Requirements",
+    "### Max attempts",
+    "## Reasoning attempts",
+    "### Attempt records",
+    "### Verification records",
+    "### Verdict"
+  ],
+  "liveTaskRequiredNonEmptyHeadings": [
+    "## Required specialist roles",
+    "## Quality gates",
+    "## Goal",
+    "## Inputs",
+    "## Dependencies",
+    "## Outputs",
+    "## Required runtime traces",
+    "## Progress proof",
+    "## Workflow artifact refs",
+    "## Allowed write scope",
+    "## Out of scope",
+    "## Acceptance criteria",
+    "## Verification steps",
+    "## Required reviews",
+    "## Security checks",
+    "## Rollback notes"
+  ],
+  "liveTaskRequiredNonEmptyReasoningHeadings": [
+    "### Claim",
+    "### Facts",
+    "### Assumptions",
+    "### Hypotheses and alternatives",
+    "### Evidence refs",
+    "### Counter-evidence",
+    "### Confidence",
+    "### Verification plan",
+    "### Research and debug budgets"
+  ]
+}

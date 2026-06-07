@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
+import { parse as parseToml } from "@iarna/toml";
 import {
   grafanaCodexConfigFragment,
   gitNexusCodexConfigFragment,
@@ -14,7 +15,16 @@ import {
   playwrightCodexConfigFragment,
   stripGitNexusFromCodexConfig
 } from "./merge.ts";
-import { repoLocalSkillIdPrefixes } from "../devgod/repo-local-skill-surface.ts";
+import { listCatalogRepoLocalSkillPaths } from "../devgod/repo-local-skill-surface.ts";
+import { verifyNonUserFacingAgentCavemanContract } from "../devgod/caveman-policy.ts";
+import {
+  buildWorkflowReviewArtifactRelativePaths,
+  workflowReviewActorRoles,
+  workflowReviewExportPoliciesDisplay,
+  workflowReviewProvenanceStatuses,
+  workflowTemplateReviewRoles,
+  type WorkflowTemplateReviewRole
+} from "../devgod/workflow-schema.ts";
 import { detectGrafanaRepoConfig } from "../grafana/config.ts";
 import { resolveRuntimeEnvironmentConfig } from "../runtime/config.ts";
 import type {
@@ -679,7 +689,14 @@ async function readInstallManifest(targetRoot: string): Promise<InstallManifest 
 async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
   const manifest: InstallFile[] = [];
 
-  const recursiveRoots = [".devgod/playwright", ".devgod/rules", ".devgod/templates", ".githooks", "plugins/devgod"];
+  const recursiveRoots = [
+    ".devgod/playwright",
+    ".devgod/rules",
+    ".devgod/templates",
+    ".githooks",
+    "plugins/caveman",
+    "plugins/devgod"
+  ];
 
   for (const relativeRoot of recursiveRoots) {
     const sourcePath = path.join(sourceRoot, relativeRoot);
@@ -713,14 +730,11 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
     });
   }
 
-  const repoLocalSkillPrefixes = repoLocalSkillIdPrefixes.map((prefix) => `.agents/skills/${prefix}`);
-  const skillsRoot = path.join(sourceRoot, ".agents/skills");
-  for (const skillPath of await listFilesRecursive(skillsRoot)) {
-    const relativePath = path.relative(sourceRoot, skillPath);
-    if (!repoLocalSkillPrefixes.some((prefix) => relativePath.startsWith(prefix))) {
+  for (const relativePath of listCatalogRepoLocalSkillPaths()) {
+    const skillPath = path.join(sourceRoot, relativePath);
+    if (!(await fileExists(skillPath))) {
       continue;
     }
-
     manifest.push({
       source: skillPath,
       target: relativePath,
@@ -1507,6 +1521,7 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
 
   const missing: string[] = [];
   const modified: string[] = [];
+  const policyDrift: string[] = [];
   for (const entry of planEntries) {
     const resolved = await resolvePlanEntry(entry, targetRoot);
     if (resolved.invalidReason) {
@@ -1521,6 +1536,21 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
 
     if (resolved.currentContent !== resolved.desiredContent) {
       modified.push(entry.target);
+    }
+
+    if (entry.target.startsWith(".codex/agents/")) {
+      const parsed = parseToml(resolved.currentContent!) as { developer_instructions?: string };
+      const cavemanResult = verifyNonUserFacingAgentCavemanContract(parsed.developer_instructions);
+      if (cavemanResult.missingMarkers.length > 0) {
+        policyDrift.push(
+          `${entry.target}: missing caveman markers ${cavemanResult.missingMarkers.join("; ")}`
+        );
+      }
+      if (cavemanResult.contradictionPhrases.length > 0) {
+        policyDrift.push(
+          `${entry.target}: contradictory caveman phrases ${cavemanResult.contradictionPhrases.join("; ")}`
+        );
+      }
     }
   }
 
@@ -1537,10 +1567,11 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
   }
 
   return {
-    ok: missing.length === 0 && modified.length === 0 && orphans.length === 0,
+    ok: missing.length === 0 && modified.length === 0 && orphans.length === 0 && policyDrift.length === 0,
     missing,
     modified,
-    orphans: orphans.sort((left, right) => left.localeCompare(right))
+    orphans: orphans.sort((left, right) => left.localeCompare(right)),
+    policyDrift: [...policyDrift].sort((left, right) => left.localeCompare(right))
   };
 }
 
@@ -1595,6 +1626,7 @@ function printVerifySummary(targetRoot: string, summary: VerifySummary): void {
   console.log(`missing: ${summary.missing.length}`);
   console.log(`modified: ${summary.modified.length}`);
   console.log(`orphans: ${summary.orphans.length}`);
+  console.log(`policy drift: ${summary.policyDrift.length}`);
 
   if (summary.missing.length > 0) {
     console.log("Missing:");
@@ -1614,6 +1646,13 @@ function printVerifySummary(targetRoot: string, summary: VerifySummary): void {
     console.log("Orphans:");
     for (const filePath of summary.orphans) {
       console.log(`- ${filePath}`);
+    }
+  }
+
+  if (summary.policyDrift.length > 0) {
+    console.log("Policy drift:");
+    for (const item of summary.policyDrift) {
+      console.log(`- ${item}`);
     }
   }
 }
@@ -1741,19 +1780,16 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
   const scaffolded = replaceTemplateTaskId(templateContent, taskId)
     .replace("`<owner-role>`", "`planner`")
     .replace("`artifact_complete | specialist_verified`", "`artifact_complete`")
-    .replace("`strict | dual | legacy`", "`strict`")
-    .replace("review_exports=required | runtime_optional", "review_exports=required");
+    .replace(/`(?:strict \| dual \| legacy|legacy \| dual \| strict)`/, "`strict`")
+    .replace(`review_exports=${workflowReviewExportPoliciesDisplay}`, "review_exports=required");
 
   const hydrated = [
     ["## Goal", `Seed starter workflow metadata for \`${taskId}\` and replace these defaults before claiming completion.`],
     ["## Inputs", "- scaffold-workflow generated artifact set\n- repo-specific context to be filled before execution"],
     ["## Dependencies", "- none yet; add upstream tasks or runtime prerequisites before execution"],
     ["## Outputs", "- a specialized task packet, brief, plan, and review set for the real work"],
-    ["## Coverage impact", "- establishes starter workflow coverage only; replace with task-specific impact before execution"],
-    ["## Touched ledger items", "- workflow:scaffolded-task-packet"],
     ["## Required runtime traces", "- none yet; add task-specific runtime traces or state why none are required"],
     ["## Progress proof", "- replace with the first concrete progress proof once substantive execution starts"],
-    ["## Interrupt checkpoint policy", "- checkpoint before any substantive write beyond the scaffolded workflow artifacts"],
     ["## Allowed write scope", "- specialize this section before implementation; scaffold only covers workflow artifact setup"],
     ["## Out of scope", "- substantive product or code changes outside the eventual task-specific write scope"],
     ["## Acceptance criteria", "- replace scaffold defaults with task-specific completion criteria before execution"],
@@ -1765,8 +1801,6 @@ function buildTaskFromTemplate(templateContent: string, taskId: string): string 
     ],
     ["## Verification steps", "- update with the exact commands, fixtures, and runtime proofs for this task"],
     ["## Security checks", "- confirm the scaffold does not widen trust boundaries or write scope unintentionally"],
-    ["## Retrieval guidance", "- prefer runtime authority and task-local artifacts over narrative summaries when they disagree"],
-    ["## Anti-patterns to avoid", "- leaving scaffold placeholders in place once the task moves into execution"],
     ["## Rollback notes", "- delete or regenerate the scaffolded workflow artifacts if this task is abandoned or replaced"],
     ["### Claim", `A specialized workflow packet for \`${taskId}\` must be completed before this task can be executed safely.`],
     ["### Facts", "- this artifact was generated by scaffold-workflow\n- the seeded values are starter defaults only"],
@@ -1882,16 +1916,16 @@ function appendReasoningHardeningSections(
 function buildReviewFromTemplate(
   templateContent: string,
   taskId: string,
-  reviewerRole: "reviewer" | "qa_engineer" | "security_reviewer"
+  reviewerRole: WorkflowTemplateReviewRole
 ): string {
+  const reviewerRolePlaceholder = `\`${workflowTemplateReviewRoles.join(" | ")}\``;
+  const actorRolePlaceholder = `\`${workflowReviewActorRoles.join(" | ")}\``;
+  const provenancePlaceholder = `\`${workflowReviewProvenanceStatuses.join(" | ")}\``;
   return replaceTemplateTaskId(templateContent, taskId)
-    .replace("`reviewer | qa_engineer | security_reviewer`", `\`${reviewerRole}\``)
+    .replace(reviewerRolePlaceholder, `\`${reviewerRole}\``)
     .replace("`<recorded-actor-id>`", "`pending-review`")
-    .replace(
-      "`reviewer | qa_engineer | security_reviewer | planner | solution_architect`",
-      `\`${reviewerRole}\``
-    )
-    .replace("`summary_only | runtime_verified | legacy_backfill`", "`summary_only`")
+    .replace(actorRolePlaceholder, `\`${reviewerRole}\``)
+    .replace(provenancePlaceholder, "`summary_only`")
     .replace("`pending | passed | blocked | waived`", "`pending`")
     .replace("`low | medium | high | critical`", "`low`")
     .replace("`none | manager | security_exception`", "`none`")
@@ -1939,6 +1973,11 @@ function buildHappyPathFixtureBrief(taskId: string): string {
 }
 
 function buildHappyPathFixtureTask(taskId: string): string {
+  const requiredReviewLines = workflowTemplateReviewRoles.map((role) => `- ${role}`);
+  const requiredSpecialistLines = [
+    "- `backend_engineer`",
+    ...workflowTemplateReviewRoles.map((role) => `- \`${role}\``)
+  ];
   return [
     "## Task ID",
     "",
@@ -1954,10 +1993,7 @@ function buildHappyPathFixtureTask(taskId: string): string {
     "",
     "## Required specialist roles",
     "",
-    "- `backend_engineer`",
-    "- `reviewer`",
-    "- `qa_engineer`",
-    "- `security_reviewer`",
+    ...requiredSpecialistLines,
     "",
     "## Quality gates",
     "",
@@ -1976,9 +2012,7 @@ function buildHappyPathFixtureTask(taskId: string): string {
     "",
     "## Required reviews",
     "",
-    "- reviewer",
-    "- qa_engineer",
-    "- security_reviewer",
+    ...requiredReviewLines,
     "",
     "## Rollback notes",
     "",
@@ -1988,7 +2022,7 @@ function buildHappyPathFixtureTask(taskId: string): string {
 
 function buildHappyPathFixtureReview(
   taskId: string,
-  reviewerRole: "reviewer" | "qa_engineer" | "security_reviewer"
+  reviewerRole: WorkflowTemplateReviewRole
 ): string {
   return [
     "# Review Gate",
@@ -2079,11 +2113,7 @@ async function prepareWorkflowArtifactPaths(
   const activeRelativePath = ".devgod/ACTIVE";
   const briefRelativePath = `.devgod/work/briefs/brief-${options.taskId}.md`;
   const taskRelativePath = `.devgod/work/tasks/task-${options.taskId}.md`;
-  const reviewRelativePaths = {
-    reviewer: `.devgod/work/reviews/review-${options.taskId}-reviewer.md`,
-    qa_engineer: `.devgod/work/reviews/review-${options.taskId}-qa_engineer.md`,
-    security_reviewer: `.devgod/work/reviews/review-${options.taskId}-security_reviewer.md`
-  } as const;
+  const reviewRelativePaths = buildWorkflowReviewArtifactRelativePaths(options.taskId);
 
   if (pathMode === "live-workflow") {
     const activeInspection = await inspectManagedTarget(targetRoot, activeRelativePath);
@@ -2216,24 +2246,12 @@ export async function scaffoldWorkflowArtifacts(options: WorkflowScaffoldOptions
       absolutePath: resolvedArtifactPaths.get(taskRelativePath) ?? path.join(targetRoot, taskRelativePath),
       content: `${buildTaskFromTemplate(taskTemplate, options.taskId).trimEnd()}\n`
     },
-    {
+    ...workflowTemplateReviewRoles.map((reviewerRole) => ({
       absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.reviewer) ??
-        path.join(targetRoot, reviewRelativePaths.reviewer),
-      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "reviewer").trimEnd()}\n`
-    },
-    {
-      absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.qa_engineer) ??
-        path.join(targetRoot, reviewRelativePaths.qa_engineer),
-      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "qa_engineer").trimEnd()}\n`
-    },
-    {
-      absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.security_reviewer) ??
-        path.join(targetRoot, reviewRelativePaths.security_reviewer),
-      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, "security_reviewer").trimEnd()}\n`
-    }
+        resolvedArtifactPaths.get(reviewRelativePaths[reviewerRole]) ??
+        path.join(targetRoot, reviewRelativePaths[reviewerRole]),
+      content: `${buildReviewFromTemplate(reviewTemplate, options.taskId, reviewerRole).trimEnd()}\n`
+    }))
   ];
 
   const { created, updated } = await writeWorkflowArtifactSet(targetRoot, writes);
@@ -2275,24 +2293,12 @@ export async function seedHappyPathFixtureArtifacts(
       absolutePath: resolvedArtifactPaths.get(taskRelativePath) ?? path.join(targetRoot, taskRelativePath),
       content: `${buildHappyPathFixtureTask(options.taskId).trimEnd()}\n`
     },
-    {
+    ...workflowTemplateReviewRoles.map((reviewerRole) => ({
       absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.reviewer) ??
-        path.join(targetRoot, reviewRelativePaths.reviewer),
-      content: `${buildHappyPathFixtureReview(options.taskId, "reviewer").trimEnd()}\n`
-    },
-    {
-      absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.qa_engineer) ??
-        path.join(targetRoot, reviewRelativePaths.qa_engineer),
-      content: `${buildHappyPathFixtureReview(options.taskId, "qa_engineer").trimEnd()}\n`
-    },
-    {
-      absolutePath:
-        resolvedArtifactPaths.get(reviewRelativePaths.security_reviewer) ??
-        path.join(targetRoot, reviewRelativePaths.security_reviewer),
-      content: `${buildHappyPathFixtureReview(options.taskId, "security_reviewer").trimEnd()}\n`
-    }
+        resolvedArtifactPaths.get(reviewRelativePaths[reviewerRole]) ??
+        path.join(targetRoot, reviewRelativePaths[reviewerRole]),
+      content: `${buildHappyPathFixtureReview(options.taskId, reviewerRole).trimEnd()}\n`
+    }))
   ];
 
   const { created, updated } = await writeWorkflowArtifactSet(targetRoot, writes);

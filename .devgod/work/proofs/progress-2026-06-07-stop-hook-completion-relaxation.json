@@ -1,0 +1,20 @@
+{
+  "cycle": 1,
+  "proof_id": "proof-2026-06-07-stop-hook-completion-relaxation",
+  "phase_before": "implementation",
+  "phase_after": "verification",
+  "evidence_refs": [
+    "plugins/devgod/scripts/hook-utils.mjs",
+    "tests/hooks.test.ts",
+    ".devgod/work/task-queue.json"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "queue:none",
+  "why_next": "the queued stop-hook integrity repair is complete and no further queued task is currently exported"
+}

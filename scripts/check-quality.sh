@@ -11,6 +11,12 @@ npm run typecheck
 echo "coverage"
 npm run check:coverage
 
+echo "workflow schema"
+npm run verify:workflow-schema
+
+echo "agent caveman contract"
+npm run verify:agent-caveman
+
 echo "workflow fixtures"
 npm run verify:workflow
 
@@ -28,6 +34,9 @@ bash scripts/check-docs-runtime-drift.sh
 
 echo "audit"
 npm audit --omit=dev
+
+echo "package surface"
+npm run verify:package-surface
 
 echo "package dry run"
 npm pack --dry-run >/dev/null

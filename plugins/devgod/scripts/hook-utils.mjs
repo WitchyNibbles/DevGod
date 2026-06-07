@@ -139,6 +139,7 @@ const hookBlockerKinds = new Set([
   "permission_denied",
   "generic_nonzero_bash"
 ]);
+const terminalTaskStatuses = new Set(["done", "complete", "completed"]);
 
 export async function readHookPayload() {
   let content = "";
@@ -577,6 +578,7 @@ export async function readActiveTaskContext(options = {}) {
   let activeFileTaskId;
   let activeFileState;
   let queueHasAuthoritativePointer = false;
+  let queueTaskStatusById = new Map();
 
   if (runtimeContext) {
     context.queueCurrentTaskId = runtimeContext.queueCurrentTaskId;
@@ -625,9 +627,33 @@ export async function readActiveTaskContext(options = {}) {
           context.queueCurrentTaskId = null;
         }
       }
+      if (Array.isArray(parsed?.tasks)) {
+        queueTaskStatusById = new Map(
+          parsed.tasks.flatMap((task) => {
+            if (!task || typeof task !== "object" || Array.isArray(task)) {
+              return [];
+            }
+
+            const taskId =
+              typeof task.id === "string" && task.id.trim().length > 0 ? task.id.trim() : undefined;
+            const status =
+              typeof task.status === "string" && task.status.trim().length > 0
+                ? task.status.trim()
+                : undefined;
+            return taskId && status ? [[taskId, status]] : [];
+          })
+        );
+      }
     } catch {
       // ignore invalid queue exports inside hook context
     }
+  }
+
+  if (
+    typeof context.queueCurrentTaskId === "string" &&
+    terminalTaskStatuses.has(queueTaskStatusById.get(context.queueCurrentTaskId) ?? "")
+  ) {
+    context.queueCurrentTaskId = null;
   }
 
   if (queueHasAuthoritativePointer) {
@@ -779,10 +805,15 @@ export function isAllowedPath(relativePath, allowedWriteScope) {
   const normalized = normalizePath(relativePath);
   return allowedWriteScope.some((scope) => {
     const normalizedScope = normalizePath(scope);
+    const directoryScope = normalizedScope.endsWith("/**")
+      ? normalizedScope.slice(0, -3)
+      : normalizedScope.endsWith("/")
+        ? normalizedScope.slice(0, -1)
+        : normalizedScope;
     return (
-      normalized === normalizedScope ||
-      normalized.startsWith(`${normalizedScope}/`) ||
-      normalizedScope === "."
+      normalized === directoryScope ||
+      normalized.startsWith(`${directoryScope}/`) ||
+      directoryScope === "."
     );
   });
 }

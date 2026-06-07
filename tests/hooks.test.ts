@@ -40,6 +40,32 @@ test("pre-tool-use hook denies apply_patch edits outside the active task scope",
   assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /AGENTS\.md|managed control-layer/i);
 });
 
+test("pre-tool-use hook allows apply_patch edits within glob-style directory scope", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "apply_patch",
+      tool_input: {
+        command: [
+          "*** Begin Patch",
+          "*** Update File: docs/maintainers/example.md",
+          "+updated",
+          "*** End Patch"
+        ].join("\n")
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-glob-scope",
+      allowedWriteScope: ["docs/**"],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  if (parsed) {
+    assert.notEqual(parsed.hookSpecificOutput.permissionDecision, "deny");
+  }
+});
+
 test("stop hook continues when an active devgod task remains and no real blocker is stated", () => {
   const parsed = evaluateStop(
     {
@@ -497,6 +523,100 @@ test("user-prompt-submit hook emits compact scope context when active task state
   );
 });
 
+test("hook context treats a terminal queued task pointer as complete authority and allows stop", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-terminal-pointer-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-terminal\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "active",
+          current_task_id: "task-terminal",
+          tasks: [{ id: "task-terminal", status: "done" }]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+    const parsed = evaluateStop(
+      {
+        last_assistant_message: "Implemented the fix and tests."
+      },
+      context
+    );
+
+    assert.equal(context.activeTaskId, undefined);
+    assert.equal(context.queueCurrentTaskId, null);
+    assert.equal(parsed, undefined);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("stop hook still blocks generic completion wording when authoritative queue state remains active", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-active-pointer-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-active\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "active",
+          current_task_id: "task-active",
+          tasks: [{ id: "task-active", status: "in_progress" }]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-active.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/core`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+    const parsed = evaluateStop(
+      {
+        last_assistant_message: "Implemented the fix and tests."
+      },
+      context
+    );
+
+    assert.equal(context.activeTaskId, "task-active");
+    assert.equal(context.queueCurrentTaskId, "task-active");
+    assert.ok(parsed);
+    assert.equal(parsed.decision, "block");
+    assert.match(parsed.reason, /task-active remains in progress/i);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("hook context prefers queue state over stale ACTIVE export when the queue is complete", async () => {
   const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-context-"));
 
@@ -785,6 +905,39 @@ test("hook context splits combined allowed write scope bullets into individual e
 
     assert.equal(context.activeTaskId, "task-combined");
     assert.deepEqual(context.allowedWriteScope, ["src/runtime", "tests", "src/admin.ts"]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("hook context preserves glob-style directory scope entries for later matching", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-scope-glob-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-glob\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-glob.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `.devgod/work/**`",
+        "- `docs/**`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, "task-glob");
+    assert.deepEqual(context.allowedWriteScope, [".devgod/work/**", "docs/**"]);
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
   }

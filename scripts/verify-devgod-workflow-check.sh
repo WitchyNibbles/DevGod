@@ -19,6 +19,7 @@ mkdir -p \
   "$fixture_root/.devgod/work/plans" \
   "$fixture_root/.devgod/work/tasks" \
   "$fixture_root/.devgod/work/reviews" \
+  "$fixture_root/src/devgod" \
   "$fixture_root/scripts"
 
 git -C "$fixture_root" init -q
@@ -48,9 +49,13 @@ EOF
 cp "$repo_root/.devgod/templates/intake-brief.md" "$fixture_root/.devgod/templates/intake-brief.md"
 cp "$repo_root/.devgod/templates/task-packet.md" "$fixture_root/.devgod/templates/task-packet.md"
 cp "$repo_root/.devgod/templates/review-gate.md" "$fixture_root/.devgod/templates/review-gate.md"
+cp "$repo_root/.devgod/templates/workflow-schema.json" "$fixture_root/.devgod/templates/workflow-schema.json"
 cp "$repo_root/.devgod/templates/coverage-manifest.json" "$fixture_root/.devgod/templates/coverage-manifest.json"
 cp "$repo_root/.devgod/templates/checkpoint-summary.md" "$fixture_root/.devgod/templates/checkpoint-summary.md"
 cp "$repo_root/.devgod/templates/progress-proof.json" "$fixture_root/.devgod/templates/progress-proof.json"
+cp "$repo_root/src/devgod/workflow-schema.ts" "$fixture_root/src/devgod/workflow-schema.ts"
+cp "$repo_root/src/devgod/workflow-schema-cli.ts" "$fixture_root/src/devgod/workflow-schema-cli.ts"
+cp "$repo_root/src/devgod/verify-workflow-schema.ts" "$fixture_root/src/devgod/verify-workflow-schema.ts"
 
 cat > "$fixture_root/.devgod/work/briefs/brief-$task_id.md" <<EOF
 # Intake Brief
@@ -68,10 +73,13 @@ cat > "$fixture_root/.devgod/work/plans/plan-$task_id.md" <<EOF
 \`$task_id\`
 EOF
 
-for pair in "reviewer reviewer" "qa qa_engineer" "security security_reviewer"; do
-  set -- $pair
-  short_role="$1"
-  full_role="$2"
+mapfile -t review_alias_pairs < <(
+  cd "$fixture_root" &&
+    node --experimental-strip-types src/devgod/workflow-schema-cli.ts list workflow-review-filename-aliases
+)
+for pair in "${review_alias_pairs[@]}"; do
+  full_role="${pair%%:*}"
+  short_role="${pair#*:}"
   cat > "$fixture_root/.devgod/work/reviews/review-$task_id-$short_role.md" <<EOF
 # Review Gate
 

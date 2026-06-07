@@ -7,6 +7,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { installDevgodIntoProject, scaffoldWorkflowArtifacts } from "../src/install/cli.ts";
+import {
+  buildWorkflowSchemaArtifact,
+  buildWorkflowReviewArtifactRelativePaths,
+  getWorkflowReviewFilenameAlias,
+  renderWorkflowSchemaArtifactJson,
+  workflowTemplateReviewRoles
+} from "../src/devgod/workflow-schema.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -72,6 +79,7 @@ test("scaffold-workflow creates canonical starter artifacts", async () => {
       join(targetRoot, ".devgod", "work", "reviews", `review-${taskId}-reviewer.md`),
       "utf8"
     );
+    const reviewRelativePaths = buildWorkflowReviewArtifactRelativePaths(taskId);
 
     assert.equal(active, `task_id=${taskId}\nworkflow=devgod\nstate=active\n`);
     assert.match(brief, new RegExp(`brief-${taskId}`));
@@ -84,9 +92,67 @@ test("scaffold-workflow creates canonical starter artifacts", async () => {
     assert.match(reviewerGate, /Pending reviewer handoff\./);
     assert.equal(packageJson.scripts?.["devgod:check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
     assert.match(installedHappyPathScript, /retrieval advisory smoke/);
+    assert.equal(getWorkflowReviewFilenameAlias("reviewer"), "reviewer");
+    assert.equal(getWorkflowReviewFilenameAlias("qa_engineer"), "qa");
+    assert.equal(getWorkflowReviewFilenameAlias("security_reviewer"), "security");
+
+    for (const role of workflowTemplateReviewRoles) {
+      const reviewPath = join(targetRoot, reviewRelativePaths[role]);
+      const reviewContent = await readFile(reviewPath, "utf8");
+      assert.match(reviewContent, new RegExp(`## Reviewer role\\n\\n\\\`${role}\\\``));
+    }
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
+});
+
+test("workflow schema artifact renderer exposes the centralized review contract", () => {
+  const artifact = buildWorkflowSchemaArtifact();
+  const rendered = renderWorkflowSchemaArtifactJson();
+  const parsed = JSON.parse(rendered) as {
+    workflowTemplateReviewRoles: string[];
+    workflowReviewFilenameAliases: string[];
+    workflowArtifactRefKeys: string[];
+    workflowArtifactRefGuidanceLine: string;
+    workflowArtifactRefExampleLines: string[];
+    workflowReviewExportsRuntimeOptionalGuidanceLine: string;
+  };
+
+  assert.deepEqual(artifact.workflowTemplateReviewRoles, [...workflowTemplateReviewRoles]);
+  assert.deepEqual(artifact.workflowReviewFilenameAliases, [
+    "reviewer:reviewer",
+    "qa_engineer:qa",
+    "security_reviewer:security"
+  ]);
+  assert.deepEqual(artifact.workflowArtifactRefKeys, [
+    "brief",
+    "plan",
+    "task",
+    "reviewer",
+    "qa_engineer",
+    "security_reviewer",
+    "review_exports"
+  ]);
+  assert.equal(rendered.endsWith("\n"), true);
+  assert.deepEqual(parsed.workflowTemplateReviewRoles, [...workflowTemplateReviewRoles]);
+  assert.deepEqual(parsed.workflowReviewFilenameAliases, [...artifact.workflowReviewFilenameAliases]);
+  assert.deepEqual(parsed.workflowArtifactRefKeys, [...artifact.workflowArtifactRefKeys]);
+  assert.equal(parsed.workflowArtifactRefGuidanceLine, artifact.workflowArtifactRefGuidanceLine);
+  assert.deepEqual(parsed.workflowArtifactRefExampleLines, [...artifact.workflowArtifactRefExampleLines]);
+  assert.equal(
+    parsed.workflowReviewExportsRuntimeOptionalGuidanceLine,
+    artifact.workflowReviewExportsRuntimeOptionalGuidanceLine
+  );
+});
+
+test("workflow schema review alias lookup rejects unknown roles", () => {
+  assert.throws(
+    () =>
+      getWorkflowReviewFilenameAlias(
+        "unknown_role" as Parameters<typeof getWorkflowReviewFilenameAlias>[0]
+      ),
+    /missing review filename alias for role unknown_role/
+  );
 });
 
 test("scaffold-workflow refuses to overwrite existing artifacts without --force", async () => {

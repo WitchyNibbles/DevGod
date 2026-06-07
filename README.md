@@ -262,6 +262,7 @@ Other important source-repo scripts that really exist today:
 - `npm run eval:promptfoo:maintainer-boundary`
 - `npm run test:mutation:maintainer-boundary:dry-run`
 - `npm run verify:setup`
+- `npm run verify:agent-caveman`
 - `npm run verify:workflow`
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
@@ -370,8 +371,13 @@ Devgod still ships a careful `repo-local release posture`.
 
 Use these `production-oriented package checks` as evidence about the package itself:
 
+- `npm run verify:agent-caveman`
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
+
+All shipped `.codex/agents/*.toml` subagents are expected to stay on caveman `ultra` mode for every emitted response, with `/caveman ultra` as the activation reference. Only the root thread that talks directly to the user is allowed outside that contract.
+
+The package now ships caveman as a mandatory repo-local skill and Codex plugin surface in downstream installs; it is not an optional post-install add-on.
 
 Maintainer-only quality tooling stays in this source repo and does not ship into consuming repos:
 

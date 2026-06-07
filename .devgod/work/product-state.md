@@ -2,62 +2,129 @@
 
 ## Product Goal
 
-Make git-flow-style branch naming, branch-from-updated-main workflow, and no-`codex` git metadata the default reusable `devgod` git policy.
+Make `devgod` internally consistent and release-trustworthy for both maintainers working in this source repo and downstream repos installing it as a package.
 
 ## Global Acceptance Criteria
 
-- `devgod` ships explicit reusable branch naming defaults using the approved git-flow-style prefixes
-- shared prompts, rules, and install output prioritize that default over GitHub MCP naming habits unless a consuming repo overrides it
-- local git guardrails reject invalid branch names or commit metadata that violates the new default
-- focused tests cover the shipped policy text and git-guard behavior
+- package manifests, shipped files, and role catalogs match the actual repo surface
+- workflow templates, scaffold output, workflow checks, and tests agree on the same contract
+- maintainers can run the core verification path without hidden drift between docs, code, and exported artifacts
+- downstream installs receive a coherent overlay without missing roles, stale templates, or contradictory checks
+- duplication, unnecessary surfaces, workflow holes, and real development blockers are documented with follow-up priorities
 
 ## Required Capabilities
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Shared git naming policy | done | `AGENTS.md`, `src/install/merge.ts`, `.devgod/rules/git-conventions.md` |
-| Deterministic local guardrails | done | `src/install/git-guard.ts`, `.githooks/pre-commit`, `scripts/check-devgod-branch-name.sh`, `scripts/check-devgod-commit-msg.sh` |
-| Install/setup compatibility | done | `tests/install.test.ts` |
-| Branch-from-main workflow guidance | done | `AGENTS.md`, `src/install/merge.ts` |
+| Package manifest and pack consistency | done | `package.json`, `tests/install.test.ts`, `npm run check:quality` |
+| Workflow template and checker consistency | done | `.devgod/templates/task-packet.md`, `tests/workflow-check.test.ts`, `tests/workflow-scaffold.test.ts`, `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-devgod-internal-consistency-hardening` |
+| Maintainer quality gate reliability | done | `npm run typecheck`, `npm test`, `npm run check:quality` |
+| Written drift and blocker summary | done | `docs/maintainers/devgod-consistency-gap-summary.md` |
 
 ## Current Milestone
 
-Ship the reusable git-flow default naming and git metadata hygiene slice.
+Close the repo's current contract drift so `devgod` can be trusted as both source-of-truth package and installable control-layer overlay.
 
 ## Completed Milestones
 
-- clarified operator intent and done criteria on 2026-06-01
-- created a clean worktree from updated `origin/main` at commit `558ed5b`
-- completed baseline dependency install and test-start verification in the isolated worktree
+- audited `devgod` against `archon` and identified that `devgod` currently has broader surface area but weaker internal consistency
+- confirmed that `archon` clears its main quality gate while the current `devgod` worktree fails package-manifest and workflow-contract tests
+- restored package-manifest, workflow-template, hook-scope, and agent-metadata consistency across the maintainer and downstream install path
+- added maintainer-facing documentation for remaining drift risks and follow-up priorities
+- added a canonical shipped-package surface helper and verifier so `package.json` files-list drift now fails before pack time
+- centralized workflow schema definitions behind one canonical source reused by the checker, templates, scaffold path, and tests
+- documented package-surface ownership explicitly and exposed ownership groups from the canonical helper for maintainers
+- simplified workflow contract breadth by removing non-behavioral task-packet requirements while preserving release, review, reasoning, and UI evidence gates
+- centralized review-role aliases and review artifact path rules across schema, checker, scaffold/install helpers, and installed happy-path verification
+- centralized workflow artifact-ref and review-export policy prose across canonical schema code, managed docs, shipped schema artifacts, and install/scaffold helper guidance
+- relaxed stop-hook completion handling so authoritative terminal queue state ends completed tasks without transcript-specific completion wording
 
 ## Current Task
 
-`none`
+None active. The stop-hook completion relaxation slice is complete.
 
 ## Next Task
 
-`none queued`
+None queued right now. The next follow-up should be selected from the remaining copied workflow-commentary debt outside managed rule, template, and helper surfaces.
 
 ## Blockers
 
-- none
+- none currently exported
 
 ## Reasoning Debt
 
-- local hooks can only guide PR metadata indirectly through policy text unless a future GitHub integration surface is added
+- package shipping metadata is still consumed manually by `package.json`, but drift is now centrally verified instead of silently relying on copied lists
+- copied contract surfaces still exist in some non-managed maintainer prose and workflow summaries even after centralizing the managed rule/template/helper policy surfaces
+- terminal queue-state recognition is explicit to `done`, `complete`, and `completed`; future queue-status additions must keep hook normalization aligned
 
 ## Verification Summary
 
-- `npm ci` passed in the isolated worktree
-- `npm test` baseline started on the clean branch before implementation edits
-- `node --experimental-strip-types --test tests/install.test.ts` passed after the policy and git-guard updates
-- `npm test` passed after the policy and git-guard updates
+- `node --experimental-strip-types --test tests/install.test.ts` passed
+- `npm run verify:package-surface` passed
+- `npm run verify:release-overlay` passed
+- `node --experimental-strip-types --test tests/hooks.test.ts` passed
+- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts` passed
+- `node --experimental-strip-types --test tests/install.test.ts` passed
+- `npm run typecheck` passed
+- `npm test` passed with 693 passing, 0 failing, 1 skipped
+- `npm run check:quality` passed, including coverage, workflow fixture verification, `npm audit`, and package dry run
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-devgod-internal-consistency-hardening` passed
+- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts tests/control-layer-contract.test.ts` passed
+- `npm run verify:workflow-schema` passed
+- `npm run verify:release-overlay` passed with the centralized workflow schema in place
+- `npm run check:quality` passed after adding workflow schema verification to the quality path
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-schema-centralization` passed
+- `node --experimental-strip-types --test tests/install.test.ts` passed after adding ownership-group coverage
+- `npm run verify:package-surface` passed after the ownership-group refactor
+- `npm run verify:release-overlay` passed after the package-surface ownership docs slice
+- `npm run check:quality` passed after the package-surface ownership docs slice
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-package-surface-ownership-docs` passed
+- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts tests/control-layer-contract.test.ts` passed after slimming workflow task-packet requirements
+- `npm run verify:workflow-schema` passed after removing non-behavioral workflow headings
+- `npm run verify:release-overlay` passed after the workflow-contract breadth simplification slice
+- `npm run check:quality` passed after the workflow-contract breadth simplification slice
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-contract-breadth-simplification` passed
+- `node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts` passed after centralizing the review-role contract
+- `node --experimental-strip-types --test tests/happy-path.test.ts` passed after fixing installed-fixture review-role lookup against the shipped schema artifact
+- `npm run verify:workflow-schema` passed after centralizing review-role aliases and artifact-path helpers
+- `npm run verify:release-overlay` passed after the review-role contract centralization slice
+- `npm run check:quality` passed after the review-role contract centralization slice
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-review-role-contract-centralization` passed
+- `node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-scaffold.test.ts tests/install.test.ts` passed after centralizing artifact-ref and review-export policy text
+- `npm run verify:workflow-schema` passed after promoting the review-gate policy doc into managed renderer output
+- `npm run verify:release-overlay` passed after compacting helper-summary policy lines for installed guidance
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-artifact-ref-policy-centralization` passed
+- `node --experimental-strip-types --test tests/hooks.test.ts` passed after normalizing terminal queued task pointers before stop-hook evaluation
+- `npm run verify:release-overlay` passed after the stop-hook completion relaxation slice
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-stop-hook-completion-relaxation` passed
 
 ## Review Summary
 
-- Design and Architecture Council packet recorded with `approved_with_conditions`
-- runtime-authenticated reviewer, QA, and security review gates were not run in this branch-local implementation pass
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-security_reviewer.md`
+- reviewer approval recorded in `.devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-reviewer.md`
+- QA approval recorded in `.devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-qa_engineer.md`
+- security approval recorded in `.devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-security_reviewer.md`
 
 ## Last Updated
 
-2026-06-02
+2026-06-07

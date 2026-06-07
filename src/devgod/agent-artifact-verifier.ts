@@ -7,6 +7,10 @@ import {
   type AgentRoleId,
   getAgentCatalogEntry
 } from "./agent-catalog.ts";
+import {
+  cavemanDirectUserFacingExceptionRoleIds,
+  verifyNonUserFacingAgentCavemanContract
+} from "./caveman-policy.ts";
 import { listCatalogRepoLocalSkillPaths } from "./repo-local-skill-surface.ts";
 
 export interface AgentArtifactVerificationResult {
@@ -14,6 +18,7 @@ export interface AgentArtifactVerificationResult {
   missingArtifacts: string[];
   unexpectedArtifacts: string[];
   metadataMismatches: string[];
+  cavemanContractMismatches: string[];
 }
 
 export interface CatalogRepoLocalSkillVerificationResult {
@@ -49,6 +54,7 @@ export async function verifyAgentCatalogArtifacts(input: {
   const unexpectedArtifacts = actualFiles.filter((artifactPath) => !expectedSet.has(artifactPath));
 
   const metadataMismatches: string[] = [];
+  const cavemanContractMismatches: string[] = [];
   for (const role of roles) {
     const entry = getAgentCatalogEntry(role);
     if (!entry.shipsAgentArtifact || !actualSet.has(entry.artifactPath)) {
@@ -56,19 +62,38 @@ export async function verifyAgentCatalogArtifacts(input: {
     }
 
     const rawToml = await readFile(path.join(input.repoRoot, entry.artifactPath), "utf8");
-    const parsed = parseToml(rawToml) as { name?: string };
+    const parsed = parseToml(rawToml) as { name?: string; developer_instructions?: string };
     if (parsed.name !== role) {
       metadataMismatches.push(
         `${entry.artifactPath}: expected name "${role}", got ${JSON.stringify(parsed.name ?? null)}`
       );
     }
+
+    if (!cavemanDirectUserFacingExceptionRoleIds.includes(role)) {
+      const cavemanResult = verifyNonUserFacingAgentCavemanContract(parsed.developer_instructions);
+      if (cavemanResult.missingMarkers.length > 0) {
+        cavemanContractMismatches.push(
+          `${entry.artifactPath}: missing caveman markers ${cavemanResult.missingMarkers.join("; ")}`
+        );
+      }
+      if (cavemanResult.contradictionPhrases.length > 0) {
+        cavemanContractMismatches.push(
+          `${entry.artifactPath}: contradictory caveman phrases ${cavemanResult.contradictionPhrases.join("; ")}`
+        );
+      }
+    }
   }
 
   return {
-    ok: missingArtifacts.length === 0 && unexpectedArtifacts.length === 0 && metadataMismatches.length === 0,
+    ok:
+      missingArtifacts.length === 0 &&
+      unexpectedArtifacts.length === 0 &&
+      metadataMismatches.length === 0 &&
+      cavemanContractMismatches.length === 0,
     missingArtifacts,
     unexpectedArtifacts,
-    metadataMismatches
+    metadataMismatches,
+    cavemanContractMismatches
   };
 }
 

@@ -1,0 +1,21 @@
+{
+  "cycle": 1,
+  "proof_id": "proof-2026-06-07-workflow-artifact-ref-policy-centralization",
+  "phase_before": "dependency_mapping",
+  "phase_after": "verification",
+  "evidence_refs": [
+    "src/devgod/workflow-schema.ts",
+    "src/install/merge.ts",
+    "src/install/cli.ts",
+    ".devgod/rules/review-gate-policy.md"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "task:2026-06-07-stop-hook-completion-relaxation",
+  "why_next": "stop-hook completion handling remains the next queued integrity repair after policy centralization"
+}

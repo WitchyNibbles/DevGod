@@ -29,6 +29,7 @@ export interface VerifySummary {
   missing: string[];
   modified: string[];
   orphans: string[];
+  policyDrift: string[];
 }
 
 export interface WorkflowScaffoldOptions {

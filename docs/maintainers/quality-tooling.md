@@ -34,3 +34,4 @@ This repo keeps its improvement and anti-regression tooling on the maintainer pa
 
 - `promptfoo` is pinned to `0.120.19` because the repo currently runs on Node `22.16.0`, while newer promptfoo releases require `^20.20.0 || >=22.22.0`.
 - The mutation lane is intentionally narrow and the CI job uses `--dry-run`; maintainers keep the deeper mutation command for local use.
+- Package-surface ownership for shipped overlay assets is documented separately in `docs/maintainers/package-surface-ownership.md`; this file covers maintainer-only tooling that must stay out of that shipped surface.

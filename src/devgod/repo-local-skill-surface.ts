@@ -2,9 +2,15 @@ import path from "node:path";
 import { agentRoleIds, getAgentCatalogEntry, type AgentRoleId } from "./agent-catalog.ts";
 
 export const repoLocalSkillIdPrefixes = ["devgod-", "anthropic-", "superpowers-"] as const;
+export const alwaysShippedRepoLocalSkillIds = [
+  "caveman",
+  "devgod-autopilot",
+  "devgod-gitnexus",
+  "devgod-repair-loop"
+] as const;
 
 export function isRepoLocalSkillId(skillId: string): boolean {
-  return repoLocalSkillIdPrefixes.some((prefix) => skillId.startsWith(prefix));
+  return skillId === "caveman" || repoLocalSkillIdPrefixes.some((prefix) => skillId.startsWith(prefix));
 }
 
 export function repoLocalSkillPathForId(skillId: string): string {
@@ -24,6 +30,10 @@ export function listCatalogRepoLocalSkillPaths(input?: {
       }
       expectedSkillPaths.add(repoLocalSkillPathForId(skillId));
     }
+  }
+
+  for (const skillId of alwaysShippedRepoLocalSkillIds) {
+    expectedSkillPaths.add(repoLocalSkillPathForId(skillId));
   }
 
   return [...expectedSkillPaths].sort();

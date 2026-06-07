@@ -37,24 +37,84 @@ Only assign file-backed gates when the task can actually produce or update the r
 - `progress_proof_required`
 - `checkpoint_resume_required`
 - `memory_compaction_required`
+- `reasoning_dual_required`
+- `reasoning_strict_required`
 
 ## Goal
 
 ## Inputs
 
+## UI surface
+
+Declare the touched UI shape for this task.
+
+Declare one:
+
+- `none`
+- `visual_change`
+- `interactive_flow`
+
+## Playwright requirement
+
+`true | false`
+
+## Browser evidence expectations
+
+State the browser evidence expectations for this task.
+
+For UI surfaces other than `none`, QA reviews must cite Playwright evidence.
+
+## Frontend workflow entrypoint
+
+Required for substantive frontend work.
+
+State the repo-local frontend routing skill or say `not_applicable`.
+
+## Visual direction package
+
+Required for substantive `visual_change` work and broad redesigns.
+
+- inspiration sources and reference URLs
+- visual exploration artifact refs
+- reference translation brief
+- design variants explored
+- chosen direction
+- rejected alternatives and why
+- chosen direction artifact ref
+- rejected direction artifact refs
+- opposite-direction artifact ref
+- named signature move
+- named impressiveness hypothesis
+- design-family reset
+- repeated primitive ban
+- media-first concept decision
+- generated asset decision
+- surface-language continuity plan
+- semantic charm map
+- asset strategy
+- motion strategy
+- idle/background motion rationale
+- media strategy
+- generated imagery or illustration rationale
+- 3D or no-3D rationale
+- technical-fit rationale
+- reduced-motion fallback
+- performance containment plan
+- critical control inventory
+- control visibility map
+- inheritance cutoff
+- legacy carryover ban
+- remake-vs-edit decision
+- functionality-preservation checks
+- screenshot critique loop plan
+
 ## Dependencies
 
 ## Outputs
 
-## Coverage impact
-
-## Touched ledger items
-
 ## Required runtime traces
 
 ## Progress proof
-
-## Interrupt checkpoint policy
 
 ## Workflow artifact refs
 
@@ -132,6 +192,10 @@ If an otherwise valid implementation step falls outside the allowed write scope:
 
 ### Approved assumptions
 
+### Inheritance policy
+
+For remake work, state which visible structures from the current surface are intentionally discarded and which functional elements must survive in a new form.
+
 ### Blocked assumptions
 
 ## Reasoning quality
@@ -160,7 +224,7 @@ If an otherwise valid implementation step falls outside the allowed write scope:
 
 ### Mode
 
-`strict | dual | legacy`
+`legacy | dual | strict`
 
 Use `strict` by default. Use `dual` or `legacy` only when compatibility needs are explicit.
 
@@ -213,64 +277,28 @@ Required for refactors, migrations, command rewrites, and other behavior-preserv
 
 ## Acceptance criteria
 
-## Good-path checks
-
-## Bad-path or edge-case checks
-
-## UI surface
-
-Declare one:
-
-- `none`
-- `visual_change`
-- `interactive_flow`
-
-If the value is `visual_change` or `interactive_flow`, the task must carry Playwright evidence before approval.
-
-## Playwright requirement
-
-State whether browser verification is required for this task.
-
-- `true` for `visual_change`
-- `true` for `interactive_flow`
-- `false` for backend-only or non-UI work
-
-When `true`, the task should define:
-
-- desktop viewport check
-- mobile viewport check
-- one happy-path check
-- one edge, failure, or regression-path check
-
-## Browser evidence expectations
-
-For `playwright_required = true` tasks:
-
-- `frontend_designer` must perform a browser self-check before handoff
-- `qa_engineer` must cite Playwright evidence refs in the runtime review
-- screenshots, traces, and videos stay task-scoped artifacts and must not be promoted into durable memory
+For broad frontend remakes, include one criterion that proves the result does not remain in the prior concept family.
 
 ## Verification steps
 
-## Residual risk disposition
-
-Fix touched-scope defects before completion or record them as explicit blockers with owner and follow-up path.
+List the exact commands, checks, fixtures, runtime proofs, and review evidence required to defend completion.
 
 ## Required reviews
 
-Include all three blocking gates for substantive work:
+List the gate roles that must approve this task before completion.
+
+Examples:
+
 - `reviewer`
-- `security_reviewer`
 - `qa_engineer`
+- `security_reviewer`
 
 ## Security checks
 
-## Retrieval guidance
-
-## Anti-patterns to avoid
-
 ## Rollback notes
 
-## Handoff format
+Record the fastest safe way to revert or abandon the slice if verification fails or the task is superseded.
 
-Must include owner role, completion standard, specialist execution evidence, and quality gate evidence.
+## Residual risk disposition
+
+Record the remaining risks, owner, and whether they are accepted, deferred, or require a follow-on task.
