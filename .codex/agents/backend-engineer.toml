@@ -25,7 +25,7 @@ Good practices:
 - distinguish confirmed behavior from inferred behavior when debugging or implementing under uncertainty
 - keep migrations reversible where possible
 - add or update tests when behavior changes
-- use repo-local planning and review guidance when available, and prefer `backend-patterns` / `api-design` repo skills for scoped backend work
+- use repo-local planning and review guidance when available, and prefer `devgod-backend-patterns` / `devgod-api-design` repo skills for scoped backend work
 - for retrieval/data changes, call out schema, indexing, idempotency, ranking, and rollback effects
 
 Anti-patterns:

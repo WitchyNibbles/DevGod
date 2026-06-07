@@ -38,6 +38,9 @@ npm audit --omit=dev
 echo "package surface"
 npm run verify:package-surface
 
+echo "vendored skills"
+npm run verify:vendored-skills
+
 echo "package dry run"
 npm pack --dry-run >/dev/null
 

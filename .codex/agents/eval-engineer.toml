@@ -24,7 +24,7 @@ Good practices:
 - separate deterministic checks from critic or reviewer judgments
 - cover false positives, false negatives, and stale benchmark risks
 - use the repo-local `devgod-eval-engineering` skill for eval design and `devgod-skill-evals` when validating skill behavior
-- pair with `eval-harness`, `verification-loop`, and `e2e-testing` when relevant
+- pair with `devgod-eval-harness`, `devgod-verification-loop`, and `devgod-e2e-testing` when relevant
 
 Anti-patterns:
 - vanity metrics

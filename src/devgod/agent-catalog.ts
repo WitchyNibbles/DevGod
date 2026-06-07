@@ -42,7 +42,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-product-framing", "devgod-intake", "market-research"],
+    defaultSkillIds: ["devgod-product-framing", "devgod-intake", "devgod-market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "cited external research"]
   },
   solution_architect: {
@@ -56,7 +56,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-architecture", "backend-patterns", "security-review", "agentic-engineering"],
+    defaultSkillIds: ["devgod-architecture", "devgod-backend-patterns", "devgod-security-review", "devgod-agentic-engineering"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "architecture notes"]
   },
   docs_researcher: {
@@ -70,7 +70,7 @@ export const agentCatalog = {
     effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-docs-research", "documentation-lookup", "search-first"],
+    defaultSkillIds: ["devgod-docs-research", "devgod-documentation-lookup", "devgod-search-first"],
     retrievalGuidance: ["approved memory", "repo rules", "approved briefs", "local technical notes"]
   },
   backend_engineer: {
@@ -84,7 +84,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-execution", "backend-patterns", "api-design", "tdd-workflow"],
+    defaultSkillIds: ["devgod-execution", "devgod-backend-patterns", "devgod-api-design", "devgod-tdd-workflow"],
     retrievalGuidance: ["approved memory", "repo rules", "runbooks", "reviewed retrieval notes"]
   },
   frontend_designer: {
@@ -98,7 +98,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-ui-art-direction", "devgod-frontend-taste", "devgod-design-system", "devgod-visual-standards", "frontend-patterns", "web-design-guidelines"],
+    defaultSkillIds: ["devgod-ui-art-direction", "devgod-frontend-taste", "devgod-design-system", "devgod-visual-standards", "devgod-frontend-patterns", "devgod-web-design-guidelines"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts", "reviewed inspiration registry and cited references"]
   },
   git_operator: {
@@ -130,7 +130,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-infra-ops", "devgod-setup", "devgod-release-readiness", "deployment-patterns", "docker-patterns"],
+    defaultSkillIds: ["devgod-infra-ops", "devgod-setup", "devgod-release-readiness", "devgod-deployment-patterns", "devgod-docker-patterns"],
     retrievalGuidance: ["approved memory", "repo rules", "setup notes", "runbooks", "incident learnings"]
   },
   reviewer: {
@@ -144,7 +144,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-review", "superpowers-verification-before-completion", "verification-loop"],
+    defaultSkillIds: ["devgod-review", "superpowers-verification-before-completion", "devgod-verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "task packets", "review artifacts"]
   },
   build_resolver: {
@@ -172,7 +172,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["security-review", "security-scan", "devgod-docs-research"],
+    defaultSkillIds: ["devgod-security-review", "devgod-security-scan", "devgod-docs-research"],
     retrievalGuidance: ["approved memory", "repo rules", "incident notes", "review artifacts"]
   },
   qa_engineer: {
@@ -190,8 +190,8 @@ export const agentCatalog = {
       "devgod-qa-verification",
       "devgod-accessibility-gate",
       "anthropic-webapp-testing",
-      "e2e-testing",
-      "verification-loop"
+      "devgod-e2e-testing",
+      "devgod-verification-loop"
     ],
     retrievalGuidance: ["approved memory", "repo rules", "review gates", "eval artifacts"]
   },
@@ -206,7 +206,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-tdd", "superpowers-test-driven-development", "tdd-workflow"],
+    defaultSkillIds: ["devgod-tdd", "superpowers-test-driven-development", "devgod-tdd-workflow"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "task packets", "verification artifacts"]
   },
   "e2e-runner": {
@@ -220,7 +220,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-e2e", "anthropic-webapp-testing", "e2e-testing"],
+    defaultSkillIds: ["devgod-e2e", "anthropic-webapp-testing", "devgod-e2e-testing"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "setup notes", "test artifacts"]
   },
   "release-readiness": {
@@ -234,7 +234,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-release-readiness", "verification-loop"],
+    defaultSkillIds: ["devgod-release-readiness", "devgod-verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "setup notes", "release notes"]
   },
   memory_curator: {
@@ -248,7 +248,7 @@ export const agentCatalog = {
     effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-memory", "strategic-compact"],
+    defaultSkillIds: ["devgod-memory", "devgod-strategic-compact"],
     retrievalGuidance: ["all reviewed project artifacts"]
   },
   eval_engineer: {
@@ -262,7 +262,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-eval-engineering", "devgod-skill-evals", "eval-harness"],
+    defaultSkillIds: ["devgod-eval-engineering", "devgod-skill-evals", "devgod-eval-harness"],
     retrievalGuidance: ["approved memory", "repo rules", "eval artifacts", "reviewed plans", "test artifacts"]
   },
   technical_writer: {
@@ -276,7 +276,7 @@ export const agentCatalog = {
     effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-technical-writing", "documentation-lookup", "article-writing"],
+    defaultSkillIds: ["devgod-technical-writing", "devgod-documentation-lookup", "devgod-article-writing"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed technical notes", "release notes"]
   },
   agent_runtime_engineer: {
@@ -290,7 +290,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-agent-runtime", "anthropic-mcp-builder", "mcp-server-patterns", "verification-loop", "agentic-engineering"],
+    defaultSkillIds: ["devgod-agent-runtime", "anthropic-mcp-builder", "devgod-mcp-server-patterns", "devgod-verification-loop", "devgod-agentic-engineering"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "runtime traces", "tooling integration notes"]
   },
   mobile_engineer: {
@@ -304,7 +304,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "frontend-patterns", "e2e-testing"],
+    defaultSkillIds: ["devgod-frontend-taste", "devgod-design-system", "devgod-frontend-patterns", "devgod-e2e-testing"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts", "test artifacts"]
   },
   ml_engineer: {
@@ -318,7 +318,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-eval-engineering", "documentation-lookup", "verification-loop"],
+    defaultSkillIds: ["devgod-eval-engineering", "devgod-documentation-lookup", "devgod-verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "model evaluations", "integration notes"]
   },
   data_engineer: {
@@ -332,7 +332,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["backend-patterns", "postgres-patterns", "database-migrations", "verification-loop"],
+    defaultSkillIds: ["devgod-backend-patterns", "devgod-postgres-patterns", "devgod-database-migrations", "devgod-verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "schema notes", "runbooks"]
   },
   ux_researcher: {
@@ -346,7 +346,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-ux-research", "devgod-frontend-taste", "market-research"],
+    defaultSkillIds: ["devgod-ux-research", "devgod-frontend-taste", "devgod-market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "reviewed plans", "reviewed UI artifacts"]
   },
   product_analyst: {
@@ -360,7 +360,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-product-analysis", "market-research"],
+    defaultSkillIds: ["devgod-product-analysis", "devgod-market-research"],
     retrievalGuidance: ["approved briefs", "approved memory", "repo rules", "reviewed plans", "eval artifacts"]
   },
   compliance_reviewer: {
@@ -374,7 +374,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-compliance-review", "security-review", "documentation-lookup"],
+    defaultSkillIds: ["devgod-compliance-review", "devgod-security-review", "devgod-documentation-lookup"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "incident notes", "audit artifacts"]
   },
   accessibility_engineer: {
@@ -388,7 +388,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-accessibility-gate", "e2e-testing", "web-design-guidelines"],
+    defaultSkillIds: ["devgod-accessibility-gate", "devgod-e2e-testing", "devgod-web-design-guidelines"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "test artifacts", "reviewed UI artifacts"]
   },
   database_specialist: {
@@ -402,7 +402,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["postgres-patterns", "database-migrations", "verification-loop"],
+    defaultSkillIds: ["devgod-postgres-patterns", "devgod-database-migrations", "devgod-verification-loop"],
     retrievalGuidance: ["approved memory", "repo rules", "schema notes", "reviewed plans", "migration artifacts"]
   },
   performance_engineer: {
@@ -416,7 +416,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-performance", "verification-loop", "backend-patterns"],
+    defaultSkillIds: ["devgod-performance", "devgod-verification-loop", "devgod-backend-patterns"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "benchmark artifacts", "profiling notes"]
   },
   context_manager: {
@@ -430,7 +430,7 @@ export const agentCatalog = {
     effort: "medium",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-context-retrieval", "devgod-memory", "search-first"],
+    defaultSkillIds: ["devgod-context-retrieval", "devgod-memory", "devgod-search-first"],
     retrievalGuidance: ["all retrieval layers", ".devgod/memory/", "Postgres runtime records", "Qdrant semantic index"]
   },
   observability_engineer: {
@@ -444,7 +444,7 @@ export const agentCatalog = {
     effort: "high",
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
-    defaultSkillIds: ["devgod-performance", "verification-loop", "backend-patterns"],
+    defaultSkillIds: ["devgod-performance", "devgod-verification-loop", "devgod-backend-patterns"],
     retrievalGuidance: ["approved memory", "repo rules", "reviewed plans", "runbooks", "benchmark artifacts", "Grafana config at src/grafana/"]
   }
 } as const satisfies Record<string, AgentCatalogEntry>;

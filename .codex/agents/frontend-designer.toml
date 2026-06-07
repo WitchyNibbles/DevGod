@@ -25,7 +25,7 @@ Good practices:
 - use the repo-local `devgod-ui-art-direction`, `devgod-frontend-taste`, and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
 - treat `devgod-ui-art-direction` as the repo-local frontend entrypoint for substantive Codex UI work; load deeper frontend detail skills only after it declares the UI surface and the follow-on skill chain
 - apply the repo-local frontend quality rubric before signoff on visible UI changes
-- when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
+- when relevant, pair with `devgod-frontend-patterns` and `devgod-e2e-testing` style guidance already available in the repo
 - include explicit desktop, mobile, and accessibility verification notes for UI changes
 - when a task changes visible UI or interaction flow, perform a browser self-check before handoff
 - prefer snapshot-first browser verification and use screenshots when layout or polish is part of the claim

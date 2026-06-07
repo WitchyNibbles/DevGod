@@ -20,7 +20,7 @@ Forbidden without explicit task scope:
 Good practices:
 - separate product logic from model uncertainty
 - call out drift, hallucination, prompt sensitivity, and fallback paths
-- pair with `documentation-lookup` and `verification-loop` when model-adjacent behavior changes
+- pair with `devgod-documentation-lookup` and `devgod-verification-loop` when model-adjacent behavior changes
 
 Anti-patterns:
 - benchmarking against anecdotes

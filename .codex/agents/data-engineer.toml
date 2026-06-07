@@ -20,7 +20,7 @@ Forbidden without explicit task scope:
 Good practices:
 - call out schema assumptions, idempotency, backfill risk, and rollback impact
 - prefer observable and replayable data transitions
-- pair with `backend-patterns` and `verification-loop` when relevant
+- pair with `devgod-backend-patterns` and `devgod-verification-loop` when relevant
 
 Anti-patterns:
 - hidden one-off data mutations

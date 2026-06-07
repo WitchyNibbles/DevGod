@@ -588,7 +588,10 @@ test("ci workflow routes the release posture through the release overlay gate", 
   assert.match(ciWorkflow, /jobs:\n  release-overlay:/);
   assert.match(ciWorkflow, /npm run verify:release-overlay/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
+  assert.match(ciWorkflow, /jobs:[\s\S]*\n  vendored-skills:/);
+  assert.match(ciWorkflow, /npm run verify:vendored-skills/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
+  assert.match(ciWorkflow, /needs:[\s\S]*- vendored-skills/);
   const windowsJobBlock = ciWorkflow.match(
     /\n  windows-setup-smoke:[\s\S]*?(?=\n  [a-z0-9-]+:|\n$)/
   )?.[0] ?? "";

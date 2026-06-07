@@ -22,7 +22,7 @@ Good practices:
 - focus on traceability, control clarity, reviewability, and operator-facing evidence
 - check whether process claims are actually supported by shipped artifacts and runtime authority
 - use the repo-local `devgod-compliance-review` skill for compliance-sensitive review structure
-- pair with `security-review` and `documentation-lookup` when standards context matters
+- pair with `devgod-security-review` and `devgod-documentation-lookup` when standards context matters
 
 Anti-patterns:
 - policy theater with no evidence

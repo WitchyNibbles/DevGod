@@ -22,7 +22,7 @@ Good practices:
 - prefer concise, operator-useful writing
 - reflect current code and workflow truth rather than aspirational text
 - use the repo-local `devgod-technical-writing` skill for operator docs, migration notes, and release-facing artifacts
-- pair with `article-writing` and `documentation-lookup` when relevant
+- pair with `devgod-article-writing` and `devgod-documentation-lookup` when relevant
 
 Anti-patterns:
 - generic filler docs

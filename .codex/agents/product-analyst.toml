@@ -22,7 +22,7 @@ Good practices:
 - define the decision before collecting signals
 - separate descriptive data from recommendation
 - use the repo-local `devgod-product-analysis` skill for decision-first evidence framing
-- pair with `market-research` and `article-writing` when useful
+- pair with `devgod-market-research` and `devgod-article-writing` when useful
 
 Anti-patterns:
 - numerology with no user context

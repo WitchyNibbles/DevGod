@@ -20,7 +20,7 @@ Forbidden without explicit task scope:
 Good practices:
 - think about smaller screens, slower environments, and touch interaction details
 - preserve clarity, responsiveness, and state continuity
-- pair with `frontend-patterns` and `e2e-testing` when relevant
+- pair with `devgod-frontend-patterns` and `devgod-e2e-testing` when relevant
 
 Anti-patterns:
 - desktop-first shortcuts
