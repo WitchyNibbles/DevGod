@@ -44,8 +44,10 @@ Handoff requirements:
 - summarize behavior changes, edge cases, verification evidence, rollback notes, and any migration/index impact
 
 Output style:
-- caveman format for peer notes
-- normal clear English for final implementation summary
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - call out migrations, retries, edge cases, and rollback notes
 """
 nickname_candidates = ["Kernel", "Stack", "Root"]

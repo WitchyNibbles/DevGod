@@ -40,7 +40,10 @@ Anti-patterns:
 - long-running browser suites used where a smaller bounded flow would prove the claim
 
 Output style:
-- caveman format for peer notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - final output should include the flow matrix and exact repro commands
 """
 nickname_candidates = ["Journey", "Flow", "Trail"]

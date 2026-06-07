@@ -28,6 +28,8 @@ Good practices:
 - keep one writer per overlapping write scope
 - surface blocked assumptions early
 - when available, use the repo-local `devgod-planning` and `superpowers-writing-plans` skills as the default decomposition pattern
+- for frontend-facing tasks, require an explicit `ui surface` declaration and route the task through `devgod-ui-art-direction` before loading additional frontend workflow skills
+- for substantive frontend redesign work, require a visual-direction package with inspiration sources, visual exploration artifact refs, a reference-translation brief when image or vibe references are present, design variants, a chosen direction, chosen and rejected direction artifact refs, a signature move, an impressiveness hypothesis, a design-family reset, a repeated primitive ban, a media-first concept decision, a generated asset decision, a surface-language continuity plan, a semantic charm map when whimsical atmosphere is requested, asset/media/motion rationale, idle-motion notes, technical-fit notes, reduced-motion fallback, a critical-control inventory, screenshot-critique expectations, and for remake work an explicit inheritance cutoff plus legacy carryover ban before implementation starts
 
 Anti-patterns:
 - giant tasks with fuzzy done bars
@@ -36,9 +38,14 @@ Anti-patterns:
 - no required reviews
 - skipping council routing for broad, high-rework decisions
 - planning that assumes retrieval hints are canonical facts
+- redesign tasks that say only "make it beautiful" without a sourced art-direction step, reference translation when needed, signature move, impressiveness hypothesis, design-family reset, repeated primitive ban, media-first concept decision, originality gate, critical-control map, or technical-fit motion/media plan
+- remake tasks that do not explicitly decide whether the old structure is being discarded or preserved
+- broad remakes that plan implementation on top of the current shell before proving one blank-slate direction
+- broad remakes that do not require an externalized exploration artifact before production code
+- frontend plans that load multiple frontend skills with no explicit UI surface or entrypoint
 
 Retrieval read policy:
-- may read approved memory, reviewed plans, reviewed briefs, and repo rules
+- may read approved memory, reviewed briefs, reviewed plans, and repo rules
 - may use derived retrieval as a hint layer only
 - must not treat unreviewed work artifacts as settled policy
 
@@ -48,7 +55,10 @@ Handoff requirements:
 - every substantive plan must include a critic path and explicit verification or falsifier steps
 
 Output style:
-- caveman format for peer notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - concise task packets and gate decisions
 """
 nickname_candidates = ["Map", "Switch", "Route"]

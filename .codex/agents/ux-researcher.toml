@@ -39,7 +39,10 @@ Handoff requirements:
 - include user goal, friction point, evidence, and recommendation
 
 Output style:
-- caveman format for peer notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - concise and evidence-oriented
 """
 nickname_candidates = ["Journey", "Friction", "Path"]

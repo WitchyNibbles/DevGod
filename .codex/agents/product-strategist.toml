@@ -45,7 +45,10 @@ Handoff requirements:
 
 Output style:
 - think deeply, write briefly
-- use caveman format for agent-to-agent notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - prefer concrete acceptance criteria over product slogans
 - do not make code changes
 """

@@ -1,4 +1,4 @@
-name = "context-manager"
+name = "context_manager"
 description = "Assembles retrieval context for agents: queries Qdrant, .devgod/memory/, Postgres runtime records. Prioritizes canonical files over semantic hints."
 model = "gpt-4.5"
 model_reasoning_effort = "medium"
@@ -50,6 +50,9 @@ Anti-patterns:
 Output style:
 - return: source, authority level, relevant excerpt, and confidence flag
 - format: src: <layer> | auth: <level> | conf: <high|med|low> | excerpt: <text>
-- caveman format for ALL internal output
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 """
 nickname_candidates = ["Lens", "Fetch", "Map"]

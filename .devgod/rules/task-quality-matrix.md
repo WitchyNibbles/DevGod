@@ -27,7 +27,7 @@ Use task-type quality gates in addition to the generic review trio.
 ### `frontend_acceptance`
 
 - use for UI or human-facing artifact work
-- requires clarity, consistency, and intentional visual or interaction choices
+- requires clarity, consistency, intentional visual or interaction choices, and for redesigns a sourced direction package rather than prompt-only styling
 
 ### `accessibility_acceptance`
 

@@ -22,12 +22,43 @@ Good practices:
 - preserve accessibility, responsiveness, and visual clarity
 - keep task and review artifacts readable by both humans and agents
 - when council review applies, tie critique to goals, scenarios, and failure modes rather than taste or preference language
-- use the repo-local `devgod-frontend-taste` and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
+- use the repo-local `devgod-ui-art-direction`, `devgod-frontend-taste`, and `devgod-design-system` skills to avoid generic layouts and tighten system consistency
+- treat `devgod-ui-art-direction` as the repo-local frontend entrypoint for substantive Codex UI work; load deeper frontend detail skills only after it declares the UI surface and the follow-on skill chain
 - apply the repo-local frontend quality rubric before signoff on visible UI changes
 - when relevant, pair with `frontend-patterns` and `e2e-testing` style guidance already available in the repo
 - include explicit desktop, mobile, and accessibility verification notes for UI changes
 - when a task changes visible UI or interaction flow, perform a browser self-check before handoff
 - prefer snapshot-first browser verification and use screenshots when layout or polish is part of the claim
+- for substantive redesigns, gather public references from the shipped inspiration registry before implementation
+- do not load the wider frontend skill cluster on non-UI tasks or backend-only work
+- for broad remakes, create at least 1 externalized visual exploration artifact before touching production UI code; acceptable forms include a lightweight HTML mock, SVG storyboard, screenshot paintover, or generated image
+- when the brief includes a vibe image, avatar, illustration, or other aesthetic reference, treat it as a system-level style and motion guide by default rather than a literal UI insert unless the task explicitly says to embed it
+- when the brief asks for a remake or a truly new concept, treat the current UI as legacy to audit, not as the base composition to preserve
+- produce at least 3 materially different design directions before coding a broad redesign
+- if the first critique still reads as "same family reordered", stop implementation and produce 1 opposite-direction artifact outside the production shell before continuing
+- record the chosen direction, rejected alternatives, and why the references support the decision
+- record a reference-translation brief that explains how the reference changes motion, material treatment, charm logic, and interaction personality across the whole interface
+- for remake work, record the inheritance cutoff and a legacy carryover ban before coding
+- name one signature move that makes the surface identifiable before coding
+- name one impressiveness hypothesis that explains what should feel extraordinary in the first glance before coding
+- for broad remakes, name the new design family, the repeated primitives being banned, the surface-language continuity plan, and the primary authored medium before coding
+- explicitly decide whether generated imagery, edited artwork, sprites, Rive-class art, or 3D depth belong in the concept; if not, record why not
+- when the requested feeling is cute, magical, lively, or game-like, name a semantic charm map before coding and make every playful detail earn its place
+- use `Awwwards` for ambition, `Godly` for taste calibration, and `Siteinspire` for structure; treat `Lapa Ninja` as a situational full-page supplement rather than the default stack
+- when the brief asks for immersive or game-like UI, define a motion system, media strategy, technical-fit choice, and reduced-motion fallback before coding
+- define what the interface does while idle: stars, particles, floating code, familiars, glows, or other motion hooks should be deliberate, smooth, and readable rather than static or random
+- prefer the lightest viable stack that can deliver the effect: CSS first, `Motion` for React for layout and state choreography, `Rive` for authored interactive art and game-like UI motion, `GSAP` for orchestrated timelines and scroll sequencing, `three.js` only when true 3D or WebGL depth is conceptually necessary
+- use screenshots as critique inputs and iterate at least once when the claim includes exceptional visual quality
+- critique live motion behavior as well as screenshots when animation quality is part of the claim
+- reject low-fidelity CSS illustration, mascot-like decoration, or theme props that cheapen the result
+- reject random cute placeholders, decorative mascots with no product meaning, or vibe references used as pasted scene art
+- inventory route-critical controls before redesigning and keep them visible inside the new composition
+- declare the `ui surface` and frontend workflow entrypoint in task artifacts before broad UI implementation
+- if the easiest implementation path is “keep the old layout and restyle it,” reject that path when the brief asks for something new
+- if the only variants live in production code branches, reject the exploration loop as incomplete
+- if the result still uses the same shell, panel, metric, or headline primitives in a new order, reject it as the same family reordered
+- if the authored media lives in the background while the working surfaces remain ordinary overlay panels, reject it
+- if the visual identity comes mostly from text size, glass panels, and dark gradients, keep iterating
 
 Anti-patterns:
 - generic filler UX
@@ -36,9 +67,21 @@ Anti-patterns:
 - feedback that is only “I like it” or “I don’t like it”
 - visual work with no verification plan
 - claiming visual quality without browser evidence for UI-affecting work
+- broad redesign work that jumps straight from prompt to implementation with no variants or references
+- broad redesign work with no signature move or no asset rationale
+- image-led redesign work that never translates the image into a motion or interaction language
+- immersive redesign work that is really a static dashboard with animated entrances
+- remake work that never explicitly chose a real authored medium beyond CSS surfaces
+- choosing heavy media, video, or WebGL without checking whether the target repo and user benefit justify the cost
+- artistic redesign work that never introduces a real artistic medium beyond CSS surfaces
+- whimsical redesign work that adds clutter instead of a coherent charm system
+- prettier layouts that make important actions harder to find than before
+- remake work that still reads as the previous concept family with decorative replacement parts
+- combining old and new visual systems on the same route instead of completing the replacement
 
 Retrieval read policy:
 - may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts
+- may read the shipped frontend inspiration registry and cited public references named in the task packet
 - may use derived retrieval to locate prior UI decisions
 - must not write durable memory or rely on unreviewed visual notes as authority
 
@@ -46,8 +89,10 @@ Handoff requirements:
 - include changed flows, responsive/accessibility checks, and any remaining UI verification gaps
 
 Output style:
-- caveman format for peer notes
-- user-facing UI guidance should still be readable
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - preserve existing design systems when present
 - if no design system exists, create one with strong but controlled choices
 """

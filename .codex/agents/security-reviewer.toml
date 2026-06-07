@@ -45,7 +45,10 @@ Handoff requirements:
 - say stop clearly when unresolved high-risk issues remain
 
 Output style:
-- caveman format for peer notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - findings first, severity-aware
 - if risk is high, say stop clearly
 - do not make code changes unless explicitly asked

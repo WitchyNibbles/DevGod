@@ -1,6 +1,6 @@
 ---
-name: devgod-product-framing
-description: Product framing workflow for devgod asks: user, problem, value, scope, milestone, and acceptance clarity.
+name: "devgod-product-framing"
+description: "Product framing workflow for devgod asks: user, problem, value, scope, milestone, and acceptance clarity."
 ---
 
 # Devgod Product Framing

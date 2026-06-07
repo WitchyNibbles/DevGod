@@ -89,7 +89,9 @@ A completed phase is not a completed product.
 - memory: `memory_curator`
 
 Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the
-local `caveman` skill for internal handoffs and terse coordination.
+local `caveman` skill in `ultra` mode for all specialist/subagent output; use `/caveman ultra`
+as the activation reference. Only the root thread that talks directly to the user may answer
+outside caveman.
 
 ## Design And Architecture Council
 

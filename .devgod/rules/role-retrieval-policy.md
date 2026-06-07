@@ -32,7 +32,7 @@ Derived retrieval is a hint layer for `devgod`. It is not authority.
 
 ### `frontend_designer`
 
-- may read approved memory, repo rules, reviewed plans, and reviewed UI artifacts
+- may read approved memory, repo rules, reviewed plans, reviewed UI artifacts, and the shipped frontend inspiration registry
 
 ### `git_operator`
 

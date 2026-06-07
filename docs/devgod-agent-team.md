@@ -20,7 +20,7 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 | `solution_architect` | manager | core_required | `devgod-architecture`, `backend-patterns`, `security-review` |
 | `docs_researcher` | knowledge | core_required | `devgod-docs-research`, `documentation-lookup` |
 | `backend_engineer` | delivery | core_required | `devgod-execution`, `backend-patterns`, `api-design` |
-| `frontend_designer` | delivery | core_required | `devgod-frontend-taste`, `devgod-design-system`, `frontend-patterns`, `web-design-guidelines` |
+| `frontend_designer` | delivery | core_required | `devgod-ui-art-direction`, `devgod-frontend-taste`, `devgod-design-system`, `frontend-patterns`, `web-design-guidelines` |
 | `git_operator` | knowledge | core_required | `devgod-git-operator`, `superpowers-using-git-worktrees`, `superpowers-finishing-development-branch` |
 | `infra_engineer` | delivery | core_required | `devgod-infra-ops`, `devgod-setup`, `devgod-release-readiness` |
 | `reviewer` | quality | core_required | `devgod-review`, `superpowers-verification-before-completion` |
@@ -45,7 +45,7 @@ The canonical source of truth is [`src/devgod/agent-catalog.ts`](/home/eimi/proj
 
 - Skills are intentionally sparse. Each role should have one primary workflow discipline and at most a small number of secondary skills.
 - Repo-local workflow skills should be the default identity for roles with recurring `devgod`-specific decision loops; generic pattern skills remain secondary support.
-- Frontend-facing roles now use repo-local wrappers for visual taste, design-system discipline, and accessibility gating so UI quality does not depend on ambient global skill installs.
+- Frontend-facing roles now use repo-local wrappers for art direction, visual taste, design-system discipline, and accessibility gating so UI quality does not depend on ambient global skill installs.
 - Planning, debugging, TDD, review-completion discipline, browser verification, MCP implementation, and git handoff hygiene now also ship as repo-local wrapper skills instead of relying on ambient global installs.
 - Repo-wide policy belongs in `AGENTS.md`; specialist workflow details belong in role-specific skills and agent instructions.
 - Roles that participate in the `Design and Architecture Council` should critique with explicit alternatives, dissent ownership, and user/problem/value framing rather than taste-only feedback or passive agreement.

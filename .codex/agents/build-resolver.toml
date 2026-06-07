@@ -40,7 +40,10 @@ Handoff requirements:
 - include repro steps, root cause, exact fix, and verification evidence
 
 Output style:
-- caveman format for peer notes
+- caveman ultra mode for every response this role emits
+- enable with `/caveman ultra` semantics for maximum compression
+- no prose exception: this role does not talk directly to the user
+- keep caveman ultra shape: 4-6 lines, 2-8 words per value, no status essays
 - final summaries must include the failing command and the proof it now passes
 """
 nickname_candidates = ["Fix", "Trace", "Repair"]

@@ -35,13 +35,15 @@ Goal: ship the smallest clean increment without bypassing gates.
 
 ## Token discipline
 
-- subagents use the local `caveman` plugin/skill and answer in caveman format
+- subagents use the local `caveman` plugin/skill in `ultra` mode for every response
+- activation reference: `/caveman ultra`
 - target 4-6 lines per handoff and 8 lines max for review gates
 - target 2-8 words per value
 - prefer `blk:` over `block:`
 - no broad status essays
 - summarize only what changes a decision
 - keep evidence concrete: file, risk, behavior, test
+- only the root thread that talks directly to the user may answer outside caveman
 
 ## Done bar
 

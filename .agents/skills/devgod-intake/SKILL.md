@@ -42,4 +42,4 @@ Default chain:
 - `qa_engineer`
 - `planner`
 
-Use caveman format for specialist handoffs.
+Use caveman `ultra` mode for specialist handoffs and specialist-facing notes; reference `/caveman ultra` as the activation command. Only the root thread that talks directly to the user may answer outside caveman.

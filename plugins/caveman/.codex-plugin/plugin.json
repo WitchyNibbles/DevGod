@@ -1,0 +1,9 @@
+{
+  "name": "caveman",
+  "version": "1.0.0",
+  "description": "Ultra-compact coordination skill for agent handoffs, status notes, and review gates.",
+  "license": "MIT",
+  "homepage": "https://github.com/juliusbrussee/caveman",
+  "repository": "https://github.com/juliusbrussee/caveman",
+  "skills": "./skills/"
+}
