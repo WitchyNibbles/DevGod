@@ -101,7 +101,7 @@ test("indexRepoMarkdown default includes capture skill markdown for retrieval", 
       [
         "# Devgod Test Skill",
         "",
-        "Use Qdrant-backed retrieval to keep planning context out of repo prompts."
+        "Use lexical-first retrieval with semantic fallback to keep planning context out of repo prompts."
       ].join("\n"),
       "utf8"
     );
@@ -118,7 +118,7 @@ test("indexRepoMarkdown default includes capture skill markdown for retrieval", 
     const results = await service.searchMemory({
       workspaceSlug: "team",
       projectSlug: "devgod",
-      query: "qdrant-backed retrieval"
+      query: "lexical-first retrieval"
     });
 
     assert.equal(results[0]?.citation.sourcePath, ".agents/skills/devgod-test/SKILL.md");

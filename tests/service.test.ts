@@ -322,8 +322,6 @@ async function seedHealthyRuntimeRegistration(
     repoPath,
     runtimeProfile: "managed",
     dataRoot: `${repoPath}/.devgod/runtime/data`,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: `${repoPath}/.devgod/install-manifest.json`,
     manifest: {},
     provenance: { authority: "runtime_authoritative" },

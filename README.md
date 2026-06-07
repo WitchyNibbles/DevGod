@@ -8,7 +8,7 @@
   <img alt="node 22+" src="https://img.shields.io/badge/node-22%2B-2f6f3e?style=for-the-badge&logo=node.js&logoColor=white">
   <img alt="typescript runtime" src="https://img.shields.io/badge/typescript-runtime-1f6feb?style=for-the-badge&logo=typescript&logoColor=white">
   <img alt="workflow" src="https://img.shields.io/badge/workflow-intake%20to%20proof-f97316?style=for-the-badge">
-  <img alt="runtime" src="https://img.shields.io/badge/runtime-postgres%20%2B%20qdrant-0f766e?style=for-the-badge">
+  <img alt="runtime" src="https://img.shields.io/badge/runtime-postgres%20%2B%20pgvector-0f766e?style=for-the-badge">
   <img alt="automation" src="https://img.shields.io/badge/automation-codex%20app%20%2B%20cli-7c3aed?style=for-the-badge">
   <img alt="state date" src="https://img.shields.io/badge/docs-2026--05--24-111827?style=for-the-badge">
 </p>
@@ -163,9 +163,12 @@ Shipped through:
 
 - `src/runtime/repo-markdown-indexer.ts`
 - `src/docs-export/`
-- `src/store/qdrant-artifact-index.ts`
+- `src/store/postgres-memory-search.ts`
 
-This layer supports retrieval refresh, markdown indexing, artifact search, and Obsidian-oriented export.
+This layer supports retrieval refresh, markdown indexing, lexical-first artifact search, pgvector semantic fallback, and Obsidian-oriented export.
+
+Devgod retrieval is opinionated: exact terms and explicit operator vocabulary should carry the primary lookup path, while pgvector remains an always-on fallback when lexical recall misses relevant context.
+In short: lexical-first retrieval with pgvector semantic fallback.
 
 ## 🚀 Quick Start
 

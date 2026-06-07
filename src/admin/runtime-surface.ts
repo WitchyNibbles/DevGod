@@ -94,9 +94,6 @@ export interface RuntimeSurfaceDependencies {
   createStore?: (client: RuntimeClient) => PostgresStore;
   createService?: (store: PostgresStore) => RuntimeSurfaceService;
   createPlanContextEmbedQuery?: typeof createPlanContextEmbedQuery;
-  inspectQdrant?: ((
-    registration: import("../domain/types.ts").RuntimeProjectRegistrationRecord
-  ) => Promise<{ ok: boolean; summary: string }>) | undefined;
   inspectReviewIdentity?: (() => Promise<import("./status.ts").ReviewIdentityStatusObservation>) | undefined;
 }
 
@@ -174,7 +171,6 @@ export async function getRuntimeHealthSurface(args: readonly string[], options: 
       getProjectRuntimeRegistration(projectId) {
         return store.getProjectRuntimeRegistration(projectId);
       },
-      inspectQdrant: dependencies.inspectQdrant,
       inspectReviewIdentity: dependencies.inspectReviewIdentity
     })
   );
@@ -286,7 +282,6 @@ export async function getLoopSurface(args: readonly string[], options: RuntimeSu
         getProjectRuntimeRegistration(projectId) {
           return store.getProjectRuntimeRegistration(projectId);
         },
-        inspectQdrant: dependencies.inspectQdrant,
         inspectReviewIdentity: dependencies.inspectReviewIdentity,
         getStatusSnapshot(runId) {
           return service.getStatus(runId);

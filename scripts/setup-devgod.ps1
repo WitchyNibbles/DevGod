@@ -225,17 +225,6 @@ if (-not $env:DEVGOD_DOCKER_CONTAINER_NAME) {
     $env:DEVGOD_DOCKER_CONTAINER_NAME = "devgod-postgres-$($env:DEVGOD_PROJECT_SLUG)"
 }
 
-if (-not $env:DEVGOD_QDRANT_CONTAINER_NAME) {
-    $env:DEVGOD_QDRANT_CONTAINER_NAME = "devgod-qdrant-$($env:DEVGOD_PROJECT_SLUG)"
-}
-
-if (-not $env:DEVGOD_QDRANT_URL) {
-    $env:DEVGOD_QDRANT_URL = "http://127.0.0.1:$($env:DEVGOD_QDRANT_PORT)"
-    if (-not $env:DEVGOD_QDRANT_PORT) {
-        $env:DEVGOD_QDRANT_URL = "http://127.0.0.1:6333"
-    }
-}
-
 if (-not $env:DEVGOD_POSTGRES_PASSWORD -or $env:DEVGOD_POSTGRES_PASSWORD -eq "devgod") {
     throw "DEVGOD_POSTGRES_PASSWORD must be set to a non-default local password before setup continues"
 }
@@ -276,32 +265,6 @@ function Wait-DevgodContainerHealth {
     throw "$Label did not become healthy"
 }
 
-function Wait-DevgodQdrantHttp {
-    param([Parameter(Mandatory = $true)][string]$Url)
-
-    Write-Host "waiting for devgod-qdrant to answer $Url"
-    for ($i = 0; $i -lt 60; $i++) {
-        try {
-            $base = [System.Uri]::new($Url)
-            $builder = [System.UriBuilder]::new($base)
-            if (-not $builder.Path.EndsWith("/")) {
-                $builder.Path = "$($builder.Path)/"
-            }
-            $endpoint = [System.Uri]::new($builder.Uri, "collections")
-            $response = Invoke-WebRequest -Uri $endpoint -Method Get -MaximumRedirection 0 -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
-                return
-            }
-        } catch {
-        }
-
-        Start-Sleep -Seconds 2
-    }
-
-    docker logs $env:DEVGOD_QDRANT_CONTAINER_NAME --tail 100
-    throw "devgod-qdrant did not answer health checks at $Url"
-}
-
 $runtimeMode = Resolve-DevgodRuntimeMode
 $env:DEVGOD_RUNTIME_MODE = $runtimeMode
 $env:DEVGOD_RUNTIME_PROFILE = Resolve-DevgodRuntimeProfile -Mode $runtimeMode
@@ -312,14 +275,11 @@ switch ($runtimeMode) {
             throw "docker runtime mode selected but Docker is not available; use DEVGOD_RUNTIME_MODE=managed or run the Unix setup path for native fallback"
         }
 
-        docker compose up -d devgod-postgres devgod-qdrant
+        docker compose up -d devgod-postgres
 
         Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_DOCKER_CONTAINER_NAME -Label "devgod-postgres"
-        Wait-DevgodContainerHealth -ContainerName $env:DEVGOD_QDRANT_CONTAINER_NAME -Label "devgod-qdrant"
-        Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
     }
     "managed" {
-        Wait-DevgodQdrantHttp -Url $env:DEVGOD_QDRANT_URL
     }
     "native" {
         throw "native runtime mode is only supported through the Unix/Linux setup path; use WSL bash setup or managed mode"
@@ -360,5 +320,4 @@ Write-Host "runtime mode: $runtimeMode"
 Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"
-Write-Host "qdrant: configured"
 Write-Host "playwright: configured"

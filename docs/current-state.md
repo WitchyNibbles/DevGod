@@ -154,14 +154,14 @@ Shipped through:
 
 - `src/runtime/repo-markdown-indexer.ts`
 - `src/runtime/embedding-runner.ts`
-- `src/store/qdrant-artifact-index.ts`
+- `src/store/postgres-memory-search.ts`
 - `src/docs-export/`
 
 Current capabilities:
 
 - repo markdown indexing
 - embedding job execution
-- Qdrant-backed artifact indexing
+- lexical-first artifact indexing with pgvector semantic fallback
 - Obsidian-friendly docs export from runtime worklogs and export requests
 
 ### 8. Repo-context profiling and queue repair

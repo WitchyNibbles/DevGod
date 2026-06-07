@@ -270,7 +270,7 @@ export function createMcpToolDefinitions(runtime: McpRuntimeSurface): readonly M
     {
       name: "devgod_runtime_health",
       description:
-        "Check runtime registration, data-root, qdrant, and review-identity health for a devgod run.",
+        "Check runtime registration, data-root, database, and review-identity health for a devgod run.",
       inputSchema: {
         runId: z.string().trim().optional(),
         workspaceSlug: z.string().trim().optional(),

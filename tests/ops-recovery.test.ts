@@ -191,8 +191,6 @@ async function seedHealthyLoopRuntimeRegistration(
     repoPath,
     runtimeProfile: "managed",
     dataRoot,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: path.join(repoPath, ".devgod", "install-manifest.json"),
     manifest: {},
     provenance: { authority: "runtime_authoritative" },
@@ -229,8 +227,6 @@ function buildHealthyLoopPreflightOptions(store: MemoryStore, cwd: string = proc
         repoPath: cwd,
         runtimeProfile: "managed",
         dataRoot,
-        qdrantUrl: "http://127.0.0.1:6333",
-        qdrantCollection: "devgod-memory",
         installManifestPath: path.join(cwd, ".devgod", "install-manifest.json"),
         manifest: {},
         provenance: { authority: "runtime_authoritative" },
@@ -239,12 +235,6 @@ function buildHealthyLoopPreflightOptions(store: MemoryStore, cwd: string = proc
       };
       await store.saveProjectRuntimeRegistration(registration);
       return registration;
-    },
-    async inspectQdrant() {
-      return {
-        ok: true,
-        summary: "qdrant reachable"
-      };
     },
     async inspectReviewIdentity() {
       return {
@@ -1021,8 +1011,6 @@ test("executeLoopCommandFromArgs rejects execution when runtime preflight fails 
     repoPath: process.cwd(),
     runtimeProfile: "managed",
     dataRoot,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: path.join(process.cwd(), ".devgod", "install-manifest.json"),
     manifest: {},
     provenance: { authority: "runtime_authoritative" },
@@ -1048,12 +1036,6 @@ test("executeLoopCommandFromArgs rejects execution when runtime preflight fails 
         },
         applyRecovery(runId, actionIds, staleAfterHours) {
           return service.applyRecovery(runId, actionIds, { staleAfterHours });
-        },
-        async inspectQdrant() {
-          return {
-            ok: true,
-            summary: "qdrant reachable"
-          };
         },
         async inspectReviewIdentity() {
           return {

@@ -421,7 +421,7 @@ export const agentCatalog = {
   },
   context_manager: {
     label: "Context Manager",
-    description: "Assembles retrieval context for agents from the correct authority layer: .devgod/memory/, Postgres runtime, and Qdrant semantic index.",
+    description: "Assembles retrieval context for agents from the correct authority layer: .devgod/memory/ and Postgres runtime records.",
     class: "knowledge",
     availability: "core_required",
     shipsAgentArtifact: true,
@@ -431,7 +431,7 @@ export const agentCatalog = {
     canOwnTasks: true,
     canSatisfySpecialistRequirement: true,
     defaultSkillIds: ["devgod-context-retrieval", "devgod-memory", "devgod-search-first"],
-    retrievalGuidance: ["all retrieval layers", ".devgod/memory/", "Postgres runtime records", "Qdrant semantic index"]
+    retrievalGuidance: ["all retrieval layers", ".devgod/memory/", "Postgres runtime records", "retrieval freshness state"]
   },
   observability_engineer: {
     label: "Observability Engineer",

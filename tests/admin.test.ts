@@ -50,8 +50,6 @@ async function seedHealthyRuntimeRegistration(
     repoPath: input.repoPath,
     runtimeProfile: "managed",
     dataRoot,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: path.join(input.repoPath, ".devgod", "install-manifest.json"),
     manifest: {},
     provenance: { authority: "runtime_authoritative" },
@@ -83,8 +81,6 @@ function buildHealthyRuntimePreflightOptions(store: MemoryStore, cwd: string) {
         repoPath: cwd,
         runtimeProfile: "managed",
         dataRoot,
-        qdrantUrl: "http://127.0.0.1:6333",
-        qdrantCollection: "devgod-memory",
         installManifestPath: path.join(cwd, ".devgod", "install-manifest.json"),
         manifest: {},
         provenance: { authority: "runtime_authoritative" },
@@ -93,12 +89,6 @@ function buildHealthyRuntimePreflightOptions(store: MemoryStore, cwd: string) {
       };
       await store.saveProjectRuntimeRegistration(registration);
       return registration;
-    },
-    async inspectQdrant() {
-      return {
-        ok: true,
-        summary: "qdrant reachable"
-      };
     },
     async inspectReviewIdentity() {
       return {
@@ -3216,8 +3206,6 @@ test("executeDaemonCommandFromArgs rejects externally forced skipRuntimePrefligh
     repoPath: daemonCwd,
     runtimeProfile: "managed",
     dataRoot,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: path.join(daemonCwd, ".devgod", "install-manifest.json"),
     manifest: {},
     provenance: { authority: "runtime_authoritative" },
@@ -3281,23 +3269,17 @@ test("executeDaemonCommandFromArgs rejects externally forced skipRuntimePrefligh
             return service.getExecutionPlan(runId, { staleAfterHours });
           },
           applyRecovery(runId, actionIds, staleAfterHours) {
-            return service.applyRecovery(runId, actionIds, { staleAfterHours });
-          },
-          getReviews(runId, taskId) {
-            return store.getReviews(runId, taskId);
-          },
-          getApprovals(runId, taskId) {
-            return store.getApprovals(runId, taskId);
-          },
-          async inspectQdrant() {
-            return {
-              ok: true,
-              summary: "qdrant reachable"
-            };
-          },
-          async inspectReviewIdentity() {
-            return {
-              authorityLabel: "derived_only" as const,
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async inspectReviewIdentity() {
+          return {
+            authorityLabel: "derived_only" as const,
               adapterConfigured: true,
               adapterExists: true,
               adapterModulePath: path.join(daemonCwd, "review-identity-adapter.ts"),
@@ -3600,8 +3582,6 @@ test("executeDaemonCommandFromArgs blocks on runtime preflight before launching 
     repoPath: daemonCwd,
     runtimeProfile: "managed",
     dataRoot,
-    qdrantUrl: "http://127.0.0.1:6333",
-    qdrantCollection: "devgod-memory",
     installManifestPath: path.join(daemonCwd, ".devgod", "install-manifest.json"),
     manifest: {},
     provenance: { authority: "runtime_authoritative" },
@@ -3673,11 +3653,8 @@ test("executeDaemonCommandFromArgs blocks on runtime preflight before launching 
         getApprovals(runId, taskId) {
           return store.getApprovals(runId, taskId);
         },
-        async inspectQdrant() {
-          return {
-            ok: false,
-            summary: "qdrant unreachable during runtime preflight"
-          };
+        async pathExists() {
+          return false;
         },
         async inspectReviewIdentity() {
           return {
@@ -3702,7 +3679,7 @@ test("executeDaemonCommandFromArgs blocks on runtime preflight before launching 
 
     assert.equal(result.result.status, "blocked");
     assert.match(result.result.reason, /runtime execution preflight failed/);
-    assert.match(result.result.reason, /qdrant unreachable during runtime preflight/);
+    assert.match(result.result.reason, /runtime data root is missing or inaccessible/);
     assert.equal(result.result.cycles.length, 0);
 
     const operatorHandoff = JSON.parse(
@@ -3713,7 +3690,7 @@ test("executeDaemonCommandFromArgs blocks on runtime preflight before launching 
       nextActions: string[];
     };
     assert.equal(operatorHandoff.blockerKind, "runtime_preflight");
-    assert.match(operatorHandoff.reason, /qdrant unreachable during runtime preflight/);
+    assert.match(operatorHandoff.reason, /runtime data root is missing or inaccessible/);
     assert.deepEqual(operatorHandoff.nextActions, [
       "run `npm run devgod:doctor -- --repair` to replay safe runtime setup healing",
       "if task-state drift remains after services are healthy, run `npm run devgod:reconcile` before retrying execution"

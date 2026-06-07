@@ -1,5 +1,7 @@
 # Consuming-Repo Memory Design
 
+> Historical note: this design predates the pgvector-only retrieval migration and preserves earlier Qdrant analysis for context.
+
 ## Goal
 
 Make DevGod materially smarter inside consumed repos by reusing stable repo-local operational context and recurring operator preferences without repeatedly asking the user or re-exploring the filesystem.
@@ -11,7 +13,7 @@ Current DevGod already has strong memory primitives, but they are not shaped for
 - reviewed repo memory in `.devgod/memory/` is durable and inspectable, but it is optimized for reviewed lessons and policy, not for machine-usable operational defaults such as virtualenv paths
 - `memory_entries` supports project-scoped retrieval, metadata, and embeddings, but it does not yet model stable repo-context slots with replacement semantics
 - `runtime_project_registrations.manifest` already stores derived runtime metadata such as retrieval freshness, but it is not yet used as a reusable repo-context profile
-- Qdrant currently accelerates artifact retrieval, but it is not yet used to retrieve structured repo-context facts
+- PostgreSQL already handles lexical retrieval plus pgvector-backed semantic fallback, but it is not yet used to retrieve structured repo-context facts
 
 The result is that DevGod has memory infrastructure, but no first-class repo-context layer. So it keeps re-discovering things such as:
 
@@ -27,8 +29,8 @@ These are based on the current source tree:
 - reviewed repo memory is explicitly primary over shared backend retrieval in [.devgod/memory/README.md](/home/gii/apps/lexer/DevGod/.devgod/memory/README.md:1) and [.devgod/rules/memory-promotion.md](/home/gii/apps/lexer/DevGod/.devgod/rules/memory-promotion.md:1)
 - project memory already lives in PostgreSQL `memory_entries` with `metadata jsonb`, embeddings, and project scope in [src/sql/migrations/001_initial_schema.sql](/home/gii/apps/lexer/DevGod/src/sql/migrations/001_initial_schema.sql:134)
 - runtime registrations already carry a mutable `manifest jsonb` and provenance in [src/sql/migrations/010_runtime_registration_and_migration_journals.sql](/home/gii/apps/lexer/DevGod/src/sql/migrations/010_runtime_registration_and_migration_journals.sql:1)
-- retrieval already combines PostgreSQL search with Qdrant artifact matches in [src/store/postgres-store.ts](/home/gii/apps/lexer/DevGod/src/store/postgres-store.ts:1109) and [src/store/postgres-memory-search.ts](/home/gii/apps/lexer/DevGod/src/store/postgres-memory-search.ts:79)
-- Qdrant points already support payload filters such as `projectId`, roles, and tags in [src/store/qdrant-artifact-index.ts](/home/gii/apps/lexer/DevGod/src/store/qdrant-artifact-index.ts:1)
+- retrieval now runs through PostgreSQL search in [src/store/postgres-store.ts](/home/gii/apps/lexer/DevGod/src/store/postgres-store.ts:1109) and [src/store/postgres-memory-search.ts](/home/gii/apps/lexer/DevGod/src/store/postgres-memory-search.ts:79)
+- PostgreSQL rows already carry project-aware metadata and embeddings that can support structured repo-context retrieval without a second vector service
 
 ## Source-backed findings
 
@@ -60,20 +62,20 @@ Fit for DevGod:
 - a repo-context profile can live safely in `runtime_project_registrations.manifest`
 - later slot-specific tables, if needed, should use atomic upserts rather than append-only duplication
 
-### 3. Use Qdrant for filtered retrieval, not raw semantic guessing
+### 3. Use PostgreSQL metadata and pgvector fallback, not raw semantic guessing
 
-Qdrant's current docs emphasize payload indexes and full-text indexes for combining vector search with structured filters and efficient query planning.
+PostgreSQL plus `jsonb`, lexical search, and `pgvector` are enough for combining structured filters with lexical-first retrieval and semantic fallback.
 
 Sources:
 
-- [Qdrant indexing](https://qdrant.tech/documentation/manage-data/indexing/)
-- [Qdrant text search](https://qdrant.tech/documentation/search/text-search/)
-- [Qdrant filtering](https://qdrant.tech/documentation/search/filtering/)
+- [PostgreSQL JSON types](https://www.postgresql.org/docs/16/datatype-json.html)
+- [PostgreSQL text search](https://www.postgresql.org/docs/current/textsearch.html)
+- [pgvector](https://github.com/pgvector/pgvector)
 
 Fit for DevGod:
 
-- if DevGod indexes repo-context facts in Qdrant, it should do so with explicit payload fields such as `projectId`, `slotKey`, `contextKind`, `freshness`, and `sourceKind`
-- Qdrant should accelerate retrieval after DevGod already has structured slot semantics, not replace them
+- if DevGod indexes repo-context facts in PostgreSQL, it should do so with explicit fields such as `projectId`, `slotKey`, `contextKind`, `freshness`, and `sourceKind`
+- pgvector should remain a semantic fallback after DevGod already has structured slot semantics, not replace them
 
 ## Proposal
 

@@ -99,8 +99,6 @@ function runtimeRegistration(overrides: Partial<RuntimeProjectRegistrationRecord
     repoPath: overrides.repoPath ?? "/repo/devgod",
     runtimeProfile: overrides.runtimeProfile ?? "local-docker",
     dataRoot: overrides.dataRoot ?? "/tmp/devgod-runtime",
-    qdrantUrl: overrides.qdrantUrl ?? "http://127.0.0.1:6333",
-    qdrantCollection: overrides.qdrantCollection ?? "devgod-memory",
     installManifestPath: overrides.installManifestPath ?? ".devgod/install-manifest.json",
     manifest: overrides.manifest ?? { version: 1 },
     provenance: overrides.provenance ?? { authority: "runtime_authoritative" },
@@ -456,10 +454,6 @@ test("workflow integrity: doctor repair safely resyncs contradictory local expor
         liveTrustReady: true,
         notes: []
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      })
     });
 
     const activeExport = await readFile(path.join(directory, ".devgod", "ACTIVE"), "utf8");
@@ -564,10 +558,6 @@ test("workflow integrity: doctor repair recreates missing local exports from per
         liveTrustReady: true,
         notes: []
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      })
     });
 
     const activeExport = await readFile(path.join(directory, ".devgod", "ACTIVE"), "utf8");
@@ -712,10 +702,6 @@ test("workflow integrity: doctor repair clears stale persisted seed failure meta
         liveTrustReady: true,
         notes: []
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      })
     });
 
     const repairedRuntimeState = await store.getProjectRuntimeState(context.project.id);

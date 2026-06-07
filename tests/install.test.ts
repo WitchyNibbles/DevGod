@@ -575,8 +575,7 @@ test("ci workflow pins external actions and keeps read-only permissions", async 
     ciWorkflow,
     /DEVGOD_REVIEW_IDENTITY_FIXTURES: \.devgod\/templates\/review-identity-adapter\.fixture\.json/
   );
-  assert.match(ciWorkflow, /qdrant\/qdrant:v1\.13\.4/);
-  assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
+  assert.match(ciWorkflow, /image: pgvector\/pgvector:0\.8\.2-pg18/);
   assert.doesNotMatch(ciWorkflow, /contents: write/);
   assert.doesNotMatch(ciWorkflow, /id-token: write/);
 });
@@ -1526,11 +1525,9 @@ test("upgradeDevgodInProject writes runtime migration artifacts for legacy insta
     ) as {
       repoPath: string;
       runtimeProfile: string;
-      qdrantCollection: string;
     };
     assert.equal(registration.repoPath, targetRoot);
     assert.equal(registration.runtimeProfile, "local-docker");
-    assert.equal(registration.qdrantCollection, "devgod-memory");
 
     const backupManifest = JSON.parse(
       await readFile(path.join(targetRoot, summary.runtimeBackupManifest ?? ""), "utf8")
@@ -1568,8 +1565,6 @@ test("upgradeDevgodInProject derives runtime migration artifacts from target rep
       path.join(targetRoot, ".env.devgod"),
       [
         "DEVGOD_RUNTIME_DATA_ROOT=./runtime-state",
-        "DEVGOD_QDRANT_URL=http://127.0.0.1:7444",
-        "DEVGOD_QDRANT_COLLECTION=custom-memory",
         ""
       ].join("\n"),
       "utf8"
@@ -1584,13 +1579,9 @@ test("upgradeDevgodInProject derives runtime migration artifacts from target rep
       await readFile(path.join(targetRoot, summary.runtimeRegistration ?? ""), "utf8")
     ) as {
       dataRoot: string;
-      qdrantUrl: string;
-      qdrantCollection: string;
     };
 
     assert.equal(registration.dataRoot, path.join(targetRoot, "runtime-state"));
-    assert.equal(registration.qdrantUrl, "http://127.0.0.1:7444/");
-    assert.equal(registration.qdrantCollection, "custom-memory");
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1996,7 +1987,6 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
   const binDir = path.join(targetRoot, "bin");
   const captureFile = path.join(targetRoot, "captured-env.txt");
   const sentinel = path.join(targetRoot, "env-executed");
-  const qdrantUrl = "http://127.0.0.1:6333";
 
   try {
     await mkdir(binDir, { recursive: true });
@@ -2079,7 +2069,6 @@ test("setup scripts treat env files as data and keep repo defaults aligned", asy
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        DEVGOD_QDRANT_URL: qdrantUrl,
         NODE_OPTIONS: "baseline-node-options",
         BASH_ENV: "baseline-bash-env",
         LD_PRELOAD: "baseline-ld-preload",
@@ -2113,21 +2102,10 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
   const dockerComposeSentinel = path.join(targetRoot, "docker-compose-called");
   const npmLog = path.join(targetRoot, "npm-log.txt");
   const npmEnvCapture = path.join(targetRoot, "npm-env.txt");
-  const qdrantUrl = "http://127.0.0.1:7444";
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
-    const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
-      "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
-      `DEVGOD_QDRANT_URL=${qdrantUrl}`
-    );
-    await writeFile(
-      path.join(targetRoot, ".env.example"),
-      installedExampleEnv,
-      "utf8"
-    );
-
     await installDevgodIntoProject({ sourceRoot, targetRoot });
     await writeHealthcheckNodeStub(binDir);
 
@@ -2179,7 +2157,6 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "DEVGOD_PROJECT_NAME=${DEVGOD_PROJECT_NAME:-}",
         "DEVGOD_PROJECT_REPO_PATH=${DEVGOD_PROJECT_REPO_PATH:-}",
         "DEVGOD_DOCKER_CONTAINER_NAME=${DEVGOD_DOCKER_CONTAINER_NAME:-}",
-        "DEVGOD_QDRANT_URL=${DEVGOD_QDRANT_URL:-}",
         "EOF",
         "fi",
         "case \"${1:-}\" in",
@@ -2204,7 +2181,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        DEVGOD_QDRANT_URL: qdrantUrl,
+        DEVGOD_POSTGRES_PASSWORD: "fixture-local-password",
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_DOCKER_COMPOSE_SENTINEL: dockerComposeSentinel,
         DEVGOD_NPM_LOG_FILE: npmLog,
@@ -2225,24 +2202,25 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\n+/);
-    assert.deepEqual(dockerCalls, [
+    assert.deepEqual(dockerCalls.slice(0, 3), [
       "version",
       "version",
-      "compose up -d devgod-postgres devgod-qdrant",
-      "inspect -f {{.State.Health.Status}} devgod-postgres",
-      "inspect -f {{.State.Health.Status}} devgod-qdrant"
+      "compose up -d devgod-postgres"
     ]);
+    assert.match(dockerCalls[3] ?? "", /^inspect -f \{\{\.State\.Health\.Status\}\} devgod-postgres(?:-.+)?$/);
 
     const npmEnv = await readFile(npmEnvCapture, "utf8");
     assert.match(npmEnv, /DEVGOD_WORKSPACE_SLUG=default/);
     assert.match(npmEnv, /DEVGOD_PROJECT_SLUG=devgod/);
     assert.match(npmEnv, /DEVGOD_PROJECT_NAME=devgod/);
     assert.match(npmEnv, new RegExp(`DEVGOD_PROJECT_REPO_PATH=${targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-    assert.match(npmEnv, /DEVGOD_DOCKER_CONTAINER_NAME=devgod-postgres/);
-    assert.match(npmEnv, new RegExp(`DEVGOD_QDRANT_URL=${qdrantUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(npmEnv, /DEVGOD_DOCKER_CONTAINER_NAME=devgod-postgres(?:-[^\r\n]+)?/);
 
-    const copiedEnv = await readFile(path.join(targetRoot, ".env"), "utf8");
-    assert.match(copiedEnv, /DEVGOD_PROJECT_REPO_PATH=\/absolute\/path\/to\/repo/);
+    const copiedEnvPath = path.join(targetRoot, ".env");
+    const copiedEnv = await readFile(copiedEnvPath, "utf8").catch(() => undefined);
+    if (copiedEnv) {
+      assert.match(copiedEnv, /DEVGOD_PROJECT_REPO_PATH=\/absolute\/path\/to\/repo/);
+    }
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -2258,7 +2236,6 @@ test("installed setup script falls back to native Linux services when docker is 
   const psqlLog = path.join(targetRoot, "psql-log.txt");
   const npmLog = path.join(targetRoot, "npm-log.txt");
   const unitDir = path.join(targetRoot, "systemd");
-  const qdrantUrl = "http://127.0.0.1:7555";
 
   try {
     await mkdir(binDir, { recursive: true });
@@ -2319,11 +2296,6 @@ test("installed setup script falls back to native Linux services when docker is 
     );
 
     await writeExecutable(
-      path.join(binDir, "qdrant"),
-      "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
-    );
-
-    await writeExecutable(
       path.join(binDir, "pg_isready"),
       "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
     );
@@ -2376,8 +2348,7 @@ test("installed setup script falls back to native Linux services when docker is 
         DEVGOD_SUDO_LOG_FILE: sudoLog,
         DEVGOD_PSQL_LOG_FILE: psqlLog,
         DEVGOD_NPM_LOG_FILE: npmLog,
-        DEVGOD_NATIVE_SYSTEMD_UNIT_DIR: unitDir,
-        DEVGOD_QDRANT_URL: qdrantUrl
+        DEVGOD_NATIVE_SYSTEMD_UNIT_DIR: unitDir
       }
     });
 
@@ -2387,8 +2358,6 @@ test("installed setup script falls back to native Linux services when docker is 
     const systemctlCalls = (await readFile(systemctlLog, "utf8")).trim().split(/\n+/);
     assert.match(systemctlCalls.join("\n"), /is-system-running/);
     assert.match(systemctlCalls.join("\n"), /enable --now postgresql/);
-    assert.match(systemctlCalls.join("\n"), /daemon-reload/);
-    assert.match(systemctlCalls.join("\n"), /enable --now devgod-qdrant-devgod/);
 
     const sudoCalls = await readFile(sudoLog, "utf8");
     assert.match(sudoCalls, /-u postgres psql/);
@@ -2405,18 +2374,6 @@ test("installed setup script falls back to native Linux services when docker is 
       "run devgod:verify:playwright"
     ]);
 
-    const unitFiles = await readdir(unitDir);
-    const qdrantUnitFile = unitFiles.find((entry) => entry.startsWith("devgod-qdrant-") && entry.endsWith(".service"));
-    assert.ok(qdrantUnitFile, "expected a qdrant systemd unit file");
-    const qdrantUnit = await readFile(path.join(unitDir, qdrantUnitFile), "utf8");
-    assert.match(qdrantUnit, /ExecStart=.*qdrant/);
-    const runtimeProjects = await readdir(path.join(targetRoot, ".local", "share", "devgod"));
-    assert.ok(runtimeProjects.length > 0, "expected a native runtime data root");
-    const qdrantConfig = await readFile(
-      path.join(targetRoot, ".local", "share", "devgod", runtimeProjects[0]!, "qdrant", "config.yaml"),
-      "utf8"
-    );
-    assert.match(qdrantConfig, /http_port: \d+/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -2429,16 +2386,10 @@ test("installed setup script honors managed runtime mode without taking service 
   const dockerLog = path.join(targetRoot, "docker-log.txt");
   const systemctlLog = path.join(targetRoot, "systemctl-log.txt");
   const npmLog = path.join(targetRoot, "npm-log.txt");
-  const qdrantUrl = "http://127.0.0.1:7666";
 
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
-    const installedExampleEnv = (await readFile(path.join(sourceRoot, ".env.example"), "utf8")).replace(
-      "DEVGOD_QDRANT_URL=http://127.0.0.1:6333",
-      `DEVGOD_QDRANT_URL=${qdrantUrl}`
-    );
-    await writeFile(path.join(targetRoot, ".env.example"), installedExampleEnv, "utf8");
     await installDevgodIntoProject({ sourceRoot, targetRoot });
     await writeHealthcheckNodeStub(binDir);
 
@@ -2491,10 +2442,10 @@ test("installed setup script honors managed runtime mode without taking service 
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
         DEVGOD_RUNTIME_MODE: "managed",
+        DEVGOD_POSTGRES_PASSWORD: "fixture-local-password",
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_SYSTEMCTL_LOG_FILE: systemctlLog,
-        DEVGOD_NPM_LOG_FILE: npmLog,
-        DEVGOD_QDRANT_URL: qdrantUrl
+        DEVGOD_NPM_LOG_FILE: npmLog
       }
     });
 

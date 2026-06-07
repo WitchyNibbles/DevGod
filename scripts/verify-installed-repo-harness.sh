@@ -68,7 +68,6 @@ sanitize_env() {
     -u DEVGOD_RUNTIME_MODE \
     -u DEVGOD_RUNTIME_DATA_ROOT \
     -u DEVGOD_DOCKER_CONTAINER_NAME \
-    -u DEVGOD_QDRANT_CONTAINER_NAME \
     "$@"
 }
 

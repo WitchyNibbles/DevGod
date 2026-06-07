@@ -117,8 +117,6 @@ function runtimeRegistration(overrides: Partial<RuntimeProjectRegistrationRecord
     repoPath: overrides.repoPath ?? "/repo/devgod",
     runtimeProfile: overrides.runtimeProfile ?? "local-docker",
     dataRoot: overrides.dataRoot ?? "/home/eimi/.local/share/devgod/devgod",
-    qdrantUrl: overrides.qdrantUrl ?? "http://127.0.0.1:6333",
-    qdrantCollection: overrides.qdrantCollection ?? "devgod-memory",
     installManifestPath: overrides.installManifestPath ?? ".devgod/install-manifest.json",
     manifest: overrides.manifest ?? { version: 1 },
     provenance: overrides.provenance ?? { authority: "runtime_authoritative" },
@@ -2236,10 +2234,6 @@ test("executeDoctorCommandFromArgs works without a run id when a project is boot
         bindingsUseShippedTemplate: false,
         liveTrustReady: false,
         notes: ["review identity bindings file missing"]
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       })
     });
 
@@ -2302,10 +2296,6 @@ test("executeDoctorCommandFromArgs reports runtime mode derived from registratio
         bindingsUseShippedTemplate: false,
         liveTrustReady: false,
         notes: ["review identity bindings file missing"]
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       })
     });
 
@@ -2361,17 +2351,12 @@ test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review
         bindingsUseShippedTemplate: false,
         liveTrustReady: false,
         notes: ["review identity bindings file missing"]
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       })
     });
 
     assert.equal(report.ok, false);
     assert.equal(report.checks.registration.ok, true);
     assert.equal(report.checks.dataRoot.ok, true);
-    assert.equal(report.checks.qdrant.ok, true);
     assert.equal(report.checks.repoPath.ok, false);
     assert.equal(report.checks.reviewIdentity.ok, false);
     assert.deepEqual(report.advisories, ["review identity bindings file missing"]);
@@ -2421,10 +2406,6 @@ test("executeDoctorRepairCommandFromArgs repairs runtime registration drift with
         bindingsUseShippedTemplate: false,
         liveTrustReady: true,
         notes: []
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       }),
       async runBootstrapRepair() {
         bootstrapRepairCalls += 1;
@@ -2505,10 +2486,6 @@ test("executeDoctorRepairCommandFromArgs skips live-trust review identity remedi
         liveTrustReady: false,
         notes: ["review identity bindings file missing"]
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      }),
       async runBootstrapRepair() {
         bootstrapRepairCalls += 1;
       },
@@ -2580,10 +2557,6 @@ test("executeDoctorRepairCommandFromArgs replays setup for database connectivity
         bindingsUseShippedTemplate: false,
         liveTrustReady: true,
         notes: []
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       }),
       async runSetupRepair() {
         setupRepairCalls += 1;
@@ -2689,10 +2662,6 @@ test("executeDoctorRepairCommandFromArgs applies safe runtime reconcile after ru
         bindingsUseShippedTemplate: false,
         liveTrustReady: true,
         notes: []
-      }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
       }),
       async runBootstrapRepair() {
         bootstrapRepairCalls += 1;
@@ -2869,10 +2838,6 @@ test("executeDoctorRepairCommandFromArgs keeps execution blocked when semantic d
         liveTrustReady: true,
         notes: []
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      })
     });
 
     const runtimeState = await store.getProjectRuntimeState(context.project.id);
@@ -2978,10 +2943,6 @@ test("executeDoctorRepairCommandFromArgs resyncs contradictory local exports fro
         liveTrustReady: true,
         notes: []
       }),
-      inspectQdrant: async () => ({
-        ok: true,
-        summary: "qdrant reachable"
-      })
     });
 
     const activeExport = await readFile(path.join(directory, ".devgod", "ACTIVE"), "utf8");

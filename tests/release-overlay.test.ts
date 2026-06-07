@@ -28,8 +28,6 @@ test("release overlay verification script stays aligned with CI", async () => {
     /DEVGOD_REVIEW_IDENTITY_FIXTURES: \.devgod\/templates\/review-identity-adapter\.fixture\.json/
   );
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  live-migrations:/);
-  assert.match(ciWorkflow, /jobs:[\s\S]*\n\s+qdrant:\n\s+image: qdrant\/qdrant:v1\.13\.4/);
-  assert.match(ciWorkflow, /DEVGOD_QDRANT_URL: http:\/\/127\.0\.0\.1:6333/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  required-checks:/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  property-regressions:/);
   assert.match(ciWorkflow, /jobs:[\s\S]*\n  promptfoo-maintainer-boundary:/);
@@ -68,4 +66,5 @@ test("README documents the opt-in overlay release posture honestly", async () =>
   assert.match(readme, /npm run verify:release-overlay/);
   assert.match(readme, /npm run verify:migrations:live/);
   assert.match(readme, /any claim that a consuming repo is fit for production use/);
+  assert.match(readme, /lexical-first retrieval with pgvector semantic fallback/i);
 });

@@ -323,24 +323,8 @@ if [[ -z "${DEVGOD_DOCKER_CONTAINER_NAME:-}" ]]; then
   export DEVGOD_DOCKER_CONTAINER_NAME="devgod-postgres-${DEVGOD_PROJECT_SLUG}"
 fi
 
-if [[ -z "${DEVGOD_QDRANT_CONTAINER_NAME:-}" ]]; then
-  export DEVGOD_QDRANT_CONTAINER_NAME="devgod-qdrant-${DEVGOD_PROJECT_SLUG}"
-fi
-
 if [[ -z "${DEVGOD_RUNTIME_DATA_ROOT:-}" ]]; then
   export DEVGOD_RUNTIME_DATA_ROOT="$HOME/.local/share/devgod/${DEVGOD_PROJECT_SLUG}"
-fi
-
-if [[ -z "${DEVGOD_QDRANT_PORT:-}" ]]; then
-  export DEVGOD_QDRANT_PORT="6333"
-fi
-
-if [[ -z "${DEVGOD_QDRANT_GRPC_PORT:-}" ]]; then
-  export DEVGOD_QDRANT_GRPC_PORT="6334"
-fi
-
-if [[ -z "${DEVGOD_QDRANT_URL:-}" ]]; then
-  export DEVGOD_QDRANT_URL="http://127.0.0.1:${DEVGOD_QDRANT_PORT}"
 fi
 
 if [[ -z "${DEVGOD_POSTGRES_PORT:-}" ]]; then
@@ -372,30 +356,6 @@ wait_for_container_health() {
   exit 1
 }
 
-wait_for_qdrant_http() {
-  local qdrant_url="$1"
-
-  echo "waiting for devgod-qdrant to answer ${qdrant_url}"
-  for _ in {1..60}; do
-    if node -e '
-      const base = new URL(process.argv[1]);
-      if (!base.pathname.endsWith("/")) {
-        base.pathname = `${base.pathname}/`;
-      }
-      const endpoint = new URL("collections", base);
-      fetch(endpoint, { redirect: "error", signal: AbortSignal.timeout(2000) })
-        .then((response) => process.exit(response.ok ? 0 : 1))
-        .catch(() => process.exit(1));
-    ' "$qdrant_url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-
-  echo "devgod-qdrant did not answer health checks at ${qdrant_url}" >&2
-  exit 1
-}
-
 wait_for_postgres_native() {
   echo "waiting for PostgreSQL to accept local connections"
   for _ in {1..60}; do
@@ -422,27 +382,6 @@ ensure_native_postgres_tools() {
   apt_available || fail "native runtime mode requires PostgreSQL client tools or apt-get support"
   run_privileged apt-get update
   run_privileged apt-get install -y postgresql postgresql-contrib postgresql-client
-}
-
-ensure_native_qdrant_binary() {
-  if [[ -n "${DEVGOD_NATIVE_QDRANT_EXECUTABLE:-}" && -x "${DEVGOD_NATIVE_QDRANT_EXECUTABLE}" ]]; then
-    printf '%s\n' "${DEVGOD_NATIVE_QDRANT_EXECUTABLE}"
-    return
-  fi
-
-  if command -v qdrant >/dev/null 2>&1; then
-    command -v qdrant
-    return
-  fi
-
-  apt_available || fail "native runtime mode requires a qdrant binary on PATH or an apt package named qdrant"
-  local qdrant_package
-  qdrant_package="$(apt_search_first_package '^qdrant$')"
-  [[ -n "$qdrant_package" ]] || fail "native runtime mode could not find a qdrant package; install Qdrant locally or use managed mode"
-  run_privileged apt-get update
-  run_privileged apt-get install -y "$qdrant_package"
-  command -v qdrant >/dev/null 2>&1 || fail "qdrant package installed but qdrant binary is still unavailable"
-  command -v qdrant
 }
 
 ensure_native_pgvector_available() {
@@ -481,65 +420,11 @@ ensure_native_postgres_database() {
   run_as_postgres psql -v ON_ERROR_STOP=1 -d "${DEVGOD_POSTGRES_DB:-devgod}" -c "create extension if not exists vector"
 }
 
-install_qdrant_systemd_unit() {
-  local qdrant_executable="$1"
-  local service_name="${DEVGOD_NATIVE_QDRANT_SERVICE_NAME:-devgod-qdrant-${DEVGOD_PROJECT_SLUG}}"
-  local unit_dir="${DEVGOD_NATIVE_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
-  local config_root="${DEVGOD_NATIVE_QDRANT_CONFIG_ROOT:-${DEVGOD_RUNTIME_DATA_ROOT}/qdrant}"
-  local storage_dir="${DEVGOD_NATIVE_QDRANT_STORAGE_DIR:-${config_root}/storage}"
-  local snapshots_dir="${DEVGOD_NATIVE_QDRANT_SNAPSHOTS_DIR:-${config_root}/snapshots}"
-  local temp_dir="${DEVGOD_NATIVE_QDRANT_TEMP_DIR:-${config_root}/tmp}"
-  local config_path="${config_root}/config.yaml"
-  local unit_path="${unit_dir}/${service_name}.service"
-  local service_user="${DEVGOD_NATIVE_QDRANT_SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
-  local tmp_unit
-
-  mkdir -p "$config_root" "$storage_dir" "$snapshots_dir" "$temp_dir"
-  run_privileged mkdir -p "$unit_dir"
-
-  cat > "$config_path" <<EOF
-log_level: INFO
-storage:
-  storage_path: ${storage_dir}
-  snapshots_path: ${snapshots_dir}
-  temp_path: ${temp_dir}
-service:
-  host: 127.0.0.1
-  http_port: ${DEVGOD_QDRANT_PORT}
-  grpc_port: ${DEVGOD_QDRANT_GRPC_PORT}
-EOF
-
-  tmp_unit="$(mktemp)"
-  cat > "$tmp_unit" <<EOF
-[Unit]
-Description=Devgod Qdrant (${DEVGOD_PROJECT_SLUG})
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${service_user}
-ExecStart=${qdrant_executable} --config-path ${config_path}
-WorkingDirectory=${config_root}
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  run_privileged install -m 0644 "$tmp_unit" "$unit_path"
-  rm -f "$tmp_unit"
-  printf '%s\n' "$service_name"
-}
-
 setup_docker_runtime() {
   docker_runtime_available || fail "docker runtime mode selected but Docker is not available; use DEVGOD_RUNTIME_MODE=native or managed instead"
-  docker compose up -d devgod-postgres devgod-qdrant
+  docker compose up -d devgod-postgres
 
   wait_for_container_health "${DEVGOD_DOCKER_CONTAINER_NAME}" "devgod-postgres"
-  wait_for_container_health "${DEVGOD_QDRANT_CONTAINER_NAME}" "devgod-qdrant"
-  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
 }
 
 setup_native_runtime() {
@@ -550,17 +435,6 @@ setup_native_runtime() {
   wait_for_postgres_native
   ensure_native_pgvector_available
   ensure_native_postgres_database
-
-  local qdrant_executable qdrant_service_name
-  qdrant_executable="$(ensure_native_qdrant_binary)"
-  qdrant_service_name="$(install_qdrant_systemd_unit "$qdrant_executable")"
-  run_privileged systemctl daemon-reload
-  run_privileged systemctl enable --now "$qdrant_service_name"
-  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
-}
-
-setup_managed_runtime() {
-  wait_for_qdrant_http "${DEVGOD_QDRANT_URL}"
 }
 
 requested_runtime_mode="$(normalize_runtime_mode "${DEVGOD_RUNTIME_MODE:-auto}")"
@@ -576,7 +450,6 @@ case "$runtime_mode" in
     setup_native_runtime
     ;;
   managed)
-    setup_managed_runtime
     ;;
   *)
     fail "unsupported runtime mode: $runtime_mode"
@@ -613,5 +486,4 @@ echo "runtime mode: ${DEVGOD_RUNTIME_MODE}"
 echo "workspace: ${DEVGOD_WORKSPACE_SLUG:-default}"
 echo "project: ${DEVGOD_PROJECT_SLUG:-unknown}"
 echo "database: configured"
-echo "qdrant: configured"
 echo "playwright: configured"

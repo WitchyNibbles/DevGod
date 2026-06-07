@@ -17,12 +17,6 @@ import type {
   WorkflowDocumentRecord,
   WorkspaceRecord
 } from "../domain/types.ts";
-import {
-  buildArtifactSearchResult,
-  canRoleAccessRetrievalMetadata,
-  compareMemorySearchResults
-} from "../core/policy.ts";
-import { DEFAULT_RETRIEVAL_ROLE } from "../domain/contracts.ts";
 import { PostgresEmbeddingJobs } from "./postgres-embedding-jobs.ts";
 import { searchMemory } from "./postgres-memory-search.ts";
 import type {
@@ -34,7 +28,6 @@ import type {
   LeaseEmbeddingJobsInput,
   QueueEmbeddingJobInput
 } from "./types.ts";
-import type { ArtifactVectorIndex } from "./qdrant-artifact-index.ts";
 
 export interface SqlQueryResult<Row> {
   rows: Row[];
@@ -64,12 +57,6 @@ interface ArtifactHydrationRow {
   createdAt: string;
 }
 
-interface RuntimeRegistrationLookupRow {
-  runtimeProfile: string | null;
-  qdrantUrl: string | null;
-  qdrantCollection: string | null;
-}
-
 function now(): string {
   return new Date().toISOString();
 }
@@ -89,19 +76,10 @@ async function withTransaction<T>(client: SqlClient, work: () => Promise<T>): Pr
 export class PostgresStore implements DevgodStore {
   private readonly client: SqlClient;
   private readonly embeddingJobs: PostgresEmbeddingJobs;
-  private readonly artifactVectorIndex?: ArtifactVectorIndex | undefined;
 
-  constructor(
-    client: SqlClient,
-    options: {
-      artifactVectorIndex?: ArtifactVectorIndex | undefined;
-    } = {}
-  ) {
+  constructor(client: SqlClient) {
     this.client = client;
-    this.artifactVectorIndex = options.artifactVectorIndex;
-    this.embeddingJobs = new PostgresEmbeddingJobs(client, {
-      artifactVectorIndex: this.artifactVectorIndex
-    });
+    this.embeddingJobs = new PostgresEmbeddingJobs(client);
   }
 
   async ensureProjectContext(params: {
@@ -184,20 +162,16 @@ export class PostgresStore implements DevgodStore {
          repo_path,
          runtime_profile,
          data_root,
-         qdrant_url,
-         qdrant_collection,
          install_manifest_path,
          manifest,
          provenance
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
        on conflict (project_id) do update
        set workspace_id = excluded.workspace_id,
            repo_path = excluded.repo_path,
            runtime_profile = excluded.runtime_profile,
            data_root = excluded.data_root,
-           qdrant_url = excluded.qdrant_url,
-           qdrant_collection = excluded.qdrant_collection,
            install_manifest_path = excluded.install_manifest_path,
            manifest = excluded.manifest,
            provenance = excluded.provenance,
@@ -208,8 +182,6 @@ export class PostgresStore implements DevgodStore {
         registration.repoPath,
         registration.runtimeProfile,
         registration.dataRoot,
-        registration.qdrantUrl ?? null,
-        registration.qdrantCollection,
         registration.installManifestPath ?? null,
         JSON.stringify(registration.manifest),
         JSON.stringify(registration.provenance)
@@ -227,8 +199,6 @@ export class PostgresStore implements DevgodStore {
           'repoPath', repo_path,
           'runtimeProfile', runtime_profile,
           'dataRoot', data_root,
-          'qdrantUrl', qdrant_url,
-          'qdrantCollection', qdrant_collection,
           'installManifestPath', install_manifest_path,
           'manifest', manifest,
           'provenance', provenance,
@@ -1071,16 +1041,6 @@ export class PostgresStore implements DevgodStore {
         );
       }
     });
-
-    const registration = this.artifactVectorIndex ? await this.lookupRuntimeRegistration(input.projectId) : undefined;
-    if (this.artifactVectorIndex && registration?.qdrantUrl && registration.qdrantCollection && registration.runtimeProfile) {
-      await this.artifactVectorIndex.deleteProjectArtifacts({
-        baseUrl: registration.qdrantUrl,
-        runtimeProfile: registration.runtimeProfile,
-        collection: registration.qdrantCollection,
-        projectId: input.projectId
-      });
-    }
   }
 
   async queueEmbeddingJob(input: QueueEmbeddingJobInput): Promise<EmbeddingJobRecord> {
@@ -1116,84 +1076,7 @@ export class PostgresStore implements DevgodStore {
     embeddingModel?: string | undefined;
     requesterRole?: RetrievalRole | undefined;
   }): Promise<SearchMemoryResult[]> {
-    const baseResults = await searchMemory(this.client, params);
-
-    if (
-      !this.artifactVectorIndex ||
-      !params.queryEmbedding ||
-      params.queryEmbedding.length === 0
-    ) {
-      return baseResults;
-    }
-
-    const projectId = `project:${params.workspaceSlug}:${params.projectSlug}`;
-    const requesterRole = params.requesterRole ?? DEFAULT_RETRIEVAL_ROLE;
-    const registration = await this.lookupRuntimeRegistration(projectId);
-    if (!registration?.qdrantUrl || !registration.qdrantCollection || !registration.runtimeProfile) {
-      return baseResults;
-    }
-
-    const artifactMatches = await this.artifactVectorIndex.queryArtifactMatches({
-      baseUrl: registration.qdrantUrl,
-      runtimeProfile: registration.runtimeProfile,
-      collection: registration.qdrantCollection,
-      projectId,
-      vector: params.queryEmbedding,
-      limit: Math.min(Math.max(params.limit * 3, 15), 100)
-    });
-
-    if (artifactMatches.length === 0) {
-      return baseResults;
-    }
-
-    const hydratedArtifacts = await this.loadArtifactsByIds(params.projectSlug, artifactMatches.map((match) => match.id));
-    const hydratedById = new Map(hydratedArtifacts.map((artifact) => [artifact.id, artifact]));
-    const qdrantResults = artifactMatches
-      .map((match) => {
-        const artifact = hydratedById.get(match.id);
-        if (!artifact) {
-          return undefined;
-        }
-
-        if (!canRoleAccessRetrievalMetadata(artifact.metadata, requesterRole)) {
-          return undefined;
-        }
-
-        const baseResult = buildArtifactSearchResult(artifact, params.query, params.projectSlug);
-        return {
-          ...baseResult,
-          score: baseResult.score + Math.max(0, match.score) * 6
-        };
-      })
-      .filter((result): result is SearchMemoryResult => Boolean(result));
-
-    if (qdrantResults.length === 0) {
-      return baseResults;
-    }
-
-    const merged = new Map<string, SearchMemoryResult>();
-    for (const result of [...baseResults, ...qdrantResults]) {
-      const existing = merged.get(result.id);
-      if (!existing || result.score > existing.score) {
-        merged.set(result.id, result);
-      }
-    }
-
-    return [...merged.values()].sort(compareMemorySearchResults).slice(0, params.limit);
-  }
-
-  private async lookupRuntimeRegistration(projectId: string): Promise<RuntimeRegistrationLookupRow | undefined> {
-    const result = await this.client.query<RuntimeRegistrationLookupRow>(
-      `select
-         runtime_profile as "runtimeProfile",
-         qdrant_url as "qdrantUrl",
-         qdrant_collection as "qdrantCollection"
-       from runtime_project_registrations
-       where project_id = $1`,
-      [projectId]
-    );
-
-    return result.rows[0];
+    return searchMemory(this.client, params);
   }
 
   private async loadArtifactsByIds(

@@ -4,8 +4,6 @@ create table if not exists runtime_project_registrations (
   repo_path text not null,
   runtime_profile text not null,
   data_root text not null,
-  qdrant_url text,
-  qdrant_collection text not null,
   install_manifest_path text,
   manifest jsonb not null default '{}'::jsonb,
   provenance jsonb not null default '{}'::jsonb,

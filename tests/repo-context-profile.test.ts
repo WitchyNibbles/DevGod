@@ -68,8 +68,6 @@ test("executeRefreshRepoContextCommandFromArgs stores the repo context profile i
     repoPath: directory,
     runtimeProfile: "local-docker",
     dataRoot: path.join(directory, "runtime-root"),
-    qdrantUrl: "http://127.0.0.1:6333/",
-    qdrantCollection: "devgod-memory",
     installManifestPath: ".devgod/install-manifest.json",
     manifest: {},
     provenance: { authority: "runtime_authoritative" },

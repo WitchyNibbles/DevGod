@@ -66,7 +66,7 @@ test("getPlanContextSurface wires query embedding through the runtime surface", 
       }
     | undefined;
 
-  const result = await getPlanContextSurface(["--query", "qdrant retrieval", "--format", "json"], {
+  const result = await getPlanContextSurface(["--query", "artifact retrieval fallback", "--format", "json"], {
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
       DEVGOD_PROJECT_SLUG: "devgod",
@@ -108,7 +108,7 @@ test("getPlanContextSurface wires query embedding through the runtime surface", 
         assert.equal(env.DEVGOD_EMBEDDING_MODEL, "devgod-local-hash-1536");
         return async ({ model, text }) => {
           assert.equal(model, "devgod-local-hash-1536");
-          assert.equal(text, "qdrant retrieval");
+          assert.equal(text, "artifact retrieval fallback");
           return [0.25, 0.75];
         };
       }
@@ -157,8 +157,6 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
                 repoPath: process.cwd(),
                 runtimeProfile: "managed",
                 dataRoot: process.cwd(),
-                qdrantUrl: "http://127.0.0.1:6333",
-                qdrantCollection: "devgod-memory",
                 installManifestPath: ".devgod/install-manifest.json",
                 manifest: {},
                 provenance: {},
@@ -384,12 +382,6 @@ test("getLoopSurface wires execution-plan and optional safe recovery through the
               assert.fail("searchMemory should not be called by loop");
               return [];
             }
-          };
-        },
-        async inspectQdrant() {
-          return {
-            ok: true,
-            summary: "qdrant reachable"
           };
         },
         async inspectReviewIdentity() {

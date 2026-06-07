@@ -236,7 +236,7 @@ test("executePlanContextCommandFromArgs derives a query embedding when an embedd
       }
     | undefined;
 
-  await executePlanContextCommandFromArgs(["--query", "qdrant retrieval"], {
+  await executePlanContextCommandFromArgs(["--query", "artifact retrieval fallback"], {
     cwd: isolatedCwd,
     env: {
       DEVGOD_WORKSPACE_SLUG: "team",
@@ -258,7 +258,7 @@ test("executePlanContextCommandFromArgs derives a query embedding when an embedd
     },
     async embedQuery({ model, text }: { model: string; text: string }) {
       assert.equal(model, "devgod-local-hash-1536");
-      assert.equal(text, "qdrant retrieval");
+      assert.equal(text, "artifact retrieval fallback");
       return [0.25, 0.75];
     }
   } as never);
