@@ -2600,6 +2600,7 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
     }
 
     await execFileAsync("git", ["init"], { cwd: targetRoot });
+    await execFileAsync("git", ["switch", "-c", "feature/test-git-guard"], { cwd: targetRoot });
     await execFileAsync("git", ["config", "user.email", "devgod@example.com"], { cwd: targetRoot });
     await execFileAsync("git", ["config", "user.name", "Devgod Test"], { cwd: targetRoot });
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');

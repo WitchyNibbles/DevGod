@@ -45,6 +45,7 @@ const shippedPackagePluginRuntimeEntries = [
 ] as const;
 
 const shippedPackageOperatorScriptEntries = [
+  "scripts/check-devgod-branch-name.sh",
   "scripts/check-devgod-commit-msg.sh",
   "scripts/check-devgod-git-guard.sh",
   "scripts/check-devgod-happy-path.sh",
