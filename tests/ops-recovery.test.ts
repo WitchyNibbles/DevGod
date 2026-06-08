@@ -25,15 +25,22 @@ import type {
 import { MemoryStore } from "../src/store/memory-store.ts";
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates: TaskPacketInput["qualityGates"] = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates: TaskPacketInput["qualityGates"] =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? [...qualityGates, "completion_audit_required"]
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -112,20 +119,23 @@ function reasoningQualityBlock(
   };
 }
 
-function gitNexusObservation(
-  overrides: Partial<import("../src/admin/gitnexus.ts").GitNexusStatusObservation> = {}
-): import("../src/admin/gitnexus.ts").GitNexusStatusObservation {
+function graphifyObservation(
+  overrides: Partial<import("../src/admin/graphify.ts").GraphifyStatusObservation> = {}
+): import("../src/admin/graphify.ts").GraphifyStatusObservation {
   return {
     authorityLabel: "derived_only",
     state: "unconfigured",
     configured: false,
     configuredScopes: [],
     configPaths: [],
-    repoIndexed: false,
-    indexRoot: "/repo/.gitnexus",
-    metaPath: "/repo/.gitnexus/meta.json",
-    recommendedCommand: "npx gitnexus analyze --skip-agents-md",
-    notes: ["gitnexus MCP config was not detected in project or user Codex config"],
+    graphBuilt: false,
+    graphRoot: "/repo/graphify-out",
+    graphPath: "/repo/graphify-out/graph.json",
+    wikiPath: "/repo/graphify-out/index.md",
+    recommendedSetupCommand: "npm run devgod:graphify:codex-full",
+    recommendedBuildCommand: "npm run devgod:graphify:build",
+    recommendedUpdateCommand: "npm run devgod:graphify:update",
+    notes: ["graphify MCP config was not detected in project or user Codex config"],
     ...overrides
   };
 }
@@ -308,17 +318,16 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
         liveTrustReady: false,
         notes: ["adapter module not configured"]
       }),
-      inspectGitNexus: async () =>
-        gitNexusObservation({
+      inspectGraphify: async () =>
+        graphifyObservation({
           state: "stale",
           configured: true,
           configuredScopes: ["project"],
           configPaths: ["/repo/.codex/config.toml"],
-          repoIndexed: true,
-          indexedAt: "2026-05-01T00:00:00.000Z",
-          indexedCommit: "abc123",
+          graphBuilt: true,
+          graphUpdatedAt: "2026-05-01T00:00:00.000Z",
           headCommit: "def456",
-          notes: ["gitnexus index is behind the current git HEAD"]
+          notes: ["graphify graph is behind the current repo snapshot"]
         }),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
@@ -340,9 +349,9 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
 
   assert.equal(result.format, "json");
   assert.match(result.report.alerts.join(" "), /stalled task: plan/);
-  assert.match(result.report.alerts.join(" "), /gitnexus advisory index is stale/);
+  assert.match(result.report.alerts.join(" "), /graphify repo graph is stale/);
   assert.match(result.report.nextActions.join(" "), /recover reset-task:plan/);
-  assert.match(result.report.nextActions.join(" "), /npx gitnexus analyze --skip-agents-md/);
+  assert.match(result.report.nextActions.join(" "), /devgod:graphify:update/);
 });
 
 test("executeRecoverCommandFromArgs applies safe recovery to requeue stalled work", async () => {
@@ -483,7 +492,7 @@ test("executeOpsCommandFromArgs surfaces reasoning warnings for complete runs", 
       liveTrustReady: true,
       notes: []
     }),
-    inspectGitNexus: async () => gitNexusObservation(),
+    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -533,17 +542,16 @@ test("executeOpsCommandFromArgs resolves latest runs and can return text output"
       liveTrustReady: true,
       notes: []
     }),
-    inspectGitNexus: async () =>
-      gitNexusObservation({
+    inspectGraphify: async () =>
+      graphifyObservation({
         state: "ready",
         configured: true,
         configuredScopes: ["project"],
         configPaths: ["/repo/.codex/config.toml"],
-        repoIndexed: true,
-        indexedAt: "2026-05-06T00:00:00.000Z",
-        indexedCommit: "abc123",
+        graphBuilt: true,
+        graphUpdatedAt: "2026-05-06T00:00:00.000Z",
         headCommit: "abc123",
-        notes: ["gitnexus advisory context is ready"]
+        notes: ["graphify repo context is ready"]
       }),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
@@ -619,7 +627,7 @@ test("executeOpsCommandFromArgs surfaces workflow integrity contradictions as al
         liveTrustReady: true,
         notes: []
       }),
-      inspectGitNexus: async () => gitNexusObservation(),
+      inspectGraphify: async () => graphifyObservation(),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1326,7 +1334,8 @@ test("executeOpsCommandFromArgs surfaces continue_analysis guidance when autonom
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rewrite", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -1338,7 +1347,8 @@ test("executeOpsCommandFromArgs surfaces continue_analysis guidance when autonom
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",
@@ -1420,7 +1430,7 @@ test("executeOpsCommandFromArgs surfaces continue_analysis guidance when autonom
       liveTrustReady: true,
       notes: []
     }),
-    inspectGitNexus: async () => gitNexusObservation(),
+    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -1492,6 +1502,34 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
       lastUpdatedAt: new Date().toISOString()
     }
   ]);
+  await service.upsertUnderstandingMaps(run.id, [
+    "repo_map",
+    "subsystems",
+    "route_map",
+    "model_map",
+    "integration_map",
+    "authz_map",
+    "config_coupling",
+    "runtime_side_effects"
+  ].map((kind) => ({
+    kind,
+    itemCount: 1,
+    analyzedCount: 1,
+    sourceRefs: ["src/core/service.ts:1"],
+    evidenceRefs: ["tests/ops-recovery.test.ts"],
+    updatedAt: new Date().toISOString()
+  })));
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:ops-recovery-checkpoint-workflow-proof",
+      targetId: "service:workflow-proof",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["approves runtime workflow proof"],
+      evidenceRefs: ["tests/ops-recovery.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
   await service.recordProgressProof(run.id, {
     cycle: 1,
     proofId: "proof-1",
@@ -1517,7 +1555,7 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
       liveTrustReady: true,
       notes: []
     }),
-    inspectGitNexus: async () => gitNexusObservation(),
+    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -1560,7 +1598,8 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
     )
   );
   assert.deepEqual(result.report.nextActions, [
-    "operator intervention required: operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)"
+    "operator intervention required: operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
+    "npm run devgod:graphify:codex-full"
   ]);
 });
 
@@ -1614,7 +1653,7 @@ test("executeOpsCommandFromArgs surfaces blocked daemon continuation state even 
         liveTrustReady: true,
         notes: []
       }),
-      inspectGitNexus: async () => gitNexusObservation(),
+      inspectGraphify: async () => graphifyObservation(),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1856,7 +1895,8 @@ test("executeLoopCommandFromArgs executes supported continue_analysis workflow-p
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rewrite", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -1868,7 +1908,8 @@ test("executeLoopCommandFromArgs executes supported continue_analysis workflow-p
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",
@@ -2048,7 +2089,8 @@ test("executeLoopCommandFromArgs resolves task-target blocking gaps through work
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rewrite", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -2060,7 +2102,8 @@ test("executeLoopCommandFromArgs resolves task-target blocking gaps through work
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",
@@ -2308,6 +2351,9 @@ test("executeLoopCommandFromArgs resumes checkpoint task targets through workflo
     recentEvidenceRefs: ["src/core/service.ts:1"],
     openGaps: [],
     nextActions: ["resume the approved task target"],
+    compressedContextRef: "memory://cp-1",
+    compressedContextSummary: "workflow proof is ready; resume the checkpoint task target before memory compaction closes out",
+    compressedContextSourceRefs: ["tests/ops-recovery.test.ts"],
     createdAt: new Date().toISOString()
   });
 

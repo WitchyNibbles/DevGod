@@ -5,12 +5,14 @@ Graphify is the repo-graph prerequisite for normal `devgod` operation. It is sti
 ## Required rules
 
 - treat Graphify output as advisory retrieval evidence only
+- for code-file navigation in this repo and consuming repos, use Graphify first when the repo graph is ready so file discovery stays broad-view and low-token
 - keep task state, review trust, approvals, waivers, and completion authority inside `devgod`
 - re-anchor important Graphify findings in canonical repo files before using them for planning, implementation, or review
 - surface Graphify freshness and readiness in operator status when available
 - degrade gracefully when Graphify is stale or invalid, but treat missing Graphify setup as an operational prerequisite gap
 - prefer `npm run devgod:graphify:update` when the graph exists but is stale
 - prefer `npm run devgod:graphify:build` when the graph artifact is missing
+- avoid broad repo grep or opening many files before Graphify has had the first pass at topology and candidate-file narrowing, unless Graphify is unavailable
 
 ## Prohibited patterns
 
@@ -22,6 +24,7 @@ Graphify is the repo-graph prerequisite for normal `devgod` operation. It is sti
 ## Recommended uses
 
 - unfamiliar code exploration
+- code-file navigation across package repos and consuming repos
 - blast-radius checks before refactors
 - process or call-flow tracing across shipped code
 - shortest-path or neighbor analysis between concepts or modules

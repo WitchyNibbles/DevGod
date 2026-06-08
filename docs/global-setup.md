@@ -138,18 +138,34 @@ Consuming repos can define multiple named review backends in one reviewed adapte
 
 The operator commands surface that selection so the repo can detect ambiguous or incomplete review trust before relying on recorded approvals.
 
-## 🔌 Optional GitNexus
+## 🕸️ Graphify Repo Graph
 
-GitNexus is supported as advisory evidence, not workflow authority.
+Graphify is the shipped repo-graph integration for DevGod. It is mandatory for DevGod operation, even though its retrieval output remains advisory rather than workflow authority.
+DevGod should use Graphify first for code-file navigation in this repo and consuming repos so agents get a broader structural view before opening files and can keep token usage lower.
+DevGod ships two required Graphify setup modes:
+
+- default mode: code-only and zero-key, building from `src/` into the repo-root `graphify-out/`
+- optional full mode: mixed code-and-docs extraction driven from an active Codex session, so Graphify can use the Codex-backed model path instead of a separate Graphify API key
 
 Typical path:
 
-1. install or upgrade DevGod with `--with-gitnexus`
+1. install or upgrade DevGod
 2. run `npm install`
-3. run `npm run devgod:gitnexus:analyze`
+3. install Graphify with `uv tool install graphifyy` or `pipx install graphifyy`
+4. run `npm run devgod:graphify:build`
 
-The shipped config uses `npx --no-install gitnexus mcp`.
-The analyzer intentionally avoids rewriting managed `AGENTS.md` content by default.
+The shipped Codex config uses `uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json`.
+Use `npm run devgod:graphify:update` after meaningful source changes so manager and specialist agents see fresh graph-backed context.
+
+For the required full mixed-corpus alternative without separate Graphify API keys:
+
+1. run `npm run devgod:graphify:codex-full`
+2. follow the printed steps
+3. register Graphify with Codex at the user level if needed: `graphify install --platform codex`
+4. from an active Codex session in the repo, run `/graphify .`
+
+Use the user-level Codex install, not `graphify install --project --platform codex`, unless you intentionally want Graphify to mutate repo-local `AGENTS.md` or `.codex/hooks.json` outside DevGod's managed surface.
+DevGod verify/setup should be treated as incomplete until one of the Graphify build paths has produced `graphify-out/graph.json`.
 
 ## 🧱 Why the split matters
 

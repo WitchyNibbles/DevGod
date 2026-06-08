@@ -4,7 +4,6 @@ export interface InstallOptions {
   sourceRoot: string;
   targetRoot: string;
   dryRun?: boolean;
-  withGitNexus?: boolean;
   withGrafana?: boolean;
 }
 
@@ -30,6 +29,7 @@ export interface VerifySummary {
   modified: string[];
   orphans: string[];
   policyDrift: string[];
+  prerequisiteDrift: string[];
 }
 
 export interface WorkflowScaffoldOptions {

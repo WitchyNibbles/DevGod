@@ -17,9 +17,9 @@ plugin_hooks = true
 max_threads = 8
 max_depth = 2
 
-[mcp_servers.gitnexus]
-command = "npx"
-args = ["--no-install", "gitnexus", "mcp"]
+[mcp_servers.graphify]
+command = "uv"
+args = ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]
 
 [mcp_servers.playwright]
 command = "npx"

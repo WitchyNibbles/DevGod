@@ -14,15 +14,22 @@ import { MemoryStore } from "../src/store/memory-store.ts";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates: TaskPacketInput["qualityGates"] = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates: TaskPacketInput["qualityGates"] =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? [...qualityGates, "completion_audit_required"]
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -92,20 +99,23 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   };
 }
 
-function gitNexusObservation(
-  overrides: Partial<import("../src/admin/gitnexus.ts").GitNexusStatusObservation> = {}
-): import("../src/admin/gitnexus.ts").GitNexusStatusObservation {
+function graphifyObservation(
+  overrides: Partial<import("../src/admin/graphify.ts").GraphifyStatusObservation> = {}
+): import("../src/admin/graphify.ts").GraphifyStatusObservation {
   return {
     authorityLabel: "derived_only",
     state: "unconfigured",
     configured: false,
     configuredScopes: [],
     configPaths: [],
-    repoIndexed: false,
-    indexRoot: "/repo/.gitnexus",
-    metaPath: "/repo/.gitnexus/meta.json",
-    recommendedCommand: "npx gitnexus analyze --skip-agents-md",
-    notes: ["gitnexus MCP config was not detected in project or user Codex config"],
+    graphBuilt: false,
+    graphRoot: "/repo/graphify-out",
+    graphPath: "/repo/graphify-out/graph.json",
+    wikiPath: "/repo/graphify-out/index.md",
+    recommendedSetupCommand: "npm run devgod:graphify:codex-full",
+    recommendedBuildCommand: "npm run devgod:graphify:build",
+    recommendedUpdateCommand: "npm run devgod:graphify:update",
+    notes: ["graphify MCP config was not detected in project or user Codex config"],
     ...overrides
   };
 }
@@ -159,7 +169,7 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
       liveTrustReady: false,
       notes: ["adapter module not configured"]
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 0,
     now: "2100-01-01T00:00:00.000Z"
   });
@@ -190,7 +200,7 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
     /run-level workflow proof may still be valid, but no autonomous continuation target is active/
   );
   assert.equal(report.reviewIdentity.liveTrustReady, false);
-  assert.equal(report.gitNexus.state, "unconfigured");
+  assert.equal(report.graphify.state, "unconfigured");
   assert.deepEqual(report.reviewIdentity.notes, ["adapter module not configured"]);
 });
 
@@ -325,7 +335,7 @@ test("buildOperatorStatusReport exposes autonomous coverage and resume guidance 
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-15T10:07:00.000Z"
   });
@@ -394,7 +404,7 @@ test("buildOperatorStatusReport reflects generated code-backed understanding inv
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T12:32:00.000Z"
   });
@@ -479,7 +489,7 @@ test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguo
         liveTrustReady: true,
         notes: []
       },
-      gitNexus: gitNexusObservation(),
+      graphify: graphifyObservation(),
       staleAfterDays: 1,
       now: "2026-05-20T16:02:00.000Z"
     });
@@ -555,7 +565,7 @@ test("buildOperatorStatusReport makes expanded standard-delivery gaps and profil
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T15:01:00.000Z"
   });
@@ -699,7 +709,7 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     now: "2026-05-20T13:12:00.000Z"
   });
 
@@ -833,7 +843,7 @@ test("buildOperatorStatusReport explains withheld rewrite readiness when invento
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T16:21:00.000Z"
   });
@@ -940,7 +950,7 @@ test("buildOperatorStatusReport counts invariants toward rewrite comprehension c
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:01:00.000Z"
   });
@@ -1017,7 +1027,7 @@ test("buildOperatorStatusReport exposes duplicate family counts and centralizati
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:21:00.000Z"
   });
@@ -1115,7 +1125,7 @@ test("buildOperatorStatusReport exposes architecture and migration evidence coun
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:48:00.000Z"
   });
@@ -1219,7 +1229,7 @@ test("buildOperatorStatusReport surfaces missing modernization artifact classes 
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T10:01:00.000Z"
   });
@@ -1291,7 +1301,7 @@ test("buildOperatorStatusReport surfaces operational checkpoint compaction and s
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     now: "2026-05-20T13:44:00.000Z"
   });
 
@@ -1376,7 +1386,7 @@ test("buildOperatorStatusReport surfaces external eval posture and explicit revi
       liveTrustReady: true,
       notes: []
     },
-    gitNexus: gitNexusObservation(),
+    graphify: graphifyObservation(),
     now: "2026-05-20T14:04:00.000Z"
   });
 
@@ -1442,13 +1452,13 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGitNexus: async () =>
-        gitNexusObservation({
-          state: "missing_index",
+      inspectGraphify: async () =>
+        graphifyObservation({
+          state: "missing_graph",
           configured: true,
           configuredScopes: ["project"],
           configPaths: [path.join(directory, ".codex/config.toml")],
-          notes: ["gitnexus MCP is configured but this repo has not been indexed yet"]
+          notes: ["graphify MCP is configured but this repo graph has not been built yet"]
         })
     });
 
@@ -1459,7 +1469,7 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
     assert.deepEqual(report.reviewIdentity.availableBackends, []);
     assert.equal(report.reviewIdentity.bindingsPresent, true);
     assert.equal(report.reviewIdentity.liveTrustReady, false);
-    assert.equal(report.gitNexus.state, "missing_index");
+    assert.equal(report.graphify.state, "missing_graph");
     assert.match(
       report.reviewIdentity.notes.join(" "),
       /still contains shipped placeholder values/
@@ -1498,11 +1508,11 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGitNexus: async () => gitNexusObservation()
+      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.reviewIdentity.liveTrustReady, false);
-    assert.equal(report.gitNexus.state, "unconfigured");
+    assert.equal(report.graphify.state, "unconfigured");
     assert.match(report.reviewIdentity.notes.join(" "), /bindings file is invalid and cannot be trusted/);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -1560,7 +1570,7 @@ test("executeStatusCommandFromArgs surfaces contradictory local completion claim
       getProjectRuntimeState(projectId) {
         return store.getProjectRuntimeState(projectId);
       },
-      inspectGitNexus: async () => gitNexusObservation()
+      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.integrity.status, "contradicted");
@@ -1666,7 +1676,7 @@ test("executeStatusCommandFromArgs marks advisory continuation as operator-requi
         }
       });
     },
-    inspectGitNexus: async () => gitNexusObservation()
+    inspectGraphify: async () => graphifyObservation()
   });
 
   assert.equal(report.autonomous.resume.executionMode, "operator_required");
@@ -1756,7 +1766,7 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGitNexus: async () => gitNexusObservation()
+      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.daemon.continuation?.state, "blocked");
@@ -1935,7 +1945,7 @@ test("executeStatusCommandFromArgs exposes daemon supervisor state with action h
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGitNexus: async () => gitNexusObservation()
+      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.daemon.supervisor?.state, "blocked");
@@ -2011,7 +2021,7 @@ test("executeStatusCommandFromArgs exposes daemon supervisor state with action h
         getStatusSnapshot(runId) {
           return service.getStatus(runId);
         },
-        inspectGitNexus: async () => gitNexusObservation()
+        inspectGraphify: async () => graphifyObservation()
       }
     );
     assert.deepEqual(allRunsReport.daemon.supervisor?.history, [
@@ -2099,17 +2109,16 @@ test("executeStatusCommandFromArgs reports multi-backend review adapters and req
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGitNexus: async () =>
-        gitNexusObservation({
+      inspectGraphify: async () =>
+        graphifyObservation({
           state: "ready",
           configured: true,
           configuredScopes: ["user"],
           configPaths: [path.join(directory, ".codex/config.toml")],
-          repoIndexed: true,
-          indexedAt: "2026-05-06T00:00:00.000Z",
-          indexedCommit: "abc123",
+          graphBuilt: true,
+          graphUpdatedAt: "2026-05-06T00:00:00.000Z",
           headCommit: "abc123",
-          notes: ["gitnexus advisory context is ready"]
+          notes: ["graphify repo context is ready"]
         })
     });
 
@@ -2166,7 +2175,7 @@ test("executeDoctorCommandFromArgs fails when a bootstrapped project has no runt
     getProjectRuntimeRegistration(projectId) {
       return store.getProjectRuntimeRegistration(projectId);
     },
-    inspectGitNexus: async () => gitNexusObservation(),
+    inspectGraphify: async () => graphifyObservation(),
     inspectReviewIdentity: async () => ({
       authorityLabel: "derived_only",
       adapterConfigured: false,
@@ -2340,7 +2349,7 @@ test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review
       getProjectRuntimeRegistration(projectId) {
         return store.getProjectRuntimeRegistration(projectId);
       },
-      inspectGitNexus: async () => gitNexusObservation(),
+      inspectGraphify: async () => graphifyObservation(),
       inspectReviewIdentity: async () => ({
         authorityLabel: "derived_only",
         adapterConfigured: true,

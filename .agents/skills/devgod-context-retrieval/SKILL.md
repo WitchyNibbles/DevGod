@@ -14,7 +14,8 @@ Goal: give the agent the right context — not all context.
 1. `.devgod/memory/` — reviewed durable facts (highest)
 2. Postgres runtime — `npx tsx src/admin.ts status` for task/review records
 3. Qdrant semantic index — `src/store/qdrant-artifact-index.ts` (advisory)
-4. Repo grep / filesystem scan (lowest)
+4. Graphify repo graph — `graphify-out/graph.json` and Graphify MCP tools for code-file navigation in this repo and consuming repos (advisory)
+5. Repo grep / filesystem scan (lowest)
 
 ## Retrieval steps
 
@@ -24,6 +25,8 @@ Goal: give the agent the right context — not all context.
 4. Scan in descending order; stop when the question is answered with sufficient confidence.
 5. If lower-authority results contradict higher-authority results, surface the conflict — do not silently promote.
 6. Trim to the token budget before returning: cut filler, keep decision signal.
+7. When Graphify is present and fresh, use it first for code-file topology, ownership, neighbor, and path questions before broad grep or wide file-open scans.
+8. Use Graphify to narrow the file set, then verify in canonical repo files.
 
 ## Token budget defaults
 

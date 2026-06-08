@@ -17,6 +17,10 @@ export interface ParsedSkillDocument {
   body: string;
 }
 
+export interface SkillDocumentValidationOptions {
+  expectedName?: string | undefined;
+}
+
 export interface VendoredSkillVerificationIssue {
   localSkillId: string;
   problem: string;
@@ -80,6 +84,35 @@ export function parseSkillDocument(content: string): ParsedSkillDocument {
     frontmatter,
     body: normalized.slice(frontmatterMatch[0].length).trimStart()
   };
+}
+
+export function validateSkillDocument(
+  content: string,
+  options: SkillDocumentValidationOptions = {}
+): string[] {
+  const parsed = parseSkillDocument(content);
+  const issues: string[] = [];
+  const name = parsed.frontmatter.name?.trim() ?? "";
+  const description = parsed.frontmatter.description?.trim() ?? "";
+  const body = parsed.body.trim();
+
+  if (name.length === 0) {
+    issues.push("SKILL.md frontmatter requires name");
+  }
+
+  if (options.expectedName && name !== options.expectedName) {
+    issues.push(`SKILL.md frontmatter name must be ${options.expectedName}`);
+  }
+
+  if (description.length === 0) {
+    issues.push("SKILL.md frontmatter requires description");
+  }
+
+  if (body.length === 0) {
+    issues.push("SKILL.md body is required");
+  }
+
+  return issues;
 }
 
 export function defaultVendoredSkillSourceRoots(): string[] {

@@ -153,17 +153,19 @@ const reviewIdentity = async () => ({
   notes: ["installed harness fixture uses an in-memory review adapter"]
 });
 
-const gitNexus = async () => ({
+const graphify = async () => ({
   authorityLabel: "derived_only",
   state: "unconfigured",
   configured: false,
   configuredScopes: [],
   configPaths: [],
-  repoIndexed: false,
-  indexRoot: join(cwd, ".gitnexus"),
-  metaPath: join(cwd, ".gitnexus", "meta.json"),
-  recommendedCommand: "npx gitnexus analyze --skip-agents-md",
-  notes: ["installed harness fixture does not require GitNexus indexing"]
+  graphBuilt: false,
+  graphRoot: join(cwd, "graphify-out"),
+  graphPath: join(cwd, "graphify-out", "graph.json"),
+  wikiPath: join(cwd, "graphify-out", "index.md"),
+  recommendedBuildCommand: "npm run devgod:graphify:build",
+  recommendedUpdateCommand: "npm run devgod:graphify:update",
+  notes: ["installed harness fixture does not require a Graphify graph artifact"]
 });
 
 const projectContext = await store.ensureProjectContext({
@@ -266,7 +268,7 @@ const status = await executeStatusCommandFromArgs([], {
     return service.getStatus(runId);
   },
   inspectReviewIdentity: reviewIdentity,
-  inspectGitNexus: gitNexus
+  inspectGraphify: graphify
 });
 
 const report = await executeReportCommandFromArgs(["--format", "json"], {
@@ -300,7 +302,7 @@ const report = await executeReportCommandFromArgs(["--format", "json"], {
     return store.getApprovals(runId, activeTaskId);
   },
   inspectReviewIdentity: reviewIdentity,
-  inspectGitNexus: gitNexus
+  inspectGraphify: graphify
 });
 
 assert.ok(status.tasks.byStatus.approved.includes(taskId));
