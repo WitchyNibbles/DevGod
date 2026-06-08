@@ -699,6 +699,23 @@ test("check-devgod-workflow-live reports idle repos clearly when no active task 
   }
 });
 
+test("check-devgod-workflow-live reports completed repos clearly when no active task exists", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-COMPLETE-INFO", "devgod-live-complete-info-");
+
+  try {
+    await writeFile(join(targetRoot, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+
+    const { stdout } = await execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+      cwd: repoRoot
+    });
+
+    assert.match(stdout, /"status":"complete"/);
+    assert.match(stdout, /Pass --task-id <task-id> to verify a specific task explicitly/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-workflow-live rejects requested task ids that do not match the active task", async () => {
   const targetRoot = await createInstalledWorkflowFixture("DG-LIVE-MATCH", "devgod-live-task-mismatch-");
   const taskId = "DG-LIVE-MATCH";

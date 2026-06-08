@@ -1,234 +1,24 @@
 {
-  "project_status": "active",
+  "project_status": "done",
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-06-07-devgod-internal-consistency-hardening",
-      "title": "Restore internal consistency across package manifests, workflow contracts, and maintainer/downstream quality gates",
+      "id": "2026-06-04-frontend-media-first-family-reset",
+      "title": "Local workflow proof seed for 2026-06-04-frontend-media-first-family-reset",
       "status": "done",
       "class": "release_candidate",
       "depends_on": [],
       "acceptance_criteria": [
-        "devgod package manifests, shipped files, and agent catalogs match the actual repo surface",
-        "workflow templates, scaffold output, and workflow checkers agree on the same required sections and states",
-        "core repo quality gates pass or any remaining blocker is isolated, intentional, and documented with follow-up priorities",
-        "duplication, unnecessary surfaces, workflow holes, and real development blockers are identified in a written gap summary"
+        "workflow-proof resolves 2026-06-04-frontend-media-first-family-reset from the latest runtime run",
+        "required reviewer, qa, and security reviews are recorded as authenticated approvals"
       ],
       "verification": [
-        "npm run typecheck",
-        "npm test",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-devgod-internal-consistency-hardening"
+        "node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-06-04-frontend-media-first-family-reset"
       ],
       "evidence": [
-        "brief: 2026-06-07-devgod-internal-consistency-hardening",
-        "task packet: 2026-06-07-devgod-internal-consistency-hardening",
-        "gap summary: docs/maintainers/devgod-consistency-gap-summary.md",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-devgod-internal-consistency-hardening-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-package-surface-manifest-hardening",
-      "title": "Eliminate package.json files-list drift with a canonical shipped-surface verifier",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-devgod-internal-consistency-hardening"
-      ],
-      "acceptance_criteria": [
-        "one canonical helper defines the expected package.json files surface",
-        "package verification fails on missing or unexpected manifest entries before pack time",
-        "package-surface tests reuse the canonical helper instead of copied lists where practical",
-        "workflow artifacts and product state reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/install.test.ts",
-        "npm run verify:package-surface",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-package-surface-manifest-hardening"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-package-surface-manifest-hardening",
-        "task packet: 2026-06-07-package-surface-manifest-hardening",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-package-surface-manifest-hardening-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-workflow-schema-centralization",
-      "title": "Centralize duplicated workflow schema definitions across template, checker, scaffold, and tests",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-package-surface-manifest-hardening"
-      ],
-      "acceptance_criteria": [
-        "one canonical workflow-schema source is reused by checker, templates, and tests",
-        "duplicated task-packet schema definitions are removed or reduced to generated or verified consumers",
-        "scaffold and workflow-check behavior stay stable with no regression",
-        "workflow artifacts and maintainer summary are updated to reflect the completed slice"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts tests/control-layer-contract.test.ts",
-        "npm run verify:workflow-schema",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-schema-centralization"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-workflow-schema-centralization",
-        "task packet: 2026-06-07-workflow-schema-centralization",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-workflow-schema-centralization-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-package-surface-ownership-docs",
-      "title": "Document package-surface ownership and update procedure explicitly for maintainers",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-workflow-schema-centralization"
-      ],
-      "acceptance_criteria": [
-        "maintainers have explicit guidance for package-surface ownership and update steps",
-        "the canonical helper exposes or clearly reflects ownership structure instead of one opaque flat list",
-        "package-surface verification and install tests stay green with no shipped-file regression",
-        "workflow artifacts and maintainer summary reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/install.test.ts",
-        "npm run verify:package-surface",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-package-surface-ownership-docs"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-package-surface-ownership-docs",
-        "task packet: 2026-06-07-package-surface-ownership-docs",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-package-surface-ownership-docs-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-workflow-contract-breadth-simplification",
-      "title": "Simplify workflow contract breadth by removing non-behavioral task-packet requirements",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-package-surface-ownership-docs"
-      ],
-      "acceptance_criteria": [
-        "non-behavioral task-packet requirements are removed from the canonical workflow contract",
-        "checker, template, scaffold, and tests agree on the slimmer contract",
-        "release-readiness, review, reasoning, and UI evidence gates preserve current behavior",
-        "workflow artifacts and maintainer summary reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts tests/control-layer-contract.test.ts",
-        "npm run verify:workflow-schema",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-contract-breadth-simplification"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-workflow-contract-breadth-simplification",
-        "task packet: 2026-06-07-workflow-contract-breadth-simplification",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-workflow-contract-breadth-simplification-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-review-role-contract-centralization",
-      "title": "Centralize copied review-role aliases and artifact-path rules across schema, checker, and scaffold helpers",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-workflow-contract-breadth-simplification"
-      ],
-      "acceptance_criteria": [
-        "one canonical review-role contract defines required gate roles, review export aliases, and default review artifact path rules",
-        "workflow checker, scaffold/install helpers, and shipped workflow schema artifact reuse that canonical review-role contract",
-        "happy-path and workflow verification fixtures keep behavior stable with no review-gate regression",
-        "workflow artifacts and maintainer summary reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts",
-        "npm run verify:workflow-schema",
-        "npm run check:quality",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-review-role-contract-centralization"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-review-role-contract-centralization",
-        "task packet: 2026-06-07-review-role-contract-centralization",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-review-role-contract-centralization-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-workflow-artifact-ref-policy-centralization",
-      "title": "Centralize workflow artifact-ref and review-export policy references across docs and helper surfaces",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-review-role-contract-centralization"
-      ],
-      "acceptance_criteria": [
-        "one canonical workflow contract source defines artifact-ref guidance text, example refs, and runtime-optional review-export policy",
-        "managed workflow docs and helper surfaces reuse that canonical policy text instead of copied prose",
-        "workflow schema, release overlay, and workflow verification remain behaviorally stable",
-        "workflow artifacts and maintainer summary reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-scaffold.test.ts tests/install.test.ts",
-        "npm run verify:workflow-schema",
-        "npm run verify:release-overlay",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-workflow-artifact-ref-policy-centralization"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-workflow-artifact-ref-policy-centralization",
-        "task packet: 2026-06-07-workflow-artifact-ref-policy-centralization",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-workflow-artifact-ref-policy-centralization-security_reviewer.md"
-      ],
-      "blocker": null
-    },
-    {
-      "id": "2026-06-07-stop-hook-completion-relaxation",
-      "title": "Relax stop-hook completion handling to trust authoritative completion state over exact transcript phrasing",
-      "status": "done",
-      "class": "release_candidate",
-      "depends_on": [
-        "2026-06-07-workflow-artifact-ref-policy-centralization"
-      ],
-      "acceptance_criteria": [
-        "stop hook allows exit when authoritative queue/runtime state proves the current task is already complete or no longer current",
-        "stop hook still blocks for truly active tasks without real blockers",
-        "hook regression tests cover stale-active-pointer completion without weakening authority-mismatch or blocker behavior",
-        "workflow artifacts and maintainer summary reflect the completed slice and next follow-up"
-      ],
-      "verification": [
-        "node --experimental-strip-types --test tests/hooks.test.ts",
-        "npm run verify:release-overlay",
-        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-stop-hook-completion-relaxation"
-      ],
-      "evidence": [
-        "brief: 2026-06-07-stop-hook-completion-relaxation",
-        "task packet: 2026-06-07-stop-hook-completion-relaxation",
-        "reviewer gate: .devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-reviewer.md",
-        "qa gate: .devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-qa_engineer.md",
-        "security gate: .devgod/work/reviews/review-2026-06-07-stop-hook-completion-relaxation-security_reviewer.md"
+        "task packet: 2026-06-04-frontend-media-first-family-reset",
+        "verification: node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id 2026-06-04-frontend-media-first-family-reset",
+        "quality gate: release_readiness_required"
       ],
       "blocker": null
     }

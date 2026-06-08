@@ -92,8 +92,8 @@ if [[ -z "$requested_task_id" ]]; then
   requested_task_id="$(awk -F= '$1 == "task_id" { print $2; exit }' "$active_file")"
   requested_task_id="${requested_task_id%$'\r'}"
 
-  if [[ "$active_state" == "idle" && -z "$requested_task_id" ]]; then
-    printf '%s\n' '{"status":"idle","message":"devgod workflow is idle; no active task to verify. Pass --task-id <task-id> to verify a specific task explicitly."}'
+  if [[ -z "$requested_task_id" && ( "$active_state" == "idle" || "$active_state" == "complete" ) ]]; then
+    printf '%s\n' "{\"status\":\"$active_state\",\"message\":\"devgod workflow is $active_state; no active task to verify. Pass --task-id <task-id> to verify a specific task explicitly.\"}"
     exit 0
   fi
 
