@@ -17,6 +17,7 @@ import {
   executeIndexRepoMarkdownCommand,
   executeReconcileRuntimeStateCommandFromArgs,
   executeReportCommandFromArgs,
+  executeRecordCouncilDecisionCommand,
   executeRecordReviewCommand,
   executeRecordReviewCommandFromArgs,
   executeRepairTaskQueueCommandFromArgs,
@@ -675,6 +676,129 @@ test("executeWorkflowProofCommandFromArgs returns runtime-authoritative proof fo
   assert.equal(result.latestReviews.length, 3);
   assert.equal(result.latestApproval?.decision, "approved");
   assert.equal(result.latestApproval?.identityAssurance, "authenticated");
+});
+
+test("executeWorkflowProofCommandFromArgs requires authenticated runtime council evidence for council-gated tasks", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Close a council-gated RFC",
+    request: "Require runtime council evidence before workflow proof succeeds."
+  });
+
+  await service.createTaskGraph(
+    run.id,
+    [taskPacket({ taskId: "rfc", qualityGates: ["product_acceptance", "council_review_required"] })]
+  );
+  await service.claimTask(run.id, "rfc", "planner");
+  await service.submitHandoff(run.id, "rfc", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared council-gated RFC artifacts.",
+    changedFiles: ["docs/plans/rfc.md"],
+    blockers: [],
+    verificationNotes: ["artifact set reviewed"],
+    executionEvidence: ["task packet written"],
+    qualityGateEvidence: ["council packet drafted"],
+    contextRefs: ["brief://council-rfc"]
+  });
+
+  await service.recordReview(run.id, "rfc", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rfc", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "rfc", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  await assert.rejects(
+    executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "rfc"], {
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getReviews(runId, taskId) {
+        return store.getReviews(runId, taskId);
+      },
+      getApprovals(runId, taskId) {
+        return store.getApprovals(runId, taskId);
+      },
+      listWorkflowDocuments(params) {
+        return store.listWorkflowDocuments(params);
+      }
+    }),
+    /missing runtime council evidence/
+  );
+
+  await service.recordCouncilOutcome(run.id, "rfc", {
+    actor: "architect-actor",
+    actorRole: "solution_architect",
+    identityAssurance: "authenticated",
+    decisionPacketRef: ".devgod/work/council/dac-rfc.md",
+    councilMembers: ["solution_architect", "product_strategist", "security_reviewer"],
+    dissentOwner: "security_reviewer",
+    outcome: "approved_with_conditions",
+    conditions: ["preserve canonical non-writability"]
+  });
+
+  const result = await executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "rfc"], {
+    getStatusSnapshot(runId) {
+      return service.getStatus(runId);
+    },
+    getReviews(runId, taskId) {
+      return store.getReviews(runId, taskId);
+    },
+    getApprovals(runId, taskId) {
+      return store.getApprovals(runId, taskId);
+    },
+    listWorkflowDocuments(params) {
+      return store.listWorkflowDocuments(params);
+    }
+  });
+
+  assert.equal(result.reviewDecision, "approved");
+  assert.equal(result.taskId, "rfc");
 });
 
 test("executeWorkflowProofCommandFromArgs rejects UI tasks whose QA review lacks Playwright evidence refs", async () => {
@@ -3027,6 +3151,93 @@ test("executeRecordReviewCommand accepts a live authenticated principal and reso
     assert.equal(result.review.actorRole, "reviewer");
     assert.deepEqual(result.blockers, ["qa pending"]);
     assert.equal(result.taskStatus, "review_blocked");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeRecordCouncilDecisionCommand accepts a live authenticated principal and resolves bound council authority", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-record-council-"));
+  const bindingsPath = path.join(directory, ".devgod/review-identity-bindings.json");
+
+  const bindings = {
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-architect",
+            roles: ["solution_architect", "reviewer"]
+          }
+        ]
+      }
+    ]
+  };
+
+  try {
+    await mkdir(path.dirname(bindingsPath), { recursive: true });
+    await writeFile(bindingsPath, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");
+
+    const result = await executeRecordCouncilDecisionCommand(
+      {
+        runId: "run-123",
+        taskId: "task-123",
+        actor: "alice-architect",
+        actorRole: "solution_architect",
+        decisionPacketRef: ".devgod/work/council/dac-task-123.md",
+        councilMembers: ["solution_architect", "product_strategist", "security_reviewer"],
+        dissentOwner: "security_reviewer",
+        outcome: "approved_with_conditions",
+        conditions: ["keep canonical skills non-writable"],
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        }
+      },
+      {
+        adapterModulePath: path.join(directory, "devgod/review-identity-adapter.ts"),
+        bindingsPath,
+        adapter: async ({ authContext }) => ({
+          provider: String((authContext as { provider: string }).provider),
+          subject: String((authContext as { subject: string }).subject),
+          verified: (authContext as { verified: boolean }).verified === true
+        }),
+        async recordCouncilDecision({ command, principal }) {
+          return {
+            council: {
+              id: "council-123",
+              runId: command.runId,
+              taskId: command.taskId,
+              proofRef: "runtime-council://run-123/task-123/council-123",
+              decisionPacketRef: command.decisionPacketRef,
+              actor: command.actor,
+              actorRole: command.actorRole,
+              identityAssurance: principal.verified ? "authenticated" : "legacy_backfill",
+              councilMembers: [...command.councilMembers],
+              dissentOwner: command.dissentOwner,
+              outcome: command.outcome,
+              conditions: [...(command.conditions ?? [])],
+              evidenceRefs: ["runtime-council://run-123/task-123/council-123"],
+              createdAt: "2026-06-08T00:00:00.000Z"
+            },
+            task: {
+              status: "approved"
+            }
+          };
+        }
+      }
+    );
+
+    assert.equal(result.principal.provider, "github");
+    assert.equal(result.principal.subject, "alice");
+    assert.equal(result.council.actorRole, "solution_architect");
+    assert.equal(result.council.outcome, "approved_with_conditions");
+    assert.deepEqual(result.council.conditions, ["keep canonical skills non-writable"]);
+    assert.equal(result.taskStatus, "approved");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

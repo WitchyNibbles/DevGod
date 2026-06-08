@@ -41,15 +41,15 @@ Close the repo's current contract drift so `devgod` can be trusted as both sourc
 
 ## Current Task
 
-None active. The stop-hook completion relaxation slice is complete.
+No task is currently active under runtime authority. The external runtime-evidence slice and the parent consuming-repo skill-evolution RFC have both been registered and closed under runtime authority.
 
 ## Next Task
 
-None queued right now. The next follow-up should be selected from the remaining copied workflow-commentary debt outside managed rule, template, and helper surfaces.
+Activate `2026-06-08-consuming-repo-skill-evolution-slice-1` under runtime authority if implementation should continue beyond the completed RFC and runtime-evidence slice.
 
 ## Blockers
 
-- none currently exported
+- No blocker is currently recorded for the completed RFC or runtime-evidence slice.
 
 ## Reasoning Debt
 
@@ -127,4 +127,4 @@ None queued right now. The next follow-up should be selected from the remaining 
 
 ## Last Updated
 
-2026-06-07
+2026-06-08

@@ -99,6 +99,8 @@ import type {
   CheckpointRecord,
   ComprehensionSummary,
   ContinuationAction,
+  CouncilOutcomeDecision,
+  CouncilOutcomeRecord,
   CoverageGapRecord,
   CoverageItemRecord,
   DuplicateFamilyRecord,
@@ -123,7 +125,8 @@ import type {
   RunStatusSnapshot,
   TaskPacketInput,
   TaskStatus,
-  UnderstandingMapRecord
+  UnderstandingMapRecord,
+  WorkflowDocumentRecord
 } from "./domain/types.ts";
 import type { WorkspaceRecord } from "./domain/types.ts";
 import type { ExportDocsCommandResult } from "./docs-export/models.ts";
@@ -725,6 +728,29 @@ interface RecordReviewCommandInput {
   authContext?: unknown;
 }
 
+const councilOutcomeValues = [
+  "approved",
+  "approved_with_conditions",
+  "rework_required",
+  "exception_granted",
+  "rejected"
+] as const;
+
+interface RecordCouncilDecisionCommandInput {
+  runId: string;
+  taskId: string;
+  actor: string;
+  actorRole: RetrievalRole;
+  decisionPacketRef: string;
+  councilMembers: RetrievalRole[];
+  dissentOwner: RetrievalRole;
+  outcome: CouncilOutcomeDecision;
+  conditions?: string[] | undefined;
+  exceptionExpiry?: string | undefined;
+  evidenceRefs?: string[] | undefined;
+  authContext?: unknown;
+}
+
 interface RecordReviewCommandResult {
   mode: "live";
   bindingsPath: string;
@@ -734,6 +760,17 @@ interface RecordReviewCommandResult {
   principal: AuthenticatedPrincipal;
   review: ReviewRecord;
   blockers: string[];
+  taskStatus: TaskStatus;
+}
+
+interface RecordCouncilDecisionCommandResult {
+  mode: "live";
+  bindingsPath: string;
+  adapterModulePath: string;
+  selectedBackend?: string | undefined;
+  availableBackends: string[];
+  principal: AuthenticatedPrincipal;
+  council: CouncilOutcomeRecord;
   taskStatus: TaskStatus;
 }
 
@@ -755,6 +792,23 @@ interface ExecuteRecordReviewCommandOptions {
   }>;
 }
 
+interface ExecuteRecordCouncilDecisionCommandOptions {
+  adapter: ReviewPrincipalAdapter<unknown>;
+  adapterModulePath: string;
+  selectedBackend?: string | undefined;
+  availableBackends?: string[] | undefined;
+  bindingsPath: string;
+  recordCouncilDecision: (input: {
+    command: RecordCouncilDecisionCommandInput;
+    principal: AuthenticatedPrincipal;
+  }) => Promise<{
+    council: CouncilOutcomeRecord;
+    task: {
+      status: TaskStatus;
+    };
+  }>;
+}
+
 interface ExecuteRecordReviewCommandFromArgsOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
@@ -765,6 +819,18 @@ interface ExecuteRecordReviewCommandFromArgsOptions {
     availableBackends?: string[] | undefined;
   }>) | undefined;
   recordReview: ExecuteRecordReviewCommandOptions["recordReview"];
+}
+
+interface ExecuteRecordCouncilDecisionCommandFromArgsOptions {
+  cwd?: string | undefined;
+  env?: EnvShape | undefined;
+  createLiveAdapter?: (() => Promise<{
+    adapter: ReviewPrincipalAdapter<unknown>;
+    modulePath: string;
+    selectedBackend?: string | undefined;
+    availableBackends?: string[] | undefined;
+  }>) | undefined;
+  recordCouncilDecision: ExecuteRecordCouncilDecisionCommandOptions["recordCouncilDecision"];
 }
 
 interface ExecuteStatusCommandOptions {
@@ -992,6 +1058,12 @@ interface ExecuteWorkflowProofCommandOptions {
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
   getReviews: (runId: string, taskId: string) => Promise<readonly ReviewRecord[]>;
   getApprovals: (runId: string, taskId: string) => Promise<readonly ApprovalRecord[]>;
+  listWorkflowDocuments?: ((params: {
+    projectId: string;
+    runId?: string | undefined;
+    taskId?: string | undefined;
+    kind?: WorkflowDocumentRecord["kind"] | undefined;
+  }) => Promise<readonly WorkflowDocumentRecord[]>) | undefined;
 }
 
 export interface WorkflowProofResult {
@@ -1779,6 +1851,74 @@ function normalizeRecordReviewCommandInput(raw: string): RecordReviewCommandInpu
       findings,
       waiverReason
     },
+    authContext: parsed.authContext
+  };
+}
+
+function isCouncilOutcomeDecision(value: string): value is CouncilOutcomeDecision {
+  return councilOutcomeValues.includes(value as CouncilOutcomeDecision);
+}
+
+function isCouncilApprovalOutcome(value: CouncilOutcomeDecision): boolean {
+  return value === "approved" || value === "approved_with_conditions" || value === "exception_granted";
+}
+
+function uniqueCommandStrings(values: readonly unknown[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => String(value).trim()).filter((value) => value.length > 0))];
+}
+
+function normalizeRecordCouncilDecisionCommandInput(raw: string): RecordCouncilDecisionCommandInput {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const runId = typeof parsed.runId === "string" ? parsed.runId.trim() : "";
+  const taskId = typeof parsed.taskId === "string" ? parsed.taskId.trim() : "";
+  const actor = typeof parsed.actor === "string" ? parsed.actor.trim() : "";
+  const actorRole = typeof parsed.actorRole === "string" ? parsed.actorRole.trim() : "";
+  const decisionPacketRef = typeof parsed.decisionPacketRef === "string" ? parsed.decisionPacketRef.trim() : "";
+  const councilMembers = Array.isArray(parsed.councilMembers) ? uniqueCommandStrings(parsed.councilMembers) : [];
+  const dissentOwner = typeof parsed.dissentOwner === "string" ? parsed.dissentOwner.trim() : "";
+  const outcome = typeof parsed.outcome === "string" ? parsed.outcome.trim() : "";
+  const conditions = Array.isArray(parsed.conditions) ? uniqueCommandStrings(parsed.conditions) : undefined;
+  const exceptionExpiry =
+    typeof parsed.exceptionExpiry === "string" ? parsed.exceptionExpiry.trim() || undefined : undefined;
+  const evidenceRefs = Array.isArray(parsed.evidenceRefs) ? uniqueCommandStrings(parsed.evidenceRefs) : undefined;
+
+  if (runId.length === 0) {
+    throw new Error("record-council-decision input requires runId");
+  }
+  if (taskId.length === 0) {
+    throw new Error("record-council-decision input requires taskId");
+  }
+  if (actor.length === 0) {
+    throw new Error("record-council-decision input requires actor");
+  }
+  if (!isRetrievalRole(actorRole)) {
+    throw new Error("record-council-decision input requires actorRole to be a valid retrieval role");
+  }
+  if (decisionPacketRef.length === 0) {
+    throw new Error("record-council-decision input requires decisionPacketRef");
+  }
+  if (councilMembers.length === 0 || !councilMembers.every((role) => isRetrievalRole(role))) {
+    throw new Error("record-council-decision input requires councilMembers to be an array of valid retrieval roles");
+  }
+  if (!isRetrievalRole(dissentOwner)) {
+    throw new Error("record-council-decision input requires dissentOwner to be a valid retrieval role");
+  }
+  if (!isCouncilOutcomeDecision(outcome)) {
+    throw new Error("record-council-decision input requires outcome to be a valid council outcome");
+  }
+
+  return {
+    runId,
+    taskId,
+    actor,
+    actorRole,
+    decisionPacketRef,
+    councilMembers,
+    dissentOwner,
+    outcome,
+    conditions,
+    exceptionExpiry,
+    evidenceRefs,
     authContext: parsed.authContext
   };
 }
@@ -3071,6 +3211,22 @@ async function readRecordReviewCommandInput(
   return normalizeRecordReviewCommandInput(await readFile(inputPath, "utf8"));
 }
 
+async function readRecordCouncilDecisionCommandInput(
+  args: readonly string[],
+  options: {
+    cwd?: string | undefined;
+  } = {}
+): Promise<RecordCouncilDecisionCommandInput> {
+  const cwd = options.cwd ?? process.cwd();
+  const inputArg = resolveCommandFlag(args, "--input");
+  if (!inputArg) {
+    throw new Error("record-council-decision requires --input <file.json>");
+  }
+
+  const inputPath = path.isAbsolute(inputArg) ? inputArg : path.resolve(cwd, inputArg);
+  return normalizeRecordCouncilDecisionCommandInput(await readFile(inputPath, "utf8"));
+}
+
 async function resolveRequiredReviewIdentityFilePath(options: {
   envVarName: string;
   envVarValue: string | undefined;
@@ -3124,6 +3280,35 @@ async function bindingsUsePlaceholderContent(bindingsPath: string): Promise<bool
       return actor.roles.some((role) => bindingValueContainsPlaceholder(role));
     });
   });
+}
+
+function resolveAuthenticatedActorRoleFromBindings(input: {
+  bindings: Awaited<ReturnType<typeof loadReviewIdentityBindings>>;
+  principal: AuthenticatedPrincipal;
+  actor: string;
+  actorRole: RetrievalRole;
+}): void {
+  if (!input.principal.verified) {
+    throw new Error("Authenticated principal must be verified");
+  }
+
+  const binding = input.bindings.bindings.find(
+    (candidate) =>
+      candidate.principal.provider === input.principal.provider &&
+      candidate.principal.subject === input.principal.subject
+  );
+  if (!binding) {
+    throw new Error(`No reviewed binding matches authenticated principal ${input.principal.provider}:${input.principal.subject}`);
+  }
+
+  const actorBinding = binding.actors.find((candidate) => candidate.actor === input.actor);
+  if (!actorBinding) {
+    throw new Error(`Authenticated principal ${input.principal.provider}:${input.principal.subject} is not bound to actor ${input.actor}`);
+  }
+
+  if (!actorBinding.roles.includes(input.actorRole)) {
+    throw new Error(`Actor ${input.actor} is not authorized for role ${input.actorRole} in reviewed bindings`);
+  }
 }
 
 export async function inspectReviewIdentityStatus(options: {
@@ -3290,6 +3475,82 @@ export async function executeRecordReviewCommandFromArgs(
     availableBackends: liveAdapter.availableBackends,
     bindingsPath,
     recordReview: options.recordReview
+  });
+}
+
+export async function executeRecordCouncilDecisionCommand(
+  command: RecordCouncilDecisionCommandInput,
+  options: ExecuteRecordCouncilDecisionCommandOptions
+): Promise<RecordCouncilDecisionCommandResult> {
+  if (isRepoTemplateReviewIdentityPath(options.bindingsPath)) {
+    throw new Error("record-council-decision requires a live reviewed bindings file, not the shipped template");
+  }
+
+  if (await bindingsUsePlaceholderContent(options.bindingsPath)) {
+    throw new Error("record-council-decision requires reviewed bindings without shipped placeholder values");
+  }
+
+  const bindings = await loadReviewIdentityBindings(options.bindingsPath);
+  const authenticate = createReviewPrincipalAdapter(options.adapter);
+  const principal = await authenticate({
+    runId: command.runId,
+    taskId: command.taskId,
+    actor: command.actor,
+    reviewerRole: "reviewer",
+    reviewState: "passed",
+    authContext: command.authContext ?? {}
+  });
+  resolveAuthenticatedActorRoleFromBindings({
+    bindings,
+    principal,
+    actor: command.actor,
+    actorRole: command.actorRole
+  });
+
+  const result = await options.recordCouncilDecision({
+    command,
+    principal
+  });
+
+  return {
+    mode: "live",
+    bindingsPath: options.bindingsPath,
+    adapterModulePath: options.adapterModulePath,
+    selectedBackend: options.selectedBackend,
+    availableBackends: [...(options.availableBackends ?? [])],
+    principal,
+    council: result.council,
+    taskStatus: result.task.status
+  };
+}
+
+export async function executeRecordCouncilDecisionCommandFromArgs(
+  args: readonly string[],
+  options: ExecuteRecordCouncilDecisionCommandFromArgsOptions
+): Promise<RecordCouncilDecisionCommandResult> {
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
+  const command = await readRecordCouncilDecisionCommandInput(args, { cwd });
+  const bindingsPath = await resolveRequiredReviewIdentityFilePath({
+    envVarName: "DEVGOD_REVIEW_IDENTITY_BINDINGS",
+    envVarValue: env.DEVGOD_REVIEW_IDENTITY_BINDINGS,
+    liveRelativePath: ".devgod/review-identity-bindings.json",
+    cwd
+  });
+  const liveAdapter = options.createLiveAdapter
+    ? await options.createLiveAdapter()
+    : await createLiveReviewIdentityAdapter({ cwd, env });
+  if (!liveAdapter.modulePath) {
+    throw new Error("record-council-decision requires a resolved live adapter module path");
+  }
+
+  return executeRecordCouncilDecisionCommand(command, {
+    adapter: liveAdapter.adapter,
+    adapterModulePath: liveAdapter.modulePath,
+    selectedBackend: liveAdapter.selectedBackend,
+    availableBackends: liveAdapter.availableBackends,
+    bindingsPath,
+    recordCouncilDecision: options.recordCouncilDecision
   });
 }
 
@@ -5149,6 +5410,12 @@ export function createSupportedContinuationExecutor(options: {
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
   getReviews: (runId: string, taskId: string) => Promise<readonly ReviewRecord[]>;
   getApprovals: (runId: string, taskId: string) => Promise<readonly ApprovalRecord[]>;
+  listWorkflowDocuments?: ((params: {
+    projectId: string;
+    runId?: string | undefined;
+    taskId?: string | undefined;
+    kind?: WorkflowDocumentRecord["kind"] | undefined;
+  }) => Promise<readonly WorkflowDocumentRecord[]>) | undefined;
   upsertCoverageGaps?: ((runId: string, gaps: CoverageGapRecord[]) => Promise<unknown>) | undefined;
   recordProgressProof?: ((runId: string, proof: ProgressProofRecord) => Promise<unknown>) | undefined;
   checkpointRun?: ((
@@ -5304,7 +5571,8 @@ export function createSupportedContinuationExecutor(options: {
         env,
         getStatusSnapshot: options.getStatusSnapshot,
         getReviews: options.getReviews,
-        getApprovals: options.getApprovals
+        getApprovals: options.getApprovals,
+        listWorkflowDocuments: options.listWorkflowDocuments
       });
     } catch (error) {
       return {
@@ -5344,6 +5612,34 @@ async function recordReviewCommand(args: readonly string[]) {
           reviewCommand.actor,
           reviewCommand.review
         );
+      });
+    }
+  });
+
+  console.log(JSON.stringify(result));
+}
+
+async function recordCouncilDecisionCommand(args: readonly string[]) {
+  const result = await executeRecordCouncilDecisionCommandFromArgs(args, {
+    async recordCouncilDecision({ command, principal }) {
+      return withClient(async (client) => {
+        const service = new DevgodCoreService(new PostgresStore(client));
+        const result = await service.recordCouncilOutcome(command.runId, command.taskId, {
+          actor: command.actor,
+          actorRole: command.actorRole,
+          identityAssurance: "authenticated",
+          decisionPacketRef: command.decisionPacketRef,
+          councilMembers: command.councilMembers,
+          dissentOwner: command.dissentOwner,
+          outcome: command.outcome,
+          conditions: command.conditions,
+          exceptionExpiry: command.exceptionExpiry,
+          evidenceRefs: command.evidenceRefs
+        });
+        return {
+          council: result.record,
+          task: result.task
+        };
       });
     }
   });
@@ -7290,6 +7586,9 @@ async function loopCommand(args: readonly string[]) {
             getApprovals(runId, taskId) {
               return store.getApprovals(runId, taskId);
             },
+            listWorkflowDocuments(params) {
+              return store.listWorkflowDocuments(params);
+            },
             upsertCoverageGaps(runId, gaps) {
               return service.upsertCoverageGaps(runId, gaps);
             },
@@ -7454,6 +7753,8 @@ export async function executeWorkflowProofCommandFromArgs(
     );
   }
 
+  await enforceCouncilWorkflowProof(task.packet, snapshot, options);
+
   if (options.getProjectRuntimeState) {
     const runtimeState = await options.getProjectRuntimeState(snapshot.run.projectId);
     const seedFailure = readSeedFailureMetadata(runtimeState);
@@ -7504,6 +7805,102 @@ function enforcePlaywrightWorkflowProof(packet: TaskPacketInput, latestReviews: 
   const hasPlaywrightEvidence = evidenceRefs.some((ref) => /playwright/i.test(ref));
   if (!hasPlaywrightEvidence) {
     throw new Error(`Task ${packet.taskId} qa_engineer review must cite Playwright evidence refs before workflow-proof`);
+  }
+}
+
+function parseCouncilOutcomeDocument(document: WorkflowDocumentRecord): CouncilOutcomeRecord | undefined {
+  if (document.kind !== "council_outcome") {
+    return undefined;
+  }
+
+  const metadata = document.metadata as Record<string, unknown>;
+  const proofRef = typeof metadata.proofRef === "string" ? metadata.proofRef : "";
+  const decisionPacketRef = typeof metadata.decisionPacketRef === "string" ? metadata.decisionPacketRef : "";
+  const actor = typeof metadata.actor === "string" ? metadata.actor : "";
+  const actorRole = typeof metadata.actorRole === "string" ? metadata.actorRole : "";
+  const identityAssurance = typeof metadata.identityAssurance === "string" ? metadata.identityAssurance : "";
+  const councilMembers = Array.isArray(metadata.councilMembers) ? uniqueCommandStrings(metadata.councilMembers) : [];
+  const dissentOwner = typeof metadata.dissentOwner === "string" ? metadata.dissentOwner : "";
+  const outcome = typeof metadata.outcome === "string" ? metadata.outcome : "";
+  const conditions = Array.isArray(metadata.conditions) ? uniqueCommandStrings(metadata.conditions) : [];
+  const exceptionExpiry = typeof metadata.exceptionExpiry === "string" ? metadata.exceptionExpiry : undefined;
+  const evidenceRefs = Array.isArray(metadata.evidenceRefs) ? uniqueCommandStrings(metadata.evidenceRefs) : [];
+
+  if (
+    proofRef.length === 0 ||
+    decisionPacketRef.length === 0 ||
+    actor.length === 0 ||
+    !isRetrievalRole(actorRole) ||
+    (identityAssurance !== "authenticated" && identityAssurance !== "legacy_backfill") ||
+    councilMembers.length === 0 ||
+    !councilMembers.every((member) => isRetrievalRole(member)) ||
+    !isRetrievalRole(dissentOwner) ||
+    !isCouncilOutcomeDecision(outcome)
+  ) {
+    return undefined;
+  }
+
+  return {
+    id: document.id,
+    runId: document.runId ?? "",
+    taskId: document.taskId ?? "",
+    proofRef,
+    decisionPacketRef,
+    actor,
+    actorRole,
+    identityAssurance,
+    councilMembers,
+    dissentOwner,
+    outcome,
+    conditions,
+    exceptionExpiry,
+    evidenceRefs,
+    createdAt: document.createdAt
+  };
+}
+
+async function enforceCouncilWorkflowProof(
+  packet: TaskPacketInput,
+  snapshot: RunStatusSnapshot,
+  options: ExecuteWorkflowProofCommandOptions
+): Promise<void> {
+  if (!packet.qualityGates.includes("council_review_required")) {
+    return;
+  }
+  if (!options.listWorkflowDocuments) {
+    throw new Error(`Task ${packet.taskId} requires runtime council evidence but workflow-proof cannot list workflow documents`);
+  }
+
+  const documents = await options.listWorkflowDocuments({
+    projectId: snapshot.run.projectId,
+    runId: snapshot.run.id,
+    taskId: packet.taskId,
+    kind: "council_outcome"
+  });
+  const latest = documents
+    .map((document) => parseCouncilOutcomeDocument(document))
+    .filter((record): record is CouncilOutcomeRecord => Boolean(record))
+    .at(-1);
+
+  if (!latest) {
+    throw new Error(`Task ${packet.taskId} is missing runtime council evidence`);
+  }
+  if (latest.identityAssurance !== "authenticated") {
+    throw new Error(`Task ${packet.taskId} latest council evidence must be authenticated`);
+  }
+  if (!isCouncilApprovalOutcome(latest.outcome)) {
+    throw new Error(`Task ${packet.taskId} latest council outcome must be approving, found ${latest.outcome}`);
+  }
+  if (latest.outcome === "approved_with_conditions" && latest.conditions.length === 0) {
+    throw new Error(`Task ${packet.taskId} approved_with_conditions council outcome must carry conditions`);
+  }
+  if (latest.outcome === "exception_granted") {
+    if (!latest.exceptionExpiry) {
+      throw new Error(`Task ${packet.taskId} exception_granted council outcome must carry exceptionExpiry`);
+    }
+    if (latest.exceptionExpiry.localeCompare(new Date().toISOString()) < 0) {
+      throw new Error(`Task ${packet.taskId} council exception expired at ${latest.exceptionExpiry}`);
+    }
   }
 }
 
@@ -10834,6 +11231,9 @@ async function workflowProofCommand(args: readonly string[]) {
       },
       getApprovals(runId, taskId) {
         return store.getApprovals(runId, taskId);
+      },
+      listWorkflowDocuments(params) {
+        return store.listWorkflowDocuments(params);
       }
     });
 
@@ -10913,6 +11313,9 @@ async function seedWorkflowProofCommand(args: readonly string[]) {
       },
       getApprovals(runId, taskId) {
         return store.getApprovals(runId, taskId);
+      },
+      listWorkflowDocuments(params) {
+        return store.listWorkflowDocuments(params);
       }
     });
 
@@ -10988,6 +11391,9 @@ async function seedModernizationProofCommand(args: readonly string[]) {
       },
       getApprovals(runId, taskId) {
         return store.getApprovals(runId, taskId);
+      },
+      listWorkflowDocuments(params) {
+        return store.listWorkflowDocuments(params);
       }
     });
 
@@ -11177,6 +11583,9 @@ async function daemonCommand(args: readonly string[]) {
               getApprovals(candidateRunId, taskId) {
                 return store.getApprovals(candidateRunId, taskId);
               },
+              listWorkflowDocuments(params) {
+                return store.listWorkflowDocuments(params);
+              },
               upsertCoverageGaps(candidateRunId, gaps) {
                 return service.upsertCoverageGaps(candidateRunId, gaps);
               },
@@ -11333,6 +11742,9 @@ async function supervisorCommand(args: readonly string[]) {
               },
               getApprovals(candidateRunId, taskId) {
                 return store.getApprovals(candidateRunId, taskId);
+              },
+              listWorkflowDocuments(params) {
+                return store.listWorkflowDocuments(params);
               },
               upsertCoverageGaps(candidateRunId, gaps) {
                 return service.upsertCoverageGaps(candidateRunId, gaps);
@@ -12090,6 +12502,11 @@ async function main() {
 
   if (command === "record-review") {
     await recordReviewCommand(args);
+    return;
+  }
+
+  if (command === "record-council-decision") {
+    await recordCouncilDecisionCommand(args);
     return;
   }
 

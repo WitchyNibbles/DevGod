@@ -69,6 +69,8 @@ import type {
   AutonomousExecutionSnapshot,
   AutonomousExecutionState,
   CheckpointRecord,
+  CouncilOutcomeDecision,
+  CouncilOutcomeRecord,
   CoverageGapRecord,
   CoverageItemRecord,
   CoverageManifestRecord,
@@ -167,6 +169,18 @@ function timestamp(): string {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+function buildReviewProofRef(review: Pick<ReviewRecord, "runId" | "taskId" | "reviewerRole" | "id">): string {
+  return `runtime-review://${review.runId}/${review.taskId}/${review.reviewerRole}/${review.id}`;
+}
+
+function buildCouncilProofRef(record: Pick<CouncilOutcomeRecord, "runId" | "taskId" | "id">): string {
+  return `runtime-council://${record.runId}/${record.taskId}/${record.id}`;
+}
+
+function isCouncilApprovalOutcome(outcome: CouncilOutcomeDecision): boolean {
+  return outcome === "approved" || outcome === "approved_with_conditions" || outcome === "exception_granted";
 }
 
 function profileHasBroadRewriteScope(profile: AutonomousExecutionState["profile"]): boolean {
@@ -1410,10 +1424,11 @@ export class DevgodCoreService {
       severity: review.severity,
       findings: [...review.findings],
       waiverReason: review.waiverReason,
-      evidenceRefs: [...(review.evidenceRefs ?? [])],
+      evidenceRefs: [],
       waiverAuthority: context.waiverAuthority ?? "none",
       createdAt: timestamp()
     };
+    reviewRecord.evidenceRefs = uniqueStrings([...(review.evidenceRefs ?? []), buildReviewProofRef(reviewRecord)]);
 
     await this.store.saveReview(reviewRecord);
     const reviews = await this.store.getReviews(runId, taskId);
@@ -1491,6 +1506,112 @@ export class DevgodCoreService {
       review: reviewRecord,
       blockers: decision.blockers,
       task: updatedTask
+    };
+  }
+
+  async recordCouncilOutcome(
+    runId: string,
+    taskId: string,
+    input: {
+      actor: string;
+      actorRole: TaskPacketInput["requiredSpecialistRoles"][number];
+      identityAssurance: "authenticated";
+      decisionPacketRef: string;
+      councilMembers: TaskPacketInput["requiredSpecialistRoles"];
+      dissentOwner: TaskPacketInput["requiredSpecialistRoles"][number];
+      outcome: CouncilOutcomeDecision;
+      conditions?: readonly string[] | undefined;
+      exceptionExpiry?: string | undefined;
+      evidenceRefs?: readonly string[] | undefined;
+    }
+  ): Promise<{ record: CouncilOutcomeRecord; task: TaskRecord }> {
+    const task = await this.requireTask(runId, taskId);
+    const allowedStatuses = new Set(["review_blocked", "approved"]);
+    if (!allowedStatuses.has(task.status)) {
+      throw new Error(`Task ${taskId} must be review_blocked or approved before council evidence can be recorded`);
+    }
+    if (!task.packet.qualityGates.includes("council_review_required")) {
+      throw new Error(`Task ${taskId} does not require council review`);
+    }
+
+    const decisionPacketRef = input.decisionPacketRef.trim();
+    if (decisionPacketRef.length === 0) {
+      throw new Error("Council decision packet ref is required");
+    }
+
+    const councilMembers = [...new Set(input.councilMembers.map((role) => role.trim()).filter((role) => role.length > 0))] as TaskPacketInput["requiredSpecialistRoles"];
+    if (councilMembers.length === 0) {
+      throw new Error("Council members are required");
+    }
+    if (!councilMembers.includes(input.actorRole)) {
+      throw new Error(`Council recording actor role ${input.actorRole} must be one of the council members`);
+    }
+    if (!councilMembers.includes(input.dissentOwner)) {
+      throw new Error(`Council dissent owner ${input.dissentOwner} must be one of the council members`);
+    }
+
+    const conditions = uniqueStrings([...(input.conditions ?? [])]);
+    if (input.outcome === "approved_with_conditions" && conditions.length === 0) {
+      throw new Error("Council outcomes approved_with_conditions require at least one condition");
+    }
+    if (input.outcome === "exception_granted" && (!input.exceptionExpiry || input.exceptionExpiry.trim().length === 0)) {
+      throw new Error("Council outcome exception_granted requires exceptionExpiry");
+    }
+    if (!isCouncilApprovalOutcome(input.outcome) && conditions.length > 0) {
+      throw new Error(`Council outcome ${input.outcome} must not carry approval conditions`);
+    }
+
+    const createdAt = timestamp();
+    const record: CouncilOutcomeRecord = {
+      id: randomUUID(),
+      runId,
+      taskId,
+      proofRef: "",
+      decisionPacketRef,
+      actor: input.actor,
+      actorRole: input.actorRole,
+      identityAssurance: input.identityAssurance,
+      councilMembers,
+      dissentOwner: input.dissentOwner,
+      outcome: input.outcome,
+      conditions,
+      exceptionExpiry: input.exceptionExpiry?.trim() || undefined,
+      evidenceRefs: [],
+      createdAt
+    };
+    record.proofRef = buildCouncilProofRef(record);
+    record.evidenceRefs = uniqueStrings([...(input.evidenceRefs ?? []), record.proofRef, decisionPacketRef]);
+
+    await this.store.saveWorkflowDocument({
+      id: record.id,
+      workspaceId: task.workspaceId,
+      projectId: task.projectId,
+      runId,
+      taskId,
+      kind: "council_outcome",
+      title: `Council outcome: ${taskId}`,
+      body: JSON.stringify(record, null, 2),
+      metadata: {
+        source: "runtime_council",
+        proofRef: record.proofRef,
+        decisionPacketRef: record.decisionPacketRef,
+        actor: record.actor,
+        actorRole: record.actorRole,
+        identityAssurance: record.identityAssurance,
+        councilMembers: record.councilMembers,
+        dissentOwner: record.dissentOwner,
+        outcome: record.outcome,
+        conditions: record.conditions,
+        exceptionExpiry: record.exceptionExpiry,
+        evidenceRefs: record.evidenceRefs
+      },
+      createdAt,
+      updatedAt: createdAt
+    });
+
+    return {
+      record,
+      task
     };
   }
 

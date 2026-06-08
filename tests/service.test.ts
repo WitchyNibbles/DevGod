@@ -438,6 +438,47 @@ test("recordReview rejects contradictory passed security reviews", async () => {
   );
 });
 
+test("recordReview appends a stable runtime proof ref to review evidence", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Build core",
+    request: "Ship the shared orchestration backend."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket()]);
+  await service.claimTask(run.id, "task-1", "planner");
+  await service.submitHandoff(run.id, "task-1", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["tests written"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+
+  const result = await service.recordReview(run.id, "task-1", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: [],
+    evidenceRefs: ["artifact://review-notes"]
+  });
+
+  assert.ok(result.review.evidenceRefs?.includes("artifact://review-notes"));
+  assert.ok(
+    result.review.evidenceRefs?.some((ref) =>
+      ref.startsWith(`runtime-review://${run.id}/task-1/reviewer/${result.review.id}`)
+    )
+  );
+});
+
 test("recordReview rejects approval attempts before a handoff exists", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({

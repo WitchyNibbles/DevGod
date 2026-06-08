@@ -25,6 +25,13 @@ export const taskStatuses = [
 export const reviewSeverities = ["low", "medium", "high", "critical"] as const;
 export const reviewStates = ["pending", "passed", "blocked", "waived"] as const;
 export const approvalDecisions = ["approved", "blocked", "waived"] as const;
+export const councilOutcomeDecisions = [
+  "approved",
+  "approved_with_conditions",
+  "rework_required",
+  "exception_granted",
+  "rejected"
+] as const;
 export const identityAssurances = ["authenticated", "legacy_backfill"] as const;
 export const memoryScopes = ["global", "project"] as const;
 export const memoryTypes = ["fact", "decision", "pattern", "lesson"] as const;
@@ -35,6 +42,7 @@ export const workflowDocumentKinds = [
   "plan",
   "task_packet",
   "review_summary",
+  "council_outcome",
   "product_state",
   "task_queue",
   "coverage_manifest",
@@ -248,6 +256,7 @@ export type TaskStatus = (typeof taskStatuses)[number];
 export type ReviewSeverity = (typeof reviewSeverities)[number];
 export type ReviewState = (typeof reviewStates)[number];
 export type ApprovalDecision = (typeof approvalDecisions)[number];
+export type CouncilOutcomeDecision = (typeof councilOutcomeDecisions)[number];
 export type IdentityAssurance = (typeof identityAssurances)[number];
 export type UiSurface = (typeof uiSurfaces)[number];
 export type MemoryScope = (typeof memoryScopes)[number];
@@ -1027,6 +1036,24 @@ export interface ApprovalRecord {
   identityAssurance: IdentityAssurance;
   decision: ApprovalDecision;
   rationale: string;
+  createdAt: string;
+}
+
+export interface CouncilOutcomeRecord {
+  id: string;
+  runId: string;
+  taskId: string;
+  proofRef: string;
+  decisionPacketRef: string;
+  actor: string;
+  actorRole: RetrievalRole;
+  identityAssurance: IdentityAssurance;
+  councilMembers: RetrievalRole[];
+  dissentOwner: RetrievalRole;
+  outcome: CouncilOutcomeDecision;
+  conditions: string[];
+  exceptionExpiry?: string | undefined;
+  evidenceRefs: string[];
   createdAt: string;
 }
 
