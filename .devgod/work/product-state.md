@@ -41,15 +41,15 @@ Close the repo's current contract drift so `devgod` can be trusted as both sourc
 
 ## Current Task
 
-No task is currently active under runtime authority. The external runtime-evidence slice and the parent consuming-repo skill-evolution RFC have both been registered and closed under runtime authority.
+No task is currently active under runtime authority. The external runtime-evidence slice, the parent consuming-repo skill-evolution RFC, consuming-repo skill-evolution slice 1, the consuming-repo skill-evolution eval slice, and the consuming-repo skill-evolution trace-mining slice have all been registered and closed under runtime authority.
 
 ## Next Task
 
-Activate `2026-06-08-consuming-repo-skill-evolution-slice-1` under runtime authority if implementation should continue beyond the completed RFC and runtime-evidence slice.
+No immediate successor task is authored yet. The RFC-defined consuming-repo skill-evolution slices are now implemented through trace mining, so any follow-on work should start from a new brief rather than from the original slice chain.
 
 ## Blockers
 
-- No blocker is currently recorded for the completed RFC or runtime-evidence slice.
+- No active blocker is recorded for the completed consuming-repo skill-evolution slice chain. The next gap is deciding whether to productize the new trace-mining mechanics into CLI/runtime surfaces or to stop at the current module-and-tests completion point.
 
 ## Reasoning Debt
 
@@ -67,6 +67,10 @@ Activate `2026-06-08-consuming-repo-skill-evolution-slice-1` under runtime autho
 - `node --experimental-strip-types --test tests/install.test.ts` passed
 - `npm run typecheck` passed
 - `npm test` passed with 693 passing, 0 failing, 1 skipped
+- `node --experimental-strip-types --test tests/skill-evolution.test.ts tests/vendored-skills.test.ts` passed after the trace-mining slice
+- `npm run typecheck` passed after the trace-mining slice
+- `npm test` passed with 700 passing, 0 failing, 1 skipped after the trace-mining slice
+- `git diff --check` passed after the trace-mining slice
 - `npm run check:quality` passed, including coverage, workflow fixture verification, `npm audit`, and package dry run
 - `bash scripts/check-devgod-workflow.sh --task-id 2026-06-07-devgod-internal-consistency-hardening` passed
 - `node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts tests/control-layer-contract.test.ts` passed

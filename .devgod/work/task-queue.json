@@ -3,22 +3,26 @@
   "current_task_id": null,
   "tasks": [
     {
-      "id": "2026-06-08-consuming-repo-skill-evolution-rfc",
-      "title": "RFC for consuming-repo skill evolution and promotion",
+      "id": "2026-06-08-consuming-repo-skill-evolution-trace-mining",
+      "title": "Consuming-repo skill evolution trace-mining",
       "status": "done",
       "class": "docs_only",
       "depends_on": [],
       "acceptance_criteria": [
-        "A concrete RFC defines overlay-vs-canonical skill boundaries for consuming repos",
-        "The RFC covers config, lifecycle, CLI/runtime surface, review gates, and rollout",
-        "Human review is required before promotion into canonical repo skills"
+        "overlay skills can mine local trace signals without touching canonical skills",
+        "bounded overlay updates are explicit, deterministic, and reversible",
+        "promotion-readiness suggestions explain why a skill is or is not ready"
       ],
       "verification": [
-        "git diff --check -- .devgod/ACTIVE .devgod/work/briefs/brief-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/tasks/task-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/council/dac-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/product-state.md .devgod/work/task-queue.json docs/plans/2026-06-08-consuming-repo-skill-evolution-rfc.md"
+        "targeted tests for trace mining, bounded overlay updates, and readiness suggestions",
+        "npm run typecheck",
+        "npm test"
       ],
       "evidence": [
-        "task packet: 2026-06-08-consuming-repo-skill-evolution-rfc",
-        "verification: git diff --check -- .devgod/ACTIVE .devgod/work/briefs/brief-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/tasks/task-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/council/dac-2026-06-08-consuming-repo-skill-evolution-rfc.md .devgod/work/product-state.md .devgod/work/task-queue.json docs/plans/2026-06-08-consuming-repo-skill-evolution-rfc.md"
+        "task packet: 2026-06-08-consuming-repo-skill-evolution-trace-mining",
+        "verification: targeted tests for trace mining, bounded overlay updates, and readiness suggestions",
+        "verification: npm run typecheck",
+        "verification: npm test"
       ],
       "blocker": null
     }
