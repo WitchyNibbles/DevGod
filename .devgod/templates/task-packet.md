@@ -23,6 +23,7 @@ List the task-type gates that apply, for example:
 Only assign file-backed gates when the task can actually produce or update the required artifacts inside its allowed write scope.
 
 - `council_review_required`
+- `completion_audit_required`
 - `product_acceptance`
 - `frontend_acceptance`
 - `accessibility_acceptance`
@@ -219,6 +220,22 @@ For remake work, state which visible structures from the current surface are int
 ### Verification plan
 
 ### Research and debug budgets
+
+## Completion audit
+
+Required when `completion_audit_required` is present and recommended for all `specialist_verified` work.
+
+### Audit claim
+
+State what must be true for the task to count as actually complete, not merely green on tests.
+
+### Audit evidence expectations
+
+List the evidence that reviewer and QA outputs must cite to prove the touched scope is complete, clean, and free of unresolved in-scope follow-up work.
+
+### Loop-back trigger
+
+State the condition that forces the task back to implementation instead of allowing review approval, for example uncovered edge cases, polish gaps, stale TODOs, or user-visible incompleteness.
 
 ## Reasoning policy
 

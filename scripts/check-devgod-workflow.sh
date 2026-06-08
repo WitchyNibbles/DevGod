@@ -365,6 +365,21 @@ require_runtime_proof_reference() {
     fail "specialist_verified runtime_verified summaries must cite Runtime proof in ${heading} of ${path#"$repo_root"/}"
 }
 
+require_completion_audit_evidence() {
+  local block="$1"
+  local path="$2"
+  local heading="$3"
+
+  printf '%s\n' "$block" | grep -Eqi 'completion[ -]?audit' ||
+    fail "completion_audit_required work must cite completion audit evidence in ${heading} of ${path#"$repo_root"/}"
+
+  printf '%s\n' "$block" | grep -Eqi 'complete|completed|done' ||
+    fail "completion_audit_required work must explicitly state completion in ${heading} of ${path#"$repo_root"/}"
+
+  printf '%s\n' "$block" | grep -Eqi 'clean|no unresolved|no open|no remaining|no follow-?up|fully closed' ||
+    fail "completion_audit_required work must explicitly state no unresolved in-scope follow-up remains in ${heading} of ${path#"$repo_root"/}"
+}
+
 load_schema_list() {
   local key="$1"
   local schema_path="$repo_root/.devgod/templates/workflow-schema.json"
@@ -994,6 +1009,7 @@ if [[ -f "$task_file" ]]; then
   if [[ "$task_completion_standard" == "specialist_verified" ]]; then
     has_reasoning_strict_gate=0
     has_stronger_artifact_gate=0
+    has_completion_audit_gate=0
 
     mapfile -t stronger_artifact_gates < <(load_schema_list "stronger-artifact-quality-gates")
     declare -A stronger_artifact_gate_map=()
@@ -1003,6 +1019,9 @@ if [[ -f "$task_file" ]]; then
 
     for gate in "${task_quality_gates[@]}"; do
       case "$gate" in
+        completion_audit_required)
+          has_completion_audit_gate=1
+          ;;
         reasoning_strict_required)
           has_reasoning_strict_gate=1
           ;;
@@ -1014,6 +1033,8 @@ if [[ -f "$task_file" ]]; then
 
     [[ "$has_reasoning_strict_gate" -eq 1 ]] ||
       fail "specialist_verified work requires reasoning_strict_required quality gate in ${task_file#"$repo_root"/}"
+    [[ "$has_completion_audit_gate" -eq 1 ]] ||
+      fail "specialist_verified work requires completion_audit_required quality gate in ${task_file#"$repo_root"/}"
     [[ "$task_reasoning_mode" == "strict" ]] ||
       fail "specialist_verified work requires strict reasoning mode in ${task_file#"$repo_root"/}"
     [[ "$has_stronger_artifact_gate" -eq 1 ]] ||
@@ -1231,6 +1252,7 @@ for expected_role in "${schema_review_roles[@]}"; do
   residual_risk="$(extract_section_value "## Residual risk" "$review_file")"
   specialist_execution_evidence="$(extract_section_value "## Specialist execution evidence" "$review_file")"
   quality_gate_evidence="$(extract_section_value "## Quality gate evidence" "$review_file")"
+  quality_gate_evidence_block="$(extract_section_block "## Quality gate evidence" "$review_file")"
   verification_evidence="$(extract_section_value "## Verification evidence" "$review_file")"
   verification_evidence_block="$(extract_section_block "## Verification evidence" "$review_file")"
   [[ -n "$findings" ]] || fail "missing findings in ${review_file#"$repo_root"/}"
@@ -1250,6 +1272,12 @@ for expected_role in "${schema_review_roles[@]}"; do
   if [[ "$task_completion_standard" == "specialist_verified" && "$provenance_status" == "runtime_verified" ]]; then
     require_runtime_proof_reference "$verification_evidence_block" "$review_file" "## Verification evidence"
     require_runtime_proof_reference "$source_handoff_block" "$review_file" "## Source handoff"
+  fi
+  if printf '%s\n' "${task_quality_gates[@]}" | grep -Fxq "completion_audit_required"; then
+    require_completion_audit_evidence "$quality_gate_evidence_block" "$review_file" "## Quality gate evidence"
+    if [[ "$expected_role" == "reviewer" || "$expected_role" == "qa_engineer" ]]; then
+      require_completion_audit_evidence "$verification_evidence_block" "$review_file" "## Verification evidence"
+    fi
   fi
 done
 

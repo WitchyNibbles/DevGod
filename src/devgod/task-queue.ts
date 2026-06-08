@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-export const ALLOWED_TASK_STATUSES = ["pending", "in_progress", "blocked", "done"] as const;
+export const ALLOWED_TASK_STATUSES = ["pending", "in_progress", "blocked", "approved", "done"] as const;
 export const ALLOWED_TASK_CLASSES = [
   "prototype_slice",
   "security_sensitive",
@@ -39,6 +39,7 @@ export interface TaskQueueSummary {
   currentTask: TaskQueueTask | null;
   nextTask: TaskQueueTask | null;
   blockedTasks: TaskQueueTask[];
+  approvedCount: number;
   doneCount: number;
   pendingCount: number;
   inProgressCount: number;
@@ -234,7 +235,10 @@ function tasksById(queue: TaskQueue): Map<string, TaskQueueTask> {
 }
 
 function dependenciesSatisfied(task: TaskQueueTask, index: Map<string, TaskQueueTask>): boolean {
-  return task.depends_on.every((dependencyId) => index.get(dependencyId)?.status === "done");
+  return task.depends_on.every((dependencyId) => {
+    const status = index.get(dependencyId)?.status;
+    return status === "approved" || status === "done";
+  });
 }
 
 export function parseTaskQueueContent(content: string): TaskQueue {
@@ -303,7 +307,7 @@ export function selectNextUnblockedTask(queue: TaskQueue): TaskQueueTask | null 
   }
 
   for (const task of queue.tasks) {
-    if (task.status === "done") {
+    if (task.status === "approved" || task.status === "done") {
       continue;
     }
 
@@ -393,6 +397,7 @@ export function summarizeTaskQueue(queue: TaskQueue): TaskQueueSummary {
     currentTask,
     nextTask: selectNextUnblockedTask(queue),
     blockedTasks: queue.tasks.filter((task) => isTaskBlocked(task)),
+    approvedCount: queue.tasks.filter((task) => task.status === "approved").length,
     doneCount: queue.tasks.filter((task) => task.status === "done").length,
     pendingCount: queue.tasks.filter((task) => task.status === "pending").length,
     inProgressCount: queue.tasks.filter((task) => task.status === "in_progress").length,

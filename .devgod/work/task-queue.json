@@ -3,6 +3,28 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-06-08-completion-audit-closeout-hardening",
+      "title": "Completion-audit closeout hardening",
+      "status": "done",
+      "class": "prototype_slice",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "specialist-verified work requires explicit completion-audit evidence",
+        "reviewer and QA gates block false-complete closeout claims",
+        "exported queues preserve approved separately from done"
+      ],
+      "verification": [
+        "npm run typecheck",
+        "node --experimental-strip-types --test tests/admin.test.ts tests/workflow-check.test.ts tests/contracts.test.ts tests/task-queue-repair.test.ts"
+      ],
+      "evidence": [
+        "task packet: 2026-06-08-completion-audit-closeout-hardening",
+        "verification: npm run typecheck",
+        "verification: node --experimental-strip-types --test tests/admin.test.ts tests/workflow-check.test.ts tests/contracts.test.ts tests/task-queue-repair.test.ts"
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-06-08-consuming-repo-skill-evolution-trace-mining",
       "title": "Consuming-repo skill evolution trace-mining",
       "status": "done",

@@ -1,6 +1,7 @@
 {
   "qualityGates": [
     "council_review_required",
+    "completion_audit_required",
     "product_acceptance",
     "frontend_acceptance",
     "accessibility_acceptance",

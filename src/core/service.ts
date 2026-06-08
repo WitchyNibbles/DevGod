@@ -521,6 +521,7 @@ function mapTaskStatusToQueueStatus(status: TaskRecord["status"]): QueueTaskStat
     case "in_progress":
       return "in_progress";
     case "approved":
+      return "approved";
     case "done":
       return "done";
     case "blocked":
@@ -563,6 +564,8 @@ function buildRuntimeTaskQueue(runStatus: RunRecord["status"], tasks: readonly T
           ? "runtime task blocked"
           : task.status === "review_blocked"
             ? "awaiting required reviews"
+            : task.status === "approved"
+              ? "approved for completion, awaiting explicit closeout"
             : null
     }))
   };

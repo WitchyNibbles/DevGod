@@ -110,15 +110,22 @@ function buildHealthyRuntimePreflightOptions(store: MemoryStore, cwd: string) {
 }
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? ([...qualityGates, "completion_audit_required"] as TaskPacketInput["qualityGates"])
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -319,7 +326,8 @@ async function createApprovedRuntimeTask(options: {
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await options.service.recordReview(run.id, options.taskId, "security-actor", {
     reviewerRole: "security_reviewer",
@@ -331,7 +339,8 @@ async function createApprovedRuntimeTask(options: {
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   return { runId: run.id };
@@ -637,7 +646,8 @@ test("executeWorkflowProofCommandFromArgs returns runtime-authoritative proof fo
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "plan", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -649,7 +659,8 @@ test("executeWorkflowProofCommandFromArgs returns runtime-authoritative proof fo
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   const result = await executeWorkflowProofCommandFromArgs(
@@ -738,7 +749,8 @@ test("executeWorkflowProofCommandFromArgs requires authenticated runtime council
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rfc", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -750,7 +762,8 @@ test("executeWorkflowProofCommandFromArgs requires authenticated runtime council
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   await assert.rejects(
@@ -861,7 +874,8 @@ test("executeWorkflowProofCommandFromArgs rejects UI tasks whose QA review lacks
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "ui-task", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -873,7 +887,8 @@ test("executeWorkflowProofCommandFromArgs rejects UI tasks whose QA review lacks
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   await assert.rejects(
@@ -952,7 +967,8 @@ test("executeWorkflowProofCommandFromArgs accepts UI tasks when QA review cites 
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "ui-task", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -965,7 +981,11 @@ test("executeWorkflowProofCommandFromArgs accepts UI tasks when QA review cites 
     state: "passed",
     severity: "low",
     findings: [],
-    evidenceRefs: ["playwright://snapshot/desktop", "artifact://playwright/ui-task/mobile.png"]
+    evidenceRefs: [
+      "playwright://snapshot/desktop",
+      "artifact://playwright/ui-task/mobile.png",
+      "completion audit: complete, clean, no unresolved in-scope follow-up work"
+    ]
   });
 
   const result = await executeWorkflowProofCommandFromArgs(["--run-id", run.id, "--task-id", "ui-task"], {
@@ -1041,7 +1061,8 @@ test("executeWorkflowProofCommandFromArgs rejects stale persisted seed failure m
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "plan", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -1053,7 +1074,8 @@ test("executeWorkflowProofCommandFromArgs rejects stale persisted seed failure m
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
@@ -2614,7 +2636,8 @@ test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the l
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(approvedRun.id, "carry-task", "security-actor", {
     reviewerRole: "security_reviewer",
@@ -2626,7 +2649,8 @@ test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the l
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
 
   const unrelatedRun = await service.intakeRequest({

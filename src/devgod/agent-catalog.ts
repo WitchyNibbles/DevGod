@@ -135,7 +135,7 @@ export const agentCatalog = {
   },
   reviewer: {
     label: "Reviewer",
-    description: "Finds correctness bugs, regressions, and missing verification.",
+    description: "Finds correctness bugs, regressions, missing verification, and false-complete claims before closure.",
     class: "quality",
     availability: "core_required",
     shipsAgentArtifact: true,
@@ -177,7 +177,7 @@ export const agentCatalog = {
   },
   qa_engineer: {
     label: "QA Engineer",
-    description: "Owns verification rigor, regression detection, and falsifiable completion claims.",
+    description: "Owns verification rigor, regression detection, completion audits, and falsifiable closure claims.",
     class: "quality",
     availability: "core_required",
     shipsAgentArtifact: true,

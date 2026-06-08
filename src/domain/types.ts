@@ -86,6 +86,7 @@ export const reviewWaiverAuthorities = ["none", "manager", "security_exception"]
 export const uiSurfaces = ["none", "visual_change", "interactive_flow"] as const;
 export const qualityGates = [
   "council_review_required",
+  "completion_audit_required",
   "product_acceptance",
   "frontend_acceptance",
   "accessibility_acceptance",

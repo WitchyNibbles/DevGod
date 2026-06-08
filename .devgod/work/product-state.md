@@ -27,6 +27,7 @@ Close the repo's current contract drift so `devgod` can be trusted as both sourc
 
 ## Completed Milestones
 
+- hardened closeout truth so `specialist_verified` work now requires explicit completion-audit evidence and exported queues no longer collapse `approved` into `done`
 - audited `devgod` against `archon` and identified that `devgod` currently has broader surface area but weaker internal consistency
 - confirmed that `archon` clears its main quality gate while the current `devgod` worktree fails package-manifest and workflow-contract tests
 - restored package-manifest, workflow-template, hook-scope, and agent-metadata consistency across the maintainer and downstream install path
@@ -59,6 +60,8 @@ No immediate successor task is authored yet. The RFC-defined consuming-repo skil
 
 ## Verification Summary
 
+- `npm run typecheck` passed after completion-audit closeout hardening
+- `node --experimental-strip-types --test tests/admin.test.ts tests/workflow-check.test.ts tests/contracts.test.ts tests/task-queue-repair.test.ts` passed after completion-audit closeout hardening
 - `node --experimental-strip-types --test tests/install.test.ts` passed
 - `npm run verify:package-surface` passed
 - `npm run verify:release-overlay` passed

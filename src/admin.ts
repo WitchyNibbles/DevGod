@@ -2347,6 +2347,7 @@ function mapSnapshotTaskStatusToQueueStatus(status: TaskStatus): TaskQueue["task
     case "in_progress":
       return "in_progress";
     case "approved":
+      return "approved";
     case "done":
       return "done";
     case "blocked":
@@ -2392,6 +2393,8 @@ function buildAuthoritativeTaskQueueFromSnapshot(
           ? "runtime task blocked"
           : task.status === "review_blocked"
             ? "awaiting required reviews"
+            : task.status === "approved"
+              ? "approved for completion, awaiting explicit closeout"
             : null
     }))
   };
@@ -7742,6 +7745,7 @@ export async function executeWorkflowProofCommandFromArgs(
   }
 
   enforcePlaywrightWorkflowProof(task.packet, latestReviews);
+  enforceCompletionAuditWorkflowProof(task.packet, latestReviews);
 
   const latestApproval = (await options.getApprovals(runId, taskId)).at(-1);
   if (!latestApproval) {
@@ -7805,6 +7809,38 @@ function enforcePlaywrightWorkflowProof(packet: TaskPacketInput, latestReviews: 
   const hasPlaywrightEvidence = evidenceRefs.some((ref) => /playwright/i.test(ref));
   if (!hasPlaywrightEvidence) {
     throw new Error(`Task ${packet.taskId} qa_engineer review must cite Playwright evidence refs before workflow-proof`);
+  }
+}
+
+function hasCompletionAuditEvidence(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return (
+    /completion[ -]?audit/i.test(value) &&
+    /(complete|completed|done)/i.test(value) &&
+    /(clean|no unresolved|no open|no remaining|no follow-?up|fully closed)/i.test(value)
+  );
+}
+
+function enforceCompletionAuditWorkflowProof(packet: TaskPacketInput, latestReviews: readonly ReviewRecord[]): void {
+  if (!packet.qualityGates.includes("completion_audit_required")) {
+    return;
+  }
+
+  for (const role of ["reviewer", "qa_engineer"] as const) {
+    const review = latestReviews.find((candidate) => candidate.reviewerRole === role);
+    if (!review) {
+      throw new Error(`Task ${packet.taskId} is missing the ${role} runtime review required for completion audit`);
+    }
+
+    const evidenceRefs = review.evidenceRefs ?? [];
+    if (!evidenceRefs.some((ref) => hasCompletionAuditEvidence(ref))) {
+      throw new Error(
+        `Task ${packet.taskId} ${role} review must cite completion-audit evidence before workflow-proof`
+      );
+    }
   }
 }
 
@@ -8001,7 +8037,13 @@ function buildWorkflowProofSeedTaskPacket(taskId: string): TaskPacketInput {
     ownerRole: "planner",
     completionStandard: "specialist_verified",
     requiredSpecialistRoles: ["planner"],
-    qualityGates: ["tdd_required", "release_readiness_required", "setup_replay_required", "reasoning_strict_required"],
+    qualityGates: [
+      "tdd_required",
+      "release_readiness_required",
+      "setup_replay_required",
+      "completion_audit_required",
+      "reasoning_strict_required"
+    ],
     goal: `Seed authoritative runtime workflow proof for ${taskId}`,
     inputs: ["local workflow artifacts", "runtime store"],
     outputs: ["approved runtime workflow proof"],
@@ -8010,7 +8052,8 @@ function buildWorkflowProofSeedTaskPacket(taskId: string): TaskPacketInput {
     outOfScope: ["production deploys", "manual database edits"],
     acceptanceCriteria: [
       `workflow-proof resolves ${taskId} from the latest runtime run`,
-      "required reviewer, qa, and security reviews are recorded as authenticated approvals"
+      "required reviewer, qa, and security reviews are recorded as authenticated approvals",
+      "reviewer and qa evidence explicitly confirm the task is complete, clean, and has no unresolved in-scope follow-up work"
     ],
     verificationSteps: [
       `node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id ${taskId}`
@@ -8098,6 +8141,7 @@ function buildModernizationProofSeedTaskPacket(taskId: string): TaskPacketInput 
       "progress_proof_required",
       "setup_replay_required",
       "release_readiness_required",
+      "completion_audit_required",
       "reasoning_strict_required"
     ],
     goal: `Seed authoritative runtime modernization proof for ${taskId}`,
@@ -8109,7 +8153,8 @@ function buildModernizationProofSeedTaskPacket(taskId: string): TaskPacketInput 
     acceptanceCriteria: [
       `workflow-proof resolves ${taskId} from the latest runtime run`,
       "status reports modernization_program rewrite readiness as ready",
-      "duplicate-family, architecture, migration, and parity evidence are present in runtime state"
+      "duplicate-family, architecture, migration, and parity evidence are present in runtime state",
+      "reviewer and qa evidence explicitly confirm the task is complete, clean, and has no unresolved in-scope follow-up work"
     ],
     verificationSteps: [
       `node --experimental-strip-types src/admin.ts workflow-proof --run-id latest --task-id ${taskId}`,
@@ -8375,7 +8420,8 @@ export async function executeSeedWorkflowProofCommandFromArgs(
       reviewerRole: "reviewer",
       state: "passed",
       severity: "low",
-      findings: []
+      findings: [],
+      evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
     });
     await options.recordReview(run.id, resolvedTaskId, "security-actor", {
       reviewerRole: "security_reviewer",
@@ -8387,7 +8433,8 @@ export async function executeSeedWorkflowProofCommandFromArgs(
       reviewerRole: "qa_engineer",
       state: "passed",
       severity: "low",
-      findings: []
+      findings: [],
+      evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
     });
 
     const proof = await executeWorkflowProofCommandFromArgs(
@@ -8486,7 +8533,8 @@ export async function executeSeedModernizationProofCommandFromArgs(
       reviewerRole: "reviewer",
       state: "passed",
       severity: "low",
-      findings: []
+      findings: [],
+      evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
     });
     await options.recordReview(run.id, resolvedTaskId, "security-actor", {
       reviewerRole: "security_reviewer",
@@ -8498,7 +8546,8 @@ export async function executeSeedModernizationProofCommandFromArgs(
       reviewerRole: "qa_engineer",
       state: "passed",
       severity: "low",
-      findings: []
+      findings: [],
+      evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
     });
 
     const now = new Date().toISOString();

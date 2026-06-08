@@ -635,6 +635,10 @@ export function validateTaskPacket(packet: TaskPacketInput): string[] {
     if (normalizedQualityGates.length === 0) {
       errors.push("specialist_verified tasks require at least one quality gate");
     }
+
+    if (!normalizedQualityGates.includes("completion_audit_required")) {
+      errors.push("specialist_verified tasks require completion_audit_required");
+    }
   }
 
   if (packet.goal.trim().length === 0) {

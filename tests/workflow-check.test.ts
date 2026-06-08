@@ -404,6 +404,7 @@ async function writeWorkflowReview(
       ? options.verificationEvidenceLines
       : provenanceStatus === "runtime_verified"
       ? [
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
           "- bash scripts/check-devgod-workflow-live.sh"
         ]
@@ -459,6 +460,7 @@ async function writeWorkflowReview(
       "## Quality gate evidence",
       "",
       "- quality gates were checked explicitly",
+      "- completion audit: complete, clean, no unresolved in-scope follow-up work",
       "",
       "## Reasoning quality findings",
       "",
@@ -1215,7 +1217,12 @@ test("check-devgod-workflow-live rejects specialist_verified tasks without stric
     stubRoot = await attachWorkflowProofStub(targetRoot);
     await writeLiveTaskPacket(targetRoot, taskId, {
       completionStandard: "specialist_verified",
-      qualityGates: ["product_acceptance", "reasoning_strict_required", "progress_proof_required"]
+      qualityGates: [
+        "product_acceptance",
+        "completion_audit_required",
+        "reasoning_strict_required",
+        "progress_proof_required"
+      ]
     });
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
       await writeWorkflowReview(targetRoot, taskId, role);
@@ -1244,7 +1251,7 @@ test("check-devgod-workflow-live rejects specialist_verified tasks without a str
     stubRoot = await attachWorkflowProofStub(targetRoot);
     await writeLiveTaskPacket(targetRoot, taskId, {
       completionStandard: "specialist_verified",
-      qualityGates: ["product_acceptance", "reasoning_strict_required"],
+      qualityGates: ["product_acceptance", "completion_audit_required", "reasoning_strict_required"],
       reasoningMode: "strict"
     });
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
@@ -1274,7 +1281,12 @@ test("check-devgod-workflow-live accepts specialist_verified tasks with strict r
     stubRoot = await attachWorkflowProofStub(targetRoot);
     await writeLiveTaskPacket(targetRoot, taskId, {
       completionStandard: "specialist_verified",
-      qualityGates: ["product_acceptance", "reasoning_strict_required", "progress_proof_required"],
+      qualityGates: [
+        "product_acceptance",
+        "completion_audit_required",
+        "reasoning_strict_required",
+        "progress_proof_required"
+      ],
       reasoningMode: "strict"
     });
     for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
@@ -1850,6 +1862,7 @@ test("check-devgod-workflow rejects specialist_verified tasks without runtime-ve
         "## Quality gates",
         "",
         "- `product_acceptance`",
+        "- `completion_audit_required`",
         "- `tdd_required`",
         "- `reasoning_strict_required`",
         "- `progress_proof_required`",
@@ -1934,6 +1947,7 @@ test("check-devgod-workflow rejects specialist_verified tasks without runtime-ve
           "",
           "## Verification evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- bash scripts/check-devgod-workflow.sh --task-id DG-SPECIALIST-PROOF",
           "",
           "## Specialist execution evidence",
@@ -1942,6 +1956,7 @@ test("check-devgod-workflow rejects specialist_verified tasks without runtime-ve
           "",
           "## Quality gate evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- acceptance claimed without runtime proof",
           "",
           "## Waiver authority",
@@ -2024,6 +2039,7 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
         "## Quality gates",
         "",
         "- `product_acceptance`",
+        "- `completion_audit_required`",
         "- `tdd_required`",
         "- `reasoning_strict_required`",
         "- `progress_proof_required`",
@@ -2108,6 +2124,7 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
           "",
           "## Verification evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- bash scripts/check-devgod-workflow.sh --task-id DG-LEGACY-REVIEW-PROOF",
           "",
           "## Specialist execution evidence",
@@ -2116,6 +2133,7 @@ test("check-devgod-workflow rejects specialist_verified tasks with legacy-backfi
           "",
           "## Quality gate evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- acceptance claimed without authenticated runtime proof",
           "",
           "## Waiver authority",
@@ -2198,6 +2216,7 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
         "## Quality gates",
         "",
         "- `product_acceptance`",
+        "- `completion_audit_required`",
         "- `tdd_required`",
         "- `reasoning_strict_required`",
         "- `progress_proof_required`",
@@ -2282,6 +2301,7 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
           "",
           "## Verification evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- bash scripts/check-devgod-workflow.sh --task-id DG-RUNTIME-PROOF-MISSING",
           "",
           "## Specialist execution evidence",
@@ -2290,6 +2310,7 @@ test("check-devgod-workflow rejects runtime_verified specialist summaries withou
           "",
           "## Quality gate evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- quality gates claimed in summary",
           "",
           "## Waiver authority",
@@ -2372,6 +2393,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
         "## Quality gates",
         "",
         "- `product_acceptance`",
+        "- `completion_audit_required`",
         "- `tdd_required`",
         "- `reasoning_strict_required`",
         "- `progress_proof_required`",
@@ -2456,6 +2478,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
           "",
           "## Verification evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
           "- bash scripts/check-devgod-workflow.sh --task-id DG-RUNTIME-PROOF-PRESENT",
           "",
@@ -2465,6 +2488,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
           "",
           "## Quality gate evidence",
           "",
+          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
           "- quality gates claimed in summary",
           "",
           "## Waiver authority",

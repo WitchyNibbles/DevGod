@@ -24,6 +24,13 @@ Use task-type quality gates in addition to the generic review trio.
 - requires a council decision packet, rotating council membership, a named dissent owner, and a recorded outcome
 - should not be applied to trivial work, tightly local bug fixes, or implementation tasks already covered by an approved parent council decision
 
+### `completion_audit_required`
+
+- use when "tests passed" is not a strong enough done signal on its own
+- default for `specialist_verified` work
+- requires reviewer and QA evidence that the touched scope is actually complete, clean, and free of unresolved in-scope follow-up work
+- any finding that implies "works, but only halfway" must loop the task back to implementation instead of allowing approval
+
 ### `frontend_acceptance`
 
 - use for UI or human-facing artifact work

@@ -42,6 +42,8 @@ List the evidence used to trust the declared quality gates for this task.
 
 When `council_review_required` applies, cite the DAC decision packet, recorded outcome, dissent owner, and any approval conditions or exception expiry carried into implementation.
 
+When `completion_audit_required` applies, explicitly state that a completion audit was performed and that the touched scope is complete, clean, and has no unresolved in-scope follow-up work.
+
 ## Reasoning quality findings
 
 Call out weak assumptions, missing alternatives, contradictory evidence, low confidence, or exhausted budgets here.
@@ -57,6 +59,8 @@ List exact commands, fixtures, or repro steps used for this gate.
 When `Provenance status` is `runtime_verified` for `specialist_verified` work, include at least one `Runtime proof:` line here that names the authenticated runtime artifact or check summarized by this markdown.
 
 For `qa_engineer` reviews on tasks with `playwright_required = true`, cite Playwright evidence refs here, including the desktop/mobile coverage and any browser artifact paths or runtime evidence refs used to support approval.
+
+For `reviewer` and `qa_engineer` reviews on tasks with `completion_audit_required`, include a completion-audit statement here that confirms the touched scope is complete, clean, and has no unresolved in-scope follow-up work.
 
 ## Waiver authority
 

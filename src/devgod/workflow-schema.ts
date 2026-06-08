@@ -2,6 +2,7 @@ export const approvalDecisions = ["approved", "blocked", "waived"] as const;
 export const completionStandards = ["artifact_complete", "specialist_verified"] as const;
 export const qualityGates = [
   "council_review_required",
+  "completion_audit_required",
   "product_acceptance",
   "frontend_acceptance",
   "accessibility_acceptance",
@@ -82,6 +83,8 @@ export const workflowCouncilVsReviewGatePolicyLine =
   "- `council_review_required` is a quality gate, not a fourth review role; it governs pre-implementation decision quality and does not replace the required review trio";
 export const workflowReleaseReadinessPolicyLine =
   "- `release_readiness_required` is a quality gate, not a fourth review gate; release-sensitive work must still surface explicit release-readiness evidence in handoffs or review summaries";
+export const workflowCompletionAuditPolicyLine =
+  "- `completion_audit_required` keeps specialist-verified work in gate scope until review evidence explicitly states the touched outcome is complete, clean, and has no unresolved follow-up work in scope";
 export const workflowRuntimeOptionalReviewExportsPolicyLine =
   "- under `runtime_authenticated_only` review authority, a task may declare `review_exports=runtime_optional` and complete live verification before markdown review exports exist; if review exports are present they must still validate as evidence summaries";
 export const workflowAuthenticatedGatePolicyLine =
@@ -142,6 +145,7 @@ export function renderReviewGatePolicyDocument(): string {
     workflowRequiredGateRolesPolicyLine,
     workflowCouncilVsReviewGatePolicyLine,
     workflowReleaseReadinessPolicyLine,
+    workflowCompletionAuditPolicyLine,
     workflowRuntimeOptionalReviewExportsPolicyLine,
     workflowAuthenticatedGatePolicyLine,
     workflowPassedStatePolicyLine,
