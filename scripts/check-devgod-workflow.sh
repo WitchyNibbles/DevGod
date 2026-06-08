@@ -374,7 +374,9 @@ import fs from "node:fs";
 
 const [schemaPath, key] = process.argv.slice(2);
 const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
-const schemaKey = key.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+const schemaKey = key
+  .replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
+  .replace(/Nonempty/g, "NonEmpty");
 const values = schema[schemaKey];
 if (!Array.isArray(values)) {
   console.error(`devgod workflow check failed: workflow schema key ${key} is missing or not a list`);
