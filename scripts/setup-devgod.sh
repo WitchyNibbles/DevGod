@@ -464,6 +464,8 @@ if [[ -f .devgod/install-manifest.json ]] && git rev-parse --show-toplevel >/dev
   npm run devgod:setup:git-guard
 fi
 
+npm run devgod:setup:graphify
+
 if has_npm_script "devgod:setup:playwright" "setup:playwright"; then
   npm run devgod:setup:playwright
 fi
@@ -486,4 +488,5 @@ echo "runtime mode: ${DEVGOD_RUNTIME_MODE}"
 echo "workspace: ${DEVGOD_WORKSPACE_SLUG:-default}"
 echo "project: ${DEVGOD_PROJECT_SLUG:-unknown}"
 echo "database: configured"
+echo "graphify: configured"
 echo "playwright: configured"

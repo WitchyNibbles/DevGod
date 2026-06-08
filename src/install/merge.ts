@@ -59,6 +59,7 @@ ${workflowContractBlock}
 - ${workflowArtifactRefHelperSummarySentence}
 - ${workflowRuntimeOptionalReviewExportsSentence}
 - keep \`devgod\` as the default workflow controller even when other tools are available
+- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready so agents get broader structure and spend fewer tokens before broad text scans
 - when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or unavailable, say so
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
 - route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
@@ -109,6 +110,7 @@ const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
 - package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
 - live work state belongs in \`.devgod/work/\`
 - reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there
+- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready for repo topology and cross-artifact retrieval, but do not treat it as workflow authority
 - when repo-local Grafana configuration is present, treat Grafana as advisory evidence for debugging and research; if configuration is partial or tools are unavailable, report that explicitly
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
 - ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
@@ -131,10 +133,8 @@ Council reminders:
 See \`AGENTS.md\` and \`.devgod/rules/\` for the full workflow contract and policy details.
 ${DOT_AGENTS_END}`;
 
-interface GitNexusInstallSettings {
-  withGitNexus?: boolean;
+interface GraphifyInstallSettings {
   withGrafana?: boolean;
-  gitNexusPackageVersion?: string;
 }
 
 const enforcedCodexConfigKeys = ["approval_policy", "sandbox_mode"] as const;
@@ -239,34 +239,6 @@ function mergeTomlTable(
   return merged;
 }
 
-function omitGitNexusMcpServer(
-  config: Record<string, unknown>
-): Record<string, unknown> {
-  const normalized = normalizeManagedCodexConfig(config);
-  const mcpServers =
-    normalized.mcp_servers &&
-    typeof normalized.mcp_servers === "object" &&
-    !Array.isArray(normalized.mcp_servers)
-      ? { ...(normalized.mcp_servers as Record<string, unknown>) }
-      : undefined;
-
-  if (!mcpServers || mcpServers.gitnexus === undefined) {
-    return normalized;
-  }
-
-  delete mcpServers.gitnexus;
-
-  if (Object.keys(mcpServers).length === 0) {
-    const { mcp_servers: _removed, ...rest } = normalized;
-    return rest;
-  }
-
-  return {
-    ...normalized,
-    mcp_servers: mcpServers
-  };
-}
-
 export function mergeCodexConfig(
   existingContent: string | undefined,
   sourceContent: string
@@ -304,11 +276,11 @@ export function mergeCodexConfig(
   return `${TOML.stringify(normalizedMerged as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
 }
 
-export function gitNexusCodexConfigFragment(): string {
+export function graphifyCodexConfigFragment(): string {
   return (
-    '[mcp_servers.gitnexus]\n' +
-    'command = "npx"\n' +
-    'args = ["--no-install", "gitnexus", "mcp"]\n'
+    '[mcp_servers.graphify]\n' +
+    'command = "uv"\n' +
+    'args = ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]\n'
   );
 }
 
@@ -331,21 +303,11 @@ export function grafanaCodexConfigFragment(): string {
   );
 }
 
-export function stripGitNexusFromCodexConfig(
-  sourceContent: string
-): string {
-  const source = omitGitNexusMcpServer(TOML.parse(sourceContent) as Record<string, unknown>);
-  return `${TOML.stringify(sortObjectKeys(source) as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
-}
-
 export function mergeGitignore(
   existingContent: string | undefined,
-  options: GitNexusInstallSettings = {}
+  _options: GraphifyInstallSettings = {}
 ): string {
-  const requiredLines = [".env.devgod", ".env.devgod.*"];
-  if (options.withGitNexus) {
-    requiredLines.push(".gitnexus/");
-  }
+  const requiredLines = [".env.devgod", ".env.devgod.*", "graphify-out/"];
   const existingLines = new Set(
     (existingContent ?? "")
       .split(/\r?\n/)
@@ -380,7 +342,7 @@ function prefixedFileDependency(relativePath: string): string {
 export function mergePackageJson(
   existingContent: string | undefined,
   dependencyPathFromTarget: string,
-  options: GitNexusInstallSettings = {}
+  options: GraphifyInstallSettings = {}
 ): string {
   const packageJson = existingContent && existingContent.trim().length > 0
     ? (JSON.parse(existingContent) as Record<string, unknown>)
@@ -451,11 +413,20 @@ export function mergePackageJson(
   scripts["devgod:record-review"] = `${devgodEntry} record-review --input .devgod/review-action.json`;
   scripts["devgod:setup:git-guard"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts";
+  scripts["devgod:setup:graphify"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify.ts";
   scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
   scripts["devgod:setup:playwright"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts";
   scripts["devgod:verify:playwright"] =
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify";
+  scripts["devgod:graphify:build"] = "graphify extract src --out .";
+  scripts["devgod:graphify:codex-full"] =
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts";
+  scripts["devgod:graphify:update"] = "graphify extract src --out .";
+  scripts["devgod:graphify:watch"] = "graphify watch src";
+  scripts["devgod:graphify:serve"] =
+    "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json";
 
   if (options.withGrafana) {
     scripts["devgod:grafana:mcp"] =
@@ -463,12 +434,6 @@ export function mergePackageJson(
   }
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);
-
-  if (options.withGitNexus) {
-    scripts["devgod:gitnexus:analyze"] = "gitnexus analyze --skip-agents-md";
-    scripts["devgod:gitnexus:status"] = "gitnexus status";
-    devDependencies.gitnexus = options.gitNexusPackageVersion ?? "1.6.3";
-  }
 
   packageJson.scripts = sortObjectKeys(scripts);
   packageJson.devDependencies = sortObjectKeys(devDependencies);

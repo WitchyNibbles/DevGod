@@ -6,17 +6,17 @@ import process from "node:process";
 import { parse as parseToml } from "@iarna/toml";
 import {
   grafanaCodexConfigFragment,
-  gitNexusCodexConfigFragment,
+  graphifyCodexConfigFragment,
   mergeAgentsMd,
   mergeDotAgentsMd,
   mergeCodexConfig,
   mergeGitignore,
   mergePackageJson,
-  playwrightCodexConfigFragment,
-  stripGitNexusFromCodexConfig
+  playwrightCodexConfigFragment
 } from "./merge.ts";
 import { listCatalogRepoLocalSkillPaths } from "../devgod/repo-local-skill-surface.ts";
 import { verifyNonUserFacingAgentCavemanContract } from "../devgod/caveman-policy.ts";
+import { inspectGraphifyStatus } from "../admin/graphify.ts";
 import {
   buildWorkflowReviewArtifactRelativePaths,
   workflowReviewActorRoles,
@@ -81,7 +81,6 @@ interface ParsedInstallCommand {
   command: "init" | "upgrade";
   dryRun: boolean;
   targetArg: string;
-  withGitNexus?: boolean;
   withGrafana?: boolean;
 }
 
@@ -123,7 +122,6 @@ type ParsedCliArgs =
 
 const installManifestRelativePath = ".devgod/install-manifest.json";
 const installManifestVersion = 1;
-const gitNexusPackageVersion = "1.6.3";
 
 const generatedReviewIdentityAdapter = `import {
   createHeaderReviewIdentityAdapter,
@@ -169,9 +167,9 @@ export default createReviewPrincipalAdapter(async () => {
 
 function usage(): never {
   throw new Error(
-    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-gitnexus] [--with-grafana] --target <path> | <path>\n" +
+    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-grafana] --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
       "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]\n" +
@@ -183,7 +181,6 @@ function buildNextSteps(
   command: "init" | "upgrade",
   mode: InstallMode,
   options: {
-    withGitNexus: boolean;
     withGrafana: boolean;
   }
 ): string[] {
@@ -193,9 +190,9 @@ function buildNextSteps(
         "Review the planned upgrade changes, conflicts, and orphans.",
         "Resolve any conflicts before applying the upgrade.",
         "Rerun in apply mode to write the planned managed-file updates.",
-        options.withGitNexus
-          ? "After apply, run npm install and npm run devgod:gitnexus:analyze to refresh the advisory index."
-          : "Run verify after the upgrade to confirm the managed surface is clean.",
+        "After apply, run npm install and then npm run devgod:setup:local so DevGod provisions Graphify, refreshes the code-only graph, and generates the wiki automatically.",
+        "The managed .codex/config.toml already registers the Graphify MCP server for the consuming repo.",
+        "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path instead of the default code-only setup.",
         options.withGrafana
           ? "If you want Grafana-backed logs, set DEVGOD_GRAFANA_URL plus auth in .env.devgod, then use the grafana MCP tools from Codex."
           : "Optional: rerun upgrade with --with-grafana to install the Grafana MCP server wiring for log-backed debugging and research.",
@@ -205,9 +202,9 @@ function buildNextSteps(
 
     return [
       "Review any backups under .devgod/install-backups/ if you changed managed files locally.",
-      options.withGitNexus
-        ? "Run npm install, then npm run devgod:gitnexus:analyze to create or refresh the advisory index."
-        : "Run verify to confirm the managed surface is clean.",
+      "Run npm install, then npm run devgod:setup:local so DevGod provisions Graphify, refreshes the code-only graph, and generates the wiki automatically.",
+      "The managed .codex/config.toml already registers the Graphify MCP server for the consuming repo.",
+      "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path instead of the default code-only setup.",
       options.withGrafana
         ? "Fill in DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod before using Grafana-backed log tools."
         : "Optional: rerun upgrade with --with-grafana to install the Grafana MCP server wiring for log-backed debugging and research.",
@@ -221,11 +218,9 @@ function buildNextSteps(
         "Review the planned file changes.",
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
-        "After npm install, run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
-        "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
-        options.withGitNexus
-          ? "After npm install, run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
-          : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
+        "After npm install, run npm run devgod:setup:local. That setup path now provisions Graphify, refreshes the code-only graph, generates the wiki, and configures the rest of the local runtime.",
+        "The managed .codex/config.toml already registers the Graphify MCP server for the consuming repo.",
+        "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path instead of the default code-only setup.",
         options.withGrafana
           ? "If you want Grafana-backed logs, set DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod after apply."
           : "Optional: rerun init with --with-grafana to add Grafana MCP wiring for log-backed debugging and research.",
@@ -236,11 +231,9 @@ function buildNextSteps(
   return [
     "cd into the target project",
     "npm install",
-    "Run npm run devgod:setup:git-guard and npm run devgod:verify:git-guard.",
-    "If you want the shipped local runtime bootstrap path, run npm run devgod:setup:local.",
-    options.withGitNexus
-      ? "Run npm run devgod:gitnexus:analyze to create the advisory index without rewriting AGENTS.md."
-      : "Optional: rerun init with --with-gitnexus to add safe GitNexus advisory setup.",
+    "Run npm run devgod:setup:local. That setup path now provisions Graphify, refreshes the code-only graph, generates the wiki, and configures the local runtime.",
+    "The managed .codex/config.toml already registers the Graphify MCP server for the consuming repo.",
+    "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path instead of the default code-only setup.",
     options.withGrafana
       ? "Fill in DEVGOD_GRAFANA_URL plus auth and datasource settings in .env.devgod before using the Grafana MCP tools."
       : "Optional: rerun init with --with-grafana to add Grafana MCP wiring for log-backed debugging and research.",
@@ -829,7 +822,6 @@ async function buildManifest(sourceRoot: string): Promise<InstallFile[]> {
 async function buildInstallPlan(
   sourceRoot: string,
   options: {
-    withGitNexus?: boolean;
     withGrafana?: boolean;
   } = {}
 ): Promise<InstallPlanEntry[]> {
@@ -846,11 +838,8 @@ async function buildInstallPlan(
   }
 
   const sourceConfig = await readFile(path.join(sourceRoot, ".codex/config.toml"), "utf8");
-  const baseCodexConfigSource = stripGitNexusFromCodexConfig(sourceConfig);
-  let codexConfigSource = mergeCodexConfig(baseCodexConfigSource, playwrightCodexConfigFragment());
-  if (options.withGitNexus) {
-    codexConfigSource = mergeCodexConfig(codexConfigSource, gitNexusCodexConfigFragment());
-  }
+  let codexConfigSource = mergeCodexConfig(sourceConfig, playwrightCodexConfigFragment());
+  codexConfigSource = mergeCodexConfig(codexConfigSource, graphifyCodexConfigFragment());
   if (options.withGrafana) {
     codexConfigSource = mergeCodexConfig(codexConfigSource, grafanaCodexConfigFragment());
   }
@@ -887,12 +876,6 @@ async function buildInstallPlan(
           currentContent,
           dependencyPath,
           {
-            ...(options.withGitNexus
-              ? {
-                  withGitNexus: true,
-                  gitNexusPackageVersion
-                }
-              : {}),
             ...(options.withGrafana ? { withGrafana: true } : {})
           }
         );
@@ -902,8 +885,7 @@ async function buildInstallPlan(
       target: ".gitignore",
       mode: "managed",
       strategy: "merge",
-      resolveDesiredContent: async (_targetRoot, currentContent) =>
-        mergeGitignore(currentContent, options.withGitNexus ? { withGitNexus: true } : {})
+      resolveDesiredContent: async (_targetRoot, currentContent) => mergeGitignore(currentContent)
     },
     {
       target: "scripts/devgod-setup.sh",
@@ -926,37 +908,6 @@ async function buildInstallPlan(
   );
 
   return plan;
-}
-
-async function detectInstalledGitNexus(targetRoot: string): Promise<boolean> {
-  const codexConfig = await readFileIfExists(path.join(targetRoot, ".codex/config.toml"));
-  if (codexConfig?.includes("[mcp_servers.gitnexus]")) {
-    return true;
-  }
-
-  const packageJsonContent = await readFileIfExists(path.join(targetRoot, "package.json"));
-  if (!packageJsonContent) {
-    return false;
-  }
-
-  try {
-    const packageJson = JSON.parse(packageJsonContent) as {
-      devDependencies?: Record<string, unknown>;
-      scripts?: Record<string, unknown>;
-    };
-
-    if (typeof packageJson.devDependencies?.gitnexus === "string") {
-      return true;
-    }
-
-    if (typeof packageJson.scripts?.["devgod:gitnexus:analyze"] === "string") {
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
 }
 
 async function detectInstalledGrafana(targetRoot: string): Promise<boolean> {
@@ -1014,8 +965,7 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
   return {
     command,
     dryRun: hasDryRun,
-    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply", "--with-gitnexus", "--with-grafana"])),
-    ...(args.includes("--with-gitnexus") ? { withGitNexus: true } : {}),
+    targetArg: resolveCliTarget(args, new Set(["--dry-run", "--apply", "--with-grafana"])),
     ...(args.includes("--with-grafana") ? { withGrafana: true } : {})
   };
 }
@@ -1125,10 +1075,9 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
     if (
       commandArgs.includes("--apply") ||
       commandArgs.includes("--dry-run") ||
-      commandArgs.includes("--with-gitnexus") ||
       commandArgs.includes("--with-grafana")
     ) {
-      throw new Error("verify does not support --apply, --dry-run, --with-gitnexus, or --with-grafana.");
+      throw new Error("verify does not support --apply, --dry-run, or --with-grafana.");
     }
 
     return {
@@ -1162,8 +1111,7 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
   return {
     command: "init",
     dryRun: true,
-    targetArg: resolveCliTarget(rawArgs, new Set(["--dry-run", "--with-gitnexus", "--with-grafana"])),
-    ...(rawArgs.includes("--with-gitnexus") ? { withGitNexus: true } : {}),
+    targetArg: resolveCliTarget(rawArgs, new Set(["--dry-run", "--with-grafana"])),
     ...(rawArgs.includes("--with-grafana") ? { withGrafana: true } : {})
   };
 }
@@ -1379,7 +1327,6 @@ async function buildManagedUpgradePlan(
   targetRoot: string,
   manifest: InstallManifest,
   options: {
-    withGitNexus?: boolean;
     withGrafana?: boolean;
   } = {}
 ): Promise<{
@@ -1427,16 +1374,15 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
-  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("init", mode, { withGitNexus, withGrafana }));
+  const summary = createInstallSummary(mode, buildNextSteps("init", mode, { withGrafana }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const plannedWrites: PlannedWrite[] = [];
 
-  for (const entry of await buildInstallPlan(sourceRoot, { withGitNexus, withGrafana })) {
+  for (const entry of await buildInstallPlan(sourceRoot, { withGrafana })) {
     const plannedWrite = resolveInstallAction(await resolvePlanEntry(entry, targetRoot));
     plannedWrites.push(plannedWrite);
     if (plannedWrite.action === "conflict") {
@@ -1459,16 +1405,14 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
-  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
-  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, { withGitNexus, withGrafana }));
+  const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, { withGrafana }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const { existingManifest, manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
   const { orphans, plannedWrites } = await buildManagedUpgradePlan(sourceRoot, targetRoot, manifest, {
-    withGitNexus,
     withGrafana
   });
 
@@ -1506,13 +1450,12 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
 export async function verifyDevgodInstall(options: InstallOptions): Promise<VerifySummary> {
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetRoot = path.resolve(options.targetRoot);
-  const withGitNexus = options.withGitNexus ?? (await detectInstalledGitNexus(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const { manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot);
-  const planEntries = (await buildInstallPlan(sourceRoot, { withGitNexus, withGrafana })).filter(
+  const planEntries = (await buildInstallPlan(sourceRoot, { withGrafana })).filter(
     (entry) => entry.mode === "managed"
   );
   const plannedTargets = new Set(planEntries.map((entry) => entry.target));
@@ -1520,6 +1463,7 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
   const missing: string[] = [];
   const modified: string[] = [];
   const policyDrift: string[] = [];
+  const prerequisiteDrift: string[] = [];
   for (const entry of planEntries) {
     const resolved = await resolvePlanEntry(entry, targetRoot);
     if (resolved.invalidReason) {
@@ -1564,12 +1508,46 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
     }
   }
 
+  const graphify = await inspectGraphifyStatus({ cwd: targetRoot });
+  if (!graphify.configured) {
+    prerequisiteDrift.push(
+      "graphify is mandatory, but no Graphify MCP config was detected in project or user Codex config"
+    );
+  }
+  switch (graphify.state) {
+    case "missing_graph":
+      prerequisiteDrift.push(
+        "graphify is mandatory, but graphify-out/graph.json has not been built; run npm run devgod:graphify:build or npm run devgod:graphify:codex-full"
+      );
+      break;
+    case "invalid_graph":
+      prerequisiteDrift.push(
+        "graphify is mandatory, but graphify-out/graph.json is invalid; rebuild it with npm run devgod:graphify:build or the Codex-backed full-graph path"
+      );
+      break;
+    case "unconfigured":
+      if (graphify.graphBuilt) {
+        prerequisiteDrift.push(
+          "graphify graph artifacts exist, but DevGod requires Graphify MCP configuration before the repo is considered operational"
+        );
+      }
+      break;
+    default:
+      break;
+  }
+
   return {
-    ok: missing.length === 0 && modified.length === 0 && orphans.length === 0 && policyDrift.length === 0,
+    ok:
+      missing.length === 0 &&
+      modified.length === 0 &&
+      orphans.length === 0 &&
+      policyDrift.length === 0 &&
+      prerequisiteDrift.length === 0,
     missing,
     modified,
     orphans: orphans.sort((left, right) => left.localeCompare(right)),
-    policyDrift: [...policyDrift].sort((left, right) => left.localeCompare(right))
+    policyDrift: [...policyDrift].sort((left, right) => left.localeCompare(right)),
+    prerequisiteDrift: [...prerequisiteDrift].sort((left, right) => left.localeCompare(right))
   };
 }
 
@@ -1625,6 +1603,7 @@ function printVerifySummary(targetRoot: string, summary: VerifySummary): void {
   console.log(`modified: ${summary.modified.length}`);
   console.log(`orphans: ${summary.orphans.length}`);
   console.log(`policy drift: ${summary.policyDrift.length}`);
+  console.log(`prerequisite drift: ${summary.prerequisiteDrift.length}`);
 
   if (summary.missing.length > 0) {
     console.log("Missing:");
@@ -1650,6 +1629,13 @@ function printVerifySummary(targetRoot: string, summary: VerifySummary): void {
   if (summary.policyDrift.length > 0) {
     console.log("Policy drift:");
     for (const item of summary.policyDrift) {
+      console.log(`- ${item}`);
+    }
+  }
+
+  if (summary.prerequisiteDrift.length > 0) {
+    console.log("Prerequisite drift:");
+    for (const item of summary.prerequisiteDrift) {
       console.log(`- ${item}`);
     }
   }

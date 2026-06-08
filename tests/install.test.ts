@@ -11,7 +11,7 @@ import { parse as parseToml } from "@iarna/toml";
 import { auditMaintainerOnlyPublishedPaths } from "../src/install/maintainer-boundary.ts";
 import {
   grafanaCodexConfigFragment,
-  gitNexusCodexConfigFragment,
+  graphifyCodexConfigFragment,
   mergeAgentsMd,
   mergeDotAgentsMd,
   mergeCodexConfig,
@@ -66,6 +66,15 @@ async function runNpmPackJsonDryRun(sourceRoot: string): Promise<string> {
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   await chmod(filePath, 0o755);
+}
+
+async function writeGraphifyGraph(targetRoot: string): Promise<void> {
+  await mkdir(path.join(targetRoot, "graphify-out"), { recursive: true });
+  await writeFile(
+    path.join(targetRoot, "graphify-out", "graph.json"),
+    JSON.stringify({ nodes: [], edges: [] }, null, 2),
+    "utf8"
+  );
 }
 
 async function writeHealthcheckNodeStub(binDir: string): Promise<void> {
@@ -223,17 +232,16 @@ test("mergeCodexConfig preserves existing comments when no semantic change is ne
   assert.equal(merged, existing);
 });
 
-test("mergeCodexConfig adds GitNexus MCP settings without overwriting existing project config", () => {
+test("mergeCodexConfig adds Graphify MCP settings without overwriting existing project config", () => {
   const merged = mergeCodexConfig(
     'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
-    gitNexusCodexConfigFragment()
+    graphifyCodexConfigFragment()
   );
 
-  assert.match(merged, /\[mcp_servers\.gitnexus\]/);
-  assert.match(merged, /command = "npx"/);
-  assert.match(merged, /"--no-install"/);
-  assert.match(merged, /"gitnexus"/);
-  assert.match(merged, /"mcp"/);
+  assert.match(merged, /\[mcp_servers\.graphify\]/);
+  assert.match(merged, /command = "uv"/);
+  assert.match(merged, /"graphify\.serve"/);
+  assert.match(merged, /"graphify-out\/graph\.json"/);
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
@@ -413,6 +421,10 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     merged.scripts["devgod:setup:git-guard"],
     "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts"
   );
+  assert.equal(
+    merged.scripts["devgod:setup:graphify"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify.ts"
+  );
   assert.match(
     merged.scripts["devgod:setup:local"],
     /node_modules\/devgod\/src\/install\/setup-local\.ts/
@@ -497,27 +509,30 @@ test("verifyCatalogRepoLocalSkills reports missing repo-local wrapper files dete
   }
 });
 
-test("mergePackageJson adds pinned GitNexus helpers only when requested", () => {
+test("mergePackageJson adds Graphify helpers by default", () => {
   const merged = JSON.parse(
     mergePackageJson(
       JSON.stringify({
         name: "target-project",
         private: true
       }),
-      "../devgod",
-      {
-        withGitNexus: true,
-        gitNexusPackageVersion: "1.6.3"
-      }
+      "../devgod"
     )
   ) as {
     scripts: Record<string, string>;
     devDependencies: Record<string, string>;
   };
 
-  assert.equal(merged.devDependencies.gitnexus, "1.6.3");
-  assert.equal(merged.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
-  assert.equal(merged.scripts["devgod:gitnexus:status"], "gitnexus status");
+  assert.equal(merged.scripts["devgod:graphify:build"], "graphify extract src --out .");
+  assert.equal(
+    merged.scripts["devgod:graphify:codex-full"],
+    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+  );
+  assert.equal(merged.scripts["devgod:graphify:update"], "graphify extract src --out .");
+  assert.equal(
+    merged.scripts["devgod:graphify:serve"],
+    "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json"
+  );
 });
 
 test("mergePackageJson adds a Grafana MCP helper only when requested", () => {
@@ -550,11 +565,11 @@ test("mergeGitignore adds devgod env ignores once", () => {
   assert.equal(first, second);
 });
 
-test("mergeGitignore adds GitNexus storage ignore only when requested", () => {
-  const first = mergeGitignore("node_modules/\n", { withGitNexus: true });
-  const second = mergeGitignore(first, { withGitNexus: true });
+test("mergeGitignore adds Graphify output ignore once", () => {
+  const first = mergeGitignore("node_modules/\n");
+  const second = mergeGitignore(first);
 
-  assert.match(first, /\.gitnexus\//);
+  assert.match(first, /graphify-out\//);
   assert.equal(first, second);
 });
 
@@ -725,8 +740,8 @@ test("installDevgodIntoProject dry-run reports planned changes without writing",
     assert.equal(summary.mode, "dry-run");
     assert.equal(summary.writesPerformed, false);
     assert.match(summary.nextSteps.join("\n"), /Rerun in apply mode to write changes/);
-    assert.match(summary.nextSteps.join("\n"), /devgod:setup:git-guard/);
-    assert.match(summary.nextSteps.join("\n"), /devgod:verify:git-guard/);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:local/);
+    assert.match(summary.nextSteps.join("\n"), /registers the Graphify MCP server/i);
     assert.ok(summary.created.includes("AGENTS.md"));
     assert.ok(summary.created.includes("scripts/devgod-setup.sh"));
     assert.ok(summary.updated.includes("package.json"));
@@ -977,43 +992,47 @@ test("installDevgodIntoProject first apply backs up divergent managed content", 
   }
 });
 
-test("installDevgodIntoProject opt-in GitNexus setup adds local package, MCP config, and safe next steps", async () => {
-  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-gitnexus-"));
+test("installDevgodIntoProject adds Graphify scripts, MCP config, and setup guidance", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-graphify-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
 
-    const summary = await installDevgodIntoProject({
-      sourceRoot,
-      targetRoot,
-      withGitNexus: true
-    });
+    const summary = await installDevgodIntoProject({ sourceRoot, targetRoot });
 
     const packageJson = JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8")) as {
-      devDependencies: Record<string, string>;
       scripts: Record<string, string>;
     };
     const codexConfig = await readFile(path.join(targetRoot, ".codex/config.toml"), "utf8");
     const gitignore = await readFile(path.join(targetRoot, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.devDependencies.gitnexus, "1.6.3");
-    assert.equal(packageJson.scripts["devgod:gitnexus:analyze"], "gitnexus analyze --skip-agents-md");
-    assert.equal(packageJson.scripts["devgod:gitnexus:status"], "gitnexus status");
+    assert.equal(packageJson.scripts["devgod:graphify:build"], "graphify extract src --out .");
+    assert.equal(
+      packageJson.scripts["devgod:graphify:codex-full"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+    );
+    assert.equal(packageJson.scripts["devgod:graphify:update"], "graphify extract src --out .");
+    assert.equal(
+      packageJson.scripts["devgod:graphify:serve"],
+      "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json"
+    );
     assert.match(codexConfig, /approval_policy = "never"/);
     assert.match(codexConfig, /sandbox_mode = "danger-full-access"/);
-    assert.match(codexConfig, /\[mcp_servers\.gitnexus\]/);
-    assert.match(codexConfig, /"--no-install"/);
-    assert.match(gitignore, /\.gitnexus\//);
-    assert.match(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
-    assert.match(summary.nextSteps.join("\n"), /devgod:setup:git-guard/);
+    assert.match(codexConfig, /\[mcp_servers\.graphify\]/);
+    assert.match(codexConfig, /graphify\.serve/);
+    assert.match(gitignore, /graphify-out\//);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:local/);
+    assert.match(summary.nextSteps.join("\n"), /registers the Graphify MCP server/i);
+    assert.match(summary.nextSteps.join("\n"), /devgod:graphify:codex-full/);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:local/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
 
-test("installDevgodIntoProject keeps GitNexus opt-in even when the source repo enables it locally", async () => {
-  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-default-no-gitnexus-"));
+test("installDevgodIntoProject ships Graphify by default", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-default-graphify-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
   try {
@@ -1027,11 +1046,192 @@ test("installDevgodIntoProject keeps GitNexus opt-in even when the source repo e
     const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
     const gitignore = await readFile(path.join(targetRoot, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.devDependencies?.gitnexus, undefined);
-    assert.equal(packageJson.scripts?.["devgod:gitnexus:analyze"], undefined);
-    assert.doesNotMatch(codexConfig, /\[mcp_servers\.gitnexus\]/);
-    assert.doesNotMatch(gitignore, /\.gitnexus\//);
-    assert.doesNotMatch(summary.nextSteps.join("\n"), /devgod:gitnexus:analyze/);
+    assert.equal(packageJson.scripts?.["devgod:graphify:build"], "graphify extract src --out .");
+    assert.equal(
+      packageJson.scripts?.["devgod:graphify:codex-full"],
+      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+    );
+    assert.match(codexConfig, /\[mcp_servers\.graphify\]/);
+    assert.match(gitignore, /graphify-out\//);
+    assert.match(summary.nextSteps.join("\n"), /devgod:setup:local/);
+    assert.match(summary.nextSteps.join("\n"), /registers the Graphify MCP server/i);
+    assert.match(summary.nextSteps.join("\n"), /devgod:graphify:codex-full/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("setup-graphify installs Graphify with uv, builds the graph, and normalizes wiki output", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-setup-graphify-install-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const binDir = path.join(targetRoot, "bin");
+  const uvLog = path.join(targetRoot, "uv.log");
+  const npmLog = path.join(targetRoot, "npm.log");
+  const graphifyLog = path.join(targetRoot, "graphify.log");
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "fixture",
+          private: true,
+          scripts: {
+            "devgod:graphify:build": "graphify extract src --out .",
+            "devgod:graphify:update": "graphify extract src --out ."
+          }
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    await mkdir(path.join(targetRoot, ".codex"), { recursive: true });
+    await writeFile(path.join(targetRoot, ".codex", "config.toml"), graphifyCodexConfigFragment(), "utf8");
+    await mkdir(path.join(targetRoot, "src"), { recursive: true });
+    await writeFile(path.join(targetRoot, "src", "index.ts"), "export const ready = true;\n", "utf8");
+
+    await writeExecutable(
+      path.join(binDir, "graphify"),
+      "#!/bin/bash\nset -euo pipefail\nexit 1\n"
+    );
+
+    await writeExecutable(
+      path.join(binDir, "uv"),
+      [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_UV_LOG_FILE:?missing uv log}"',
+        'if [[ "${1:-}" == "--version" ]]; then',
+        '  printf "%s\\n" "uv 0.test"',
+        "  exit 0",
+        "fi",
+        'if [[ "${1:-}" == "tool" && "${2:-}" == "install" && "${3:-}" == "graphifyy" ]]; then',
+        "  cat > \"${DEVGOD_GRAPHIFY_BIN:?missing graphify bin}\" <<'EOF'",
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_GRAPHIFY_LOG_FILE:?missing graphify log}"',
+        'if [[ "${1:-}" == "--version" ]]; then',
+        '  printf "%s\\n" "graphify 0.test"',
+        "  exit 0",
+        "fi",
+        'mkdir -p graphify-out/wiki',
+        'printf "%s\\n" "# Code Wiki" > graphify-out/wiki/index.md',
+        "exit 0",
+        "EOF",
+        '  chmod +x "${DEVGOD_GRAPHIFY_BIN}"',
+        "  exit 0",
+        "fi",
+        "exit 1"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "npm"),
+      [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_NPM_LOG_FILE:?missing npm log}"',
+        "exit 0"
+      ].join("\n")
+    );
+
+    await execFileAsync(process.execPath, ["--experimental-strip-types", path.join(sourceRoot, "src/install/setup-graphify.ts")], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:/bin:/usr/bin`,
+        DEVGOD_UV_LOG_FILE: uvLog,
+        DEVGOD_NPM_LOG_FILE: npmLog,
+        DEVGOD_GRAPHIFY_LOG_FILE: graphifyLog,
+        DEVGOD_GRAPHIFY_BIN: path.join(binDir, "graphify")
+      }
+    });
+
+    assert.match(await readFile(uvLog, "utf8"), /tool install graphifyy/);
+    assert.deepEqual((await readFile(npmLog, "utf8")).trim().split(/\n+/), ["run devgod:graphify:build"]);
+    assert.match(await readFile(graphifyLog, "utf8"), /\.\/src --wiki --no-viz/);
+    assert.match(await readFile(path.join(targetRoot, "graphify-out", "index.md"), "utf8"), /Code Wiki/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("setup-graphify refreshes an existing graph with update and skips uv install when graphify is already present", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-setup-graphify-update-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const binDir = path.join(targetRoot, "bin");
+  const npmLog = path.join(targetRoot, "npm.log");
+  const graphifyLog = path.join(targetRoot, "graphify.log");
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "fixture",
+          private: true,
+          scripts: {
+            "devgod:graphify:build": "graphify extract src --out .",
+            "devgod:graphify:update": "graphify extract src --out ."
+          }
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    await mkdir(path.join(targetRoot, ".codex"), { recursive: true });
+    await writeFile(path.join(targetRoot, ".codex", "config.toml"), graphifyCodexConfigFragment(), "utf8");
+    await mkdir(path.join(targetRoot, "src"), { recursive: true });
+    await writeFile(path.join(targetRoot, "src", "index.ts"), "export const ready = true;\n", "utf8");
+    await writeGraphifyGraph(targetRoot);
+
+    await writeExecutable(
+      path.join(binDir, "graphify"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_GRAPHIFY_LOG_FILE:?missing graphify log}"',
+        'if [[ "${1:-}" == "--version" ]]; then',
+        '  printf "%s\\n" "graphify 0.test"',
+        "  exit 0",
+        "fi",
+        'if [[ "${1:-}" == "./src" && "${2:-}" == "--wiki" && "${3:-}" == "--no-viz" ]]; then',
+        '  mkdir -p graphify-out',
+        '  printf "%s\\n" "# Existing Wiki" > graphify-out/index.md',
+        "  exit 0",
+        "fi",
+        "exit 0"
+      ].join("\n")
+    );
+
+    await writeExecutable(
+      path.join(binDir, "npm"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'printf "%s\\n" "$*" >> "${DEVGOD_NPM_LOG_FILE:?missing npm log}"',
+        "exit 0"
+      ].join("\n")
+    );
+
+    await execFileAsync(process.execPath, ["--experimental-strip-types", path.join(sourceRoot, "src/install/setup-graphify.ts")], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        DEVGOD_NPM_LOG_FILE: npmLog,
+        DEVGOD_GRAPHIFY_LOG_FILE: graphifyLog
+      }
+    });
+
+    assert.deepEqual((await readFile(npmLog, "utf8")).trim().split(/\n+/), ["run devgod:graphify:update"]);
+    assert.match(await readFile(graphifyLog, "utf8"), /--version/);
+    assert.match(await readFile(graphifyLog, "utf8"), /\.\/src --wiki --no-viz/);
+    assert.match(await readFile(path.join(targetRoot, "graphify-out", "index.md"), "utf8"), /Existing Wiki/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1175,24 +1375,26 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
   }
 });
 
-test("verifyDevgodInstall auto-detects the GitNexus install option", async () => {
-  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-gitnexus-"));
+test("verifyDevgodInstall requires the mandatory Graphify graph", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-graphify-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
-    await installDevgodIntoProject({ sourceRoot, targetRoot, withGitNexus: true });
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
 
     const summary = await verifyDevgodInstall({
       sourceRoot,
       targetRoot
     });
 
-    assert.equal(summary.ok, true);
+    assert.equal(summary.ok, false);
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
     assert.deepEqual(summary.policyDrift, []);
+    assert.match(summary.prerequisiteDrift.join(" "), /graphify.*mandatory/i);
+    assert.match(summary.prerequisiteDrift.join(" "), /graph\.json/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1205,6 +1407,7 @@ test("verifyDevgodInstall auto-detects the Grafana install option", async () => 
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot, withGrafana: true });
+    await writeGraphifyGraph(targetRoot);
 
     const summary = await verifyDevgodInstall({
       sourceRoot,
@@ -1214,18 +1417,20 @@ test("verifyDevgodInstall auto-detects the Grafana install option", async () => 
     assert.equal(summary.ok, true);
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
 });
 
-test("upgradeDevgodInProject preserves the GitNexus install option without repeating the flag", async () => {
-  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-gitnexus-"));
+test("upgradeDevgodInProject preserves the default Graphify-managed install", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-graphify-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
-    await installDevgodIntoProject({ sourceRoot, targetRoot, withGitNexus: true });
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
 
     const replay = await upgradeDevgodInProject({
       sourceRoot,
@@ -1350,6 +1555,7 @@ test("verifyDevgodInstall passes when managed files match the install manifest",
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
 
     const summary = await verifyDevgodInstall({
       sourceRoot,
@@ -1360,6 +1566,7 @@ test("verifyDevgodInstall passes when managed files match the install manifest",
     assert.deepEqual(summary.missing, []);
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1372,6 +1579,7 @@ test("verifyDevgodInstall reports missing managed files", async () => {
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
     await rm(path.join(targetRoot, driftFixtureTarget));
 
     const summary = await verifyDevgodInstall({
@@ -1382,6 +1590,7 @@ test("verifyDevgodInstall reports missing managed files", async () => {
     assert.equal(summary.ok, false);
     assert.ok(summary.missing.includes(driftFixtureTarget));
     assert.deepEqual(summary.policyDrift, []);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1394,6 +1603,7 @@ test("verifyDevgodInstall reports modified managed files", async () => {
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
     await writeFile(path.join(targetRoot, driftFixtureTarget), "#!/usr/bin/env bash\necho drifted-managed-file\n", "utf8");
 
     const summary = await verifyDevgodInstall({
@@ -1404,6 +1614,7 @@ test("verifyDevgodInstall reports modified managed files", async () => {
     assert.equal(summary.ok, false);
     assert.ok(summary.modified.includes(driftFixtureTarget));
     assert.deepEqual(summary.policyDrift, []);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1416,6 +1627,7 @@ test("verifyDevgodInstall reports caveman policy drift for shipped agent artifac
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
     const backendAgentPath = path.join(targetRoot, ".codex", "agents", "devgod-build-resolver.toml");
     const backendAgent = await readFile(backendAgentPath, "utf8");
     await writeFile(
@@ -1435,6 +1647,7 @@ test("verifyDevgodInstall reports caveman policy drift for shipped agent artifac
     assert.equal(summary.ok, false);
     assert.ok(summary.modified.includes(".codex/agents/devgod-build-resolver.toml"));
     assert.match(summary.policyDrift[0] ?? "", /devgod-build-resolver\.toml: missing caveman markers/);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1447,6 +1660,7 @@ test("verify CLI succeeds for legacy installs without an install manifest", asyn
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
     await rm(path.join(targetRoot, ".devgod", "install-manifest.json"));
 
     await execFileAsync(
@@ -1463,6 +1677,7 @@ test("verify CLI succeeds for legacy installs without an install manifest", asyn
     assert.deepEqual(summary.modified, []);
     assert.deepEqual(summary.orphans, []);
     assert.deepEqual(summary.policyDrift, []);
+    assert.deepEqual(summary.prerequisiteDrift, []);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1688,6 +1903,7 @@ test("verifyDevgodInstall treats managed symlinks as drift and does not read thr
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
     await writeFile(outsideFile, "#!/usr/bin/env bash\necho outside\n", "utf8");
     await rm(path.join(targetRoot, driftFixtureTarget));
     await symlink(outsideFile, path.join(targetRoot, driftFixtureTarget));
@@ -1699,6 +1915,7 @@ test("verifyDevgodInstall treats managed symlinks as drift and does not read thr
 
     assert.equal(summary.ok, false);
     assert.ok(summary.modified.includes(driftFixtureTarget));
+    assert.deepEqual(summary.prerequisiteDrift, []);
     assert.equal(await readFile(outsideFile, "utf8"), "#!/usr/bin/env bash\necho outside\n");
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
@@ -1775,7 +1992,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     ".agents/skills/devgod-execution/SKILL.md",
     ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
-    ".agents/skills/devgod-gitnexus/SKILL.md",
+    ".agents/skills/devgod-graphify/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-memory/SKILL.md",
@@ -2165,7 +2382,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
         "    ;;",
         "  run)",
         "    case \"${2:-}\" in",
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
+        "      devgod:setup:graphify|devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2192,6 +2409,7 @@ test("installed setup script bootstraps a clean workspace with synthetic docker 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:graphify",
       "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
@@ -2325,7 +2543,7 @@ test("installed setup script falls back to native Linux services when docker is 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
+        "      devgod:setup:graphify|devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2365,6 +2583,7 @@ test("installed setup script falls back to native Linux services when docker is 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:graphify",
       "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
@@ -2425,7 +2644,7 @@ test("installed setup script honors managed runtime mode without taking service 
         "    ;;",
         "  run)",
         '    case "${2:-}" in',
-        "      devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
+        "      devgod:setup:graphify|devgod:setup:playwright|devgod:migrate|devgod:bootstrap|devgod:repair-task-queue|devgod:refresh-repo-context|devgod:verify:setup|devgod:verify:playwright|devgod:refresh-retrieval|devgod:refresh-retrieval:fast)",
         "        exit 0",
         "        ;;",
         "    esac",
@@ -2454,6 +2673,7 @@ test("installed setup script honors managed runtime mode without taking service 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\n+/);
     assert.deepEqual(npmCalls, [
       "install",
+      "run devgod:setup:graphify",
       "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",

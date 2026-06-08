@@ -298,6 +298,8 @@ if ((Test-Path -LiteralPath ".devgod/install-manifest.json")) {
     }
 }
 
+npm run devgod:setup:graphify
+
 if (Test-DevgodScript -Preferred "devgod:setup:playwright" -Fallback "setup:playwright") {
     npm run devgod:setup:playwright
 }
@@ -320,4 +322,5 @@ Write-Host "runtime mode: $runtimeMode"
 Write-Host "workspace: $($env:DEVGOD_WORKSPACE_SLUG)"
 Write-Host "project: $($env:DEVGOD_PROJECT_SLUG)"
 Write-Host "database: configured"
+Write-Host "graphify: configured"
 Write-Host "playwright: configured"
