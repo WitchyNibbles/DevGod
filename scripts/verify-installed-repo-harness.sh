@@ -98,12 +98,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  DevgodCoreService,
+  MemoryStore,
+  createReviewActionContextResolver,
   executeReportCommandFromArgs,
   executeSeedModernizationProofCommandFromArgs,
   executeStatusCommandFromArgs
-} from "./node_modules/devgod/src/admin.ts";
-import { createReviewActionContextResolver } from "./node_modules/devgod/src/core/review-context.ts";
-import { DevgodCoreService, MemoryStore } from "./node_modules/devgod/src/index.ts";
+} from "devgod";
 
 const [, , workspaceSlug, projectSlug, taskId] = process.argv;
 const cwd = process.cwd();

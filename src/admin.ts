@@ -49,6 +49,7 @@ import {
   type DaemonContinuationStatusObservation,
   type DaemonOperatorHandoffObservation,
   type DaemonSupervisorStatusObservation,
+  inspectTaskProofObligations,
   type ReviewIdentityStatusObservation
 } from "./admin/status.ts";
 import { parseExportDocsRequest } from "./docs-export/parser.ts";
@@ -5687,6 +5688,10 @@ export async function executeStatusCommandFromArgs(
     readActiveWorkflowExport(options.cwd ?? process.cwd()),
     readTaskQueueExport(options.cwd ?? process.cwd())
   ]);
+  const taskProofObligations = await inspectTaskProofObligations({
+    cwd: options.cwd ?? process.cwd(),
+    snapshot
+  });
   const daemonContinuation = await readDaemonContinuationStatus(options.cwd ?? process.cwd());
   const daemonHandoff = await readDaemonOperatorHandoff(options.cwd ?? process.cwd());
   const daemonSupervisor = await readDaemonSupervisorStatus(
@@ -5727,6 +5732,18 @@ export async function executeStatusCommandFromArgs(
         `local queue current task ${localQueueExport.current_task_id ?? "none"} disagrees with runtime queue current task ${runtimeQueue.current_task_id ?? "none"}`
       );
     }
+
+    const failingTaskProofObligations = taskProofObligations.tasks.filter((task) => task.exportState !== "valid");
+    for (const obligation of failingTaskProofObligations) {
+      if (localActiveExport.activeState !== "active") {
+        contradictions.push(...obligation.issues);
+      }
+      if (localActiveExport.activeState === "idle") {
+        contradictions.push(
+          `local workflow export is idle while approved task ${obligation.taskId} still has failing exported artifact checks`
+        );
+      }
+    }
   }
 
   return buildOperatorStatusReport({
@@ -5756,12 +5773,14 @@ export async function executeStatusCommandFromArgs(
             activeTaskId: localActiveExport.activeTaskId,
             queueProjectStatus: localQueueExport.project_status,
             queueCurrentTaskId: localQueueExport.current_task_id
-          }
+          },
+          taskProofObligations
         }
       : {
           authorityLabel: "derived_only",
           status: "unavailable",
-          contradictions: []
+          contradictions: [],
+          taskProofObligations
         },
     staleAfterDays
   });

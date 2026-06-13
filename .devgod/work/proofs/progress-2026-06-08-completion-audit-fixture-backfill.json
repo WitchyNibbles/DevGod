@@ -1,0 +1,26 @@
+{
+  "task_id": "2026-06-08-completion-audit-fixture-backfill",
+  "status": "approved_for_handoff",
+  "summary": "Completion-audit fixture drift was backfilled across the affected test builders and review fixtures, clearing the targeted packet-contract failures without weakening the stricter specialist_verified validation.",
+  "changed_paths": [
+    "tests/actions.test.ts",
+    "tests/workflow-integrity.test.ts",
+    "tests/ops-recovery.test.ts"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/actions.test.ts tests/workflow-integrity.test.ts tests/control-layer-contract.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/admin.test.ts tests/status-report.test.ts tests/ops-recovery.test.ts",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Repo-wide maintainer quality gates remain unverified in this slice; the next quality-gate restoration task still needs to run npm-level verification end to end.",
+    "Additional stale specialist_verified fixtures may still exist outside the targeted suites covered by this slice's bounded verification commands."
+  ],
+  "blocker": null,
+  "next_recommended_task": "2026-06-08-quality-gate-restoration"
+}

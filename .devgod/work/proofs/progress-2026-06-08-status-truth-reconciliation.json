@@ -1,0 +1,27 @@
+{
+  "task_id": "2026-06-08-status-truth-reconciliation",
+  "status": "completed",
+  "summary": "Reconciled the stale maintainer-facing status narrative with the current runtime-authoritative state after local export resync and runtime-state reconciliation.",
+  "changed_paths": [
+    ".devgod/work/product-state.md"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types ./src/admin/devgod.ts sync-runtime-exports --format text",
+      "result": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types ./src/admin/devgod.ts reconcile-runtime-state --apply --format text",
+      "result": "passed"
+    },
+    {
+      "command": "bash scripts/check-devgod-workflow-live.sh --repo-root .",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Runtime status and exported queue lifecycle labels are intentionally different: the authoritative run reports the latest task as approved while the exported local queue records it as done after closeout.",
+    "Other non-runtime markdown summaries outside product-state may still contain historical wording and should be treated as secondary audit candidates if they are used operationally."
+  ],
+  "blocker": null
+}

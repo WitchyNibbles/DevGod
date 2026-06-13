@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   advanceTaskQueue,
   parseTaskQueueContent,
+  readTaskQueue,
   selectNextUnblockedTask,
   summarizeTaskQueue
 } from "../src/devgod/task-queue.ts";
@@ -174,6 +178,94 @@ test("selectNextUnblockedTask skips tasks with unmet dependencies", () => {
   );
 
   assert.equal(selectNextUnblockedTask(queue)?.id, "task-001");
+});
+
+test("readTaskQueue and summarizeTaskQueue report realistic autopilot queue state", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "devgod-autopilot-status-"));
+  const queuePath = path.join(directory, ".devgod", "work", "task-queue.json");
+
+  await mkdir(path.dirname(queuePath), { recursive: true });
+  await writeFile(
+    queuePath,
+    `${JSON.stringify(
+      buildQueue({
+        current_task_id: "task-002",
+        tasks: [
+          {
+            id: "task-001",
+            title: "Completed prep",
+            status: "done",
+            class: "docs_only",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          },
+          {
+            id: "task-002",
+            title: "Active slice",
+            status: "in_progress",
+            class: "prototype_slice",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          },
+          {
+            id: "task-003",
+            title: "Needs approval",
+            status: "blocked",
+            class: "security_sensitive",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: "awaiting security review"
+          },
+          {
+            id: "task-004",
+            title: "Ready once current finishes",
+            status: "pending",
+            class: "release_candidate",
+            depends_on: ["task-002"],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          },
+          {
+            id: "task-005",
+            title: "Already approved",
+            status: "approved",
+            class: "docs_only",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          }
+        ]
+      }),
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const queue = await readTaskQueue(queuePath);
+  const summary = summarizeTaskQueue(queue);
+
+  assert.equal(summary.projectStatus, "in_progress");
+  assert.equal(summary.currentTask?.id, "task-002");
+  assert.equal(summary.nextTask?.id, "task-002");
+  assert.equal(summary.blockedTasks.map((task) => task.id).join(","), "task-003");
+  assert.equal(summary.doneCount, 1);
+  assert.equal(summary.inProgressCount, 1);
+  assert.equal(summary.pendingCount, 1);
+  assert.equal(summary.approvedCount, 1);
+  assert.equal(summary.totalCount, 5);
 });
 
 test("parseTaskQueueContent rejects invalid task statuses", () => {

@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DevgodCoreService, MemoryStore, indexRepoMarkdown, runEmbeddingJobs } from "../src/index.ts";
+import { DevgodCoreService } from "../src/core/service.ts";
+import { indexRepoMarkdown } from "../src/runtime/repo-markdown-indexer.ts";
+import { runEmbeddingJobs } from "../src/runtime/embedding-runner.ts";
+import { MemoryStore } from "../src/store/memory-store.ts";
 import type { EmbeddingJobRecord } from "../src/store/types.ts";
 
 function getEmbeddingJobs(store: MemoryStore): Map<string, EmbeddingJobRecord> {

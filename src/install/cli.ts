@@ -126,7 +126,7 @@ const installManifestVersion = 1;
 const generatedReviewIdentityAdapter = `import {
   createHeaderReviewIdentityAdapter,
   createReviewPrincipalAdapter
-} from "devgod/src/index.ts";
+} from "devgod";
 
 export const reviewIdentityAdapters = {
   auth_context_passthrough: createReviewPrincipalAdapter(async ({ authContext }) => {
@@ -935,7 +935,11 @@ async function backupExistingFile(
   summary.writesPerformed = true;
 }
 
-function resolveCliTarget(args: string[], ignoredArgs: ReadonlySet<string> = new Set(["--dry-run"])): string {
+function resolveCliTarget(
+  args: string[],
+  ignoredArgs: ReadonlySet<string> = new Set(["--dry-run"]),
+  ignoredArgsWithValues: ReadonlySet<string> = new Set()
+): string {
   const targetIndex = args.indexOf("--target");
 
   if (targetIndex !== -1) {
@@ -946,12 +950,23 @@ function resolveCliTarget(args: string[], ignoredArgs: ReadonlySet<string> = new
     return targetArg;
   }
 
-  const positionalTarget = args.find((arg) => !ignoredArgs.has(arg));
-  if (!positionalTarget || positionalTarget.startsWith("-")) {
-    usage();
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (ignoredArgs.has(arg)) {
+      continue;
+    }
+    if (ignoredArgsWithValues.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      usage();
+    }
+
+    return arg;
   }
 
-  return positionalTarget;
+  usage();
 }
 
 function parseInstallCommand(command: "init" | "upgrade", args: string[]): ParsedInstallCommand {
@@ -1056,7 +1071,7 @@ function parseUpgradeReasoningWorkflowCommand(
 
   return {
     command: "upgrade-reasoning-workflow",
-    targetArg: resolveCliTarget(args, new Set(["--task-id", "--mode", "--force"])),
+    targetArg: resolveCliTarget(args, new Set(["--force"]), new Set(["--task-id", "--mode"])),
     taskId: parseTaskId(args, "upgrade-reasoning-workflow"),
     mode: modeRaw,
     force: args.includes("--force")
@@ -2407,12 +2422,14 @@ async function main() {
     ? await installDevgodIntoProject({
         sourceRoot,
         targetRoot,
-        dryRun: parsedArgs.dryRun
+        dryRun: parsedArgs.dryRun,
+        ...(parsedArgs.withGrafana !== undefined ? { withGrafana: parsedArgs.withGrafana } : {})
       })
     : await upgradeDevgodInProject({
         sourceRoot,
         targetRoot,
-        dryRun: parsedArgs.dryRun
+        dryRun: parsedArgs.dryRun,
+        ...(parsedArgs.withGrafana !== undefined ? { withGrafana: parsedArgs.withGrafana } : {})
       });
 
   printInstallSummary(parsedArgs.command, targetRoot, summary);

@@ -6,7 +6,11 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { installDevgodIntoProject, scaffoldWorkflowArtifacts } from "../src/install/cli.ts";
+import {
+  installDevgodIntoProject,
+  scaffoldWorkflowArtifacts,
+  seedHappyPathFixtureArtifacts
+} from "../src/install/cli.ts";
 import {
   buildWorkflowSchemaArtifact,
   buildWorkflowReviewArtifactRelativePaths,
@@ -41,6 +45,40 @@ async function runScaffold(targetRoot: string, taskId: string, args: string[] = 
     { cwd: repoRoot }
   );
 }
+
+async function runWorkflowSchemaCli(args: string[]) {
+  return execFileAsync("node", ["--experimental-strip-types", "src/devgod/workflow-schema-cli.ts", ...args], {
+    cwd: repoRoot
+  });
+}
+
+test("workflow-schema-cli renders shipped workflow templates", async () => {
+  const intake = await runWorkflowSchemaCli(["render-template", "intake-brief"]);
+  const taskPacket = await runWorkflowSchemaCli(["render-template", "task-packet"]);
+  const reviewGate = await runWorkflowSchemaCli(["render-template", "review-gate"]);
+
+  assert.match(intake.stdout, /## Task ID/);
+  assert.match(taskPacket.stdout, /## Workflow artifact refs/);
+  assert.match(taskPacket.stdout, /## Export artifact policy/);
+  assert.match(reviewGate.stdout, /## Provenance status/);
+});
+
+test("workflow-schema-cli lists workflow enum surfaces", async () => {
+  const reviewPolicies = await runWorkflowSchemaCli(["list", "workflow-review-export-policies"]);
+  const reasoningModes = await runWorkflowSchemaCli(["list", "reasoning-workflow-modes"]);
+
+  assert.match(reviewPolicies.stdout, /required/);
+  assert.match(reviewPolicies.stdout, /runtime_optional/);
+  assert.match(reasoningModes.stdout, /strict/);
+  assert.match(reasoningModes.stdout, /dual/);
+});
+
+test("workflow-schema-cli rejects missing args and unknown keys", async () => {
+  await assert.rejects(runWorkflowSchemaCli([]), /usage: workflow-schema-cli\.ts <render-template\|list> <key>/);
+  await assert.rejects(runWorkflowSchemaCli(["render-template", "unknown-template"]), /unknown template key/);
+  await assert.rejects(runWorkflowSchemaCli(["list", "unknown-list"]), /unknown list key/);
+  await assert.rejects(runWorkflowSchemaCli(["unknown-mode", "task-packet"]), /unknown mode/);
+});
 
 test("scaffold-workflow creates canonical starter artifacts", async () => {
   const taskId = "DG-SCAFFOLD-CREATE";
@@ -87,6 +125,8 @@ test("scaffold-workflow creates canonical starter artifacts", async () => {
     assert.match(task, /## Owner role\n\n`planner`/);
     assert.match(task, /## Completion standard\n\n`artifact_complete`/);
     assert.match(task, /## Reasoning policy\n\n### Mode\n\n`strict`/);
+    assert.match(task, /review_exports=runtime_optional/);
+    assert.match(task, /Allowed values: `required \| runtime_optional`/);
     assert.match(reviewerGate, /## Review state\n\n`pending`/);
     assert.match(reviewerGate, /## Decision\n\n`blocked`/);
     assert.match(reviewerGate, /Pending reviewer handoff\./);
@@ -210,6 +250,59 @@ test("scaffold-workflow refuses to replace a different active task without --for
   }
 });
 
+test("scaffold-workflow overwrites an existing active task when force flags are set", async () => {
+  const targetRoot = await createTargetRoot("devgod-scaffold-force-active-");
+  const oldTaskId = "DG-SCAFFOLD-OLD";
+  const newTaskId = "DG-SCAFFOLD-NEW";
+
+  try {
+    await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId: oldTaskId,
+      force: false,
+      forceActive: false
+    });
+
+    const summary = await scaffoldWorkflowArtifacts({
+      sourceRoot: repoRoot,
+      targetRoot,
+      taskId: newTaskId,
+      force: true,
+      forceActive: true
+    });
+
+    const active = await readFile(join(targetRoot, ".devgod", "ACTIVE"), "utf8");
+    const newTask = await readFile(join(targetRoot, ".devgod", "work", "tasks", `task-${newTaskId}.md`), "utf8");
+
+    assert.equal(active, `task_id=${newTaskId}\nworkflow=devgod\nstate=active\n`);
+    assert.match(newTask, new RegExp(`\\\`${newTaskId}\\\``));
+    assert.ok(summary.updated.includes(".devgod/ACTIVE"));
+    assert.ok(summary.created.includes(`.devgod/work/tasks/task-${newTaskId}.md`));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("seed-happy-path-fixture rejects --force-active because fixtures never become active", async () => {
+  const targetRoot = await createTargetRoot("devgod-happy-path-force-active-");
+
+  try {
+    await assert.rejects(
+      seedHappyPathFixtureArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId: "fixture-demo",
+        force: false,
+        forceActive: true
+      }),
+      /seed-happy-path-fixture does not support --force-active because fixtures never become active/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("scaffolded workflow artifacts remain blocked until reviews are completed", async () => {
   const taskId = "DG-SCAFFOLD-PENDING";
   const targetRoot = await createTargetRoot("devgod-scaffold-pending-");
@@ -230,6 +323,31 @@ test("scaffolded workflow artifacts remain blocked until reviews are completed",
         { cwd: repoRoot }
       ),
       /unexpected value.*pending/
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("scaffold-workflow rejects invalid managed parents before writing artifacts", async () => {
+  const targetRoot = await createTargetRoot("devgod-scaffold-parent-file-");
+  const taskId = "DG-SCAFFOLD-PARENT-FILE";
+
+  try {
+    await rm(join(targetRoot, ".devgod", "work"), { recursive: true, force: true });
+    await writeFile(join(targetRoot, ".devgod", "work"), "not-a-directory\n", "utf8");
+
+    await assert.rejects(
+      scaffoldWorkflowArtifacts({
+        sourceRoot: repoRoot,
+        targetRoot,
+        taskId,
+        force: false,
+        forceActive: false
+      }),
+      new RegExp(
+        `refusing to scaffold \\.devgod/work/briefs/brief-${taskId}\\.md: managed path parent is not an in-root directory`
+      )
     );
   } finally {
     await rm(targetRoot, { recursive: true, force: true });

@@ -664,6 +664,118 @@ test("executeOpsCommandFromArgs surfaces workflow integrity contradictions as al
   }
 });
 
+test("executeOpsCommandFromArgs gives concrete repair guidance for approved-task export gaps", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-ops-approved-export-gap-"));
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Approved export gap",
+    request: "Tell ops exactly how to repair missing approved-task exports."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-approved", allowedWriteScope: ["src/core"] })]);
+  await service.claimTask(run.id, "task-approved", "planner");
+  await service.submitHandoff(run.id, "task-approved", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "Prepared approved task.",
+    changedFiles: ["src/admin.ts"],
+    blockers: [],
+    verificationNotes: ["approved-task export gap is intentional"],
+    executionEvidence: ["runtime task approval should outlive missing local task packet"],
+    qualityGateEvidence: ["required reviews are present in runtime"],
+    contextRefs: ["brief://task-approved"]
+  });
+  await service.recordReview(run.id, "task-approved", "reviewer-actor", {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "task-approved", "security-actor", {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "task-approved", "qa-actor", {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(context);
+  const runtimeState = await store.getProjectRuntimeState(context.project.id);
+  assert.ok(runtimeState);
+
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(path.join(directory, ".devgod", "ACTIVE"), "workflow=devgod\nstate=idle\n", "utf8");
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      `${JSON.stringify(runtimeState.taskQueue, null, 2)}\n`,
+      "utf8"
+    );
+
+    const result = await executeOpsCommandFromArgs(["--run-id", run.id, "--format", "json"], {
+      cwd: directory,
+      env: process.env,
+      inspectReviewIdentity: async () => ({
+        authorityLabel: "derived_only",
+        adapterConfigured: true,
+        adapterExists: true,
+        availableBackends: [],
+        bindingsPresent: true,
+        bindingsPath: ".devgod/review-identity-bindings.json",
+        bindingsUseShippedTemplate: false,
+        liveTrustReady: true,
+        notes: []
+      }),
+      inspectGraphify: async () => graphifyObservation(),
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      getExecutionPlan(runId, staleAfterHours) {
+        return service.getExecutionPlan(runId, { staleAfterHours });
+      },
+      getRoutingReport(runId) {
+        return service.recommendRouting(runId);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        return service.inspectRecovery(runId, { staleAfterHours });
+      }
+    });
+
+    assert.equal(result.report.status.integrity.status, "contradicted");
+    assert.equal(result.report.status.integrity.taskProofObligations?.tasks[0]?.exportState, "missing");
+    assert.ok(
+      result.report.nextActions.includes(
+        `inspect integrity drift for run ${run.id}: npm run devgod -- status --run-id ${run.id}`
+      )
+    );
+    assert.ok(
+      result.report.nextActions.includes(
+        "repair or regenerate approved task export for task-approved: .devgod/work/tasks/task-task-approved.md"
+      )
+    );
+    assert.ok(
+      result.report.nextActions.includes(
+        "verify approved task artifact for task-approved: bash scripts/check-devgod-workflow-live.sh --task-id task-approved"
+      )
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeOpsCommandFromArgs surfaces persisted workflow seed failure residue as alerts and repair guidance", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-ops-seed-failure-"));
   const { service, store } = createService();
@@ -2288,19 +2400,22 @@ test("executeLoopCommandFromArgs resumes checkpoint task targets through workflo
     reviewerRole: "reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rewrite", "security-actor", {
     reviewerRole: "security_reviewer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.recordReview(run.id, "rewrite", "qa-actor", {
     reviewerRole: "qa_engineer",
     state: "passed",
     severity: "low",
-    findings: []
+    findings: [],
+    evidenceRefs: ["completion audit: complete, clean, no unresolved in-scope follow-up work"]
   });
   await service.configureAutonomousExecution(run.id, {
     profile: "legacy_rewrite",

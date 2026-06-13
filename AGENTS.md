@@ -31,9 +31,20 @@ review_authority=runtime_authenticated_only
 workflow_check=node --experimental-strip-types ./src/admin/devgod.ts workflow-proof --run-id latest --task-id <task-id>
 workflow_check_scope=runtime_authority_only
 review_artifact_trust=runtime_records_only
+runtime_canonical_records=task,review,approval,council
+workflow_export_artifacts=task_packet_markdown,review_markdown,product_state_markdown,task_queue_json
+task_packet_export=required_live_export_present_and_valid
+review_export_required_when=review_exports=required
+review_export_optional_when=review_exports=runtime_optional
+product_state_export=advisory_unless_runtime_written_or_verified
+task_queue_export=advisory_unless_runtime_written_or_verified
+export_blocking=stale_or_malformed_required_exports_block_release_not_runtime_truth
+specialist_verified_requirement=completion_audit_required
 ci_scope=runtime_contract_and_export_regressions
 local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
 <!-- devgod-workflow-contract:end -->
+
+Runtime task, review, approval, and council records are canonical. Markdown task packets, reviews, product state, and queue files are export artifacts. Stale or malformed exports can block release if they are required for the task class, but they cannot override authenticated runtime truth. product-state.md is advisory unless runtime writes or verifies it.
 
 ## Manager kernel
 
@@ -44,7 +55,7 @@ local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>
 - keep the council lean and rotating with written alternatives, a named dissent owner, bounded timeboxes, and no indefinite blocking
 - use bounded investigation packets when evidence is needed: owner role, question, read scope, forbidden write scope, evidence required, max output, stop condition
 - require task packets to declare explicit workflow artifact refs whenever they inherit a parent brief or plan, or when runtime authority may satisfy review gates before markdown review exports exist
-- do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses `review_exports=runtime_optional` under runtime authority
+- do not activate a task unless its allowed write scope covers every required workflow export, or the task explicitly uses `review_exports=runtime_optional` under runtime authority, which waives only markdown review-summary exports
 - require a reasoning-quality pass on substantive work: separate facts, assumptions, and guesses; generate plausible alternatives; note counter-evidence; record confidence and remaining uncertainty
 - treat `strict` as the default reasoning mode for substantive work unless a compatibility-only `dual` or `legacy` choice is explicit
 - when evidence is weak, contradictory, or the first path fails, investigate at least one alternative before finalizing unless the task is truly trivial

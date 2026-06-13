@@ -1,3 +1,5 @@
+import { access, readFile } from "node:fs/promises";
+import path from "node:path";
 import type { FreshnessGateDecision } from "../runtime/freshness-gate.ts";
 import { assessFreshness } from "../runtime/freshness-gate.ts";
 import type {
@@ -15,6 +17,12 @@ import {
   type AutonomousWakeOwner
 } from "./autonomous-summary.ts";
 import { buildRuntimeTraceRegistry } from "../runtime/runtime-trace-registry.ts";
+import {
+  liveTaskRequiredHeadings,
+  liveTaskRequiredNonEmptyHeadings,
+  liveTaskRequiredNonEmptyReasoningHeadings,
+  liveTaskRequiredReasoningHeadings
+} from "../devgod/workflow-schema.ts";
 
 type StatusAuthorityLabel = "runtime_authoritative" | "derived_only";
 
@@ -152,6 +160,21 @@ export interface DaemonSupervisorStatusObservation {
   updatedAt?: string | undefined;
 }
 
+export interface TaskProofObligationTaskObservation {
+  authorityLabel: "derived_only";
+  taskId: string;
+  exportState: "valid" | "missing" | "invalid";
+  artifactPath: string;
+  verificationCommand: string;
+  issues: string[];
+}
+
+export interface TaskProofObligationObservation {
+  authorityLabel: "derived_only";
+  status: "none" | "outstanding";
+  tasks: TaskProofObligationTaskObservation[];
+}
+
 export interface OperatorStatusReport {
   run: {
     authorityLabel: "runtime_authoritative";
@@ -254,6 +277,175 @@ export interface OperatorStatusReport {
       queueProjectStatus: string;
       queueCurrentTaskId: string | null;
     } | undefined;
+    taskProofObligations?: TaskProofObligationObservation | undefined;
+  };
+}
+
+function toRelativeArtifactPath(cwd: string, artifactPath: string): string {
+  const relativePath = path.relative(cwd, artifactPath);
+  return relativePath.length > 0 ? relativePath.split(path.sep).join("/") : path.basename(artifactPath);
+}
+
+function readMarkdownSectionBlock(content: string, heading: string): string | undefined {
+  const lines = content.split(/\r?\n/);
+  const headingIndex = lines.findIndex((line) => line.trim() === heading);
+  if (headingIndex === -1) {
+    return undefined;
+  }
+
+  const block: string[] = [];
+  for (let index = headingIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (line.trim().startsWith("#")) {
+      break;
+    }
+    block.push(line);
+  }
+
+  return block.join("\n");
+}
+
+function isNonEmptySectionBlock(content: string, heading: string): boolean {
+  const block = readMarkdownSectionBlock(content, heading);
+  return block !== undefined && block.trim().length > 0;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function inspectApprovedTaskArtifact(input: {
+  cwd: string;
+  task: RunStatusSnapshot["tasks"][number];
+}): Promise<TaskProofObligationTaskObservation> {
+  const taskId = input.task.packet.taskId;
+  const taskArtifactPath = path.join(input.cwd, ".devgod", "work", "tasks", `task-${taskId}.md`);
+  const artifactPath = toRelativeArtifactPath(input.cwd, taskArtifactPath);
+  const issues: string[] = [];
+
+  let taskContent: string | undefined;
+  try {
+    taskContent = await readFile(taskArtifactPath, "utf8");
+  } catch {
+    taskContent = undefined;
+  }
+
+  if (!taskContent) {
+    issues.push(`approved task ${taskId} is missing exported task artifact ${artifactPath}`);
+    return {
+      authorityLabel: "derived_only",
+      taskId,
+      exportState: "missing",
+      artifactPath,
+      verificationCommand: `bash scripts/check-devgod-workflow-live.sh --task-id ${taskId}`,
+      issues
+    };
+  }
+
+  for (const heading of liveTaskRequiredHeadings) {
+    if (!taskContent.includes(heading)) {
+      issues.push(`missing heading ${heading} in ${artifactPath}`);
+    }
+  }
+  for (const heading of liveTaskRequiredReasoningHeadings) {
+    if (!taskContent.includes(heading)) {
+      issues.push(`missing heading ${heading} in ${artifactPath}`);
+    }
+  }
+  for (const heading of liveTaskRequiredNonEmptyHeadings) {
+    if (!isNonEmptySectionBlock(taskContent, heading)) {
+      issues.push(`blank section ${heading} in ${artifactPath}`);
+    }
+  }
+  for (const heading of liveTaskRequiredNonEmptyReasoningHeadings) {
+    if (!isNonEmptySectionBlock(taskContent, heading)) {
+      issues.push(`blank section ${heading} in ${artifactPath}`);
+    }
+  }
+  if (
+    input.task.packet.completionStandard === "specialist_verified" ||
+    input.task.packet.qualityGates.includes("completion_audit_required")
+  ) {
+    for (const heading of [
+      "## Completion audit",
+      "### Audit claim",
+      "### Audit evidence expectations",
+      "### Loop-back trigger"
+    ]) {
+      if (!taskContent.includes(heading)) {
+        issues.push(`missing heading ${heading} in ${artifactPath}`);
+      } else if (!isNonEmptySectionBlock(taskContent, heading)) {
+        issues.push(`blank section ${heading} in ${artifactPath}`);
+      }
+    }
+  }
+
+  const additionalArtifactPaths: string[] = [];
+  if (input.task.packet.qualityGates.includes("coverage_ledger_required")) {
+    additionalArtifactPaths.push(
+      `.devgod/work/coverage/coverage-${taskId}.json`,
+      `.devgod/work/coverage/items-${taskId}.json`,
+      `.devgod/work/coverage/gaps-${taskId}.json`,
+      `.devgod/work/coverage/dependency-graph-${taskId}.json`,
+      `.devgod/work/coverage/traces-${taskId}.json`
+    );
+  }
+  if (input.task.packet.qualityGates.includes("progress_proof_required")) {
+    additionalArtifactPaths.push(`.devgod/work/proofs/progress-${taskId}.json`);
+  }
+  if (
+    input.task.packet.qualityGates.includes("checkpoint_resume_required") ||
+    input.task.packet.qualityGates.includes("memory_compaction_required")
+  ) {
+    additionalArtifactPaths.push(`.devgod/work/checkpoints/checkpoint-${taskId}.md`);
+  }
+
+  for (const relativeArtifactPath of additionalArtifactPaths) {
+    const absoluteArtifactPath = path.join(input.cwd, relativeArtifactPath);
+    if (!(await fileExists(absoluteArtifactPath))) {
+      issues.push(`missing exported artifact ${relativeArtifactPath} for approved task ${taskId}`);
+    }
+  }
+
+  return {
+    authorityLabel: "derived_only",
+    taskId,
+    exportState: issues.length === 0 ? "valid" : "invalid",
+    artifactPath,
+    verificationCommand: `bash scripts/check-devgod-workflow-live.sh --task-id ${taskId}`,
+    issues
+  };
+}
+
+export async function inspectTaskProofObligations(input: {
+  cwd: string;
+  snapshot: RunStatusSnapshot;
+}): Promise<TaskProofObligationObservation> {
+  const approvedTasks = input.snapshot.tasks.filter((task) => task.status === "approved");
+  if (approvedTasks.length === 0) {
+    return {
+      authorityLabel: "derived_only",
+      status: "none",
+      tasks: []
+    };
+  }
+
+  return {
+    authorityLabel: "derived_only",
+    status: "outstanding",
+    tasks: await Promise.all(
+      approvedTasks.map((task) =>
+        inspectApprovedTaskArtifact({
+          cwd: path.resolve(input.cwd),
+          task
+        })
+      )
+    )
   };
 }
 

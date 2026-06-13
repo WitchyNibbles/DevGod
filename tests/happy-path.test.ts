@@ -11,6 +11,33 @@ import { installDevgodIntoProject, seedHappyPathFixtureArtifacts } from "../src/
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+function childProcessEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_V8_COVERAGE: ""
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete env[key];
+      continue;
+    }
+    env[key] = value;
+  }
+  env.NODE_V8_COVERAGE = "";
+  return env;
+}
+
+async function execFileWithoutCoverage(
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; env?: Record<string, string | undefined> } = {}
+) {
+  return execFileAsync(file, [...args], {
+    ...options,
+    env: childProcessEnv(options.env)
+  });
+}
+
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   await chmod(filePath, 0o755);
@@ -181,7 +208,7 @@ test("check-devgod-happy-path passes a synthetic fixture and reports advisory re
   const targetRoot = await createHappyPathFixture(taskId);
 
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await execFileWithoutCoverage(
       "bash",
       ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
       { cwd: repoRoot }
@@ -216,7 +243,7 @@ test("installed consumer fixture can seed and pass the happy-path flow without m
     assert.ok(summary.created.length > 0);
     assert.equal(summary.updated.length, 0);
 
-    const { stdout } = await execFileAsync(
+    const { stdout } = await execFileWithoutCoverage(
       "bash",
       ["scripts/check-devgod-happy-path.sh", "--task-id", taskId],
       { cwd: targetRoot }
@@ -235,15 +262,12 @@ test("verify-installed-repo-harness can include the Grafana opt-in wiring", asyn
   const { stubPath, stubRoot } = await createPlaywrightNpxStub();
 
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await execFileWithoutCoverage(
       "bash",
       ["scripts/verify-installed-repo-harness.sh", "--with-grafana"],
       {
         cwd: repoRoot,
-        env: {
-          ...process.env,
-          DEVGOD_PLAYWRIGHT_NPX_BIN: stubPath
-        }
+        env: { DEVGOD_PLAYWRIGHT_NPX_BIN: stubPath }
       }
     );
 
@@ -287,7 +311,7 @@ test("check-devgod-happy-path fails when a required review gate is missing", asy
     );
 
     await assert.rejects(
-      execFileAsync(
+      execFileWithoutCoverage(
         "bash",
         ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
         {
@@ -310,7 +334,7 @@ test("check-devgod-happy-path fails clearly when the review identity adapter sca
     await rm(join(targetRoot, "devgod", "review-identity-adapter.ts"), { force: true });
 
     await assert.rejects(
-      execFileAsync(
+      execFileWithoutCoverage(
         "bash",
         ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
         { cwd: repoRoot }
@@ -330,7 +354,7 @@ test("check-devgod-happy-path fails clearly on malformed review identity binding
     await writeFile(join(targetRoot, ".devgod", "review-identity-bindings.json"), '{"bindings":[]}' + "\n", "utf8");
 
     await assert.rejects(
-      execFileAsync(
+      execFileWithoutCoverage(
         "bash",
         ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
         { cwd: repoRoot }
@@ -350,7 +374,7 @@ test("check-devgod-happy-path fails clearly when a managed workflow export is st
     await rm(join(targetRoot, "scripts", "check-devgod-workflow.sh"), { force: true });
 
     await assert.rejects(
-      execFileAsync(
+      execFileWithoutCoverage(
         "bash",
         ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
         { cwd: repoRoot }
@@ -377,7 +401,7 @@ test("check-devgod-happy-path fails clearly when installed setup wiring is incom
     await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
 
     await assert.rejects(
-      execFileAsync(
+      execFileWithoutCoverage(
         "bash",
         ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
         { cwd: repoRoot }
@@ -394,10 +418,9 @@ test("verify-installed-repo-harness isolates fresh target repo context and reach
   const { stubPath, stubRoot } = await createPlaywrightNpxStub();
 
   try {
-    const { stdout } = await execFileAsync("bash", ["scripts/verify-installed-repo-harness.sh"], {
+    const { stdout } = await execFileWithoutCoverage("bash", ["scripts/verify-installed-repo-harness.sh"], {
       cwd: repoRoot,
       env: {
-        ...process.env,
         DEVGOD_WORKSPACE_SLUG: "wrong-workspace",
         DEVGOD_PROJECT_SLUG: "wrong-project",
         DEVGOD_PLAYWRIGHT_NPX_BIN: stubPath

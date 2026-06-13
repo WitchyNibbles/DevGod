@@ -23,6 +23,7 @@ import type {
   ReasoningQualityBlock,
   ReviewActionContext,
   ReviewRecord,
+  TaskRecord,
   TaskPacketInput
 } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
@@ -34,15 +35,22 @@ function isoHoursAgo(hours: number): string {
 }
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates: TaskPacketInput["qualityGates"] = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates: TaskPacketInput["qualityGates"] =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? [...qualityGates, "completion_audit_required"]
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -101,6 +109,21 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     })
   };
 }
+
+test("service taskPacket auto-adds completion audit only for specialist_verified defaults", () => {
+  const defaultPacket = taskPacket();
+  const explicitGatePacket = taskPacket({
+    qualityGates: ["product_acceptance", "completion_audit_required"]
+  });
+  const artifactCompletePacket = taskPacket({
+    completionStandard: "artifact_complete",
+    qualityGates: ["product_acceptance"]
+  });
+
+  assert.deepEqual(defaultPacket.qualityGates, ["product_acceptance", "completion_audit_required"]);
+  assert.deepEqual(explicitGatePacket.qualityGates, ["product_acceptance", "completion_audit_required"]);
+  assert.deepEqual(artifactCompletePacket.qualityGates, ["product_acceptance"]);
+});
 
 function reasoningQualityBlock(
   overrides: Partial<ReasoningQualityBlock> = {}
@@ -171,6 +194,22 @@ function mutateTaskWhere(
     ...task,
     packet: mutate(task.packet)
   });
+}
+
+function mutateTaskRecordWhere(
+  store: MemoryStore,
+  predicate: (task: TaskRecord) => boolean,
+  mutate: (task: TaskRecord) => TaskRecord
+): void {
+  const tasks = (store as unknown as { tasks: Map<string, TaskRecord> }).tasks;
+  const entry = [...tasks.entries()].find(([, task]) => predicate(task));
+
+  if (!entry) {
+    assert.fail("expected matching task record");
+  }
+
+  const [taskId, task] = entry;
+  tasks.set(taskId, mutate(task));
 }
 
 function mutateReviewWhere(
@@ -328,6 +367,147 @@ async function seedHealthyRuntimeRegistration(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
+}
+
+async function createApprovedAutonomousTask(
+  service: DevgodCoreService,
+  input: {
+    title: string;
+    request: string;
+    taskId: string;
+    qualityGates: TaskPacketInput["qualityGates"];
+  }
+) {
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: input.title,
+    request: input.request
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: input.taskId,
+      qualityGates: input.qualityGates
+    })
+  ]);
+  await service.claimTask(run.id, input.taskId, "planner");
+  await service.submitHandoff(run.id, input.taskId, {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for runtime verification",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["autonomous continuation evidence recorded"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, input.taskId, reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, input.taskId, reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, input.taskId, reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  return run;
+}
+
+async function createContinuationRun(service: DevgodCoreService) {
+  const run = await createApprovedAutonomousTask(service, {
+    title: "Autonomous continuation",
+    request: "Keep moving while autonomous work remains.",
+    taskId: "rewrite",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "final_verification",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services", "tests"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:workflow-proof",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 2,
+      callsitesAnalyzed: 2,
+      runtimeTraced: true,
+      evidenceRefs: ["src/core/service.ts:1"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:autonomous-proof",
+      targetId: "task:runtime-proof",
+      kind: "missing_validation",
+      severity: "high",
+      description: "Runtime proof still needs to run.",
+      blocking: true,
+      evidenceRefs: ["src/admin.ts:1"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+      status: "open"
+    }
+  ]);
+  await service.recordProgressProof(run.id, {
+    cycle: 1,
+    proofId: "proof-1",
+    phaseBefore: "validation",
+    phaseAfter: "final_verification",
+    evidenceRefs: ["src/core/service.ts:1"],
+    coverageDelta: { validated: 1 },
+    blockingGapDelta: { closed: 0, opened: 1 },
+    nextTarget: "review:authenticated",
+    whyNext: "Runtime proof is the next autonomous target.",
+    createdAt: new Date().toISOString()
+  });
+  await service.checkpointRun(run.id, {
+    checkpointId: "cp-1",
+    phase: "final_verification",
+    activeTargets: ["review:authenticated"],
+    recentEvidenceRefs: ["src/core/service.ts:1"],
+    openGaps: ["gap:autonomous-proof"],
+    nextActions: ["stale checkpoint action"],
+    compressedContextRef: "memory://cp-1",
+    createdAt: new Date().toISOString()
+  });
+
+  return run;
 }
 
 test("claimTask blocks overlapping write scopes", async () => {
@@ -1309,6 +1489,168 @@ test("recordReview ignores reviews from other runs with the same task key", asyn
   assert.equal(result.task.status, "review_blocked");
   assert.ok(result.blockers.includes("missing required review: security_reviewer"));
   assert.ok(result.blockers.includes("missing required review: qa_engineer"));
+});
+
+test("recordCouncilOutcome enforces council membership and approval proof requirements", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Council-gated release",
+    request: "Keep release authority with an authenticated council outcome."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "council",
+      qualityGates: ["product_acceptance", "completion_audit_required", "council_review_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "council", "planner");
+  await service.submitHandoff(run.id, "council", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for council review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["council decision packet pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["council review gate remains strict"],
+    contextRefs: ["brief-1"]
+  });
+
+  await assert.rejects(
+    service.recordCouncilOutcome(run.id, "council", {
+      actor: "planner-council",
+      actorRole: "planner",
+      identityAssurance: "authenticated",
+      decisionPacketRef: "packet://council-1",
+      councilMembers: ["reviewer", "qa_engineer"],
+      dissentOwner: "reviewer",
+      outcome: "approved"
+    }),
+    /must be one of the council members/
+  );
+
+  await assert.rejects(
+    service.recordCouncilOutcome(run.id, "council", {
+      actor: "reviewer-council",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      decisionPacketRef: "packet://council-1",
+      councilMembers: ["reviewer", "qa_engineer"],
+      dissentOwner: "planner",
+      outcome: "approved"
+    }),
+    /dissent owner planner must be one of the council members/
+  );
+
+  await assert.rejects(
+    service.recordCouncilOutcome(run.id, "council", {
+      actor: "reviewer-council",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      decisionPacketRef: "packet://council-1",
+      councilMembers: ["reviewer", "qa_engineer"],
+      dissentOwner: "reviewer",
+      outcome: "approved_with_conditions"
+    }),
+    /require at least one condition/
+  );
+
+  await assert.rejects(
+    service.recordCouncilOutcome(run.id, "council", {
+      actor: "reviewer-council",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      decisionPacketRef: "packet://council-1",
+      councilMembers: ["reviewer", "qa_engineer"],
+      dissentOwner: "reviewer",
+      outcome: "exception_granted"
+    }),
+    /requires exceptionExpiry/
+  );
+
+  await assert.rejects(
+    service.recordCouncilOutcome(run.id, "council", {
+      actor: "reviewer-council",
+      actorRole: "reviewer",
+      identityAssurance: "authenticated",
+      decisionPacketRef: "packet://council-1",
+      councilMembers: ["reviewer", "qa_engineer"],
+      dissentOwner: "reviewer",
+      outcome: "rejected",
+      conditions: ["ship behind a flag"]
+    }),
+    /must not carry approval conditions/
+  );
+});
+
+test("recordCouncilOutcome persists council proof refs for approved_with_conditions outcomes", async () => {
+  const { service, store } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Council-approved release",
+    request: "Persist authenticated council proof without weakening runtime authority."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "council",
+      qualityGates: ["product_acceptance", "completion_audit_required", "council_review_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "council", "planner");
+  await service.submitHandoff(run.id, "council", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for council review",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["authenticated decision packet is attached"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["council review gate remains strict"],
+    contextRefs: ["brief-1"]
+  });
+
+  const result = await service.recordCouncilOutcome(run.id, "council", {
+    actor: "planner-council",
+    actorRole: "planner",
+    identityAssurance: "authenticated",
+    decisionPacketRef: "packet://council-2",
+    councilMembers: ["planner", "reviewer", "planner", "qa_engineer"],
+    dissentOwner: "reviewer",
+    outcome: "approved_with_conditions",
+    conditions: ["record authenticated runtime proof", "record authenticated runtime proof", "   "],
+    evidenceRefs: ["artifact://council-notes", "artifact://council-notes", "  "]
+  });
+
+  assert.equal(result.task.status, "review_blocked");
+  assert.equal(result.record.proofRef, `runtime-council://${run.id}/council/${result.record.id}`);
+  assert.deepEqual(result.record.councilMembers, ["planner", "reviewer", "qa_engineer"]);
+  assert.deepEqual(result.record.conditions, ["record authenticated runtime proof"]);
+  assert.deepEqual(result.record.evidenceRefs, [
+    "artifact://council-notes",
+    result.record.proofRef,
+    "packet://council-2"
+  ]);
+
+  const documents = await store.listWorkflowDocuments({
+    projectId: run.projectId,
+    runId: run.id,
+    taskId: "council",
+    kind: "council_outcome"
+  });
+
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0]?.metadata.source, "runtime_council");
+  assert.equal(documents[0]?.metadata.proofRef, result.record.proofRef);
+  assert.deepEqual(documents[0]?.metadata.conditions, ["record authenticated runtime proof"]);
 });
 
 test("claimTask blocks dependencies with stale approved legacy review state", async () => {
@@ -2510,6 +2852,142 @@ test("executeDirectiveStep persists one history entry per supported review step"
   assert.equal(memoryEntries.size, 2);
 });
 
+test("executeDirectiveStep stops dispatching reviews once the plan becomes complete", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Finish the last review gate",
+    request: "Stop runtime review dispatch as soon as the last authenticated review lands."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for the last authenticated review",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["qa still pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["review evidence remains authoritative"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const executedRoles: string[] = [];
+  const result = await service.executeDirectiveStep(run.id, {
+    maxReviewDispatchSteps: 3,
+    async executeReviewRecommendation({ directive }) {
+      const recommendation = directive.recommendations[0];
+      assert.ok(recommendation);
+      assert.equal(recommendation.targetReviewRole, "qa_engineer");
+      executedRoles.push(recommendation.targetReviewRole);
+      const actor = reviewContext(recommendation.targetReviewRole).actor;
+      await service.recordReview(run.id, recommendation.taskId, actor, {
+        reviewerRole: recommendation.targetReviewRole,
+        state: "passed",
+        severity: "low",
+        findings: []
+      });
+      return {
+        executed: true,
+        taskId: recommendation.taskId,
+        actor,
+        reviewRole: recommendation.targetReviewRole,
+        evidence: ["recorded the final authenticated QA review"]
+      };
+    }
+  });
+
+  assert.deepEqual(executedRoles, ["qa_engineer"]);
+  assert.equal(result.initialPlan.directive.kind, "dispatch_reviews");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "dispatch_reviews");
+  assert.equal(result.steps[0]?.outcome, "executed");
+  assert.equal(result.finalPlan.directive.kind, "complete");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 1);
+  assert.ok(history[0]?.metadata.tags.includes("next:complete"));
+});
+
+test("executeDirectiveStep records a declined review dispatch with executor evidence", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Decline an authenticated review dispatch",
+    request: "Fail closed when the next review executor refuses to act."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "review dispatch should fail closed with explicit evidence",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["security and QA still pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["authenticated reviews are still required"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  const result = await service.executeDirectiveStep(run.id, {
+    async executeReviewRecommendation({ directive }) {
+      const recommendation = directive.recommendations[0];
+      assert.ok(recommendation);
+      return {
+        executed: false,
+        taskId: recommendation.taskId,
+        actor: "security-reviewer-actor",
+        reviewRole: recommendation.targetReviewRole,
+        evidence: ["review executor deferred until live proof is attached"]
+      };
+    }
+  });
+
+  assert.equal(result.initialPlan.directive.kind, "dispatch_reviews");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "dispatch_reviews");
+  assert.equal(result.steps[0]?.outcome, "unsupported");
+  assert.equal(result.steps[0]?.actor, "security-reviewer-actor");
+  assert.deepEqual(result.steps[0]?.evidence, [
+    "review executor deferred until live proof is attached"
+  ]);
+  assert.equal(result.finalPlan.directive.kind, "dispatch_reviews");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 1);
+  assert.ok(history[0]?.metadata.tags.includes("outcome:unsupported"));
+});
+
 test("executeDirectiveStep fails closed on unsupported review dispatch and still records the stop reason", async () => {
   const { service, store } = createService();
   await seedHealthyRuntimeRegistration(store);
@@ -2558,6 +3036,117 @@ test("executeDirectiveStep fails closed on unsupported review dispatch and still
 
   const memoryEntries = (store as unknown as { memoryEntries: Map<string, MemoryEntryRecord> }).memoryEntries;
   assert.equal(memoryEntries.size, 1);
+});
+
+test("executeDirectiveStep records unsupported continuation when no continuation executor is supplied", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await createContinuationRun(service);
+
+  const result = await service.executeDirectiveStep(run.id);
+
+  assert.equal(result.initialPlan.directive.kind, "continue_analysis");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "continue_analysis");
+  assert.equal(result.steps[0]?.outcome, "unsupported");
+  assert.equal(result.steps[0]?.nextDirectiveKind, "continue_analysis");
+  assert.ok(result.steps[0]?.evidence.includes("next target remains task:runtime-proof"));
+  assert.ok(result.steps[0]?.evidence.includes("action:run_workflow_proof"));
+  assert.ok(result.steps[0]?.evidence.includes("run workflow-proof after authenticated reviews"));
+  assert.equal(result.finalPlan.directive.kind, "continue_analysis");
+});
+
+test("executeDirectiveStep fails closed when a continuation executor declines the next proof action", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await createContinuationRun(service);
+
+  const result = await service.executeDirectiveStep(run.id, {
+    async executeContinuationAction() {
+      return {
+        executed: false,
+        evidence: []
+      };
+    }
+  });
+
+  assert.equal(result.initialPlan.directive.kind, "continue_analysis");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "continue_analysis");
+  assert.equal(result.steps[0]?.outcome, "unsupported");
+  assert.equal(result.steps[0]?.taskId, "task:runtime-proof");
+  assert.deepEqual(result.steps[0]?.evidence, [
+    "continuation executor declined to apply the next typed autonomous action"
+  ]);
+  assert.equal(result.finalPlan.directive.kind, "continue_analysis");
+});
+
+test("executeDirectiveStep can execute a continuation and hand off to the next native runtime directive", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await createContinuationRun(service);
+
+  const result = await service.executeDirectiveStep(run.id, {
+    async executeContinuationAction({ action }) {
+      assert.equal(action.kind, "run_workflow_proof");
+      await service.upsertCoverageGaps(run.id, [
+        {
+          id: "gap:autonomous-proof",
+          targetId: "task:runtime-proof",
+          kind: "missing_validation",
+          severity: "high",
+          description: "Runtime proof still needs to run.",
+          blocking: true,
+          evidenceRefs: ["tests/service.test.ts"],
+          createdBy: "qa_engineer",
+          suggestedNextActions: ["run workflow-proof after authenticated reviews"],
+          status: "closed"
+        }
+      ]);
+      await service.recordProgressProof(run.id, {
+        cycle: 2,
+        proofId: "proof-2",
+        phaseBefore: "final_verification",
+        phaseAfter: "final_verification",
+        evidenceRefs: ["tests/service.test.ts"],
+        coverageDelta: { validated: 1 },
+        blockingGapDelta: { closed: 1, opened: 0 },
+        nextTarget: "   ",
+        whyNext: undefined,
+        createdAt: new Date().toISOString()
+      });
+      await service.checkpointRun(run.id, {
+        checkpointId: "cp-2",
+        phase: "final_verification",
+        activeTargets: [],
+        recentEvidenceRefs: ["tests/service.test.ts"],
+        openGaps: [],
+        nextActions: [],
+        compressedContextRef: "memory://cp-2",
+        createdAt: new Date().toISOString()
+      });
+
+      return {
+        executed: true,
+        taskId: action.taskId,
+        evidence: ["closed the runtime workflow-proof validation gap"]
+      };
+    }
+  });
+
+  assert.equal(result.initialPlan.directive.kind, "continue_analysis");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0]?.directiveKind, "continue_analysis");
+  assert.equal(result.steps[0]?.outcome, "executed");
+  assert.equal(result.steps[0]?.taskId, "runtime-proof");
+  assert.ok(result.steps[0]?.evidence.includes("closed the runtime workflow-proof validation gap"));
+  assert.equal(result.finalPlan.directive.kind, "rebuild_inventory");
+
+  const history = await service.getLoopExecutionHistory(run.id);
+  assert.equal(history.length, 1);
+  assert.ok(history[0]?.metadata.tags.includes("directive:continue_analysis"));
+  assert.ok(history[0]?.metadata.tags.includes("outcome:executed"));
+  assert.ok(history[0]?.metadata.tags.includes("next:rebuild_inventory"));
 });
 
 test("executeDirectiveStep persists complete and blocked terminations without changing task state", async () => {
@@ -2722,6 +3311,202 @@ test("getExecutionPlan returns safe recovery actions before more routing", async
   }
 });
 
+test("inspectRecovery and applyRecovery cover safe queue mutations without auto-applying missing reviews", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Recover stale runtime queue",
+    request: "Repair only safe runtime queue mutations and keep review authority strict."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "stalled", allowedWriteScope: ["src/stalled"] }),
+    taskPacket({ taskId: "review", allowedWriteScope: ["src/review"] }),
+    taskPacket({ taskId: "approved", allowedWriteScope: ["src/approved"] }),
+    taskPacket({ taskId: "orphan", allowedWriteScope: ["src/orphan"] })
+  ]);
+
+  await service.claimTask(run.id, "stalled", "planner");
+  mutateTaskRecordWhere(store, (task) => task.packet.taskId === "stalled", (task) => ({
+    ...task,
+    updatedAt: isoHoursAgo(49)
+  }));
+
+  await service.claimTask(run.id, "review", "planner");
+  await service.submitHandoff(run.id, "review", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "waiting on authenticated reviews",
+    changedFiles: ["src/review.ts"],
+    blockers: [],
+    verificationNotes: ["security and QA still pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["review gate remains strict"],
+    contextRefs: ["brief-review"]
+  });
+  mutateTaskRecordWhere(store, (task) => task.packet.taskId === "review", (task) => ({
+    ...task,
+    updatedAt: isoHoursAgo(49)
+  }));
+
+  await service.claimTask(run.id, "approved", "planner");
+  await service.submitHandoff(run.id, "approved", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "approved task that will be made stale",
+    changedFiles: ["src/approved.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["review evidence should stay current"],
+    contextRefs: ["brief-approved"]
+  });
+  await service.recordReview(run.id, "approved", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "approved", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "approved", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  mutateReviewWhere(
+    store,
+    (review) => review.taskId === "approved" && review.reviewerRole === "qa_engineer",
+    (review) => ({
+      ...review,
+      state: "blocked",
+      severity: "high",
+      findings: ["approval evidence regressed"]
+    })
+  );
+
+  await service.claimTask(run.id, "orphan", "planner");
+  mutateTaskRecordWhere(store, (task) => task.packet.taskId === "orphan", (task) => ({
+    ...task,
+    status: "ready",
+    claimedBy: undefined
+  }));
+
+  const inspection = await service.inspectRecovery(run.id, {
+    staleAfterHours: 24,
+    now: new Date().toISOString()
+  });
+
+  assert.deepEqual(
+    inspection.issues.map((issue) => issue.kind).sort(),
+    ["orphan_lock", "stale_approval", "stale_review_block", "stalled_task"]
+  );
+  assert.ok(inspection.actions.some((action) => action.kind === "reset_task_to_ready" && action.safeToApply));
+  assert.ok(inspection.actions.some((action) => action.kind === "reblock_stale_approval" && action.safeToApply));
+  assert.ok(inspection.actions.some((action) => action.kind === "release_orphan_lock" && action.safeToApply));
+  assert.ok(inspection.actions.some((action) => action.kind === "request_missing_reviews" && !action.safeToApply));
+
+  const applied = await service.applyRecovery(run.id, [], {
+    staleAfterHours: 24,
+    now: new Date().toISOString()
+  });
+
+  assert.deepEqual(applied.appliedActionIds.sort(), [
+    "reblock-approved:approved",
+    "release-lock:orphan",
+    "reset-task:stalled"
+  ]);
+  assert.deepEqual(applied.skippedActionIds, []);
+
+  const stalledTask = await store.getTask(run.id, "stalled");
+  const reviewTask = await store.getTask(run.id, "review");
+  const approvedTask = await store.getTask(run.id, "approved");
+  const orphanTask = await store.getTask(run.id, "orphan");
+  assert.equal(stalledTask?.status, "ready");
+  assert.equal(stalledTask?.claimedBy, undefined);
+  assert.equal(reviewTask?.status, "review_blocked");
+  assert.equal(approvedTask?.status, "review_blocked");
+  assert.equal(orphanTask?.status, "ready");
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  const activeLocks = await store.getActiveLocks(projectContext.project.id);
+  assert.ok(activeLocks.every((lock) => lock.taskId !== "stalled"));
+  assert.ok(activeLocks.every((lock) => lock.taskId !== "orphan"));
+});
+
+test("inspectRecovery rejects invalid staleAfterHours inputs before reading runtime state", async () => {
+  const { service } = createService();
+
+  await assert.rejects(
+    service.inspectRecovery("run-missing", {
+      staleAfterHours: -1
+    }),
+    /staleAfterHours must be a non-negative integer: -1/
+  );
+
+  await assert.rejects(
+    service.inspectRecovery("run-missing", {
+      staleAfterHours: 1.5
+    }),
+    /staleAfterHours must be a non-negative integer: 1.5/
+  );
+});
+
+test("applyRecovery skips unsafe and unknown action ids without mutating review-blocked tasks", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Keep unsafe recovery manual",
+    request: "Only safe recovery actions should mutate runtime state."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "review", allowedWriteScope: ["src/review"] })]);
+  await service.claimTask(run.id, "review", "planner");
+  await service.submitHandoff(run.id, "review", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "waiting on authenticated reviews",
+    changedFiles: ["src/review.ts"],
+    blockers: [],
+    verificationNotes: ["security and QA still pending"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["review gate remains strict"],
+    contextRefs: ["brief-review"]
+  });
+  mutateTaskRecordWhere(store, (task) => task.packet.taskId === "review", (task) => ({
+    ...task,
+    updatedAt: isoHoursAgo(49)
+  }));
+
+  const applied = await service.applyRecovery(
+    run.id,
+    ["request-reviews:review", "missing-action"],
+    {
+      staleAfterHours: 24,
+      now: new Date().toISOString()
+    }
+  );
+
+  assert.deepEqual(applied.appliedActionIds, []);
+  assert.deepEqual(applied.skippedActionIds.sort(), ["missing-action", "request-reviews:review"]);
+  assert.equal(applied.snapshot.tasks[0]?.status, "review_blocked");
+});
+
 test("getExecutionPlan returns complete when all tasks are terminal", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -2768,6 +3553,82 @@ test("getExecutionPlan returns complete when all tasks are terminal", async () =
   const plan = await service.getExecutionPlan(run.id);
 
   assert.equal(plan.directive.kind, "complete");
+});
+
+test("getExecutionPlan returns blocked for terminal runs when autonomous manifest evidence is invalid", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  const run = await createApprovedAutonomousTask(service, {
+    title: "Terminal run with invalid autonomous evidence",
+    request: "Do not auto-complete when persisted autonomous evidence becomes invalid.",
+    taskId: "rewrite",
+    qualityGates: ["product_acceptance", "coverage_ledger_required"]
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "validation",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:terminal-evidence",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      callsiteCount: 1,
+      callsitesAnalyzed: 1,
+      runtimeTraced: true,
+      evidenceRefs: ["tests/service.test.ts"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: new Date().toISOString()
+    }
+  ]);
+  await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:terminal-evidence",
+      targetId: "service:terminal-evidence",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["persists terminal verification state"],
+      evidenceRefs: ["tests/service.test.ts"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  if (!projectContext) {
+    assert.fail("expected project context");
+  }
+  const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+  if (!runtimeState?.metadata?.autonomousExecution?.manifest) {
+    assert.fail("expected autonomous execution runtime state");
+  }
+  runtimeState.metadata.autonomousExecution.manifest.requiredCategories = [];
+  await store.saveProjectRuntimeState(runtimeState);
+
+  const plan = await service.getExecutionPlan(run.id);
+
+  assert.equal(plan.directive.kind, "blocked");
+  if (plan.directive.kind === "blocked") {
+    assert.ok(plan.directive.blockers.some((blocker) => blocker.includes("coverage manifest is invalid")));
+    assert.ok(
+      plan.directive.rationale.some((reason) =>
+        reason.includes("autonomous execution requirements still block completion")
+      )
+    );
+  }
 });
 
 test("getStatus surfaces autonomous execution coverage and readiness when configured", async () => {
@@ -4234,6 +5095,74 @@ test("getExecutionPlan returns checkpoint and executeDirectiveStep preserves the
   assert.equal(execution.steps[0]?.outcome, "blocked");
 });
 
+test("executeDirectiveStep keeps apply_recovery blocked until safe actions are explicitly applied", async () => {
+  const store = new MemoryStore();
+  const { service } = createService(store);
+  await seedHealthyRuntimeRegistration(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Require explicit recovery application",
+    request: "Surface recovery work without auto-applying it during directive execution."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan" })]);
+  await service.claimTask(run.id, "plan", "planner");
+  await service.submitHandoff(run.id, "plan", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "ready for review but approval has gone stale",
+    changedFiles: [".devgod/work/tasks/task-plan.md"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["planner handoff recorded"],
+    qualityGateEvidence: ["product acceptance captured in intake artifacts"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "plan", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "plan", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+
+  mutateReviewWhere(
+    store,
+    (review) => review.taskId === "plan" && review.reviewerRole === "qa_engineer",
+    (review) => ({
+      ...review,
+      state: "blocked",
+      severity: "high",
+      findings: ["approval should be reblocked"]
+    })
+  );
+
+  const execution = await service.executeDirectiveStep(run.id);
+
+  assert.equal(execution.initialPlan.directive.kind, "apply_recovery");
+  assert.equal(execution.steps.length, 1);
+  assert.equal(execution.steps[0]?.directiveKind, "apply_recovery");
+  assert.equal(execution.steps[0]?.outcome, "blocked");
+  assert.deepEqual(execution.steps[0]?.evidence, [
+    "safe recovery must be applied explicitly before directive execution can continue"
+  ]);
+  assert.equal(execution.finalPlan.directive.kind, "apply_recovery");
+});
+
 test("getExecutionPlan returns dispatch_subagents when pending investigations remain queued", async () => {
   const { service } = createService();
   const run = await service.intakeRequest({
@@ -4398,6 +5327,82 @@ test("getExecutionPlan returns replan_migration when migration sequencing falls 
     );
     assert.ok(plan.directive.nextActions.includes("replan toward modernization_strategy"));
   }
+});
+
+test("executeDirectiveStep preserves replan_migration blockers and next actions", async () => {
+  const { service, store } = createService();
+  await seedHealthyRuntimeRegistration(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Block runtime until migration is replanned",
+    request: "Keep migration sequencing in a blocked native directive until replanning happens."
+  });
+
+  await service.createTaskGraph(run.id, [
+    taskPacket({
+      taskId: "replan-migration",
+      qualityGates: ["product_acceptance", "coverage_ledger_required"]
+    })
+  ]);
+  await service.claimTask(run.id, "replan-migration", "planner");
+  await service.submitHandoff(run.id, "replan-migration", {
+    actor: "planner",
+    ownerRole: "planner",
+    completionStandard: "specialist_verified",
+    summary: "the current migration sequence is stale and needs replanning",
+    changedFiles: ["src/core/service.ts"],
+    blockers: [],
+    verificationNotes: ["all reviews passed"],
+    executionEvidence: ["migration sequencing analysis recorded"],
+    qualityGateEvidence: ["runtime-native migration planning remains blocked"],
+    contextRefs: ["brief-1"]
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("reviewer").actor, {
+    reviewerRole: "reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("security_reviewer").actor, {
+    reviewerRole: "security_reviewer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.recordReview(run.id, "replan-migration", reviewContext("qa_engineer").actor, {
+    reviewerRole: "qa_engineer",
+    state: "passed",
+    severity: "low",
+    findings: []
+  });
+  await service.configureAutonomousExecution(run.id, {
+    profile: "standard_delivery",
+    phase: "migration_sequencing",
+    manifest: {
+      runId: run.id,
+      profile: "standard_delivery",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 1,
+        criticalItemValidation: 0,
+        callsiteCoverage: 0,
+        runtimeTraceCoverage: 0
+      }
+    }
+  });
+
+  const execution = await service.executeDirectiveStep(run.id);
+
+  assert.equal(execution.initialPlan.directive.kind, "replan_migration");
+  assert.equal(execution.steps.length, 1);
+  assert.equal(execution.steps[0]?.directiveKind, "replan_migration");
+  assert.equal(execution.steps[0]?.outcome, "blocked");
+  assert.ok(
+    execution.steps[0]?.evidence.includes("next:replan toward modernization_strategy")
+  );
+  assert.equal(execution.finalPlan.directive.kind, "replan_migration");
 });
 
 test("selectAutonomousNextTarget falls back to the latest progress proof when no blocking gap or checkpoint remains", () => {
@@ -5500,5 +6505,239 @@ test("failTask releases active locks and persists runtime seed failure metadata"
   assert.match(
     String((runtimeState.metadata?.seedFailure as { reason?: string }).reason ?? ""),
     /synthetic runtime seed failure/
+  );
+});
+
+test("upsertRuntimeTraces merges trace evidence into matching items and closes only matching runtime-trace gaps", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Trace merge coverage",
+    request: "Merge runtime trace evidence into coverage items without disturbing unrelated gaps."
+  });
+
+  await service.configureAutonomousExecution(run.id, {
+    profile: "legacy_rewrite",
+    phase: "runtime_tracing",
+    manifest: {
+      runId: run.id,
+      profile: "legacy_rewrite",
+      requiredCategories: ["services"],
+      thresholds: {
+        criticalItemCoverage: 0.8,
+        criticalItemValidation: 0.6,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.75
+      }
+    }
+  });
+  await service.upsertCoverageItems(run.id, [
+    {
+      id: "service:older",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      evidenceRefs: ["item://older", "trace://shared"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+    },
+    {
+      id: "service:newer",
+      category: "services",
+      state: "validated",
+      criticality: "critical",
+      sources: ["src/core/service.ts:1"],
+      evidenceRefs: ["item://newer"],
+      verificationRefs: ["tests/service.test.ts"],
+      lastUpdatedAt: "2026-05-20T12:05:00.000Z"
+    }
+  ]);
+  await service.upsertCoverageGaps(run.id, [
+    {
+      id: "gap:older-trace",
+      targetId: "service:older",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Older service still lacks a recorded runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record older service trace"],
+      status: "open"
+    },
+    {
+      id: "gap:untraced",
+      targetId: "service:untraced",
+      kind: "missing_runtime_trace",
+      severity: "high",
+      description: "Another service still lacks a recorded runtime trace.",
+      blocking: true,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["record unrelated trace"],
+      status: "open"
+    },
+    {
+      id: "gap:newer-validation",
+      targetId: "service:newer",
+      kind: "missing_validation",
+      severity: "medium",
+      description: "Newer service still needs validation.",
+      blocking: false,
+      evidenceRefs: ["tests/service.test.ts"],
+      createdBy: "qa_engineer",
+      suggestedNextActions: ["run validation"],
+      status: "open"
+    }
+  ]);
+
+  const state = await service.upsertRuntimeTraces(run.id, [
+    {
+      traceId: "trace:older-2",
+      targetId: "service:older",
+      kind: "side_effect",
+      risky: true,
+      sideEffects: ["records workflow proof completion"],
+      evidenceRefs: ["trace://shared", "trace://older"],
+      createdAt: "2026-05-20T12:04:00.000Z"
+    },
+    {
+      traceId: "trace:older-1",
+      targetId: "service:older",
+      kind: "auth",
+      risky: false,
+      sideEffects: [],
+      evidenceRefs: ["trace://shared"],
+      createdAt: "2026-05-20T12:02:00.000Z"
+    },
+    {
+      traceId: "trace:newer",
+      targetId: "service:newer",
+      kind: "integration",
+      risky: true,
+      sideEffects: ["calls an external provider"],
+      evidenceRefs: ["trace://newer", "trace://shared"],
+      createdAt: "2026-05-20T12:03:00.000Z"
+    }
+  ]);
+
+  const olderItem = state.coverageItems.find((item) => item.id === "service:older");
+  const newerItem = state.coverageItems.find((item) => item.id === "service:newer");
+  const olderGap = state.gaps.find((gap) => gap.id === "gap:older-trace");
+  const untracedGap = state.gaps.find((gap) => gap.id === "gap:untraced");
+  const validationGap = state.gaps.find((gap) => gap.id === "gap:newer-validation");
+
+  assert.equal(olderItem?.runtimeTraced, true);
+  assert.deepEqual(olderItem?.evidenceRefs, ["item://older", "trace://shared", "trace://older"]);
+  assert.equal(olderItem?.lastUpdatedAt, "2026-05-20T12:04:00.000Z");
+  assert.equal(newerItem?.runtimeTraced, true);
+  assert.equal(newerItem?.lastUpdatedAt, "2026-05-20T12:05:00.000Z");
+  assert.ok(newerItem?.evidenceRefs.includes("trace://newer"));
+  assert.equal(olderGap?.status, "closed");
+  assert.equal(untracedGap?.status, "open");
+  assert.equal(validationGap?.status, "open");
+});
+
+test("generateRepoInventory merges generated inventory with existing autonomous evidence", async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), "devgod-service-inventory-"));
+
+  try {
+    await mkdir(resolve(fixtureRoot, "src", "config"), { recursive: true });
+    await mkdir(resolve(fixtureRoot, "src", "core"), { recursive: true });
+    await writeFile(resolve(fixtureRoot, "package.json"), '{"name":"service-inventory","version":"1.0.0"}\n', "utf8");
+    await writeFile(
+      resolve(fixtureRoot, "src", "core", "service.ts"),
+      'export function serviceEntry() { return "ok"; }\n',
+      "utf8"
+    );
+    await writeFile(
+      resolve(fixtureRoot, "src", "config", "runtime.ts"),
+      'const key = "API_URL"; export const apiUrl = process.env[key] ?? "https://example.com";\n',
+      "utf8"
+    );
+
+    const { service } = createService();
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Inventory merge",
+      request: "Merge generated repo understanding into existing runtime evidence."
+    });
+
+    await service.configureAutonomousExecution(run.id, {
+      profile: "legacy_rewrite",
+      phase: "inventory",
+      manifest: {
+        runId: run.id,
+        profile: "legacy_rewrite",
+        requiredCategories: ["services"],
+        thresholds: {
+          criticalItemCoverage: 0.8,
+          criticalItemValidation: 0.6,
+          callsiteCoverage: 0.85,
+          runtimeTraceCoverage: 0.75,
+          inventoryCompleteness: 1
+        }
+      }
+    });
+    await service.upsertCoverageItems(run.id, [
+      {
+        id: "manual:seed",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["tests/service.test.ts:1"],
+        evidenceRefs: ["tests/service.test.ts:1"],
+        verificationRefs: ["tests/service.test.ts"],
+        lastUpdatedAt: "2026-05-20T12:00:00.000Z"
+      }
+    ]);
+    await service.upsertCoverageGaps(run.id, [
+      {
+        id: "gap:manual-seed",
+        targetId: "manual:seed",
+        kind: "missing_validation",
+        severity: "medium",
+        description: "Existing seeded gap should survive inventory generation.",
+        blocking: false,
+        evidenceRefs: ["tests/service.test.ts"],
+        createdBy: "qa_engineer",
+        suggestedNextActions: ["keep the seeded gap"],
+        status: "open"
+      }
+    ]);
+
+    const state = await service.generateRepoInventory(run.id, {
+      repoRoot: fixtureRoot,
+      now: "2026-05-20T16:30:00.000Z"
+    });
+
+    assert.ok(state.coverageItems.some((item) => item.id === "manual:seed"));
+    assert.ok(state.coverageItems.some((item) => item.id === "file:src/core/service.ts"));
+    assert.ok(state.gaps.some((gap) => gap.id === "gap:manual-seed"));
+    assert.ok(state.gaps.some((gap) => gap.targetId === "file:src/config/runtime.ts"));
+    assert.ok(state.understandingMaps?.some((map) => map.kind === "config_coupling"));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("exportCoverageLedger rejects runs without an autonomous execution manifest", async () => {
+  const { service } = createService();
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Ledger export guard",
+    request: "Do not export a coverage ledger before the manifest exists."
+  });
+
+  await assert.rejects(
+    service.exportCoverageLedger(run.id),
+    /coverage ledger export requires an autonomous execution manifest/
   );
 });

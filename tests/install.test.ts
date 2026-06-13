@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "@iarna/toml";
 import { auditMaintainerOnlyPublishedPaths } from "../src/install/maintainer-boundary.ts";
 import {
+  agentsManagedBlock,
   grafanaCodexConfigFragment,
   graphifyCodexConfigFragment,
   mergeAgentsMd,
@@ -38,11 +39,129 @@ import {
 } from "../src/devgod/package-surface.ts";
 import { listCatalogRepoLocalSkillPaths } from "../src/devgod/repo-local-skill-surface.ts";
 
-const execFileAsync = promisify(execFile);
+const execFileRawAsync = promisify(execFile);
 
-async function runNpmPackJsonDryRun(sourceRoot: string): Promise<string> {
+function normalizeExecFileTextOutput(output: string | NodeJS.ArrayBufferView): string {
+  return typeof output === "string" ? output : Buffer.from(output.buffer, output.byteOffset, output.byteLength).toString("utf8");
+}
+
+function childProcessEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_V8_COVERAGE: ""
+  };
+  return {
+    ...env,
+    ...overrides,
+    NODE_V8_COVERAGE: ""
+  };
+}
+
+function execFileAsync(
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileRawAsync(file, [...args], {
+    ...options,
+    encoding: "utf8",
+    env: childProcessEnv(options.env ?? {})
+  }).then(({ stdout, stderr }) => ({
+    stdout: normalizeExecFileTextOutput(stdout),
+    stderr: normalizeExecFileTextOutput(stderr)
+  }));
+}
+
+interface PackFixtureStageOptions {
+  intendedTrackedRelativePaths?: string[];
+}
+
+function normalizeFixtureRelativePath(relativePath: string): string {
+  const normalized = relativePath.split(path.sep).join(path.posix.sep);
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    path.posix.isAbsolute(normalized)
+  ) {
+    throw new Error(`Pack fixture paths must stay repo-relative; received "${relativePath}"`);
+  }
+  return normalized;
+}
+
+async function listTrackedFixturePaths(sourceRoot: string): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", ["ls-files", "-z"], { cwd: sourceRoot });
+  return stdout
+    .split("\0")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => normalizeFixtureRelativePath(entry))
+    .sort();
+}
+
+async function listUntrackedFixturePaths(sourceRoot: string): Promise<Set<string>> {
+  const { stdout } = await execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: sourceRoot
+  });
+  return new Set(
+    stdout
+      .split("\0")
+      .filter((entry) => entry.length > 0)
+      .map((entry) => normalizeFixtureRelativePath(entry))
+  );
+}
+
+async function copyFixturePath(sourceRoot: string, stagedRoot: string, relativePath: string): Promise<void> {
+  const sourcePath = path.join(sourceRoot, relativePath);
+  const stagedPath = path.join(stagedRoot, relativePath);
+  await mkdir(path.dirname(stagedPath), { recursive: true });
+  await cp(sourcePath, stagedPath, {
+    force: true,
+    recursive: false
+  });
+}
+
+async function stagePackSourceRoot(
+  sourceRoot: string,
+  options: PackFixtureStageOptions = {}
+): Promise<{ root: string; cleanup: () => Promise<void> }> {
+  const stagedRoot = await mkdtemp(path.join(tmpdir(), "devgod-pack-source-"));
+  const trackedPaths = await listTrackedFixturePaths(sourceRoot);
+  const trackedPathSet = new Set(trackedPaths);
+  const untrackedPaths = await listUntrackedFixturePaths(sourceRoot);
+  const intendedTrackedPaths = (options.intendedTrackedRelativePaths ?? []).map((entry) =>
+    normalizeFixtureRelativePath(entry)
+  );
+
+  for (const relativePath of intendedTrackedPaths) {
+    if (!trackedPathSet.has(relativePath) && !untrackedPaths.has(relativePath)) {
+      throw new Error(
+        `Intended tracked pack fixture path must exist in the workspace before staging: ${relativePath}`
+      );
+    }
+  }
+
+  const fixturePaths = [...new Set([...trackedPaths, ...intendedTrackedPaths])];
+
+  try {
+    for (const relativePath of fixturePaths) {
+      await copyFixturePath(sourceRoot, stagedRoot, relativePath);
+    }
+
+    return {
+      root: stagedRoot,
+      cleanup: async () => rm(stagedRoot, { recursive: true, force: true })
+    };
+  } catch (error) {
+    await rm(stagedRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function runNpmPackJsonDryRun(sourceRoot: string, options: PackFixtureStageOptions = {}): Promise<string> {
   const npmCacheDir = await mkdtemp(path.join(tmpdir(), "devgod-npm-pack-cache-"));
   const outputPath = path.join(npmCacheDir, "npm-pack-output.json");
+  const staged = await stagePackSourceRoot(sourceRoot, options);
 
   try {
     await execFileAsync(
@@ -54,12 +173,46 @@ async function runNpmPackJsonDryRun(sourceRoot: string): Promise<string> {
           `npm pack --json --dry-run --cache ${JSON.stringify(npmCacheDir)} > ${JSON.stringify(outputPath)}`
         ].join("\n")
       ],
-      { cwd: sourceRoot }
+      { cwd: staged.root }
     );
 
     return await readFile(outputPath, "utf8");
   } finally {
+    await staged.cleanup();
     await rm(npmCacheDir, { recursive: true, force: true });
+  }
+}
+
+async function createPackedTarball(
+  sourceRoot: string,
+  options: PackFixtureStageOptions = {}
+): Promise<{ tarballPath: string; cleanup: () => Promise<void> }> {
+  const packDir = await mkdtemp(path.join(tmpdir(), "devgod-npm-pack-"));
+  const staged = await stagePackSourceRoot(sourceRoot, options);
+
+  try {
+    const { stdout } = await execFileAsync(
+      "npm",
+      ["pack", "--json", "--pack-destination", packDir],
+      { cwd: staged.root }
+    );
+    const packResult = JSON.parse(stdout) as Array<{ filename: string }>;
+    const filename = packResult[0]?.filename;
+    if (!filename) {
+      throw new Error("npm pack did not report a tarball filename");
+    }
+
+    return {
+      tarballPath: path.join(packDir, filename),
+      cleanup: async () => {
+        await staged.cleanup();
+        await rm(packDir, { recursive: true, force: true });
+      }
+    };
+  } catch (error) {
+    await staged.cleanup();
+    await rm(packDir, { recursive: true, force: true });
+    throw error;
   }
 }
 
@@ -116,7 +269,9 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /`solution_architect`/);
   assert.match(first, /`planner`/);
   assert.match(first, /`git_operator`/);
+  assert.match(first, /workflow_check=devgod workflow-proof --run-id latest --task-id <task-id>/);
   assert.match(first, /workflow-proof --run-id latest --task-id/);
+  assert.doesNotMatch(first, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
   assert.match(first, /## Autonomy Loop/);
   assert.match(first, /update runtime product state/i);
   assert.match(first, /update runtime task queue/i);
@@ -232,6 +387,26 @@ test("mergeCodexConfig preserves existing comments when no semantic change is ne
   assert.equal(merged, existing);
 });
 
+test("merge helpers initialize empty managed files and normalize absolute dependency paths", () => {
+  const mergedAgents = mergeAgentsMd(undefined);
+  const mergedDotAgents = mergeDotAgentsMd(undefined);
+  const mergedCodexConfig = mergeCodexConfig(undefined, 'model = "gpt-5.4"\n');
+  const mergedGitignore = mergeGitignore(undefined);
+  const mergedPackageJson = JSON.parse(mergePackageJson(undefined, "/opt/devgod")) as {
+    devDependencies: Record<string, string>;
+    name: string;
+    private: boolean;
+  };
+
+  assert.equal(mergedAgents, agentsManagedBlock());
+  assert.match(mergedDotAgents, /BEGIN DEVGOD KERNEL/);
+  assert.match(mergedCodexConfig, /model = "gpt-5\.4"/);
+  assert.equal(mergedGitignore, "\n# devgod\n.env.devgod\n.env.devgod.*\ngraphify-out/\n");
+  assert.equal(mergedPackageJson.name, "project-with-devgod");
+  assert.equal(mergedPackageJson.private, true);
+  assert.equal(mergedPackageJson.devDependencies.devgod, "file:/opt/devgod");
+});
+
 test("mergeCodexConfig adds Graphify MCP settings without overwriting existing project config", () => {
   const merged = mergeCodexConfig(
     'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = ["playwright-mcp"]\n',
@@ -266,7 +441,9 @@ test("mergeCodexConfig adds Grafana MCP settings without overwriting existing pr
 
   assert.match(merged, /\[mcp_servers\.grafana\]/);
   assert.match(merged, /command = "node"/);
-  assert.match(merged, /src\/grafana\/mcp-server\.ts/);
+  assert.match(merged, /node_modules\/devgod\/dist\/bin\/devgod\.js/);
+  assert.match(merged, /grafana-mcp/);
+  assert.doesNotMatch(merged, /node_modules\/devgod\/src\/grafana\/mcp-server\.ts/);
   assert.match(merged, /\[mcp_servers\.playwright\]/);
 });
 
@@ -285,158 +462,51 @@ test("mergePackageJson adds devgod dependency and scripts without removing exist
     scripts: Record<string, string>;
     devDependencies: Record<string, string>;
   };
+  const devgodEntry = "devgod";
 
   assert.equal(merged.scripts.test, "vitest");
-  assert.equal(
-    merged.scripts.devgod,
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts"
-  );
-  assert.match(merged.scripts["devgod:migrate"], /node_modules\/devgod\/src\/admin\/devgod\.ts migrate/);
-  assert.match(merged.scripts["devgod:doctor"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor/);
-  assert.match(merged.scripts["devgod:heal"], /node_modules\/devgod\/src\/admin\/devgod\.ts doctor --repair/);
-  assert.match(merged.scripts["devgod:status"], /node_modules\/devgod\/src\/admin\/devgod\.ts status/);
-  assert.equal(
-    merged.scripts["devgod:coverage"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts coverage --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:gaps"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts gaps --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:checkpoint"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts checkpoint --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:resume"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts resume --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:seed-workflow-proof"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-workflow-proof"
-  );
-  assert.equal(
-    merged.scripts["devgod:seed-modernization-proof"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-modernization-proof"
-  );
-  assert.equal(
-    merged.scripts["devgod:advance-active-task"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts advance-active-task --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:reconcile"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts reconcile-runtime-state --apply --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:sync-runtime-exports"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts sync-runtime-exports --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:daemon"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts daemon --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:supervisor"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts supervisor --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:supervisor-history"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts supervisor-history --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:loop"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts loop --format text"
-  );
+  assert.equal(merged.scripts.devgod, devgodEntry);
+  assert.equal(merged.scripts["devgod:migrate"], `${devgodEntry} migrate`);
+  assert.equal(merged.scripts["devgod:doctor"], `${devgodEntry} doctor`);
+  assert.equal(merged.scripts["devgod:heal"], `${devgodEntry} doctor --repair`);
+  assert.equal(merged.scripts["devgod:status"], `${devgodEntry} status`);
+  assert.equal(merged.scripts["devgod:coverage"], `${devgodEntry} coverage --format text`);
+  assert.equal(merged.scripts["devgod:gaps"], `${devgodEntry} gaps --format text`);
+  assert.equal(merged.scripts["devgod:checkpoint"], `${devgodEntry} checkpoint --format text`);
+  assert.equal(merged.scripts["devgod:resume"], `${devgodEntry} resume --format text`);
+  assert.equal(merged.scripts["devgod:seed-workflow-proof"], `${devgodEntry} seed-workflow-proof`);
+  assert.equal(merged.scripts["devgod:seed-modernization-proof"], `${devgodEntry} seed-modernization-proof`);
+  assert.equal(merged.scripts["devgod:advance-active-task"], `${devgodEntry} advance-active-task --format text`);
+  assert.equal(merged.scripts["devgod:reconcile"], `${devgodEntry} reconcile-runtime-state --apply --format text`);
+  assert.equal(merged.scripts["devgod:sync-runtime-exports"], `${devgodEntry} sync-runtime-exports --format text`);
+  assert.equal(merged.scripts["devgod:daemon"], `${devgodEntry} daemon --format text`);
+  assert.equal(merged.scripts["devgod:supervisor"], `${devgodEntry} supervisor --format text`);
+  assert.equal(merged.scripts["devgod:supervisor-history"], `${devgodEntry} supervisor-history --format text`);
+  assert.equal(merged.scripts["devgod:loop"], `${devgodEntry} loop --format text`);
   assert.equal(merged.scripts["devgod:check-workflow"], "bash scripts/check-devgod-workflow.sh");
-  assert.equal(
-    merged.scripts["devgod:report"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts report --format markdown"
-  );
-  assert.equal(
-    merged.scripts["devgod:focus"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts ops --format text"
-  );
-  assert.equal(
-    merged.scripts["devgod:refresh-retrieval"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval"
-  );
-  assert.equal(
-    merged.scripts["devgod:refresh-retrieval:fast"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-retrieval --artifacts-only"
-  );
-  assert.equal(
-    merged.scripts["devgod:refresh-repo-context"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts refresh-repo-context"
-  );
-  assert.equal(
-    merged.scripts["devgod:repair-task-queue"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts repair-task-queue"
-  );
-  assert.equal(
-    merged.scripts["devgod:autopilot-status"],
-    "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts"
-  );
-  assert.equal(
-    merged.scripts["devgod:github-dispatch"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts github-dispatch --target ."
-  );
-  assert.equal(
-    merged.scripts["devgod:mcp"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts mcp"
-  );
-  assert.equal(
-    merged.scripts["devgod:ui"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts serve-ui"
-  );
-  assert.match(
-    merged.scripts["devgod:verify:migrations:live"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-live-migrations/
-  );
-  assert.equal(
-    merged.scripts["devgod:scaffold-workflow"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts scaffold-workflow --target ."
-  );
-  assert.equal(
-    merged.scripts["devgod:upgrade-reasoning-workflow"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts upgrade-reasoning-workflow --target ."
-  );
-  assert.equal(
-    merged.scripts["devgod:seed-happy-path-fixture"],
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts seed-happy-path-fixture --target ."
-  );
+  assert.equal(merged.scripts["devgod:report"], `${devgodEntry} report --format markdown`);
+  assert.equal(merged.scripts["devgod:focus"], `${devgodEntry} ops --format text`);
+  assert.equal(merged.scripts["devgod:refresh-retrieval"], `${devgodEntry} refresh-retrieval`);
+  assert.equal(merged.scripts["devgod:refresh-retrieval:fast"], `${devgodEntry} refresh-retrieval --artifacts-only`);
+  assert.equal(merged.scripts["devgod:refresh-repo-context"], `${devgodEntry} refresh-repo-context`);
+  assert.equal(merged.scripts["devgod:repair-task-queue"], `${devgodEntry} repair-task-queue`);
+  assert.equal(merged.scripts["devgod:autopilot-status"], `${devgodEntry} autopilot-status`);
+  assert.equal(merged.scripts["devgod:github-dispatch"], `${devgodEntry} github-dispatch --target .`);
+  assert.equal(merged.scripts["devgod:mcp"], `${devgodEntry} mcp`);
+  assert.equal(merged.scripts["devgod:ui"], `${devgodEntry} serve-ui`);
+  assert.equal(merged.scripts["devgod:verify:migrations:live"], `${devgodEntry} verify-live-migrations`);
+  assert.equal(merged.scripts["devgod:scaffold-workflow"], `${devgodEntry} scaffold-workflow --target .`);
+  assert.equal(merged.scripts["devgod:upgrade-reasoning-workflow"], `${devgodEntry} upgrade-reasoning-workflow --target .`);
+  assert.equal(merged.scripts["devgod:seed-happy-path-fixture"], `${devgodEntry} seed-happy-path-fixture --target .`);
   assert.equal(merged.scripts["devgod:check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
-  assert.match(
-    merged.scripts["devgod:verify:review-identity"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
-  );
-  assert.equal(
-    merged.scripts["devgod:verify:git-guard"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts"
-  );
-  assert.match(
-    merged.scripts["devgod:record-review"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
-  );
-  assert.equal(
-    merged.scripts["devgod:setup:git-guard"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts"
-  );
-  assert.equal(
-    merged.scripts["devgod:setup:graphify"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify.ts"
-  );
-  assert.match(
-    merged.scripts["devgod:setup:local"],
-    /node_modules\/devgod\/src\/install\/setup-local\.ts/
-  );
-  assert.match(
-    merged.scripts["devgod:setup:playwright"],
-    /node_modules\/devgod\/src\/install\/setup-playwright\.ts/
-  );
-  assert.match(
-    merged.scripts["devgod:verify:playwright"],
-    /node_modules\/devgod\/src\/install\/setup-playwright\.ts --verify/
-  );
+  assert.equal(merged.scripts["devgod:verify:review-identity"], `${devgodEntry} verify-review-identity`);
+  assert.equal(merged.scripts["devgod:verify:git-guard"], `${devgodEntry} verify-git-guard`);
+  assert.equal(merged.scripts["devgod:record-review"], `${devgodEntry} record-review --input .devgod/review-action.json`);
+  assert.equal(merged.scripts["devgod:setup:git-guard"], `${devgodEntry} setup-git-guard`);
+  assert.equal(merged.scripts["devgod:setup:graphify"], `${devgodEntry} setup-graphify`);
+  assert.equal(merged.scripts["devgod:setup:local"], `${devgodEntry} setup-local`);
+  assert.equal(merged.scripts["devgod:setup:playwright"], `${devgodEntry} setup-playwright`);
+  assert.equal(merged.scripts["devgod:verify:playwright"], `${devgodEntry} setup-playwright --verify`);
   assert.equal(merged.devDependencies.devgod, "file:../devgod");
 });
 
@@ -526,7 +596,7 @@ test("mergePackageJson adds Graphify helpers by default", () => {
   assert.equal(merged.scripts["devgod:graphify:build"], "graphify extract src --out .");
   assert.equal(
     merged.scripts["devgod:graphify:codex-full"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+    "devgod setup-graphify-codex"
   );
   assert.equal(merged.scripts["devgod:graphify:update"], "graphify extract src --out .");
   assert.equal(
@@ -553,7 +623,7 @@ test("mergePackageJson adds a Grafana MCP helper only when requested", () => {
 
   assert.equal(
     merged.scripts["devgod:grafana:mcp"],
-    "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+    "devgod grafana-mcp"
   );
 });
 
@@ -627,7 +697,9 @@ test("README frames devgod as an opt-in overlay with production-oriented package
 test("package.json keeps shipped skills and agent configs explicit", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const pkg = JSON.parse(await readFile(path.join(sourceRoot, "package.json"), "utf8")) as {
+    bin?: Record<string, string> | string;
     description?: string;
+    exports?: Record<string, string>;
     license?: string;
     files: string[];
     private?: boolean;
@@ -659,6 +731,7 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
       "bootstrap",
       "operator_docs",
       "plugin_runtime",
+      "published_entrypoints",
       "operator_scripts",
       "runtime_sources",
       "repo_local_skills",
@@ -681,9 +754,26 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   const catalogSkillVerification = await verifyCatalogRepoLocalSkills({ repoRoot: sourceRoot });
   assert.equal(catalogSkillVerification.ok, true);
   assert.deepEqual(catalogSkillVerification.missingSkillFiles, []);
-  assert.equal(pkg.private, true);
+  assert.equal(pkg.private, false);
   assert.equal(pkg.license, "MIT");
   assert.match(pkg.description ?? "", /opt-in overlay/i);
+  assert.deepEqual(pkg.bin, {
+    devgod: "./dist/bin/devgod.js"
+  });
+  assert.deepEqual(pkg.exports, {
+    ".": {
+      types: "./src/public.ts",
+      default: "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  });
+  assert.equal(pkg.scripts.devgod, "node --experimental-strip-types src/admin/devgod.ts");
+  assert.equal(pkg.scripts.migrate, "node --experimental-strip-types src/admin/devgod.ts migrate");
+  assert.equal(pkg.scripts.status, "node --experimental-strip-types src/admin/devgod.ts status");
+  assert.equal(pkg.scripts.ops, "node --experimental-strip-types src/admin/devgod.ts ops --format text");
+  assert.equal(pkg.scripts["record:review"], "node --experimental-strip-types src/admin/devgod.ts record-review --input .devgod/review-action.json");
+  assert.equal(pkg.scripts.mcp, "node --experimental-strip-types src/admin/devgod.ts mcp");
+  assert.equal(pkg.scripts.ui, "node --experimental-strip-types src/admin/devgod.ts serve-ui");
   assert.equal(pkg.scripts["check:happy-path"], "bash scripts/check-devgod-happy-path.sh");
   assert.equal(
     pkg.scripts["scaffold:workflow"],
@@ -703,6 +793,14 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
     "node --experimental-strip-types src/devgod/verify-package-surface.ts"
   );
   assert.equal(pkg.scripts["verify:release-overlay"], "bash scripts/verify-release-overlay.sh");
+  assert.equal(
+    pkg.scripts["devgod:graphify:codex-full"],
+    "node --experimental-strip-types src/install/setup-graphify-codex.ts"
+  );
+  assert.doesNotMatch(
+    pkg.scripts["devgod:graphify:codex-full"],
+    /node_modules\/devgod\/src\/install\/setup-graphify-codex\.ts/
+  );
   for (const relativePath of excludedOverlayFiles) {
     assert.ok(!pkg.files.includes(relativePath), `${relativePath} should stay out of the overlay package manifest`);
   }
@@ -710,17 +808,369 @@ test("package.json keeps shipped skills and agent configs explicit", async () =>
   assert.ok(pkg.files.every((file) => !file.includes("*")));
 });
 
-test("package dry run includes the orchestration eval entrypoint exported by src/index.ts", async () => {
+test("package dry run includes the JS public entrypoints and exported source modules", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const packResult = JSON.parse(await runNpmPackJsonDryRun(sourceRoot)) as Array<{
+  const packResult = JSON.parse(await runNpmPackJsonDryRun(sourceRoot, {
+    intendedTrackedRelativePaths: ["src/public.ts"]
+  })) as Array<{
     files: Array<{
       path: string;
     }>;
   }>;
 
   const packedFiles = new Set(packResult[0]?.files.map((entry) => entry.path) ?? []);
+  assert.ok(packedFiles.has("dist/bin/devgod.js"));
+  assert.ok(packedFiles.has("dist/index.js"));
+  assert.ok(packedFiles.has("dist/register-typescript-hooks.js"));
+  assert.ok(packedFiles.has("src/public.ts"));
   assert.ok(packedFiles.has("src/evals/orchestration-baseline.ts"));
   assert.ok(packedFiles.has("src/index.ts"));
+});
+
+test("verify-package-surface script reports success and drift with canonical package boundaries", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const verifierEntrypoint = path.join(sourceRoot, "src", "devgod", "verify-package-surface.ts");
+  const driftRoot = await mkdtemp(path.join(tmpdir(), "devgod-package-surface-drift-"));
+
+  try {
+    const { stdout } = await execFileAsync(process.execPath, ["--experimental-strip-types", verifierEntrypoint], {
+      cwd: sourceRoot
+    });
+    assert.match(stdout, /package surface verified/);
+
+    await writeFile(
+      path.join(driftRoot, "package.json"),
+      JSON.stringify({ files: ["AGENTS.md", "README.md"] }, null, 2) + "\n",
+      "utf8"
+    );
+
+    await assert.rejects(
+      execFileAsync(process.execPath, ["--experimental-strip-types", verifierEntrypoint], {
+        cwd: driftRoot
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stderr = "stderr" in error ? String(error.stderr) : "";
+        assert.match(stderr, /package\.json files drifted from canonical package surface/);
+        assert.match(stderr, /missing:/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(driftRoot, { recursive: true, force: true });
+  }
+});
+
+test("packed install exposes the public import and executable surfaces", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-packed-install-"));
+  const npmCacheDir = await mkdtemp(path.join(tmpdir(), "devgod-packed-install-cache-"));
+  const packed = await createPackedTarball(sourceRoot, {
+    intendedTrackedRelativePaths: ["src/public.ts"]
+  });
+
+  try {
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify({ name: "packed-install-fixture", private: true }, null, 2) + "\n",
+      "utf8"
+    );
+
+    await execFileAsync(
+      "npm",
+      ["install", "--ignore-scripts", "--no-package-lock", packed.tarballPath],
+      {
+        cwd: targetRoot,
+        env: {
+          ...process.env,
+          npm_config_cache: npmCacheDir
+        }
+      }
+    );
+
+    const installedPackageRoot = path.join(targetRoot, "node_modules", "devgod");
+    const installedPackageJson = JSON.parse(
+      await readFile(path.join(installedPackageRoot, "package.json"), "utf8")
+    ) as {
+      exports?: { ".": { types?: string; default?: string } };
+      bin?: { devgod?: string };
+    };
+
+    assert.equal(installedPackageJson.exports?.["."].types, "./src/public.ts");
+    assert.equal(installedPackageJson.exports?.["."].default, "./dist/index.js");
+    assert.equal(installedPackageJson.bin?.devgod, "./dist/bin/devgod.js");
+    await assert.doesNotReject(
+      execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "--input-type=module",
+          "--eval",
+          [
+            'import assert from "node:assert/strict";',
+            'import * as devgod from "devgod";',
+            'assert.equal(typeof devgod.DevgodCoreService, "function");',
+            'assert.equal(typeof devgod.MemoryStore, "function");',
+            'assert.equal(typeof devgod.createReviewPrincipalAdapter, "function");',
+            'await assert.rejects(',
+            '  devgod.executeStatusCommandFromArgs([], { cwd: process.cwd(), env: {} }),',
+            '  /status-like commands require --run-id <run-id> or --run-id latest with workspace\\/project/',
+            ');',
+            'await assert.rejects(',
+            '  devgod.executeReportCommandFromArgs(["--run-id", "run-1", "--stale-after-hours", "bad"], { cwd: process.cwd(), env: {} }),',
+            '  /Invalid --stale-after-hours value: bad/',
+            ');',
+            'await assert.rejects(',
+            '  devgod.executeSeedModernizationProofCommandFromArgs([], { cwd: process.cwd(), env: {} }),',
+            '  /seed-modernization-proof requires DEVGOD_WORKSPACE_SLUG and DEVGOD_PROJECT_SLUG or explicit flags/',
+            ');'
+          ].join("\n")
+        ],
+        { cwd: targetRoot }
+      )
+    );
+
+    const devgodBin = path.join(
+      targetRoot,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "devgod.cmd" : "devgod"
+    );
+    const { stdout: binStdout } = await execFileAsync(devgodBin, ["help"], { cwd: targetRoot });
+    assert.match(binStdout, /Usage:/);
+  } finally {
+    await packed.cleanup();
+    await rm(npmCacheDir, { recursive: true, force: true });
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("public devgod bin routes install and admin commands without private path knowledge", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-public-bin-"));
+  const npmCacheDir = await mkdtemp(path.join(tmpdir(), "devgod-public-bin-cache-"));
+  const packed = await createPackedTarball(sourceRoot, {
+    intendedTrackedRelativePaths: ["src/public.ts"]
+  });
+
+  try {
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify({ name: "public-bin-fixture", private: true }, null, 2) + "\n",
+      "utf8"
+    );
+    await execFileAsync("npm", ["install", "--ignore-scripts", "--no-package-lock", packed.tarballPath], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        npm_config_cache: npmCacheDir
+      }
+    });
+
+    const cliEntrypoint = path.join(
+      targetRoot,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "devgod.cmd" : "devgod"
+    );
+    const { stdout: helpStdout } = await execFileAsync(cliEntrypoint, ["help"], { cwd: targetRoot });
+    assert.match(helpStdout, /Stable public CLI entrypoint for the devgod package/);
+    assert.match(helpStdout, /Install commands:/);
+    assert.match(helpStdout, /Helper commands:/);
+
+    await assert.rejects(
+      execFileAsync(cliEntrypoint, ["init", "--target", targetRoot], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stderr = "stderr" in error ? String(error.stderr) : "";
+        assert.match(stderr, /init requires exactly one of --apply or --dry-run/);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      execFileAsync(cliEntrypoint, ["seed-modernization-proof", "--workspace-slug", "team", "--project-slug", "devgod"], {
+        cwd: targetRoot,
+        env: {
+          ...process.env
+        }
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stderr = "stderr" in error ? String(error.stderr) : "";
+        assert.match(
+          stderr,
+          /DEVGOD_CORE_DATABASE_URL is required|Project team\/devgod is not bootstrapped|seed-modernization-proof requires --task-id or an active runtime task/
+        );
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      execFileAsync(cliEntrypoint, ["unknown-command"], { cwd: targetRoot }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stderr = "stderr" in error ? String(error.stderr) : "";
+        assert.match(stderr, /Unknown devgod command: unknown-command/);
+        return true;
+      }
+    );
+  } finally {
+    await packed.cleanup();
+    await rm(npmCacheDir, { recursive: true, force: true });
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("repo-local devgod scripts and helper entrypoints stay callable through package surfaces", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-setup-local-"));
+  const npmCacheDir = await mkdtemp(path.join(tmpdir(), "devgod-setup-local-cache-"));
+  const packed = await createPackedTarball(sourceRoot, {
+    intendedTrackedRelativePaths: ["src/public.ts"]
+  });
+
+  try {
+    const { stdout: helpStdout } = await execFileAsync("npm", ["run", "devgod", "--", "help"], {
+      cwd: sourceRoot
+    });
+    assert.match(helpStdout, /Implicit workflow controller by default/);
+    assert.match(helpStdout, /mcp \| serve-ui/);
+
+    await assert.rejects(
+      execFileAsync("npm", ["run", "devgod", "--", "unknown-command"], {
+        cwd: sourceRoot
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stderr = "stderr" in error ? String(error.stderr) : "";
+        assert.match(stderr, /Unknown devgod command: unknown-command/);
+        return true;
+      }
+    );
+
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify({ name: "setup-local-fixture", private: true }, null, 2) + "\n",
+      "utf8"
+    );
+    await execFileAsync("npm", ["install", "--ignore-scripts", "--no-package-lock", packed.tarballPath], {
+      cwd: targetRoot,
+      env: {
+        ...process.env,
+        npm_config_cache: npmCacheDir
+      }
+    });
+    const cliEntrypoint = path.join(
+      targetRoot,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "devgod.cmd" : "devgod"
+    );
+
+    await mkdir(path.join(targetRoot, "scripts"), { recursive: true });
+    await writeExecutable(
+      path.join(targetRoot, "scripts", "devgod-setup.sh"),
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "printf 'setup-local-ok\\n'"
+      ].join("\n")
+    );
+
+    const { stdout: setupLocalStdout } = await execFileAsync(process.execPath, [cliEntrypoint, "setup-local"], {
+      cwd: targetRoot
+    });
+    assert.match(setupLocalStdout, /setup-local-ok/);
+
+    let graphifyOutput = "";
+    try {
+      const result = await execFileAsync(process.execPath, [cliEntrypoint, "setup-graphify-codex"], {
+        cwd: sourceRoot
+      });
+      graphifyOutput = `${result.stdout}${result.stderr}`;
+    } catch (error) {
+      assert.ok(error instanceof Error);
+      const stdout = "stdout" in error ? String(error.stdout) : "";
+      const stderr = "stderr" in error ? String(error.stderr) : "";
+      graphifyOutput = `${stdout}${stderr}`;
+    }
+    assert.match(graphifyOutput, /Devgod Graphify Codex full-mode helper/);
+  } finally {
+    await packed.cleanup();
+    await rm(npmCacheDir, { recursive: true, force: true });
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("package verification scripts stay runnable from the published boundary set", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-autopilot-status-"));
+
+  try {
+    await mkdir(path.join(targetRoot, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(targetRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-001",
+          tasks: [
+            {
+              id: "task-001",
+              title: "Example task",
+              status: "in_progress",
+              class: "prototype_slice",
+              depends_on: [],
+              acceptance_criteria: ["Example task outcome is explicitly defined."],
+              verification: ["bash scripts/check-devgod-workflow.sh --task-id task-001"],
+              evidence: [
+                "task packet: task-001",
+                "verification: bash scripts/check-devgod-workflow.sh --task-id task-001"
+              ],
+              blocker: null
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const { stdout: autopilotStdout } = await execFileAsync(
+      process.execPath,
+      ["--experimental-strip-types", path.join(sourceRoot, "src/devgod/autopilot-status.ts")],
+      { cwd: targetRoot }
+    );
+    assert.match(autopilotStdout, /Project status: in_progress/);
+    assert.match(autopilotStdout, /Current task: task-001 - Example task \[in_progress\]/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+
+  const { stdout: cavemanStdout } = await execFileAsync("npm", ["run", "verify:agent-caveman"], {
+    cwd: sourceRoot
+  });
+  assert.match(cavemanStdout, /agent caveman contract verified/);
+
+  const { stdout: vendoredStdout } = await execFileAsync("npm", ["run", "verify:vendored-skills"], {
+    cwd: sourceRoot
+  });
+  assert.match(vendoredStdout, /vendored skills verified/);
+
+  const { stdout: workflowStdout } = await execFileAsync("npm", ["run", "verify:workflow-schema"], {
+    cwd: sourceRoot
+  });
+  assert.match(workflowStdout, /workflow schema verified/);
+
+  const { stdout: workflowCliStdout } = await execFileAsync(
+    process.execPath,
+    ["--experimental-strip-types", path.join(sourceRoot, "src/devgod/workflow-schema-cli.ts"), "list", "quality-gates"],
+    { cwd: sourceRoot }
+  );
+  assert.match(workflowCliStdout, /product_acceptance/);
+  assert.match(workflowCliStdout, /coverage_ledger_required/);
 });
 
 test("installDevgodIntoProject dry-run reports planned changes without writing", async () => {
@@ -782,11 +1232,11 @@ test("installDevgodIntoProject ships Playwright MCP configs and setup wiring", a
     assert.match(codexConfig, /\[mcp_servers\.playwright_vision\]/);
     assert.equal(
       packageJson.scripts?.["devgod:setup:playwright"],
-      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts"
+      "devgod setup-playwright"
     );
     assert.equal(
       packageJson.scripts?.["devgod:verify:playwright"],
-      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify"
+      "devgod setup-playwright --verify"
     );
     assert.match(kernelAgents, /BEGIN DEVGOD KERNEL/);
     assert.match(kernelAgents, /devgod-intake/);
@@ -864,6 +1314,48 @@ test("parseCliArgs accepts upgrade-reasoning-workflow with explicit mode", () =>
   });
 });
 
+test("parseCliArgs accepts positional targets for verify and workflow mutation commands", () => {
+  assert.deepEqual(parseCliArgs(["verify", "/tmp/project"]), {
+    command: "verify",
+    targetArg: "/tmp/project"
+  });
+
+  assert.deepEqual(
+    parseCliArgs([
+      "scaffold-workflow",
+      "--task-id",
+      "task-123",
+      "--force",
+      "--force-active",
+      "/tmp/project"
+    ]),
+    {
+      command: "scaffold-workflow",
+      targetArg: "/tmp/project",
+      taskId: "task-123",
+      force: true,
+      forceActive: true
+    }
+  );
+
+  assert.deepEqual(
+    parseCliArgs([
+      "seed-happy-path-fixture",
+      "--task-id",
+      "fixture-demo",
+      "--force",
+      "/tmp/project"
+    ]),
+    {
+      command: "seed-happy-path-fixture",
+      targetArg: "/tmp/project",
+      taskId: "fixture-demo",
+      force: true,
+      forceActive: false
+    }
+  );
+});
+
 test("parseCliArgs defaults upgrade-reasoning-workflow mode to strict", () => {
   const parsed = parseCliArgs([
     "upgrade-reasoning-workflow",
@@ -880,6 +1372,120 @@ test("parseCliArgs defaults upgrade-reasoning-workflow mode to strict", () => {
     mode: "strict",
     force: false
   });
+});
+
+test("parseCliArgs rejects unsupported upgrade-reasoning-workflow modes", () => {
+  assert.throws(
+    () =>
+      parseCliArgs([
+        "upgrade-reasoning-workflow",
+        "--target",
+        "/tmp/project",
+        "--task-id",
+        "task-123",
+        "--mode",
+        "legacy"
+      ]),
+    /mode must be dual or strict/
+  );
+});
+
+test("parseCliArgs requires a target for upgrade-reasoning-workflow", () => {
+  assert.throws(
+    () => parseCliArgs(["upgrade-reasoning-workflow", "--task-id", "task-123", "--mode", "dual"]),
+    /Usage: node --experimental-strip-types src\/install\/cli\.ts/
+  );
+});
+
+test("parseCliArgs validates install, verify, and workflow mutation modes", () => {
+  assert.throws(
+    () => parseCliArgs(["upgrade", "--apply", "--dry-run", "--target", "/tmp/project"]),
+    /upgrade requires exactly one of --apply or --dry-run/
+  );
+  assert.throws(
+    () => parseCliArgs(["verify", "--dry-run", "/tmp/project"]),
+    /verify does not support --apply, --dry-run, or --with-grafana/
+  );
+  assert.throws(
+    () => parseCliArgs(["scaffold-workflow", "--target", "/tmp/project"]),
+    /scaffold-workflow requires --task-id <task-id>/
+  );
+  assert.throws(
+    () => parseCliArgs(["scaffold-workflow", "--dry-run", "--target", "/tmp/project", "--task-id", "task-123"]),
+    /scaffold-workflow does not support --apply or --dry-run/
+  );
+  assert.throws(
+    () => parseCliArgs(["seed-happy-path-fixture", "--target", "/tmp/project", "--task-id", "fixture bad"]),
+    /task_id must match/
+  );
+  assert.throws(
+    () =>
+      parseCliArgs(["seed-happy-path-fixture", "--apply", "--target", "/tmp/project", "--task-id", "fixture-demo"]),
+    /seed-happy-path-fixture does not support --apply or --dry-run/
+  );
+  assert.throws(
+    () => parseCliArgs(["upgrade-reasoning-workflow", "--target", "/tmp/project", "--task-id", "task-123", "--mode"]),
+    /Mode must follow --mode and cannot start with '-'/
+  );
+  assert.throws(
+    () =>
+      parseCliArgs([
+        "upgrade-reasoning-workflow",
+        "--target",
+        "/tmp/project",
+        "--task-id",
+        "task-123",
+        "--force-active"
+      ]),
+    /does not support --apply, --dry-run, or --force-active/
+  );
+});
+
+test("parseCliArgs accepts upgrade-reasoning-workflow with force and positional target", () => {
+  const parsed = parseCliArgs([
+    "upgrade-reasoning-workflow",
+    "--task-id",
+    "task-123",
+    "--mode",
+    "dual",
+    "--force",
+    "/tmp/project"
+  ]);
+
+  assert.deepEqual(parsed, {
+    command: "upgrade-reasoning-workflow",
+    targetArg: "/tmp/project",
+    taskId: "task-123",
+    mode: "dual",
+    force: true
+  });
+});
+
+test("parseCliArgs rejects malformed workflow mutation targets and task ids", () => {
+  assert.throws(
+    () => parseCliArgs(["scaffold-workflow", "--target", "--task-id", "task-123"]),
+    /Target path must follow --target and cannot start with '-'/
+  );
+  assert.throws(
+    () => parseCliArgs(["scaffold-workflow", "--target", "/tmp/project", "--task-id", "--force"]),
+    /Task id must follow --task-id and cannot start with '-'/
+  );
+  assert.throws(
+    () => parseCliArgs(["seed-happy-path-fixture", "--target", "/tmp/project", "--task-id", "--force"]),
+    /Task id must follow --task-id and cannot start with '-'/
+  );
+  assert.throws(
+    () =>
+      parseCliArgs([
+        "upgrade-reasoning-workflow",
+        "--target",
+        "--task-id",
+        "task-123",
+        "--mode",
+        "dual"
+      ]),
+    /Target path must follow --target and cannot start with '-'/
+  );
 });
 
 test("parseCliArgs accepts Grafana install opt-in", () => {
@@ -952,6 +1558,159 @@ test("upgradeReasoningWorkflowArtifacts backfills policy, attempts, and verdict 
   }
 });
 
+test("upgradeReasoningWorkflowArtifacts reports a no-op when the requested hardening already exists", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-noop-"));
+  const taskId = "task-reasoning-noop";
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await mkdir(path.join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+
+    await writeFile(
+      path.join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+      [
+        "## Task ID",
+        "",
+        `\`${taskId}\``,
+        "",
+        "## Reasoning quality",
+        "",
+        "### Claim",
+        "",
+        "- legacy reasoning claim",
+        "",
+        "### Evidence refs",
+        "",
+        "- `src/core/service.ts`",
+        "",
+        "### Verification plan",
+        "",
+        "- `npm test`"
+      ].join("\n"),
+      "utf8"
+    );
+
+    await upgradeReasoningWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId,
+      mode: "strict"
+    });
+
+    const hardenedContent = await readFile(
+      path.join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+      "utf8"
+    );
+    const summary = await upgradeReasoningWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId,
+      mode: "strict"
+    });
+
+    assert.deepEqual(summary.created, []);
+    assert.deepEqual(summary.updated, []);
+    assert.match(summary.nextSteps[0] ?? "", /Task already contains reasoning hardening sections/);
+    assert.equal(
+      await readFile(path.join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`), "utf8"),
+      hardenedContent
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeReasoningWorkflowArtifacts rewrites an already hardened task packet when forced", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-force-"));
+  const taskId = "task-reasoning-force";
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await mkdir(path.join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+
+    await writeFile(
+      path.join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+      [
+        "## Task ID",
+        "",
+        `\`${taskId}\``,
+        "",
+        "## Reasoning quality",
+        "",
+        "### Claim",
+        "",
+        "- legacy reasoning claim",
+        "",
+        "### Evidence refs",
+        "",
+        "- `src/core/service.ts`",
+        "",
+        "### Verification plan",
+        "",
+        "- `npm test`"
+      ].join("\n"),
+      "utf8"
+    );
+
+    await upgradeReasoningWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId,
+      mode: "strict"
+    });
+
+    const summary = await upgradeReasoningWorkflowArtifacts({
+      sourceRoot,
+      targetRoot,
+      taskId,
+      mode: "strict",
+      force: true
+    });
+
+    assert.deepEqual(summary.created, []);
+    assert.deepEqual(summary.updated, [`.devgod/work/tasks/task-${taskId}.md`]);
+    assert.match(summary.nextSteps[1] ?? "", /keep mode `strict`/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("upgradeReasoningWorkflowArtifacts rejects symlinked task artifacts", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-symlink-"));
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-reasoning-symlink-outside-"));
+  const taskId = "task-reasoning-symlink";
+  const outsideTaskPath = path.join(outsideRoot, `task-${taskId}.md`);
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await mkdir(path.join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(outsideTaskPath, "outside\n", "utf8");
+    await symlink(outsideTaskPath, path.join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`));
+
+    await assert.rejects(
+      upgradeReasoningWorkflowArtifacts({
+        sourceRoot,
+        targetRoot,
+        taskId,
+        mode: "strict"
+      }),
+      new RegExp(
+        `refusing to upgrade \\.devgod/work/tasks/task-${taskId}\\.md: managed path is not an in-root regular file`
+      )
+    );
+    assert.equal(await readFile(outsideTaskPath, "utf8"), "outside\n");
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
 test("installDevgodIntoProject first apply backs up divergent managed content", async () => {
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-backup-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1010,7 +1769,7 @@ test("installDevgodIntoProject adds Graphify scripts, MCP config, and setup guid
     assert.equal(packageJson.scripts["devgod:graphify:build"], "graphify extract src --out .");
     assert.equal(
       packageJson.scripts["devgod:graphify:codex-full"],
-      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+      "devgod setup-graphify-codex"
     );
     assert.equal(packageJson.scripts["devgod:graphify:update"], "graphify extract src --out .");
     assert.equal(
@@ -1049,7 +1808,7 @@ test("installDevgodIntoProject ships Graphify by default", async () => {
     assert.equal(packageJson.scripts?.["devgod:graphify:build"], "graphify extract src --out .");
     assert.equal(
       packageJson.scripts?.["devgod:graphify:codex-full"],
-      "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts"
+      "devgod setup-graphify-codex"
     );
     assert.match(codexConfig, /\[mcp_servers\.graphify\]/);
     assert.match(gitignore, /graphify-out\//);
@@ -1258,10 +2017,12 @@ test("installDevgodIntoProject opt-in Grafana setup adds MCP config, env guidanc
 
     assert.equal(
       packageJson.scripts["devgod:grafana:mcp"],
-      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+      "devgod grafana-mcp"
     );
     assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
-    assert.match(codexConfig, /src\/grafana\/mcp-server\.ts/);
+    assert.match(codexConfig, /node_modules\/devgod\/dist\/bin\/devgod\.js/);
+    assert.match(codexConfig, /grafana-mcp/);
+    assert.doesNotMatch(codexConfig, /node_modules\/devgod\/src\/grafana\/mcp-server\.ts/);
     assert.match(envExample, /DEVGOD_GRAFANA_URL=/);
     assert.match(envExample, /DEVGOD_GRAFANA_LOGS_DATASOURCE_UID=/);
     assert.match(summary.nextSteps.join("\n"), /DEVGOD_GRAFANA_URL/);
@@ -1298,7 +2059,7 @@ test("installDevgodIntoProject auto-detects configured Grafana env and adds MCP 
 
     assert.equal(
       packageJson.scripts["devgod:grafana:mcp"],
-      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+      "devgod grafana-mcp"
     );
     assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
   } finally {
@@ -1370,6 +2131,57 @@ test("install CLI init --apply is explicit, replay-safe, and does not run docker
     );
     assert.match(manifestContent, /"target": "AGENTS\.md"/);
     await assert.rejects(readFile(dockerSentinel, "utf8"));
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("install CLI init --apply forwards the Grafana opt-in", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-install-cli-grafana-"));
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+
+    await execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "init", "--apply", "--with-grafana", "--target", targetRoot],
+      { cwd: sourceRoot }
+    );
+
+    const installedPackageJson = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8")
+    ) as { scripts?: Record<string, string> };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+
+    assert.equal(installedPackageJson.scripts?.["devgod:grafana:mcp"], "devgod grafana-mcp");
+    assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("install CLI upgrade --apply forwards the Grafana opt-in", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-cli-grafana-"));
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n', "utf8");
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    await execFileAsync(
+      "node",
+      ["--experimental-strip-types", "src/install/cli.ts", "upgrade", "--apply", "--with-grafana", "--target", targetRoot],
+      { cwd: sourceRoot }
+    );
+
+    const installedPackageJson = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8")
+    ) as { scripts?: Record<string, string> };
+    const codexConfig = await readFile(path.join(targetRoot, ".codex", "config.toml"), "utf8");
+
+    assert.equal(installedPackageJson.scripts?.["devgod:grafana:mcp"], "devgod grafana-mcp");
+    assert.match(codexConfig, /\[mcp_servers\.grafana\]/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
   }
@@ -1683,6 +2495,169 @@ test("verify CLI succeeds for legacy installs without an install manifest", asyn
   }
 });
 
+test("verifyDevgodInstall rejects malformed install manifest variants", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-bad-manifest-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const manifestPath = path.join(targetRoot, ".devgod", "install-manifest.json");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+
+    const scenarios = [
+      {
+        label: "invalid JSON",
+        content: "{bad-json\n",
+        error: /Install manifest at \.devgod\/install-manifest\.json is not valid JSON/
+      },
+      {
+        label: "invalid shape",
+        content: "null\n",
+        error: /Install manifest at \.devgod\/install-manifest\.json has an invalid shape/
+      },
+      {
+        label: "unsupported version",
+        content: `${JSON.stringify({ version: 2, files: [] }, null, 2)}\n`,
+        error: /Install manifest at \.devgod\/install-manifest\.json has unsupported version 2/
+      },
+      {
+        label: "missing files list",
+        content: `${JSON.stringify({ version: 1 }, null, 2)}\n`,
+        error: /Install manifest at \.devgod\/install-manifest\.json is missing its files list/
+      },
+      {
+        label: "invalid file record",
+        content: `${JSON.stringify({ version: 1, files: [null] }, null, 2)}\n`,
+        error: /Install manifest at \.devgod\/install-manifest\.json has an invalid file record/
+      },
+      {
+        label: "invalid file record fields",
+        content: `${JSON.stringify(
+          {
+            version: 1,
+            files: [{ target: driftFixtureTarget, strategy: "replace", contentHash: 123 }]
+          },
+          null,
+          2
+        )}\n`,
+        error: /Install manifest at \.devgod\/install-manifest\.json has an invalid file record/
+      },
+      {
+        label: "unsupported strategy",
+        content: `${JSON.stringify(
+          {
+            version: 1,
+            files: [{ target: driftFixtureTarget, strategy: "seed", contentHash: hashContent("stale") }]
+          },
+          null,
+          2
+        )}\n`,
+        error: /Install manifest at \.devgod\/install-manifest\.json has an unsupported strategy/
+      }
+    ] as const;
+
+    for (const scenario of scenarios) {
+      await writeFile(manifestPath, scenario.content, "utf8");
+      await assert.rejects(
+        verifyDevgodInstall({ sourceRoot, targetRoot }),
+        scenario.error,
+        scenario.label
+      );
+    }
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyDevgodInstall rejects install manifest symlinks outside the target root", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-manifest-symlink-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-manifest-symlink-outside-"));
+  const outsideManifestPath = path.join(outsideRoot, "install-manifest.json");
+  const manifestPath = path.join(targetRoot, ".devgod", "install-manifest.json");
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeFile(outsideManifestPath, '{ "version": 1, "files": [] }\n', "utf8");
+    await rm(manifestPath, { force: true });
+    await symlink(outsideManifestPath, manifestPath);
+
+    await assert.rejects(
+      verifyDevgodInstall({ sourceRoot, targetRoot }),
+      /Install manifest at \.devgod\/install-manifest\.json is not an in-root regular file/
+    );
+    assert.equal(await readFile(outsideManifestPath, "utf8"), '{ "version": 1, "files": [] }\n');
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("verify CLI reports missing, orphaned, policy, and prerequisite drift", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-verify-cli-drift-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const orphanTarget = "scripts/legacy-managed.sh";
+
+  try {
+    await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
+    await installDevgodIntoProject({ sourceRoot, targetRoot });
+    await writeGraphifyGraph(targetRoot);
+    await writeFile(path.join(targetRoot, "graphify-out", "graph.json"), "{not-json\n", "utf8");
+    await rm(path.join(targetRoot, driftFixtureTarget));
+
+    const backendAgentPath = path.join(targetRoot, ".codex", "agents", "devgod-build-resolver.toml");
+    const backendAgent = await readFile(backendAgentPath, "utf8");
+    await writeFile(
+      backendAgentPath,
+      backendAgent.replace(
+        "- no prose exception: this role does not talk directly to the user\n",
+        ""
+      ),
+      "utf8"
+    );
+
+    await writeFile(path.join(targetRoot, orphanTarget), "#!/usr/bin/env bash\necho orphan\n", "utf8");
+    const manifestPath = path.join(targetRoot, ".devgod", "install-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      files: Array<{ contentHash: string; strategy: "merge" | "replace"; target: string }>;
+      version: number;
+    };
+    manifest.files.push({
+      target: orphanTarget,
+      strategy: "replace",
+      contentHash: hashContent("#!/usr/bin/env bash\necho orphan\n")
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["--experimental-strip-types", "src/install/cli.ts", "verify", "--target", targetRoot],
+        { cwd: sourceRoot }
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const stdout = "stdout" in error ? String(error.stdout) : "";
+        assert.match(stdout, /status: drifted/);
+        assert.match(stdout, /Missing:/);
+        assert.match(stdout, /- scripts\/check-devgod-workflow\.sh/);
+        assert.match(stdout, /Modified:/);
+        assert.match(stdout, /- \.codex\/agents\/devgod-build-resolver\.toml/);
+        assert.match(stdout, /Orphans:/);
+        assert.match(stdout, /- scripts\/legacy-managed\.sh/);
+        assert.match(stdout, /Policy drift:/);
+        assert.match(stdout, /missing caveman markers/);
+        assert.match(stdout, /Prerequisite drift:/);
+        assert.match(stdout, /graphify.*invalid/i);
+        return true;
+      }
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("upgradeDevgodInProject legacy installs backfill the manifest and count manifest-only writes", async () => {
   const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-upgrade-legacy-backfill-"));
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1967,7 +2942,9 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
   assert.match(agentsMd, /local_live_check=bash scripts\/check-devgod-workflow-live\.sh \[--task-id <task-id>\]/);
   assert.doesNotMatch(agentsMd, /\.devgod\/ACTIVE/);
   assert.match(agentsMd, /`reviewer`, `security_reviewer`, and `qa_engineer` gates/);
+  assert.match(agentsMd, /workflow_check=devgod workflow-proof --run-id latest --task-id <task-id>/);
   assert.match(agentsMd, /workflow-proof --run-id latest --task-id/);
+  assert.doesNotMatch(agentsMd, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
   assert.match(agentsMd, /explicit workflow artifact refs/);
   assert.match(agentsMd, /review_exports=runtime_optional/);
 
@@ -2057,6 +3034,7 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     "utf8"
   );
   assert.match(installedLiveWorkflowChecker, /scripts\/check-devgod-workflow\.sh/);
+  assert.doesNotMatch(installedLiveWorkflowChecker, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
 
   const installedAgents = [
     ".codex/agents/devgod-build-resolver.toml",
@@ -2108,87 +3086,38 @@ test("installDevgodIntoProject seeds scaffolding but not live work or reviewed m
     "utf8"
   );
   assert.match(reviewIdentityAdapter, /Implement devgod\/review-identity-adapter\.ts/);
+  assert.match(reviewIdentityAdapter, /from "devgod"/);
+  assert.doesNotMatch(reviewIdentityAdapter, /from "devgod\/src\/index\.ts"/);
 
   const targetPackageJson = JSON.parse(
     await readFile(path.join(targetRoot, "package.json"), "utf8")
   ) as { scripts: Record<string, string> };
-  assert.match(
+  assert.equal(
     targetPackageJson.scripts["devgod:upgrade-reasoning-workflow"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts upgrade-reasoning-workflow --target \./
+    "devgod upgrade-reasoning-workflow --target ."
   );
-  assert.match(
+  assert.equal(
     targetPackageJson.scripts["devgod:seed-happy-path-fixture"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-happy-path-fixture --target \./
+    "devgod seed-happy-path-fixture --target ."
   );
-  assert.match(
-    targetPackageJson.scripts["devgod:seed-workflow-proof"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-workflow-proof/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:seed-modernization-proof"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts seed-modernization-proof/
-  );
-  assert.match(targetPackageJson.scripts.devgod, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
-  assert.match(
-    targetPackageJson.scripts["devgod:status"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts status/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:coverage"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts coverage --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:gaps"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts gaps --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:checkpoint"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts checkpoint --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:resume"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts resume --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:supervisor-history"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts supervisor-history --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:heal"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts doctor --repair/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:reconcile"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts reconcile-runtime-state --apply --format text/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:verify:review-identity"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts verify-review-identity/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:refresh-repo-context"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts refresh-repo-context/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:repair-task-queue"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts repair-task-queue/
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:autopilot-status"],
-    /node_modules\/devgod\/src\/devgod\/autopilot-status\.ts/
-  );
-  assert.equal(
-    targetPackageJson.scripts["devgod:verify:git-guard"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts"
-  );
-  assert.match(
-    targetPackageJson.scripts["devgod:record-review"],
-    /node_modules\/devgod\/src\/admin\/devgod\.ts record-review --input \.devgod\/review-action\.json/
-  );
-  assert.equal(
-    targetPackageJson.scripts["devgod:setup:git-guard"],
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts"
-  );
+  assert.equal(targetPackageJson.scripts["devgod:seed-workflow-proof"], "devgod seed-workflow-proof");
+  assert.equal(targetPackageJson.scripts["devgod:seed-modernization-proof"], "devgod seed-modernization-proof");
+  assert.equal(targetPackageJson.scripts.devgod, "devgod");
+  assert.equal(targetPackageJson.scripts["devgod:status"], "devgod status");
+  assert.equal(targetPackageJson.scripts["devgod:coverage"], "devgod coverage --format text");
+  assert.equal(targetPackageJson.scripts["devgod:gaps"], "devgod gaps --format text");
+  assert.equal(targetPackageJson.scripts["devgod:checkpoint"], "devgod checkpoint --format text");
+  assert.equal(targetPackageJson.scripts["devgod:resume"], "devgod resume --format text");
+  assert.equal(targetPackageJson.scripts["devgod:supervisor-history"], "devgod supervisor-history --format text");
+  assert.equal(targetPackageJson.scripts["devgod:heal"], "devgod doctor --repair");
+  assert.equal(targetPackageJson.scripts["devgod:reconcile"], "devgod reconcile-runtime-state --apply --format text");
+  assert.equal(targetPackageJson.scripts["devgod:verify:review-identity"], "devgod verify-review-identity");
+  assert.equal(targetPackageJson.scripts["devgod:refresh-repo-context"], "devgod refresh-repo-context");
+  assert.equal(targetPackageJson.scripts["devgod:repair-task-queue"], "devgod repair-task-queue");
+  assert.equal(targetPackageJson.scripts["devgod:autopilot-status"], "devgod autopilot-status");
+  assert.equal(targetPackageJson.scripts["devgod:verify:git-guard"], "devgod verify-git-guard");
+  assert.equal(targetPackageJson.scripts["devgod:record-review"], "devgod record-review --input .devgod/review-action.json");
+  assert.equal(targetPackageJson.scripts["devgod:setup:git-guard"], "devgod setup-git-guard");
 
   await assert.rejects(
     readFile(path.join(targetRoot, ".devgod/memory/project-profile.md"), "utf8")
@@ -2697,14 +3626,14 @@ test("workflow live wrapper forwards the active task id to the workflow checker"
   try {
     await writeFile(path.join(targetRoot, "package.json"), '{ "name": "fixture", "private": true }\n');
     await installDevgodIntoProject({ sourceRoot, targetRoot });
-    await mkdir(path.join(stubRoot, "src", "admin"), { recursive: true });
+    await mkdir(path.join(stubRoot, "dist", "bin"), { recursive: true });
     await writeFile(
       path.join(stubRoot, "package.json"),
-      JSON.stringify({ name: "devgod", private: true, type: "module" }, null, 2) + "\n",
+      JSON.stringify({ name: "devgod", private: true, type: "module", bin: { devgod: "./dist/bin/devgod.js" } }, null, 2) + "\n",
       "utf8"
     );
     await writeFile(
-      path.join(stubRoot, "src", "admin", "devgod.ts"),
+      path.join(stubRoot, "dist", "bin", "devgod.js"),
       [
         'import { writeFileSync } from "node:fs";',
         'writeFileSync(process.env.DEVGOD_WORKFLOW_PROOF_ARGS_LOG, process.argv.slice(2).join(" "), "utf8");',
@@ -2759,6 +3688,19 @@ test("workflow live wrapper forwards the active task id to the workflow checker"
     await rm(stubRoot, { recursive: true, force: true });
     await rm(targetRoot, { recursive: true, force: true });
   }
+});
+
+test("installed harness verifier imports public devgod APIs instead of private source paths", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const verifier = await readFile(
+    path.join(sourceRoot, "scripts/verify-installed-repo-harness.sh"),
+    "utf8"
+  );
+
+  assert.match(verifier, /from "devgod"/);
+  assert.doesNotMatch(verifier, /node_modules\/devgod\/src\/admin\/devgod\.ts/);
+  assert.doesNotMatch(verifier, /node_modules\/devgod\/src\/grafana\/mcp-server\.ts/);
+  assert.doesNotMatch(verifier, /\.\/node_modules\/devgod\/src\/index\.ts/);
 });
 
 test("setup-git-guard configures hooks and blocks managed control-layer commits", async (t) => {
@@ -2850,6 +3792,67 @@ test("setup-git-guard configures hooks and blocks managed control-layer commits"
   }
 });
 
+test("verify-git-guard CLI reports missing hooks and manifest in an unconfigured repo", async (t) => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-git-guard-fail-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    try {
+      await execFileAsync("git", ["--version"]);
+    } catch {
+      t.skip("git is not available in this environment");
+      return;
+    }
+
+    await execFileAsync("git", ["init"], { cwd: targetRoot });
+
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["--experimental-strip-types", path.join(sourceRoot, "src/install/verify-git-guard.ts")],
+        { cwd: targetRoot }
+      ),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        const stderr = String((error as { stderr?: string }).stderr ?? "");
+        assert.match(stderr, /devgod git guard verification failed/);
+        assert.match(stderr, /core\.hooksPath must be \.githooks, found unset/);
+        assert.match(stderr, /missing hook file: \.githooks\/pre-commit/);
+        assert.match(stderr, /missing guard script: scripts\/check-devgod-git-guard\.sh/);
+        assert.match(stderr, /missing \.devgod\/install-manifest\.json/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("verify-git-guard CLI reports git resolution errors outside a repo", async () => {
+  const targetRoot = await mkdtemp(path.join(tmpdir(), "devgod-git-guard-no-repo-"));
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  try {
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["--experimental-strip-types", path.join(sourceRoot, "src/install/verify-git-guard.ts")],
+        { cwd: targetRoot }
+      ),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.ok(error !== null);
+        const stderr = String((error as { stderr?: string }).stderr ?? "");
+        assert.match(stderr, /git rev-parse|not a git repository/i);
+        return true;
+      }
+    );
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("PowerShell setup script keeps the same env-import safety contract textually", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const setupPowerShell = await readFile(path.join(sourceRoot, "scripts/setup-devgod.ps1"), "utf8");
@@ -2865,7 +3868,9 @@ test("PowerShell setup script keeps the same env-import safety contract textuall
 
 test("npm pack dry run includes the new agent, skill, and retrieval policy surface", async () => {
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const output = JSON.parse(await runNpmPackJsonDryRun(sourceRoot)) as Array<{
+  const output = JSON.parse(await runNpmPackJsonDryRun(sourceRoot, {
+    intendedTrackedRelativePaths: ["src/public.ts"]
+  })) as Array<{
     files: Array<{ path: string }>;
   }>;
   const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
@@ -2895,5 +3900,58 @@ test("npm pack dry run includes the new agent, skill, and retrieval policy surfa
     "tests/install.test.ts"
   ]) {
     assert.ok(!packedFiles.has(excludedPath), `${excludedPath} should not be present in npm pack --dry-run output`);
+  }
+});
+
+test("pack staging excludes arbitrary untracked files and only includes intended tracked fixtures when named", async () => {
+  const sourceRoot = await mkdtemp(path.join(tmpdir(), "devgod-pack-clean-checkout-"));
+
+  try {
+    await execFileAsync("git", ["init"], { cwd: sourceRoot });
+    await mkdir(path.join(sourceRoot, "src"), { recursive: true });
+    await writeFile(
+      path.join(sourceRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "pack-clean-checkout",
+          version: "1.0.0",
+          type: "module",
+          files: ["index.js", "src/public.ts"]
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    await writeFile(path.join(sourceRoot, "index.js"), 'export const tracked = "tracked";\n', "utf8");
+    await writeFile(path.join(sourceRoot, "leak.txt"), "should stay out of the staged pack fixture\n", "utf8");
+    await writeFile(path.join(sourceRoot, "src", "public.ts"), 'export const planned = "planned";\n', "utf8");
+    await execFileAsync("git", ["add", "package.json", "index.js"], { cwd: sourceRoot });
+
+    const output = JSON.parse(await runNpmPackJsonDryRun(sourceRoot)) as Array<{
+      files: Array<{ path: string }>;
+    }>;
+    const packedFiles = new Set(output.flatMap((entry) => entry.files.map((file) => file.path)));
+
+    assert.ok(packedFiles.has("index.js"));
+    assert.ok(!packedFiles.has("leak.txt"));
+    assert.ok(!packedFiles.has("src/public.ts"));
+
+    const intendedFixtureOutput = JSON.parse(
+      await runNpmPackJsonDryRun(sourceRoot, {
+        intendedTrackedRelativePaths: ["src/public.ts"]
+      })
+    ) as Array<{
+      files: Array<{ path: string }>;
+    }>;
+    const intendedFixtureFiles = new Set(
+      intendedFixtureOutput.flatMap((entry) => entry.files.map((file) => file.path))
+    );
+
+    assert.ok(intendedFixtureFiles.has("index.js"));
+    assert.ok(!intendedFixtureFiles.has("leak.txt"));
+    assert.ok(intendedFixtureFiles.has("src/public.ts"));
+  } finally {
+    await rm(sourceRoot, { recursive: true, force: true });
   }
 });

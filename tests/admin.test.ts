@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TaskQueue } from "../src/devgod/task-queue.ts";
 import {
+  dispatchGithubWorkItem,
+} from "../src/admin/github-dispatch.ts";
+import {
+  buildPlanContextRefreshArgs,
   buildDaemonTaskPacketFingerprint,
   buildDaemonTaskPrompt,
   determineDaemonPromptMode,
@@ -14,8 +19,13 @@ import {
   executeCheckpointCommandFromArgs,
   executeCoverageCommandFromArgs,
   executeGapsCommandFromArgs,
+  executeGithubDispatchCommandFromArgs,
   executeIndexRepoMarkdownCommand,
+  executeExportDocsCommandFromArgs,
+  executeRefreshRepoContextCommandFromArgs,
+  executeRefreshRetrievalCommand,
   executeReconcileRuntimeStateCommandFromArgs,
+  executeRecoverCommandFromArgs,
   executeReportCommandFromArgs,
   executeRecordCouncilDecisionCommand,
   executeRecordReviewCommand,
@@ -25,15 +35,49 @@ import {
   executeSeedModernizationProofCommandFromArgs,
   executeSeedWorkflowProofCommandFromArgs,
   executeSyncRuntimeExportsCommandFromArgs,
+  executeStatusCommandFromArgs,
   executeSupervisorCommandFromArgs,
   executeSupervisorHistoryCommandFromArgs,
+  executeLoopCommandFromArgs,
+  executeOpsCommandFromArgs,
+  executePlanContextCommandFromArgs,
   executeVerifyReviewIdentityCommand,
-  executeWorkflowProofCommandFromArgs
+  executeWorkflowProofCommandFromArgs,
+  inspectReviewIdentityStatus,
+  inspectRetrievalFreshness
 } from "../src/admin.ts";
 import { createReviewActionContextResolver } from "../src/core/review-context.ts";
 import { DevgodCoreService } from "../src/core/service.ts";
-import type { TaskPacketInput, TrustedReviewActionContext } from "../src/domain/types.ts";
+import { currentIsoDateInTimezone } from "../src/docs-export/date-resolver.ts";
+import { resolveObsidianConfig, validateObsidianConfig } from "../src/docs-export/obsidian-config.ts";
+import type { WorklogEntry } from "../src/docs-export/models.ts";
+import { parseExportDocsRequest } from "../src/docs-export/parser.ts";
+import { ObsidianMarkdownRenderer } from "../src/docs-export/renderer.ts";
+import { DocsSummarizer } from "../src/docs-export/summarizer.ts";
+import type {
+  SearchMemoryResult,
+  TaskPacketInput,
+  TrustedReviewActionContext
+} from "../src/domain/types.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
+
+const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function childProcessEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_V8_COVERAGE: ""
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete env[key];
+      continue;
+    }
+    env[key] = value;
+  }
+  env.NODE_V8_COVERAGE = "";
+  return env;
+}
 
 async function seedHealthyRuntimeRegistration(
   store: MemoryStore,
@@ -195,6 +239,187 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   };
 }
 
+async function runAdminCli(
+  args: readonly string[],
+  options: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+  } = {}
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const env = childProcessEnv(options.env);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", path.join(sourceRoot, "src/admin.ts"), ...args], {
+      cwd: options.cwd ?? sourceRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+function searchMemoryResult(overrides: Partial<SearchMemoryResult> = {}): SearchMemoryResult {
+  return {
+    id: overrides.id ?? "memory-1",
+    title: overrides.title ?? "Approved runtime proof",
+    content: overrides.content ?? "Runtime proof is approved and ready for the next owner turn.",
+    scope: overrides.scope ?? "project",
+    projectSlug: overrides.projectSlug ?? "devgod",
+    score: overrides.score ?? 0.91,
+    authority: overrides.authority ?? {
+      source: "runtime_document",
+      precedence: "runtime_context",
+      scope: "project",
+      allowedRoles: ["planner"]
+    },
+    freshness: overrides.freshness ?? {
+      status: "fresh",
+      createdAt: "2026-06-01T09:00:00.000Z",
+      staleAfterDays: 7
+    },
+    citation: overrides.citation ?? {
+      kind: "workflow_document",
+      documentId: "workflow-proof",
+      label: "Workflow proof",
+      canonicalRef: "workflow://run-1/task-1",
+      runId: "run-1",
+      taskId: "task-1"
+    },
+    provenance: overrides.provenance ?? {
+      entryType: "decision",
+      actor: "planner",
+      runId: "run-1",
+      taskId: "task-1",
+      createdAt: "2026-06-01T09:00:00.000Z"
+    },
+    metadata: overrides.metadata ?? {
+      allowedRoles: ["planner"],
+      tags: ["workflow-proof"],
+      staleAfterDays: 7,
+      supersededBy: [],
+      contradicts: []
+    },
+    conflict: overrides.conflict ?? {
+      detected: false,
+      relatedIds: []
+    }
+  };
+}
+
+function buildExportDocsEntry(): WorklogEntry {
+  return {
+    run: {
+      id: "run-export-1",
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      actor: "manager",
+      title: "Admin coverage push",
+      request: "Document admin wrapper coverage work",
+      summary: {
+        goal: "Raise admin coverage",
+        audience: ["maintainers"],
+        constraints: [],
+        risks: [],
+        unknowns: [],
+        successCriteria: ["test coverage improved"],
+        outOfScope: [],
+        trustBoundaries: [],
+        destructiveActions: [],
+        externalIntegrations: [],
+        stopGo: "go"
+      },
+      status: "approved",
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T12:00:00.000Z"
+    },
+    tasks: [
+      {
+        id: "task-export-1",
+        runId: "run-export-1",
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        status: "approved",
+        claimedBy: "planner",
+        createdAt: "2026-06-01T09:30:00.000Z",
+        updatedAt: "2026-06-01T11:00:00.000Z",
+        packet: taskPacket({
+          taskId: "task-export-1",
+          title: "Cover admin wrapper commands",
+          goal: "Raise admin wrapper coverage",
+          allowedWriteScope: ["tests/admin.test.ts"]
+        })
+      }
+    ],
+    handoffsByTask: {
+      "task-export-1": [
+        {
+          id: "handoff-export-1",
+          runId: "run-export-1",
+          taskId: "task-export-1",
+          actor: "planner",
+          ownerRole: "planner",
+          completionStandard: "specialist_verified",
+          summary: "Added coverage for wrapper paths.",
+          changedFiles: ["tests/admin.test.ts"],
+          blockers: [],
+          verificationNotes: ["targeted admin coverage tests pass"],
+          executionEvidence: ["wrapper validation exercised"],
+          qualityGateEvidence: ["coverage command re-run"],
+          contextRefs: ["tests/admin.test.ts"],
+          createdAt: "2026-06-01T11:00:00.000Z"
+        }
+      ]
+    },
+    reviewsByTask: {
+      "task-export-1": [
+        {
+          id: "review-export-1",
+          runId: "run-export-1",
+          taskId: "task-export-1",
+          reviewerRole: "qa_engineer",
+          actor: "qa-actor",
+          actorRole: "qa_engineer",
+          identityAssurance: "authenticated",
+          state: "passed",
+          severity: "low",
+          findings: [],
+          waiverAuthority: "none",
+          evidenceRefs: ["tests/admin.test.ts"],
+          createdAt: "2026-06-01T11:30:00.000Z"
+        }
+      ]
+    },
+    approvalsByTask: {
+      "task-export-1": [
+        {
+          id: "approval-export-1",
+          runId: "run-export-1",
+          taskId: "task-export-1",
+          actor: "manager",
+          actorRole: "reviewer",
+          identityAssurance: "authenticated",
+          decision: "approved",
+          rationale: "Wrapper coverage is ready to merge.",
+          createdAt: "2026-06-01T11:45:00.000Z"
+        }
+      ]
+    },
+    decisionMemoryEntries: []
+  };
+}
+
 test("determineDaemonPromptMode uses full prompts for fresh sessions and compact prompts for stable resumed sessions", () => {
   const packet = taskPacket({
     taskId: "task-owner",
@@ -275,15 +500,23 @@ test("buildDaemonTaskPrompt keeps full bootstrap details on first turn and uses 
   assert.match(fullPrompt, /Acceptance criteria: criterion-a \| criterion-b/);
   assert.match(fullPrompt, /Verification steps: verify-a \| verify-b/);
   assert.match(fullPrompt, /Required reviews: reviewer, qa_engineer/);
+  assert.match(fullPrompt, /^Allowed write scope: src\/runtime, tests$/m);
 
-  assert.match(compactPrompt, /Compressed context: phase=implementation; targets=task:task-owner; open-gaps=none/);
-  assert.match(compactPrompt, /Compressed context ref: memory:\/\/checkpoint\/cp-1\/compressed-context/);
-  assert.match(compactPrompt, /Scale, latency, or item volume are not blockers by themselves/);
-  assert.match(compactPrompt, /return status needs_followup and include checkpoint\.evidence_refs/);
-  assert.match(compactPrompt, /Previously bootstrapped task requirements remain in force/);
-  assert.doesNotMatch(compactPrompt, /Acceptance criteria:/);
-  assert.doesNotMatch(compactPrompt, /Verification steps:/);
-  assert.doesNotMatch(compactPrompt, /Required reviews:/);
+  assert.notEqual(fullPrompt, compactPrompt);
+  assert.match(compactPrompt, /^Active task: task-owner$/m);
+  assert.match(compactPrompt, /^Directive: continue_analysis$/m);
+  assert.match(compactPrompt, /^Goal: Ship the owner slice$/m);
+  assert.match(compactPrompt, /^Allowed write scope: src\/runtime, tests$/m);
+  assert.match(compactPrompt, /^Previously bootstrapped task requirements remain in force unless explicitly updated below\.$/m);
+  assert.match(compactPrompt, /^Compressed context: phase=implementation; targets=task:task-owner; open-gaps=none$/m);
+  assert.match(compactPrompt, /^Compressed context ref: memory:\/\/checkpoint\/cp-1\/compressed-context$/m);
+  assert.match(compactPrompt, /compressed checkpoint summary .* persist progress and continue/i);
+  assert.match(compactPrompt, /If scope blocks the next required edit, stop immediately .* minimum safe .* delta\./i);
+  assert.match(compactPrompt, /^Operator notes: follow the runtime ledger$/m);
+  assert.match(compactPrompt, /Autonomous target: task:task-owner\./);
+  assert.doesNotMatch(compactPrompt, /^Acceptance criteria:/m);
+  assert.doesNotMatch(compactPrompt, /^Verification steps:/m);
+  assert.doesNotMatch(compactPrompt, /^Required reviews:/m);
 });
 
 async function createApprovedRuntimeTask(options: {
@@ -584,6 +817,176 @@ export default createReviewPrincipalAdapter(async ({ authContext }) => ({
 
     assert.equal(result.passed, 2);
     assert.equal(result.failed, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("verify-review-identity command requires a live adapter when local bindings and fixtures are present", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-review-identity-live-"));
+  const bindings = {
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-reviewer",
+            roles: ["reviewer"]
+          }
+        ]
+      }
+    ]
+  };
+  const fixtures = {
+    fixtures: [
+      {
+        name: "allow reviewer principal",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "allow",
+          principal: {
+            provider: "github",
+            subject: "alice",
+            verified: true
+          },
+          context: {
+            actor: "alice-reviewer",
+            actorRole: "reviewer",
+            waiverAuthority: "none"
+          }
+        }
+      }
+    ]
+  };
+
+  try {
+    await mkdir(path.join(directory, ".devgod"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "review-identity-bindings.json"),
+      `${JSON.stringify(bindings, null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "review-identity-adapter.fixture.json"),
+      `${JSON.stringify(fixtures, null, 2)}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeVerifyReviewIdentityCommand({
+        cwd: directory,
+        env: {
+          ...process.env,
+          DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE: undefined,
+          DEVGOD_REVIEW_IDENTITY_BINDINGS: undefined,
+          DEVGOD_REVIEW_IDENTITY_FIXTURES: undefined
+        }
+      }),
+      /DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE is required for verify-review-identity/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("verify-review-identity command reports fixture verification failures with fixture names", async () => {
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-review-identity-failure-"));
+  const adapterImportUrl = pathToFileURL(path.join(sourceRoot, "src/index.ts")).href;
+
+  const adapterModule = `import { createReviewPrincipalAdapter } from ${JSON.stringify(adapterImportUrl)};
+
+export default createReviewPrincipalAdapter(async ({ authContext }) => ({
+  provider: String(authContext.provider),
+  subject: "mallory",
+  verified: authContext.verified === true
+}));
+`;
+
+  const bindings = {
+    bindings: [
+      {
+        principal: {
+          provider: "github",
+          subject: "alice"
+        },
+        actors: [
+          {
+            actor: "alice-reviewer",
+            roles: ["reviewer"]
+          }
+        ]
+      }
+    ]
+  };
+  const fixtures = {
+    fixtures: [
+      {
+        name: "allow reviewer principal",
+        authContext: {
+          provider: "github",
+          subject: "alice",
+          verified: true
+        },
+        review: {
+          actor: "alice-reviewer",
+          reviewerRole: "reviewer",
+          reviewState: "passed"
+        },
+        expect: {
+          outcome: "allow",
+          principal: {
+            provider: "github",
+            subject: "alice",
+            verified: true
+          },
+          context: {
+            actor: "alice-reviewer",
+            actorRole: "reviewer",
+            waiverAuthority: "none"
+          }
+        }
+      }
+    ]
+  };
+
+  try {
+    await writeFile(path.join(directory, "review-identity-adapter.ts"), adapterModule, "utf8");
+    await writeFile(
+      path.join(directory, "review-identity-bindings.json"),
+      `${JSON.stringify(bindings, null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, "review-identity-adapter.fixture.json"),
+      `${JSON.stringify(fixtures, null, 2)}\n`,
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeVerifyReviewIdentityCommand({
+        cwd: directory,
+        env: {
+          ...process.env,
+          DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE: "./review-identity-adapter.ts",
+          DEVGOD_REVIEW_IDENTITY_BINDINGS: "./review-identity-bindings.json",
+          DEVGOD_REVIEW_IDENTITY_FIXTURES: "./review-identity-adapter.fixture.json"
+        }
+      }),
+      /Review identity verification failed: allow reviewer principal:/
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1519,7 +1922,46 @@ test("executeAdvanceActiveTaskCommandFromArgs refuses queue mutation when runtim
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
     resolveReviewActionContext: createReviewActionContextResolver({
-      bindings: { bindings: [] },
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "test",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "security-actor"
+            },
+            actors: [
+              {
+                actor: "security-actor",
+                roles: ["security_reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "qa-actor"
+            },
+            actors: [
+              {
+                actor: "qa-actor",
+                roles: ["qa_engineer"]
+              }
+            ]
+          }
+        ]
+      },
       async resolveAuthenticatedPrincipal(input) {
         return {
           provider: "test",
@@ -2373,6 +2815,64 @@ test("executeSyncRuntimeExportsCommandFromArgs rejects complete exports without 
   }
 });
 
+test("executeSyncRuntimeExportsCommandFromArgs exports the default idle workflow state when runtime state is missing", async () => {
+  const store = new MemoryStore();
+  await store.ensureProjectContext({
+    workspaceSlug: "team",
+    projectSlug: "devgod"
+  });
+
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-sync-missing-runtime-state-"));
+  try {
+    await mkdir(path.join(exportCwd, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(exportCwd, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(exportCwd, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-stale",
+          tasks: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+
+    const synced = await executeSyncRuntimeExportsCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod"],
+      {
+        cwd: exportCwd,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        }
+      }
+    );
+
+    assert.equal(synced.result.activeTaskId, null);
+    assert.equal(synced.result.queue.project_status, "idle");
+    assert.equal(synced.result.queue.current_task_id, null);
+
+    const exportedActive = await readFile(path.join(exportCwd, ".devgod", "ACTIVE"), "utf8");
+    const exportedQueue = JSON.parse(
+      await readFile(path.join(exportCwd, ".devgod", "work", "task-queue.json"), "utf8")
+    ) as { current_task_id?: string | null; project_status?: string };
+    assert.equal(exportedActive, "workflow=devgod\nstate=idle\n");
+    assert.equal(exportedQueue.project_status, "idle");
+    assert.equal(exportedQueue.current_task_id, null);
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
 test("executeRepairTaskQueueCommandFromArgs stays explicitly derived-only when repairing local queue aliases", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-repair-task-queue-"));
   const queuePath = path.join(directory, ".devgod", "work", "task-queue.json");
@@ -2579,6 +3079,195 @@ test("executeReconcileRuntimeStateCommandFromArgs aligns a stale active task to 
   assert.equal(reconciled.result.queue.tasks[0]?.status, "in_progress");
 });
 
+test("executeReconcileRuntimeStateCommandFromArgs clears stale active tasks once the runtime run is complete", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Reconcile completed run",
+    request: "Clear stale task pointers once runtime work is complete."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-owner", allowedWriteScope: ["src/runtime"] })]);
+  await service.claimTask(run.id, "task-owner", "planner");
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-stale",
+    taskQueue: {
+      project_status: "complete",
+      current_task_id: "task-stale",
+      tasks: [
+        {
+          id: "task-owner",
+          title: "task-owner",
+          status: "done",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "complete", items: [] },
+    lastVerifiedRunId: run.id,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const snapshot = await service.getStatus(run.id);
+  const completedSnapshot = {
+    ...snapshot,
+    tasks: snapshot.tasks.map((task) => ({
+      ...task,
+      status: "approved" as const
+    }))
+  };
+
+  const exportCwd = await mkdtemp(path.join(tmpdir(), "devgod-reconcile-complete-"));
+  try {
+    const reconciled = await executeReconcileRuntimeStateCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--apply", "--format", "json"],
+      {
+        cwd: exportCwd,
+        env: process.env,
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot() {
+          return Promise.resolve(completedSnapshot);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            directive: {
+              kind: "complete"
+            }
+          } as Awaited<ReturnType<typeof service.getExecutionPlan>>);
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        }
+      }
+    );
+
+    assert.equal(reconciled.result.repairAction, "clear_completed_active_task");
+    assert.equal(reconciled.result.activeTaskId, null);
+    assert.equal(reconciled.result.runtimeStateChanged, true);
+    assert.equal(reconciled.result.queue.current_task_id, null);
+    assert.match(reconciled.result.reason, /cleared a stale active task from a completed runtime run/i);
+
+    const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+    assert.equal(runtimeState?.activeTaskId, undefined);
+    assert.equal((runtimeState?.taskQueue as TaskQueue).current_task_id, null);
+    assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "runtime_task_reconcile");
+  } finally {
+    await rm(exportCwd, { recursive: true, force: true });
+  }
+});
+
+test("executeReconcileRuntimeStateCommandFromArgs refuses to auto-reconcile multiple authoritative in-progress tasks", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Reconcile ambiguous active work",
+    request: "Do not guess between multiple in-progress runtime tasks."
+  });
+  await service.createTaskGraph(run.id, [
+    taskPacket({ taskId: "task-alpha", allowedWriteScope: ["src/runtime"] }),
+    taskPacket({ taskId: "task-beta", allowedWriteScope: ["src/admin"] })
+  ]);
+
+  const snapshot = await service.getStatus(run.id);
+  const unsafeSnapshot = {
+    ...snapshot,
+    tasks: snapshot.tasks.map((task) => ({
+      ...task,
+      status: "in_progress" as const
+    }))
+  };
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "task-alpha",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-alpha",
+      tasks: unsafeSnapshot.tasks.map((task) => ({
+        id: task.packet.taskId,
+        title: task.packet.title,
+        status: "in_progress" as const,
+        class: "release_candidate" as const,
+        depends_on: [...task.packet.dependencies],
+        acceptance_criteria: [...task.packet.acceptanceCriteria],
+        verification: [...task.packet.verificationSteps],
+        evidence: [],
+        blocker: null
+      }))
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const reconciled = await executeReconcileRuntimeStateCommandFromArgs(
+    ["--workspace-slug", "team", "--project-slug", "devgod", "--apply", "--format", "json"],
+    {
+      env: process.env,
+      getProjectContext(params) {
+        return store.getProjectContext(params);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      saveProjectRuntimeState(state) {
+        return store.saveProjectRuntimeState(state);
+      },
+      getStatusSnapshot() {
+        return Promise.resolve(unsafeSnapshot);
+      },
+      getExecutionPlan() {
+        assert.fail("multiple authoritative in-progress tasks should bypass execution-plan derivation");
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        return service.applyRecovery(runId, actionIds, { staleAfterHours });
+      }
+    }
+  );
+
+  assert.equal(reconciled.result.repairAction, "rebuild_stale_runtime_queue");
+  assert.equal(reconciled.result.runtimeStateChanged, true);
+  assert.equal(reconciled.result.activeTaskId, "task-alpha");
+  assert.match(reconciled.result.reason, /multiple in-progress runtime tasks make automatic reconciliation unsafe/i);
+
+  const runtimeState = await store.getProjectRuntimeState(projectContext.project.id);
+  assert.equal(runtimeState?.activeTaskId, "task-alpha");
+  assert.equal((runtimeState?.taskQueue as TaskQueue).current_task_id, "task-alpha");
+  assert.equal(runtimeState?.metadata?.lastIntegrityRepair?.kind, "runtime_task_reconcile");
+});
+
 test("executeWorkflowProofCommandFromArgs resolves --run-id latest against the latest run containing the task", async () => {
   const store = new MemoryStore();
   const resolver = createReviewActionContextResolver({
@@ -2692,7 +3381,46 @@ test("autonomous admin commands expose coverage, gap, checkpoint, and resume sur
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
     resolveReviewActionContext: createReviewActionContextResolver({
-      bindings: { bindings: [] },
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "test",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "security-actor"
+            },
+            actors: [
+              {
+                actor: "security-actor",
+                roles: ["security_reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "qa-actor"
+            },
+            actors: [
+              {
+                actor: "qa-actor",
+                roles: ["qa_engineer"]
+              }
+            ]
+          }
+        ]
+      },
       async resolveAuthenticatedPrincipal(input) {
         return {
           provider: "test",
@@ -2879,7 +3607,7 @@ test("executeCheckpointCommandFromArgs validates and records checkpoint input", 
   }
 });
 
-test("executeCheckpointCommandFromArgs rejects poisoned future checkpoints and invalid context schemes", async () => {
+test("executeCheckpointCommandFromArgs rejects checkpoint timestamps too far in the future", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-invalid-"));
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({
@@ -2905,7 +3633,6 @@ test("executeCheckpointCommandFromArgs rejects poisoned future checkpoints and i
           recentEvidenceRefs: ["src/admin.ts:1"],
           openGaps: ["gap:admin-open"],
           nextActions: ["mislead operator"],
-          compressedContextRef: "http://example.invalid/poison",
           createdAt: "2099-01-01T00:00:00.000Z"
         },
         null,
@@ -2924,7 +3651,59 @@ test("executeCheckpointCommandFromArgs rejects poisoned future checkpoints and i
           return service.checkpointRun(runId, checkpoint, checkpointOptions);
         }
       }),
-      /createdAt too far in the future|invalid compressedContextRef scheme/
+      /checkpoint input from .* has createdAt too far in the future/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeCheckpointCommandFromArgs rejects invalid compressed context schemes", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-checkpoint-invalid-scheme-"));
+  const service = new DevgodCoreService(new MemoryStore());
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Checkpoint validation",
+    request: "Reject poisoned checkpoint payloads."
+  });
+
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "rewrite" })]);
+  await seedAutonomousState(service, run.id, { includeCheckpoint: false });
+
+  try {
+    const invalidPath = path.join(directory, "checkpoint-invalid-scheme.json");
+    await writeFile(
+      invalidPath,
+      JSON.stringify(
+        {
+          checkpointId: "cp-poison",
+          phase: "final_verification",
+          activeTargets: ["review:authenticated"],
+          recentEvidenceRefs: ["src/admin.ts:1"],
+          openGaps: ["gap:admin-open"],
+          nextActions: ["mislead operator"],
+          compressedContextRef: "http://example.invalid/poison",
+          createdAt: "2026-05-15T12:05:00.000Z"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await assert.rejects(
+      executeCheckpointCommandFromArgs(["--run-id", run.id, "--input", invalidPath], {
+        cwd: directory,
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        checkpointRun(runId, checkpoint, checkpointOptions) {
+          return service.checkpointRun(runId, checkpoint, checkpointOptions);
+        }
+      }),
+      /checkpoint input has invalid compressedContextRef scheme/
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -2989,7 +3768,46 @@ test("executeReportCommandFromArgs exposes persisted loop history without writin
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
     resolveReviewActionContext: createReviewActionContextResolver({
-      bindings: { bindings: [] },
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "test",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "security-actor"
+            },
+            actors: [
+              {
+                actor: "security-actor",
+                roles: ["security_reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "qa-actor"
+            },
+            actors: [
+              {
+                actor: "qa-actor",
+                roles: ["qa_engineer"]
+              }
+            ]
+          }
+        ]
+      },
       async resolveAuthenticatedPrincipal(input) {
         return {
           provider: "test",
@@ -5446,6 +6264,113 @@ test("executeDaemonCommandFromArgs quarantines invalid queued operator continuat
   }
 });
 
+test("executeDaemonCommandFromArgs blocks without launching Codex when the active runtime task has no executable next step", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Daemon blocked runtime",
+    request: "Surface blocked runtime state before any owner turn is launched."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/admin"] })]);
+  await service.claimTask(run.id, "plan", "planner");
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "Plan runtime slice",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-daemon-runtime-blocked-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const plan = await service.getExecutionPlan(run.id);
+    assert.equal(plan.directive.kind, "blocked");
+
+    const result = await executeDaemonCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-cycles", "1", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("daemon should not launch Codex when the runtime loop is already blocked");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.equal(result.result.reason, "runtime reported no executable next step");
+    assert.equal(result.result.cycles[0]?.action, "blocked");
+
+    const operatorHandoff = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "operator-handoff.json"), "utf8")
+    ) as {
+      blockerKind: string;
+      reason: string;
+    };
+    assert.equal(operatorHandoff.blockerKind, "runtime_blocked");
+    assert.equal(operatorHandoff.reason, "runtime reported no executable next step");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
+  }
+});
+
 test("executeSupervisorCommandFromArgs synthesizes operator continuation actions and reruns the daemon", async () => {
   const store = new MemoryStore();
   const service = new DevgodCoreService(store, {
@@ -6238,14 +7163,23 @@ test("executeSupervisorCommandFromArgs materializes a resumable CLI scheduler re
       scheduler: {
         schedule: string;
         manualReviewRequired: boolean;
-        launcherHints: Array<{ shellCommand?: string | undefined }>;
+        launcherHints: Array<{
+          kind?: string | undefined;
+          onCalendar?: string | undefined;
+          shellCommand?: string | undefined;
+        }>;
       };
     };
     assert.equal(request.request.resumeSessionId, "session-cli-resume");
     assert.equal(request.request.runnable, true);
     assert.equal(request.scheduler.schedule, "*/30 * * * *");
     assert.equal(request.scheduler.manualReviewRequired, false);
-    assert.match(request.scheduler.launcherHints[0]?.shellCommand ?? "", /codex exec resume session-cli-resume/);
+    assert.equal(request.scheduler.launcherHints.length, 2);
+    assert.deepEqual(request.scheduler.launcherHints.map((hint) => hint.kind), ["cron", "systemd"]);
+    for (const hint of request.scheduler.launcherHints) {
+      assert.match(hint.shellCommand ?? "", /codex exec resume session-cli-resume/);
+    }
+    assert.ok(request.scheduler.launcherHints[1]?.onCalendar);
     const prompt = await readFile(path.join(daemonCwd, request.request.promptPath), "utf8");
     assert.match(prompt, /Continuation target: artifact:resume/);
     const outputSchema = JSON.parse(await readFile(path.join(daemonCwd, request.request.outputSchemaPath), "utf8")) as {
@@ -6609,13 +7543,22 @@ test("executeSupervisorCommandFromArgs materializes a fresh-run CLI scheduler re
       await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "cli-scheduler-request.json"), "utf8")
     ) as {
       request: { resumeSessionId?: string | undefined; runnable: boolean };
-      scheduler: { schedule: string; manualReviewRequired: boolean; launcherHints: Array<{ shellCommand?: string }> };
+      scheduler: {
+        schedule: string;
+        manualReviewRequired: boolean;
+        launcherHints: Array<{ kind?: string; onCalendar?: string; shellCommand?: string }>;
+      };
     };
     assert.equal(request.request.resumeSessionId, undefined);
     assert.equal(request.request.runnable, true);
     assert.equal(request.scheduler.schedule, "0 * * * *");
     assert.equal(request.scheduler.manualReviewRequired, false);
-    assert.match(request.scheduler.launcherHints[0]?.shellCommand ?? "", /codex exec "\$\(cat \.devgod\/work\/daemon\/cli-scheduler-prompt\.txt\)"/);
+    assert.equal(request.scheduler.launcherHints.length, 2);
+    assert.deepEqual(request.scheduler.launcherHints.map((hint) => hint.kind), ["cron", "systemd"]);
+    for (const hint of request.scheduler.launcherHints) {
+      assert.match(hint.shellCommand ?? "", /codex exec "\$\(cat \.devgod\/work\/daemon\/cli-scheduler-prompt\.txt\)"/);
+    }
+    assert.ok(request.scheduler.launcherHints[1]?.onCalendar);
   } finally {
     await rm(daemonCwd, { recursive: true, force: true });
   }
@@ -7238,6 +8181,112 @@ test("executeSupervisorCommandFromArgs appends supervisor history across repeate
     assert.equal(historyLines[1]?.actions.length, 2);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeSupervisorCommandFromArgs reports unsupported daemon handoffs for already-blocked runtime loops", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store);
+  const run = await service.intakeRequest({
+    workspaceSlug: "team",
+    projectSlug: "devgod",
+    actor: "ceo",
+    title: "Supervisor blocked runtime",
+    request: "Stop when the daemon hands back a blocked runtime without a continuation path."
+  });
+  await service.createTaskGraph(run.id, [taskPacket({ taskId: "plan", allowedWriteScope: ["src/admin"] })]);
+  await service.claimTask(run.id, "plan", "planner");
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+  await store.saveProjectRuntimeState({
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    activeRunId: run.id,
+    activeTaskId: "plan",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "plan",
+      tasks: [
+        {
+          id: "plan",
+          title: "Plan runtime slice",
+          status: "in_progress",
+          class: "release_candidate",
+          depends_on: [],
+          acceptance_criteria: [],
+          verification: [],
+          evidence: [],
+          blocker: null
+        }
+      ]
+    },
+    productState: { status: "in_progress", items: [] },
+    lastVerifiedRunId: undefined,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const daemonCwd = await mkdtemp(path.join(tmpdir(), "devgod-supervisor-runtime-blocked-"));
+  await seedHealthyRuntimeRegistration(store, {
+    projectId: projectContext.project.id,
+    workspaceId: projectContext.workspace.id,
+    repoPath: daemonCwd
+  });
+  try {
+    const result = await executeSupervisorCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "--max-supervisor-cycles", "1", "--max-cycles", "1", "--format", "json"],
+      {
+        cwd: daemonCwd,
+        env: process.env,
+        ...buildHealthyRuntimePreflightOptions(store, daemonCwd),
+        getProjectContext(params) {
+          return store.getProjectContext(params);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        saveProjectRuntimeState(state) {
+          return store.saveProjectRuntimeState(state);
+        },
+        getStatusSnapshot(runId) {
+          return service.getStatus(runId);
+        },
+        getExecutionPlan(runId, staleAfterHours) {
+          return service.getExecutionPlan(runId, { staleAfterHours });
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          return service.applyRecovery(runId, actionIds, { staleAfterHours });
+        },
+        getReviews(runId, taskId) {
+          return store.getReviews(runId, taskId);
+        },
+        getApprovals(runId, taskId) {
+          return store.getApprovals(runId, taskId);
+        },
+        async runCodexTurn() {
+          assert.fail("supervisor should stop before launching a Codex turn for blocked runtime loops");
+        }
+      }
+    );
+
+    assert.equal(result.result.status, "blocked");
+    assert.equal(result.result.reason, "runtime reported no executable next step");
+    assert.equal(result.result.daemonRuns.length, 1);
+
+    const supervisorStatus = JSON.parse(
+      await readFile(path.join(daemonCwd, ".devgod", "work", "daemon", "supervisor-status.json"), "utf8")
+    ) as {
+      blockerKind?: string;
+      reason: string;
+      state: string;
+    };
+    assert.equal(supervisorStatus.state, "blocked");
+    assert.equal(supervisorStatus.blockerKind, "unsupported_handoff");
+    assert.equal(supervisorStatus.reason, "runtime reported no executable next step");
+  } finally {
+    await rm(daemonCwd, { recursive: true, force: true });
   }
 });
 
@@ -8635,4 +9684,1756 @@ test("executeIndexRepoMarkdownCommand accepts flags before the positional repo r
     chunksStored: 2,
     jobsQueued: 2
   });
+});
+
+test("executeIndexRepoMarkdownCommand requires a project slug", async () => {
+  await assert.rejects(
+    executeIndexRepoMarkdownCommand({
+      argv: ["node", "src/admin.ts", "index-repo-markdown"],
+      env: {}
+    }),
+    /DEVGOD_PROJECT_SLUG is required/
+  );
+});
+
+test("inspectRetrievalFreshness reports missing workspace, bootstrap, registration, and manifest prerequisites", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-retrieval-prereqs-"));
+  const store = new MemoryStore();
+
+  try {
+    const missingWorkspace = await inspectRetrievalFreshness({
+      cwd: directory,
+      env: {},
+      store
+    });
+    assert.equal(missingWorkspace.state, "degraded");
+    assert.match(missingWorkspace.summary, /workspace\/project context is missing/i);
+
+    const missingProject = await inspectRetrievalFreshness({
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      store
+    });
+    assert.equal(missingProject.state, "degraded");
+    assert.match(missingProject.summary, /not bootstrapped/i);
+
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    const missingRegistration = await inspectRetrievalFreshness({
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      store
+    });
+    assert.equal(missingRegistration.state, "missing");
+    assert.match(missingRegistration.summary, /runtime registration is missing retrieval metadata/i);
+
+    await seedHealthyRuntimeRegistration(store, {
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      repoPath: directory
+    });
+
+    const missingManifest = await inspectRetrievalFreshness({
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_PROJECT_SLUG: "devgod"
+      },
+      store
+    });
+    assert.equal(missingManifest.state, "missing");
+    assert.match(missingManifest.summary, /retrieval index has not been bootstrapped yet/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("inspectRetrievalFreshness distinguishes fingerprint drift, model drift, degraded status, and snapshot failures", async () => {
+  const baseStore = {
+    async getProjectContext() {
+      return { project: { id: "project-1" } };
+    }
+  };
+
+  const fingerprintDrift = await inspectRetrievalFreshness({
+    cwd: process.cwd(),
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    store: {
+      ...baseStore,
+      async getProjectRuntimeRegistration() {
+        return {
+          repoPath: process.cwd(),
+          manifest: {
+            retrievalIndex: {
+              status: "ready",
+              include: ["README.md"],
+              fingerprint: "stale-fingerprint"
+            }
+          }
+        };
+      }
+    } as never,
+    async captureSnapshot() {
+      return {
+        repoRoot: process.cwd(),
+        include: ["README.md"],
+        fileCount: 1,
+        fingerprint: "fresh-fingerprint"
+      };
+    }
+  });
+  assert.equal(fingerprintDrift.state, "stale");
+  assert.match(fingerprintDrift.summary, /does not match the current repo snapshot/i);
+
+  const modelDrift = await inspectRetrievalFreshness({
+    cwd: process.cwd(),
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod",
+      DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-3072"
+    },
+    store: {
+      ...baseStore,
+      async getProjectRuntimeRegistration() {
+        return {
+          repoPath: process.cwd(),
+          manifest: {
+            retrievalIndex: {
+              status: "ready",
+              include: ["README.md"],
+              fingerprint: "matching-fingerprint",
+              embeddingModel: "devgod-local-hash-1536"
+            }
+          }
+        };
+      }
+    } as never,
+    async captureSnapshot() {
+      return {
+        repoRoot: process.cwd(),
+        include: ["README.md"],
+        fileCount: 1,
+        fingerprint: "matching-fingerprint"
+      };
+    }
+  });
+  assert.equal(modelDrift.state, "stale");
+  assert.match(modelDrift.summary, /embeddings no longer match the configured embedding model/i);
+
+  const degradedWithEmbeddings = await inspectRetrievalFreshness({
+    cwd: process.cwd(),
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod",
+      DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+    },
+    store: {
+      ...baseStore,
+      async getProjectRuntimeRegistration() {
+        return {
+          repoPath: process.cwd(),
+          manifest: {
+            retrievalIndex: {
+              status: "degraded",
+              include: ["README.md"],
+              fingerprint: "matching-fingerprint",
+              embeddingModel: "devgod-local-hash-1536"
+            }
+          }
+        };
+      }
+    } as never,
+    async captureSnapshot() {
+      return {
+        repoRoot: process.cwd(),
+        include: ["README.md"],
+        fileCount: 1,
+        fingerprint: "matching-fingerprint"
+      };
+    }
+  });
+  assert.equal(degradedWithEmbeddings.state, "degraded");
+  assert.match(degradedWithEmbeddings.summary, /repo retrieval index is degraded/i);
+
+  const degradedWithoutEmbeddings = await inspectRetrievalFreshness({
+    cwd: process.cwd(),
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    store: {
+      ...baseStore,
+      async getProjectRuntimeRegistration() {
+        return {
+          repoPath: process.cwd(),
+          manifest: {
+            retrievalIndex: {
+              status: "indexing",
+              include: ["README.md"],
+              fingerprint: "matching-fingerprint"
+            }
+          }
+        };
+      }
+    } as never,
+    async captureSnapshot() {
+      return {
+        repoRoot: process.cwd(),
+        include: ["README.md"],
+        fileCount: 1,
+        fingerprint: "matching-fingerprint"
+      };
+    }
+  });
+  assert.equal(degradedWithoutEmbeddings.state, "degraded");
+  assert.match(degradedWithoutEmbeddings.summary, /repo retrieval index is indexing/i);
+
+  const captureFailure = await inspectRetrievalFreshness({
+    cwd: process.cwd(),
+    env: {
+      DEVGOD_WORKSPACE_SLUG: "team",
+      DEVGOD_PROJECT_SLUG: "devgod"
+    },
+    store: {
+      ...baseStore,
+      async getProjectRuntimeRegistration() {
+        return {
+          repoPath: process.cwd(),
+          manifest: {
+            retrievalIndex: {
+              status: "ready",
+              include: ["README.md"],
+              fingerprint: "matching-fingerprint"
+            }
+          }
+        };
+      }
+    } as never,
+    async captureSnapshot() {
+      throw new Error("synthetic snapshot failure");
+    }
+  });
+  assert.equal(captureFailure.state, "degraded");
+  assert.match(captureFailure.summary, /retrieval freshness check failed: synthetic snapshot failure/i);
+});
+
+test("executeRefreshRetrievalCommand validates setup prerequisites and records degraded embedding failures", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-refresh-retrieval-"));
+
+  try {
+    await assert.rejects(
+      executeRefreshRetrievalCommand({
+        cwd: directory,
+        env: {}
+      }),
+      /DEVGOD_PROJECT_SLUG is required/
+    );
+
+    const emptyStore = new MemoryStore();
+    await assert.rejects(
+      executeRefreshRetrievalCommand({
+        cwd: directory,
+        env: {
+          DEVGOD_WORKSPACE_SLUG: "team",
+          DEVGOD_PROJECT_SLUG: "devgod"
+        },
+        async withClient(callback) {
+          return callback({ kind: "client" } as never);
+        },
+        createStore() {
+          return emptyStore as never;
+        },
+        async captureSnapshot() {
+          return {
+            repoRoot: directory,
+            include: ["README.md"],
+            fileCount: 1,
+            fingerprint: "repo-fingerprint"
+          };
+        },
+        async indexRepoMarkdown() {
+          return {
+            runId: "run-markdown",
+            filesIndexed: 1,
+            chunksStored: 1,
+            jobsQueued: 0
+          };
+        }
+      }),
+      /must be bootstrapped before retrieval refresh/
+    );
+
+    const missingRegistrationStore = new MemoryStore();
+    await missingRegistrationStore.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await assert.rejects(
+      executeRefreshRetrievalCommand({
+        cwd: directory,
+        env: {
+          DEVGOD_WORKSPACE_SLUG: "team",
+          DEVGOD_PROJECT_SLUG: "devgod"
+        },
+        async withClient(callback) {
+          return callback({ kind: "client" } as never);
+        },
+        createStore() {
+          return missingRegistrationStore as never;
+        },
+        async captureSnapshot() {
+          return {
+            repoRoot: directory,
+            include: ["README.md"],
+            fileCount: 1,
+            fingerprint: "repo-fingerprint"
+          };
+        },
+        async indexRepoMarkdown() {
+          return {
+            runId: "run-markdown",
+            filesIndexed: 1,
+            chunksStored: 1,
+            jobsQueued: 2
+          };
+        }
+      }),
+      /must be runtime-registered before retrieval refresh/
+    );
+
+    const store = new MemoryStore();
+    const context = await store.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await seedHealthyRuntimeRegistration(store, {
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      repoPath: directory
+    });
+
+    const result = await executeRefreshRetrievalCommand({
+      cwd: directory,
+      env: {
+        DEVGOD_WORKSPACE_SLUG: "team",
+        DEVGOD_WORKSPACE_NAME: "Team Workspace",
+        DEVGOD_PROJECT_SLUG: "devgod",
+        DEVGOD_PROJECT_NAME: "Devgod",
+        DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+      },
+      async withClient(callback) {
+        return callback({ kind: "client" } as never);
+      },
+      createStore() {
+        return store as never;
+      },
+      async captureSnapshot() {
+        return {
+          repoRoot: directory,
+          include: ["README.md"],
+          fileCount: 1,
+          fingerprint: "repo-fingerprint"
+        };
+      },
+      async indexRepoMarkdown() {
+        return {
+          runId: "run-markdown",
+          filesIndexed: 1,
+          chunksStored: 2,
+          jobsQueued: 2
+        };
+      },
+      async createEmbeddingProvider() {
+        return { embed: async () => [] } as never;
+      },
+      async runEmbeddingJobs() {
+        return {
+          leased: 2,
+          completed: 1,
+          failed: 1
+        };
+      },
+      now() {
+        return new Date("2026-06-01T12:00:00.000Z");
+      }
+    });
+
+    assert.equal(result.mode, "full");
+    assert.equal(result.embeddingJobs?.failed, 1);
+
+    const registration = await store.getProjectRuntimeRegistration(context.project.id);
+    const retrievalIndex = registration?.manifest.retrievalIndex as Record<string, unknown> | undefined;
+    assert.equal(retrievalIndex?.status, "degraded");
+    assert.equal(retrievalIndex?.embeddingFailed, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeRefreshRepoContextCommandFromArgs accepts explicit args and rejects missing bootstrap state", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-refresh-repo-context-"));
+  const repoRoot = path.join(directory, "docs");
+  const readyStore = new MemoryStore();
+
+  try {
+    await mkdir(path.join(repoRoot, ".venv"), { recursive: true });
+    await writeFile(path.join(repoRoot, ".venv", "pyvenv.cfg"), "home = /usr/bin/python3\n", "utf8");
+    await writeFile(path.join(repoRoot, "manage.py"), "print('manage')\n", "utf8");
+
+    const context = await readyStore.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: repoRoot
+    });
+    await seedHealthyRuntimeRegistration(readyStore, {
+      projectId: context.project.id,
+      workspaceId: context.workspace.id,
+      repoPath: repoRoot
+    });
+
+    const refreshed = await executeRefreshRepoContextCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "docs"],
+      {
+        cwd: directory,
+        env: {},
+        withClient: async (callback) => callback({ kind: "client" } as never),
+        createStore() {
+          return readyStore as never;
+        },
+        now() {
+          return new Date("2026-06-02T12:00:00.000Z");
+        }
+      }
+    );
+
+    assert.equal(refreshed.repoRoot, repoRoot);
+    assert.equal(refreshed.workspaceSlug, "team");
+    assert.equal(refreshed.projectSlug, "devgod");
+    assert.equal(refreshed.slotCount > 0, true);
+
+    await assert.rejects(
+      executeRefreshRepoContextCommandFromArgs({
+        cwd: directory,
+        env: {}
+      }),
+      /DEVGOD_PROJECT_SLUG is required/
+    );
+
+    const emptyStore = new MemoryStore();
+    await assert.rejects(
+      executeRefreshRepoContextCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod"], {
+        cwd: directory,
+        env: {},
+        withClient: async (callback) => callback({ kind: "client" } as never),
+        createStore() {
+          return emptyStore as never;
+        }
+      }),
+      /must be bootstrapped before repo context refresh/
+    );
+
+    const missingRegistrationStore = new MemoryStore();
+    await missingRegistrationStore.ensureProjectContext({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      repoPath: directory
+    });
+    await assert.rejects(
+      executeRefreshRepoContextCommandFromArgs(["--workspace-slug", "team", "--project-slug", "devgod"], {
+        cwd: directory,
+        env: {},
+        withClient: async (callback) => callback({ kind: "client" } as never),
+        createStore() {
+          return missingRegistrationStore as never;
+        }
+      }),
+      /must be runtime-registered before repo context refresh/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executePlanContextCommandFromArgs auto-refreshes stale repo and retrieval state and forwards query embeddings", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-plan-context-refresh-"));
+  let repoFresh = false;
+  let retrievalFresh = false;
+  let repoRefreshCalls = 0;
+  let retrievalRefreshCalls = 0;
+  let embeddedQuery: { model: string; text: string } | undefined;
+  let searchInput:
+    | Parameters<NonNullable<Parameters<typeof executePlanContextCommandFromArgs>[1]["searchMemory"]>>[0]
+    | undefined;
+
+  try {
+    const result = await executePlanContextCommandFromArgs(
+      [
+        "--query",
+        "runtime proof",
+        "--workspace-slug",
+        "team",
+        "--project-slug",
+        "devgod",
+        "--role",
+        "reviewer",
+        "--limit",
+        "1",
+        "--project-only",
+        "--auto-refresh-repo-context",
+        "--auto-refresh-retrieval"
+      ],
+      {
+        cwd: directory,
+        env: {
+          DEVGOD_EMBEDDING_MODEL: "devgod-local-hash-1536"
+        },
+        async searchMemory(input) {
+          searchInput = input;
+          return [
+            searchMemoryResult({
+              authority: {
+                source: "runtime_document",
+                precedence: "runtime_context",
+                scope: "project",
+                allowedRoles: ["reviewer"]
+              },
+              metadata: {
+                allowedRoles: ["reviewer"],
+                tags: ["workflow-proof"],
+                staleAfterDays: 7,
+                supersededBy: [],
+                contradicts: []
+              }
+            })
+          ];
+        },
+        async embedQuery(input) {
+          embeddedQuery = input;
+          return [0.25, 0.75];
+        },
+        async getRepoContext() {
+          return repoFresh
+            ? {
+                authorityLabel: "derived_only" as const,
+                state: "fresh" as const,
+                summary: "repo context is current",
+                items: []
+              }
+            : {
+                authorityLabel: "derived_only" as const,
+                state: "stale" as const,
+                summary: "repo context is stale",
+                items: []
+              };
+        },
+        async refreshRepoContext() {
+          repoRefreshCalls += 1;
+          repoFresh = true;
+          return {
+            authorityLabel: "runtime_authoritative",
+            workspaceSlug: "team",
+            projectSlug: "devgod",
+            repoRoot: directory,
+            slotCount: 0,
+            status: "ready",
+            fingerprint: "repo-context-refresh"
+          };
+        },
+        async getRetrievalFreshness() {
+          return retrievalFresh
+            ? {
+                authorityLabel: "derived_only" as const,
+                state: "fresh" as const,
+                summary: "retrieval index is current"
+              }
+            : {
+                authorityLabel: "derived_only" as const,
+                state: "stale" as const,
+                summary: "retrieval index is stale"
+              };
+        },
+        async refreshRetrieval() {
+          retrievalRefreshCalls += 1;
+          retrievalFresh = true;
+          return {
+            authorityLabel: "runtime_authoritative",
+            workspaceSlug: "team",
+            projectSlug: "devgod",
+            repoRoot: directory,
+            mode: "full",
+            filesIndexed: 1,
+            chunksStored: 1,
+            jobsQueued: 0
+          };
+        }
+      }
+    );
+
+    assert.equal(result.format, "json");
+    assert.equal(repoRefreshCalls, 1);
+    assert.equal(retrievalRefreshCalls, 1);
+    assert.deepEqual(embeddedQuery, {
+      model: "devgod-local-hash-1536",
+      text: "runtime proof"
+    });
+    assert.equal(searchInput?.workspaceSlug, "team");
+    assert.equal(searchInput?.projectSlug, "devgod");
+    assert.equal(searchInput?.requesterRole, "reviewer");
+    assert.equal(searchInput?.includeGlobal, false);
+    assert.deepEqual(searchInput?.queryEmbedding, [0.25, 0.75]);
+    assert.equal(result.report.totalResults, 1);
+    assert.match(result.report.repoContext?.summary ?? "", /after automatic refresh/i);
+    assert.match(result.report.retrieval?.summary ?? "", /after automatic refresh/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executePlanContextCommandFromArgs validates options and defers stale automatic refresh when disabled", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-plan-context-"));
+  let repoRefreshCalls = 0;
+  let retrievalRefreshCalls = 0;
+
+  try {
+    await assert.rejects(
+      executePlanContextCommandFromArgs([], {
+        searchMemory: async () => []
+      }),
+      /plan-context requires --query/i
+    );
+
+    await assert.rejects(
+      executePlanContextCommandFromArgs(["--query", "runtime proof"], {
+        env: {},
+        searchMemory: async () => []
+      }),
+      /workspace\/project/i
+    );
+
+    await assert.rejects(
+      executePlanContextCommandFromArgs(
+        ["--query", "runtime proof", "--workspace-slug", "team", "--project-slug", "devgod", "--role", "invalid"],
+        {
+          searchMemory: async () => []
+        }
+      ),
+      /Invalid --role value/i
+    );
+
+    await assert.rejects(
+      executePlanContextCommandFromArgs(
+        ["--query", "runtime proof", "--workspace-slug", "team", "--project-slug", "devgod", "--limit", "0"],
+        {
+          searchMemory: async () => []
+        }
+      ),
+      /Invalid --limit value/i
+    );
+
+    const result = await executePlanContextCommandFromArgs(
+      ["--query", "runtime proof", "--workspace-slug", "team", "--project-slug", "devgod"],
+      {
+        cwd: directory,
+        searchMemory: async () => [],
+        async getRepoContext() {
+          return {
+            authorityLabel: "derived_only",
+            state: "stale",
+            summary: "repo context is stale",
+            items: []
+          };
+        },
+        async refreshRepoContext() {
+          repoRefreshCalls += 1;
+          throw new Error("refresh should stay disabled");
+        },
+        async getRetrievalFreshness() {
+          return {
+            authorityLabel: "derived_only",
+            state: "stale",
+            summary: "retrieval index is stale"
+          };
+        },
+        async refreshRetrieval() {
+          retrievalRefreshCalls += 1;
+          throw new Error("refresh should stay disabled");
+        }
+      }
+    );
+
+    assert.equal(repoRefreshCalls, 0);
+    assert.equal(retrievalRefreshCalls, 0);
+    assert.match(result.report.repoContext?.summary ?? "", /automatic repo context refresh deferred/i);
+    assert.match(result.report.retrieval?.summary ?? "", /automatic retrieval refresh deferred/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeExportDocsCommandFromArgs validates config, reports empty worklogs, and writes notes for matching entries", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-export-docs-"));
+  const vaultPath = path.join(directory, "vault");
+
+  try {
+    await mkdir(vaultPath, { recursive: true });
+
+    await assert.rejects(
+      executeExportDocsCommandFromArgs(["daily summary"], {
+        cwd: directory,
+        env: {},
+        createWorklogProvider() {
+          return {
+            async getEntries() {
+              return [];
+            }
+          };
+        }
+      }),
+      /DEVGOD_WORKSPACE_SLUG.*DEVGOD_PROJECT_SLUG/i
+    );
+
+    const resolveObsidianConfig = () => ({
+      enabled: true,
+      vaultPath,
+      defaultProject: "devgod",
+      dailyFolder: "Devgod/Daily",
+      docsFolder: "Devgod/Docs",
+      adrFolder: "Devgod/ADR",
+      timezone: "Europe/Madrid"
+    });
+
+    const emptyResult = await executeExportDocsCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "daily summary for 2026-06-01"],
+      {
+        cwd: directory,
+        env: {},
+        resolveObsidianConfig,
+        async validateObsidianConfig() {},
+        createWorklogProvider() {
+          return {
+            async getEntries() {
+              return [];
+            }
+          };
+        }
+      }
+    );
+
+    assert.equal(emptyResult.matchedEntries, 0);
+    assert.equal(emptyResult.targetPath, undefined);
+    assert.match(emptyResult.message, /No matching worklog entries found/i);
+
+    const writtenResult = await executeExportDocsCommandFromArgs(
+      ["--workspace-slug", "team", "--project-slug", "devgod", "project summary for 2026-06-01"],
+      {
+        cwd: directory,
+        env: {},
+        resolveObsidianConfig,
+        async validateObsidianConfig() {},
+        createWorklogProvider() {
+          return {
+            async getEntries() {
+              return [buildExportDocsEntry()];
+            }
+          };
+        }
+      }
+    );
+
+    assert.equal(writtenResult.matchedEntries, 1);
+    assert.ok(writtenResult.targetPath);
+    const markdown = await readFile(writtenResult.targetPath, "utf8");
+    assert.match(markdown, /Cover admin wrapper commands/);
+    assert.match(writtenResult.message, /Exported Obsidian note/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("admin docs-export coverage keeps source modules hot in-process", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-docs-export-source-"));
+  const vaultPath = path.join(directory, "vault");
+
+  try {
+    await mkdir(vaultPath, { recursive: true });
+
+    const config = resolveObsidianConfig({
+      DEVGOD_OBSIDIAN_ENABLED: "true",
+      DEVGOD_OBSIDIAN_VAULT_PATH: vaultPath,
+      DEVGOD_OBSIDIAN_DEFAULT_PROJECT: "devgod",
+      DEVGOD_OBSIDIAN_DAILY_FOLDER: "Devgod/Daily",
+      DEVGOD_OBSIDIAN_DOCS_FOLDER: "Devgod/Docs",
+      DEVGOD_OBSIDIAN_ADR_FOLDER: "Devgod/ADR",
+      DEVGOD_OBSIDIAN_TIMEZONE: "Europe/Madrid"
+    }, {
+      cwd: directory,
+      projectSlug: "devgod"
+    });
+    await validateObsidianConfig(config);
+
+    const request = parseExportDocsRequest("project summary for 2026-06-01", config);
+    assert.equal(request.project, "devgod");
+    assert.equal(request.dateFrom, "2026-06-01");
+    assert.equal(request.dateTo, "2026-06-01");
+    assert.equal(currentIsoDateInTimezone(new Date("2026-06-01T21:30:00.000Z"), "Europe/Madrid"), "2026-06-01");
+
+    const summary = new DocsSummarizer().summarize([buildExportDocsEntry()], request);
+    const markdown = new ObsidianMarkdownRenderer().render(summary, request);
+
+    assert.equal(summary.files.includes("tests/admin.test.ts"), true);
+    assert.match(markdown, /Cover admin wrapper commands/);
+    assert.match(markdown, /## Tasks/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("admin CLI entrypoint rejects unknown or incomplete wrapper commands before runtime dispatch", async () => {
+  const unknown = await runAdminCli(["unknown-command"]);
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.stderr, /Unknown command/i);
+
+  const refreshRetrieval = await runAdminCli(["refresh-retrieval", "--project-slug", ""]);
+  assert.equal(refreshRetrieval.code, 1);
+  assert.match(refreshRetrieval.stderr, /--project-slug requires a value/i);
+
+  const refreshRepoContext = await runAdminCli(["refresh-repo-context", "--project-slug", ""]);
+  assert.equal(refreshRepoContext.code, 1);
+  assert.match(refreshRepoContext.stderr, /--project-slug requires a value/i);
+
+  const indexRepoMarkdown = await runAdminCli(["index-repo-markdown", "--project-slug", ""]);
+  assert.equal(indexRepoMarkdown.code, 1);
+  assert.match(indexRepoMarkdown.stderr, /--project-slug requires a value/i);
+
+  const githubDispatch = await runAdminCli(["github-dispatch"], {
+    env: {
+      DEVGOD_PROJECT_SLUG: "devgod"
+    }
+  });
+  assert.equal(githubDispatch.code, 1);
+  assert.match(githubDispatch.stderr, /--input/i);
+});
+
+test("admin CLI entrypoint rewrites task queues through the repair-task-queue wrapper", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-cli-repair-"));
+  const queuePath = path.join(directory, "task-queue.json");
+
+  try {
+    await writeFile(
+      queuePath,
+      `${JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: null,
+          tasks: [
+            {
+              id: "task-001",
+              title: "Legacy slice",
+              status: "pending",
+              class: "implementation_slice",
+              depends_on: [],
+              acceptance_criteria: [],
+              verification: [],
+              evidence: [],
+              blocker: null
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await runAdminCli(["repair-task-queue", "--queue-path", "task-queue.json"], {
+      cwd: directory
+    });
+
+    assert.equal(result.code, 0);
+    const parsed = JSON.parse(result.stdout) as {
+      changed: boolean;
+      repairedTasks: number;
+      authorityLabel: string;
+    };
+    assert.equal(parsed.authorityLabel, "derived_only");
+    assert.equal(parsed.changed, true);
+    assert.equal(parsed.repairedTasks, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("buildPlanContextRefreshArgs keeps only workspace and project passthrough flags", () => {
+  assert.deepEqual(
+    buildPlanContextRefreshArgs([
+      "--query",
+      "runtime proof",
+      "--workspace-slug",
+      "team",
+      "--project-slug",
+      "devgod",
+      "--role",
+      "reviewer",
+      "--limit",
+      "3",
+      "--project-only"
+    ]),
+    ["--workspace-slug", "team", "--project-slug", "devgod"]
+  );
+});
+
+test("inspectReviewIdentityStatus reports invalid bindings and ambiguous backend selection", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-review-identity-status-"));
+  const adapterPath = path.join(directory, "review-identity-adapter.ts");
+  const bindingsPath = path.join(directory, ".devgod", "review-identity-bindings.json");
+
+  try {
+    await mkdir(path.dirname(bindingsPath), { recursive: true });
+    await writeFile(
+      adapterPath,
+      `export const reviewIdentityAdapters = {
+  alpha: async () => ({ provider: "github", subject: "alpha", verified: true }),
+  beta: async () => ({ provider: "github", subject: "beta", verified: true })
+};
+`,
+      "utf8"
+    );
+    await writeFile(bindingsPath, "{not-valid-json}\n", "utf8");
+
+    const status = await inspectReviewIdentityStatus({
+      cwd: directory,
+      env: {
+        ...process.env,
+        DEVGOD_REVIEW_IDENTITY_ADAPTER_MODULE: "./review-identity-adapter.ts",
+        DEVGOD_REVIEW_IDENTITY_BINDINGS: "./.devgod/review-identity-bindings.json"
+      }
+    });
+
+    assert.equal(status.adapterConfigured, true);
+    assert.equal(status.adapterExists, true);
+    assert.deepEqual(status.availableBackends, ["alpha", "beta"]);
+    assert.equal(status.selectedBackend, undefined);
+    assert.equal(status.bindingsPresent, true);
+    assert.equal(status.liveTrustReady, false);
+    assert.ok(
+      status.notes.some((note) => note.includes("multiple review backends are available but none is selected"))
+    );
+    assert.ok(
+      status.notes.some((note) => note.includes("review identity bindings file is invalid and cannot be trusted"))
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeStatusCommandFromArgs reports integrity drift from local completion exports without runtime proof", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "test",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "security-actor"
+            },
+            actors: [
+              {
+                actor: "security-actor",
+                roles: ["security_reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "qa-actor"
+            },
+            actors: [
+              {
+                actor: "qa-actor",
+                roles: ["qa_engineer"]
+              }
+            ]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-status",
+    title: "Status integrity drift",
+    request: "Report local completion drift for an approved task.",
+    qualityGates: [
+      "product_acceptance",
+      "coverage_ledger_required",
+      "progress_proof_required",
+      "checkpoint_resume_required"
+    ]
+  });
+  await seedAutonomousState(service, runId, {
+    includeCheckpoint: true
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-status-"));
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "ACTIVE"),
+      "task_id=task-status\nworkflow=devgod\nstate=complete\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "done",
+          current_task_id: "task-status",
+          tasks: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    await store.saveProjectRuntimeState({
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      activeRunId: runId,
+      activeTaskId: "task-status",
+      taskQueue: {
+        project_status: "in_progress",
+        current_task_id: "task-status",
+        tasks: [
+          {
+            id: "task-status",
+            title: "task-status",
+            status: "approved",
+            class: "release_candidate",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          }
+        ]
+      },
+      productState: { status: "in_progress", items: [] },
+      lastVerifiedRunId: undefined,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const report = await executeStatusCommandFromArgs(
+      ["--run-id", runId, "--stale-after-days", "2"],
+      {
+        cwd: directory,
+        env: process.env,
+        inspectReviewIdentity: async () => ({
+          authorityLabel: "derived_only",
+          adapterConfigured: true,
+          adapterExists: true,
+          adapterModulePath: path.join(directory, "review-identity-adapter.ts"),
+          selectedBackend: "github",
+          availableBackends: ["github"],
+          bindingsPresent: true,
+          bindingsPath: path.join(directory, ".devgod", "review-identity-bindings.json"),
+          bindingsUseShippedTemplate: false,
+          liveTrustReady: true,
+          notes: []
+        }),
+        inspectGraphify: async () => ({
+          authorityLabel: "derived_only",
+          state: "ready",
+          configured: true,
+          configuredScopes: ["project"],
+          configPaths: [path.join(directory, ".codex", "config.toml")],
+          graphBuilt: true,
+          graphRoot: directory,
+          graphPath: path.join(directory, ".graphify", "graph.json"),
+          wikiPath: path.join(directory, ".graphify", "wiki.md"),
+          graphUpdatedAt: "2026-06-12T00:00:00.000Z",
+          headCommit: "abc123",
+          notes: []
+        }),
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        }
+      }
+    );
+
+    assert.equal(report.integrity.status, "contradicted");
+    assert.ok(
+      report.integrity.contradictions.some((item) =>
+        item.includes("local exports claim complete but runtime state has no authoritative workflow proof")
+      )
+    );
+    assert.equal(report.integrity.taskProofObligations?.status, "outstanding");
+    assert.ok(
+      report.integrity.taskProofObligations?.tasks.some(
+        (task) => task.taskId === "task-status" && task.exportState === "missing"
+      )
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeOpsCommandFromArgs surfaces integrity alerts and repair actions from status drift", async () => {
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: {
+              provider: "test",
+              subject: "reviewer-actor"
+            },
+            actors: [
+              {
+                actor: "reviewer-actor",
+                roles: ["reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "security-actor"
+            },
+            actors: [
+              {
+                actor: "security-actor",
+                roles: ["security_reviewer"]
+              }
+            ]
+          },
+          {
+            principal: {
+              provider: "test",
+              subject: "qa-actor"
+            },
+            actors: [
+              {
+                actor: "qa-actor",
+                roles: ["qa_engineer"]
+              }
+            ]
+          }
+        ]
+      },
+      async resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+  const { runId } = await createApprovedRuntimeTask({
+    store,
+    service,
+    taskId: "task-ops",
+    title: "Ops integrity drift",
+    request: "Surface operator actions for local drift."
+  });
+
+  const projectContext = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+  assert.ok(projectContext);
+
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-ops-"));
+  try {
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(
+      path.join(directory, ".devgod", "ACTIVE"),
+      "task_id=task-ops\nworkflow=devgod\nstate=complete\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "done",
+          current_task_id: "task-ops",
+          tasks: []
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+    await store.saveProjectRuntimeState({
+      projectId: projectContext.project.id,
+      workspaceId: projectContext.workspace.id,
+      activeRunId: runId,
+      activeTaskId: "task-ops",
+      taskQueue: {
+        project_status: "in_progress",
+        current_task_id: "task-ops",
+        tasks: [
+          {
+            id: "task-ops",
+            title: "task-ops",
+            status: "approved",
+            class: "release_candidate",
+            depends_on: [],
+            acceptance_criteria: [],
+            verification: [],
+            evidence: [],
+            blocker: null
+          }
+        ]
+      },
+      productState: { status: "in_progress", items: [] },
+      lastVerifiedRunId: undefined,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const result = await executeOpsCommandFromArgs(
+      ["--run-id", runId, "--format", "text"],
+      {
+        cwd: directory,
+        env: process.env,
+        inspectReviewIdentity: async () => ({
+          authorityLabel: "derived_only",
+          adapterConfigured: true,
+          adapterExists: true,
+          adapterModulePath: path.join(directory, "review-identity-adapter.ts"),
+          selectedBackend: "github",
+          availableBackends: ["github"],
+          bindingsPresent: true,
+          bindingsPath: path.join(directory, ".devgod", "review-identity-bindings.json"),
+          bindingsUseShippedTemplate: false,
+          liveTrustReady: true,
+          notes: []
+        }),
+        inspectGraphify: async () => ({
+          authorityLabel: "derived_only",
+          state: "ready",
+          configured: true,
+          configuredScopes: ["project"],
+          configPaths: [path.join(directory, ".codex", "config.toml")],
+          graphBuilt: true,
+          graphRoot: directory,
+          graphPath: path.join(directory, ".graphify", "graph.json"),
+          wikiPath: path.join(directory, ".graphify", "wiki.md"),
+          graphUpdatedAt: "2026-06-12T00:00:00.000Z",
+          headCommit: "abc123",
+          notes: []
+        }),
+        getStatusSnapshot(candidateRunId) {
+          return service.getStatus(candidateRunId);
+        },
+        getProjectRuntimeState(projectId) {
+          return store.getProjectRuntimeState(projectId);
+        },
+        getExecutionPlan(candidateRunId, staleAfterHours) {
+          return service.getExecutionPlan(candidateRunId, { staleAfterHours });
+        },
+        getRoutingReport(candidateRunId) {
+          return service.recommendRouting(candidateRunId);
+        },
+        inspectRecovery(candidateRunId, staleAfterHours) {
+          return service.inspectRecovery(candidateRunId, { staleAfterHours });
+        }
+      }
+    );
+
+    assert.equal(result.format, "text");
+    assert.equal(result.report.runId, runId);
+    assert.ok(
+      result.report.alerts.some((alert) =>
+        alert.includes("workflow integrity: local exports claim complete but runtime state has no authoritative workflow proof")
+      )
+    );
+    assert.ok(
+      result.report.nextActions.some((action) =>
+        action.includes(`inspect integrity drift for run ${runId}`)
+      )
+    );
+    assert.ok(
+      result.report.nextActions.some((action) =>
+        action.includes("repair or regenerate approved task export for task-ops")
+      )
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeRecoverCommandFromArgs inspects advisory recovery and persists integrity metadata after apply", async () => {
+  const recoveryInspection = {
+    authorityLabel: "runtime_authoritative",
+    runId: "run-recover",
+    issues: [],
+    recommendedActions: [],
+    safeActions: [],
+    summary: {
+      totalIssues: 0,
+      safeActions: 0
+    }
+  } as never;
+
+  const advisory = await executeRecoverCommandFromArgs(
+    ["--run-id", "run-recover"],
+    {
+      getStatusSnapshot() {
+        return Promise.resolve({} as never);
+      },
+      inspectRecovery(runId, staleAfterHours) {
+        assert.equal(runId, "run-recover");
+        assert.equal(staleAfterHours, 24);
+        return Promise.resolve(recoveryInspection);
+      },
+      applyRecovery() {
+        assert.fail("advisory recover should not apply actions");
+      }
+    }
+  );
+  assert.equal(advisory, recoveryInspection);
+
+  await assert.rejects(
+    executeRecoverCommandFromArgs(
+      ["--run-id", "run-recover", "--apply", "repair-1", "--apply-safe"],
+      {
+        getStatusSnapshot() {
+          return Promise.resolve({} as never);
+        },
+        inspectRecovery() {
+          return Promise.resolve(recoveryInspection);
+        },
+        applyRecovery() {
+          return Promise.resolve({} as never);
+        }
+      }
+    ),
+    /either --apply-safe or one\/more --apply/
+  );
+
+  const savedStates: Array<{ metadata?: Record<string, unknown> }> = [];
+  const runtimeState = {
+    projectId: "project-recover",
+    workspaceId: "workspace-recover",
+    activeRunId: "run-recover",
+    activeTaskId: "task-recover",
+    taskQueue: {
+      project_status: "in_progress",
+      current_task_id: "task-recover",
+      tasks: []
+    },
+    productState: { status: "in_progress", items: [] },
+    metadata: {},
+    createdAt: "2026-06-12T00:00:00.000Z",
+    updatedAt: "2026-06-12T00:00:00.000Z"
+  };
+
+  const applied = await executeRecoverCommandFromArgs(
+    ["--run-id", "run-recover", "--apply", "repair-1"],
+    {
+      inspectRecovery() {
+        assert.fail("apply mode should not inspect advisory recovery");
+      },
+      applyRecovery(runId, actionIds, staleAfterHours) {
+        assert.equal(runId, "run-recover");
+        assert.deepEqual(actionIds, ["repair-1"]);
+        assert.equal(staleAfterHours, 24);
+        return Promise.resolve({
+          appliedActionIds: ["repair-1"],
+          snapshot: {}
+        } as never);
+      },
+      getStatusSnapshot() {
+        return Promise.resolve({
+          run: {
+            projectId: "project-recover"
+          }
+        } as never);
+      },
+      getProjectRuntimeState(projectId) {
+        assert.equal(projectId, "project-recover");
+        return Promise.resolve(runtimeState as never);
+      },
+      saveProjectRuntimeState(state) {
+        savedStates.push(state as never);
+        return Promise.resolve();
+      }
+    }
+  );
+
+  const appliedResult = applied as { appliedActionIds: string[] };
+  assert.deepEqual(appliedResult.appliedActionIds, ["repair-1"]);
+  assert.equal(savedStates.length, 1);
+  const lastIntegrityRepair = savedStates[0]?.metadata?.lastIntegrityRepair as
+    | {
+        kind?: string;
+        summary?: string;
+      }
+    | undefined;
+  assert.equal(lastIntegrityRepair?.kind, "recovery_action_apply");
+  assert.match(
+    String(lastIntegrityRepair?.summary),
+    /recover applied safe runtime recovery actions: repair-1/
+  );
+});
+
+test("executeLoopCommandFromArgs applies safe recovery and forwards trusted review inputs to directive execution", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-loop-"));
+  const dataRoot = path.join(directory, "runtime-data");
+  const reviewInputPath = path.join(directory, "review-input.json");
+
+  try {
+    await mkdir(dataRoot, { recursive: true });
+    await writeFile(
+      reviewInputPath,
+      `${JSON.stringify({
+        runId: "run-loop",
+        taskId: "task-review",
+        actor: "alice-reviewer",
+        review: {
+          reviewerRole: "reviewer",
+          state: "passed",
+          severity: "low",
+          findings: []
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    const readyReviewIdentity = {
+      authorityLabel: "derived_only" as const,
+      adapterConfigured: true,
+      adapterExists: true,
+      adapterModulePath: path.join(directory, "review-identity-adapter.ts"),
+      selectedBackend: "github",
+      availableBackends: ["github"],
+      bindingsPresent: true,
+      bindingsPath: path.join(directory, ".devgod", "review-identity-bindings.json"),
+      bindingsUseShippedTemplate: false,
+      liveTrustReady: true,
+      notes: []
+    };
+
+    const runtimeSnapshot = {
+      run: {
+        id: "run-loop",
+        workspaceId: "workspace-loop",
+        projectId: "project-loop"
+      }
+    } as never;
+
+    let applyPlanCalls = 0;
+    const applied = await executeLoopCommandFromArgs(
+      ["--run-id", "run-loop", "--apply-safe-recovery", "--stale-after-hours", "6"],
+      {
+        cwd: directory,
+        env: process.env,
+        findProjectContext() {
+          return Promise.resolve(undefined);
+        },
+        getProjectRuntimeRegistration() {
+          return Promise.resolve({
+            projectId: "project-loop",
+            workspaceId: "workspace-loop",
+            repoPath: directory,
+            runtimeProfile: "managed",
+            dataRoot,
+            installManifestPath: path.join(directory, ".devgod", "install-manifest.json"),
+            manifest: {},
+            provenance: { authority: "runtime_authoritative" },
+            createdAt: "2026-06-12T00:00:00.000Z",
+            updatedAt: "2026-06-12T00:00:00.000Z"
+          } as never);
+        },
+        pathExists() {
+          return Promise.resolve(true);
+        },
+        inspectReviewIdentity() {
+          return Promise.resolve(readyReviewIdentity);
+        },
+        getStatusSnapshot() {
+          return Promise.resolve(runtimeSnapshot);
+        },
+        getExecutionPlan() {
+          applyPlanCalls += 1;
+          return Promise.resolve(
+            (applyPlanCalls === 1
+              ? {
+                  directive: {
+                    kind: "apply_recovery",
+                    actions: [{ id: "repair-1" }],
+                    rationale: []
+                  }
+                }
+              : {
+                  directive: {
+                    kind: "dispatch_owner",
+                    recommendation: {
+                      taskId: "task-review",
+                      targetRole: "planner"
+                    },
+                    rationale: []
+                  }
+                }) as never
+          );
+        },
+        applyRecovery(runId, actionIds, staleAfterHours) {
+          assert.equal(runId, "run-loop");
+          assert.deepEqual(actionIds, ["repair-1"]);
+          assert.equal(staleAfterHours, 6);
+          return Promise.resolve({
+            appliedActionIds: ["repair-1"],
+            snapshot: runtimeSnapshot
+          } as never);
+        }
+      }
+    );
+
+    assert.equal(applied.result.mode, "applied");
+    assert.deepEqual(applied.result.appliedRecoveryActionIds, ["repair-1"]);
+    assert.equal(applied.result.finalPlan.directive.kind, "dispatch_owner");
+
+    let executedReviewCommands: unknown[] = [];
+    const executed = await executeLoopCommandFromArgs(
+      [
+        "--run-id",
+        "run-loop",
+        "--execute-supported-directives",
+        "--owner-actor",
+        "automation-bot",
+        "--review-input",
+        reviewInputPath
+      ],
+      {
+        cwd: directory,
+        env: process.env,
+        findProjectContext() {
+          return Promise.resolve(undefined);
+        },
+        getProjectRuntimeRegistration() {
+          return Promise.resolve({
+            projectId: "project-loop",
+            workspaceId: "workspace-loop",
+            repoPath: directory,
+            runtimeProfile: "managed",
+            dataRoot,
+            installManifestPath: path.join(directory, ".devgod", "install-manifest.json"),
+            manifest: {},
+            provenance: { authority: "runtime_authoritative" },
+            createdAt: "2026-06-12T00:00:00.000Z",
+            updatedAt: "2026-06-12T00:00:00.000Z"
+          } as never);
+        },
+        pathExists() {
+          return Promise.resolve(true);
+        },
+        inspectReviewIdentity() {
+          return Promise.resolve(readyReviewIdentity);
+        },
+        getStatusSnapshot() {
+          return Promise.resolve(runtimeSnapshot);
+        },
+        getExecutionPlan() {
+          return Promise.resolve({
+            directive: {
+              kind: "dispatch_reviews",
+              recommendations: [
+                {
+                  taskId: "task-review",
+                  targetReviewRole: "reviewer"
+                }
+              ],
+              rationale: []
+            }
+          } as never);
+        },
+        applyRecovery() {
+          assert.fail("directive execution path should not apply recovery");
+        },
+        executeDirectiveStep(runId, input) {
+          assert.equal(runId, "run-loop");
+          assert.equal(input.ownerActor, "automation-bot");
+          executedReviewCommands = [...input.reviewCommands];
+          return Promise.resolve({
+            steps: [
+              {
+                directiveKind: "dispatch_reviews",
+                outcome: "completed",
+                taskId: "task-review",
+                reviewRole: "reviewer",
+                actor: "automation-bot"
+              }
+            ],
+            finalPlan: {
+              directive: {
+                kind: "dispatch_owner",
+                recommendation: {
+                  taskId: "task-next",
+                  targetRole: "planner"
+                },
+                rationale: []
+              }
+            },
+            snapshot: runtimeSnapshot
+          } as never);
+        }
+      }
+    );
+
+    assert.equal(executed.result.mode, "executed");
+    assert.equal(executed.result.executedSteps[0]?.taskId, "task-review");
+    assert.equal(executed.result.finalPlan.directive.kind, "dispatch_owner");
+    assert.equal(executedReviewCommands.length, 1);
+    assert.equal((executedReviewCommands[0] as { taskId: string }).taskId, "task-review");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("executeGithubDispatchCommandFromArgs validates required input and project context before runtime dispatch", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-github-dispatch-"));
+
+  try {
+    await assert.rejects(
+      executeGithubDispatchCommandFromArgs([]),
+      /github-dispatch requires --input <github-event\.json>/
+    );
+
+    await writeFile(
+      path.join(directory, "github-event.json"),
+      `${JSON.stringify({
+        repository: { full_name: "acme/devgod" },
+        issue: { number: 1, title: "Queue work", body: "Dispatch the item." }
+      })}\n`,
+      "utf8"
+    );
+
+    const previousCwd = process.cwd();
+    const previousProjectSlug = process.env.DEVGOD_PROJECT_SLUG;
+
+    try {
+      process.chdir(directory);
+      delete process.env.DEVGOD_PROJECT_SLUG;
+
+      await assert.rejects(
+        executeGithubDispatchCommandFromArgs(["--input", "github-event.json"]),
+        /github-dispatch requires DEVGOD_PROJECT_SLUG or --project-slug/
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousProjectSlug === undefined) {
+        delete process.env.DEVGOD_PROJECT_SLUG;
+      } else {
+        process.env.DEVGOD_PROJECT_SLUG = previousProjectSlug;
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("dispatchGithubWorkItem stops before runtime dispatch when project context resolution fails", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-admin-github-dispatch-context-"));
+
+  try {
+    const inputPath = path.join(directory, "github-event.json");
+    await writeFile(
+      inputPath,
+      `${JSON.stringify({
+        repository: { full_name: "acme/devgod" },
+        issue: { number: 7, title: "Queue work", body: "Dispatch the item." }
+      })}\n`,
+      "utf8"
+    );
+
+    let createRunCalls = 0;
+    let getProjectRuntimeStateCalls = 0;
+    let saveProjectRuntimeStateCalls = 0;
+    let saveWorkflowDocumentCalls = 0;
+
+    await assert.rejects(
+      dispatchGithubWorkItem({
+        store: {
+          async ensureProjectContext() {
+            throw new Error("synthetic project context failure");
+          },
+          async createRun() {
+            createRunCalls += 1;
+            assert.fail("createRun should not execute when project context resolution fails");
+          },
+          async getProjectRuntimeState() {
+            getProjectRuntimeStateCalls += 1;
+            assert.fail("getProjectRuntimeState should not execute when project context resolution fails");
+          },
+          async saveProjectRuntimeState() {
+            saveProjectRuntimeStateCalls += 1;
+            assert.fail("saveProjectRuntimeState should not execute when project context resolution fails");
+          },
+          async saveWorkflowDocument() {
+            saveWorkflowDocumentCalls += 1;
+            assert.fail("saveWorkflowDocument should not execute when project context resolution fails");
+          }
+        },
+        workspaceSlug: "team",
+        projectSlug: "devgod",
+        inputPath
+      }),
+      /synthetic project context failure/
+    );
+
+    assert.equal(createRunCalls, 0);
+    assert.equal(getProjectRuntimeStateCalls, 0);
+    assert.equal(saveProjectRuntimeStateCalls, 0);
+    assert.equal(saveWorkflowDocumentCalls, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

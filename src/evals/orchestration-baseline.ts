@@ -61,15 +61,22 @@ export interface OrchestrationEvalReport {
 const orchestrationRequiredPassRate = 1;
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates: TaskPacketInput["qualityGates"] = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates: TaskPacketInput["qualityGates"] =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? [...qualityGates, "completion_audit_required"]
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],

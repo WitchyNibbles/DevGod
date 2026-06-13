@@ -63,9 +63,17 @@ export function buildOperatorDashboardReport(input: {
   if (input.status.integrity.status === "contradicted") {
     alerts.push(...input.status.integrity.contradictions.map((item) => `workflow integrity: ${item}`));
     nextActions.push(
-      "inspect runtime-vs-export drift with `npm run devgod:status -- --run-id latest`",
+      `inspect integrity drift for run ${input.status.run.id}: npm run devgod -- status --run-id ${input.status.run.id}`,
       "repair trusted runtime drift before accepting local completion signals"
     );
+  }
+  for (const obligation of input.status.integrity.taskProofObligations?.tasks ?? []) {
+    if (obligation.exportState === "valid") {
+      continue;
+    }
+    alerts.push(`approved task export ${obligation.exportState}: ${obligation.taskId}`);
+    nextActions.push(`repair or regenerate approved task export for ${obligation.taskId}: ${obligation.artifactPath}`);
+    nextActions.push(`verify approved task artifact for ${obligation.taskId}: ${obligation.verificationCommand}`);
   }
   if (input.status.integrity.runtimeState?.seedFailure) {
     const seedFailure = input.status.integrity.runtimeState.seedFailure;

@@ -37,6 +37,7 @@ export const workflowReviewActorRoles = [...workflowTemplateReviewRoles, "planne
 export const workflowReviewProvenanceStatuses = ["summary_only", "runtime_verified", "legacy_backfill"] as const;
 export const workflowReviewExportPolicies = ["required", "runtime_optional"] as const;
 export const workflowReviewExportPoliciesDisplay = workflowReviewExportPolicies.join(" | ");
+export const workflowReviewExportsDefaultExampleLine = "review_exports=runtime_optional";
 export const workflowCouncilNeeds = ["required", "not_required", "inherited"] as const;
 export const workflowCouncilRequiredStates = ["true", "false", "inherited"] as const;
 export const workflowCouncilOutcomes = [
@@ -73,8 +74,35 @@ export const workflowArtifactRefGuidanceLine =
 export const workflowArtifactRefHelperSummaryLine =
   "Inherited task packets must carry explicit workflow artifact refs.";
 export const workflowArtifactRefFormatIntroLine = "Use repo-relative `key=value` lines:";
+export const workflowRuntimeCanonicalRecordsPolicyLine =
+  "- runtime task, review, approval, and council records are canonical truth for workflow state and release decisions";
+export const workflowExportArtifactsPolicyLine =
+  "- markdown task packets, markdown review summaries, `product-state.md`, and `task-queue.json` are export artifacts; they may block release when stale or malformed, but they cannot override authenticated runtime truth";
+export const workflowRequiredReviewExportsPolicyLine =
+  "- `review_exports=required` means markdown review summaries are required export evidence for the task class";
 export const workflowReviewExportsRuntimeOptionalGuidanceLine =
   "When `review_exports=runtime_optional`, the task must run under the runtime workflow contract and still cite release-readiness or other gate evidence in task verification artifacts or exported review summaries.";
+export const workflowReviewExportsAllowedValuesGuidanceLine =
+  "Allowed values: `required | runtime_optional`.";
+export const workflowReviewExportsScopeAlignmentGuidanceLine =
+  "Set `review_exports=required` only when the allowed write scope can actually update the referenced review artifacts; otherwise use `runtime_optional` or request the minimum safe scope expansion before execution.";
+export const workflowSpecialistVerifiedCompletionAuditRequirementLine =
+  "`specialist_verified` work always requires `completion_audit_required`";
+export const workflowSpecialistVerifiedExportPolicyLine =
+  `- ${workflowSpecialistVerifiedCompletionAuditRequirementLine}; \`review_exports=runtime_optional\` waives only markdown review-summary exports, not the task packet or other required workflow exports`;
+export const workflowTaskPacketExportPolicyHeading = "## Export artifact policy";
+export const workflowTaskPacketExportRequiredLine =
+  "Task packet markdown is a required export artifact for live work and must remain present, current, and well-formed.";
+export const workflowTaskPacketReviewExportsRequiredLine =
+  "Review markdown summaries are required when `review_exports=required`.";
+export const workflowTaskPacketReviewExportsRuntimeOptionalLine =
+  "Runtime-authenticated review authority may satisfy completion before markdown review summaries exist only when `review_exports=runtime_optional`.";
+export const workflowTaskPacketRequiredExportsValidationLine =
+  "Required export artifacts must be present and validate under the workflow checker.";
+export const workflowTaskPacketProductStateAdvisoryLine =
+  "`product-state.md` and `task-queue.json` are advisory export artifacts unless runtime writes or verifies them.";
+export const workflowTaskPacketExportBlockingLine =
+  "Stale or malformed export artifacts can block release or workflow proof, but they cannot override authenticated runtime truth.";
 export const workflowRuntimeOptionalReviewExportsHelperSummaryLine =
   "Use `review_exports=runtime_optional` only when runtime-authenticated review authority covers the gate.";
 export const workflowRequiredGateRolesPolicyLine =
@@ -86,7 +114,9 @@ export const workflowReleaseReadinessPolicyLine =
 export const workflowCompletionAuditPolicyLine =
   "- `completion_audit_required` keeps specialist-verified work in gate scope until review evidence explicitly states the touched outcome is complete, clean, and has no unresolved follow-up work in scope";
 export const workflowRuntimeOptionalReviewExportsPolicyLine =
-  "- under `runtime_authenticated_only` review authority, a task may declare `review_exports=runtime_optional` and complete live verification before markdown review exports exist; if review exports are present they must still validate as evidence summaries";
+  "- `review_exports=runtime_optional` means runtime-authenticated review records may satisfy completion before markdown review summaries exist; if summaries exist they remain export evidence and must validate against runtime truth";
+export const workflowReviewExportsScopeAlignmentPolicyLine =
+  "- a task may declare `review_exports=required` only when its allowed write scope includes the referenced markdown review artifacts; otherwise use `runtime_optional` or widen scope explicitly before execution";
 export const workflowAuthenticatedGatePolicyLine =
   "- a required gate satisfies completion only when its latest satisfying review has authenticated actor provenance";
 export const workflowPassedStatePolicyLine =
@@ -138,15 +168,33 @@ export function buildWorkflowArtifactRefExampleLines(taskId: string): string[] {
   ];
 }
 
+function buildWorkflowTaskTemplateArtifactRefExampleLines(taskId: string): string[] {
+  const reviewPaths = buildWorkflowReviewArtifactRelativePaths(taskId);
+  return [
+    `brief=.devgod/work/briefs/brief-${taskId}.md`,
+    `plan=.devgod/work/plans/plan-${taskId}.md`,
+    `task=.devgod/work/tasks/task-${taskId}.md`,
+    `reviewer=${reviewPaths.reviewer}`,
+    `qa_engineer=${reviewPaths.qa_engineer}`,
+    `security_reviewer=${reviewPaths.security_reviewer}`,
+    workflowReviewExportsDefaultExampleLine
+  ];
+}
+
 export function renderReviewGatePolicyDocument(): string {
   return [
     "# Review Gate Policy",
     "",
+    workflowRuntimeCanonicalRecordsPolicyLine,
+    workflowExportArtifactsPolicyLine,
+    workflowRequiredReviewExportsPolicyLine,
+    workflowRuntimeOptionalReviewExportsPolicyLine,
+    workflowSpecialistVerifiedExportPolicyLine,
     workflowRequiredGateRolesPolicyLine,
     workflowCouncilVsReviewGatePolicyLine,
     workflowReleaseReadinessPolicyLine,
     workflowCompletionAuditPolicyLine,
-    workflowRuntimeOptionalReviewExportsPolicyLine,
+    workflowReviewExportsScopeAlignmentPolicyLine,
     workflowAuthenticatedGatePolicyLine,
     workflowPassedStatePolicyLine,
     workflowWaiverPolicyLine,
@@ -357,11 +405,11 @@ export function renderReviewGateTemplate(): string {
     "",
     ...section("## Severity", `\`${joinValues(reviewSeverities)}\``),
     ...section("## Specialist execution evidence", "List the evidence used to trust the claimed specialist ownership for this task."),
-    ...section("## Quality gate evidence", "List the evidence used to trust the declared quality gates for this task.", "", "When `council_review_required` applies, cite the DAC decision packet, recorded outcome, dissent owner, and any approval conditions or exception expiry carried into implementation."),
+    ...section("## Quality gate evidence", "List the evidence used to trust the declared quality gates for this task.", "", "When `council_review_required` applies, cite the DAC decision packet, recorded outcome, dissent owner, and any approval conditions or exception expiry carried into implementation.", "", "When `completion_audit_required` applies, explicitly state that a completion audit was performed and that the touched scope is complete, clean, and has no unresolved in-scope follow-up work."),
     ...section("## Reasoning quality findings", "Call out weak assumptions, missing alternatives, contradictory evidence, low confidence, or exhausted budgets here."),
     ...section("## Findings"),
     ...section("## Residual risk"),
-    ...section("## Verification evidence", "List exact commands, fixtures, or repro steps used for this gate.", "", "When `Provenance status` is `runtime_verified` for `specialist_verified` work, include at least one `Runtime proof:` line here that names the authenticated runtime artifact or check summarized by this markdown.", "", "For `qa_engineer` reviews on tasks with `playwright_required = true`, cite Playwright evidence refs here, including the desktop/mobile coverage and any browser artifact paths or runtime evidence refs used to support approval."),
+    ...section("## Verification evidence", "List exact commands, fixtures, or repro steps used for this gate.", "", "When `Provenance status` is `runtime_verified` for `specialist_verified` work, include at least one `Runtime proof:` line here that names the authenticated runtime artifact or check summarized by this markdown.", "", "For `qa_engineer` reviews on tasks with `playwright_required = true`, cite Playwright evidence refs here, including the desktop/mobile coverage and any browser artifact paths or runtime evidence refs used to support approval.", "", "For `reviewer` and `qa_engineer` reviews on tasks with `completion_audit_required`, include a completion-audit statement here that confirms the touched scope is complete, clean, and has no unresolved in-scope follow-up work."),
     ...section("## Waiver authority", `\`${joinValues(reviewWaiverAuthorities)}\``),
     "Use `none` for `pending`, `passed`, and `blocked` reviews. Use `manager` for waived `reviewer` or `qa_engineer` gates recorded by `planner` or `solution_architect`. Use `security_exception` for waived `security_reviewer` gates recorded by `security_reviewer`.",
     "",
@@ -397,9 +445,27 @@ export function renderTaskPacketTemplate(): string {
       "",
       workflowArtifactRefFormatIntroLine,
       "",
-      ...buildWorkflowArtifactRefExampleLines("<task-id>"),
+      ...buildWorkflowTaskTemplateArtifactRefExampleLines("<task-id>"),
       "",
-      workflowReviewExportsRuntimeOptionalGuidanceLine
+      workflowReviewExportsAllowedValuesGuidanceLine,
+      "",
+      workflowReviewExportsRuntimeOptionalGuidanceLine,
+      "",
+      workflowReviewExportsScopeAlignmentGuidanceLine
+    ),
+    ...section(
+      workflowTaskPacketExportPolicyHeading,
+      workflowTaskPacketExportRequiredLine,
+      "",
+      workflowTaskPacketReviewExportsRequiredLine,
+      "",
+      workflowTaskPacketReviewExportsRuntimeOptionalLine,
+      "",
+      workflowTaskPacketRequiredExportsValidationLine,
+      "",
+      workflowTaskPacketProductStateAdvisoryLine,
+      "",
+      workflowTaskPacketExportBlockingLine
     ),
     ...section("## Council review", "Declare the council state for this task."),
     ...section("### Required", `\`${joinValues(workflowCouncilRequiredStates)}\``),
@@ -428,6 +494,10 @@ export function renderTaskPacketTemplate(): string {
     ...section("### Open questions"),
     ...section("### Verification plan"),
     ...section("### Research and debug budgets"),
+    ...section("## Completion audit", `${workflowSpecialistVerifiedCompletionAuditRequirementLine}.`),
+    ...section("### Audit claim", "State what must be true for the task to count as actually complete, not merely green on tests."),
+    ...section("### Audit evidence expectations", "List the evidence that reviewer and QA outputs must cite to prove the touched scope is complete, clean, and free of unresolved in-scope follow-up work."),
+    ...section("### Loop-back trigger", "State the condition that forces the task back to implementation instead of allowing review approval, for example uncovered edge cases, polish gaps, stale TODOs, or user-visible incompleteness."),
     ...section("## Reasoning policy"),
     ...section("### Mode", `\`${joinValues(reasoningWorkflowModes)}\``),
     "Use `strict` by default. Use `dual` or `legacy` only when compatibility needs are explicit.",

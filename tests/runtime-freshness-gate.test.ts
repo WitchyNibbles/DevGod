@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assessFreshness, runWithFreshnessGate } from "../src/index.ts";
+import { assessFreshness, runWithFreshnessGate } from "../src/runtime/freshness-gate.ts";
 
 test("assessFreshness returns fresh for recent timestamps", () => {
   const result = assessFreshness(

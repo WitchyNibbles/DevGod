@@ -1,33 +1,79 @@
 {
-  "project_status": "approved",
-  "current_task_id": null,
+  "project_status": "in_progress",
+  "current_task_id": "2026-06-12-devgod-autonomous-team-repair",
   "tasks": [
     {
-      "id": "2026-06-08-completion-audit-closeout-hardening",
-      "title": "Completion-audit closeout hardening",
-      "status": "done",
+      "id": "2026-06-12-devgod-autonomous-team-repair",
+      "title": "Autonomous-team repair track activation, gate restoration, runtime/export semantics, status contradiction repair, package boundary stabilization, and raw CLI coupling removal",
+      "status": "in_progress",
       "class": "prototype_slice",
       "depends_on": [],
       "acceptance_criteria": [
-        "specialist-verified work requires explicit completion-audit evidence",
-        "reviewer and QA gates block false-complete closeout claims",
-        "exported queues preserve approved separately from done"
+        "clarified autonomous-team product direction is recorded in roadmap and workflow artifacts",
+        "runtime DB authority is preserved as canonical",
+        "Phase 1 quality and workflow red gates are reproduced before repair",
+        "Phase 1 maintainer quality gates pass after repair",
+        "Phase 2.1 defines runtime records as canonical and markdown/status files as required or advisory export artifacts",
+        "live workflow checks require non-empty completion-audit export sections for specialist_verified and completion_audit_required tasks",
+        "status and ops surfaces report approved-task export obligations and concrete repair actions for stale or invalid exports",
+        "stale approved trace-mining task exports are repaired without changing runtime approval authority",
+        "existing approved trace-mining task remains preserved in queue history",
+        "public package metadata exposes stable JS import and bin entrypoints",
+        "downstream installer scripts and workflow contract text use the public devgod command instead of raw node_modules TypeScript paths",
+        "packed install can import devgod and run the devgod bin",
+        "managed install and test surfaces do not depend on checkout-specific absolute paths or raw devgod source paths",
+        "package-surface tests validate the generated dist index artifact and staged pack output instead of only in-memory renderer output"
       ],
       "verification": [
-        "npm run typecheck",
-        "node --experimental-strip-types --test tests/admin.test.ts tests/workflow-check.test.ts tests/contracts.test.ts tests/task-queue-repair.test.ts"
+        "git diff --check -- docs/plans/2026-06-12-devgod-repair-roadmap.md .devgod/work/briefs/brief-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/task-queue.json .devgod/work/product-state.md",
+        "npm run check:coverage",
+        "npm run verify:workflow-schema",
+        "node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-integrity.test.ts tests/workflow-check.test.ts",
+        "node --experimental-strip-types --test tests/status-report.test.ts tests/ops-recovery.test.ts tests/workflow-integrity.test.ts",
+        "npm run devgod -- status --format text",
+        "bash scripts/check-devgod-workflow.sh --repo-root <temporary-export-root> --task-id 2026-06-08-consuming-repo-skill-evolution-trace-mining",
+        "bash scripts/check-devgod-workflow.sh --live --external-review-authority --repo-root <temporary-export-root> --task-id 2026-06-08-consuming-repo-skill-evolution-trace-mining",
+        "rg -n 'node_modules/devgod/src/admin/devgod|devgod/src/index|from \"devgod/src|\"./src/index.ts\"|\"./src/admin/devgod.ts\"' package.json src/install tests dist src/devgod || true",
+        "node --experimental-strip-types --test tests/types-modules.test.ts tests/install.test.ts",
+        "npm run verify:package-surface",
+        "npm pack --dry-run",
+        "bash scripts/check-devgod-workflow.sh --task-id 2026-06-12-devgod-autonomous-team-repair",
+        "bash scripts/check-devgod-workflow-live.sh --repo-root . --task-id 2026-06-12-devgod-autonomous-team-repair",
+        "npm run check:quality",
+        "rg -n 'node_modules/devgod/src/|devgod/src/index\\.ts|\\.\\./src/public\\.ts' src tests scripts package.json .devgod/templates || true",
+        "node --experimental-strip-types --test tests/mcp-tools.test.ts tests/cli-surface-coverage.test.ts"
       ],
       "evidence": [
-        "task packet: 2026-06-08-completion-audit-closeout-hardening",
-        "verification: npm run typecheck",
-        "verification: node --experimental-strip-types --test tests/admin.test.ts tests/workflow-check.test.ts tests/contracts.test.ts tests/task-queue-repair.test.ts"
+        "roadmap: docs/plans/2026-06-12-devgod-repair-roadmap.md",
+        "brief: .devgod/work/briefs/brief-2026-06-12-devgod-autonomous-team-repair.md",
+        "task packet: .devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md",
+        "maintainer clarification: 2026-06-12 autonomous-team definition",
+        "verification: npm run check:quality passed on 2026-06-12 after Phase 1 gate restoration",
+        "verification: npm run verify:workflow-schema passed after Phase 2.1 runtime/export semantics integration",
+        "verification: focused Phase 2.1 tests passed with 63 tests and 0 failures",
+        "verification: npm run check:quality passed after Phase 2.1 integration with branch coverage 80.16%",
+        "verification: focused Phase 2.2 tests passed with 79 tests and 0 failures",
+        "verification: npm run devgod -- status --format text surfaced derived taskProofObligations for stale approved trace-mining exports",
+        "verification: npm run check:quality passed after Phase 2.2 integration",
+        "verification: repaired trace-mining export set passed artifact and live external-review checks in a temporary export root",
+        "verification: npm run devgod -- status --format text now reports the trace-mining taskProofObligations entry as valid",
+        "verification: Phase 3.1 package-boundary audit loop approved with residual risk for JS bridge over shipped TypeScript internals",
+        "verification: no forbidden raw package-boundary references remain in package, install, test, dist, or src/devgod surfaces",
+        "verification: focused package-boundary tests passed with 70 tests and 0 failures",
+        "verification: npm run verify:package-surface passed after Phase 3.1 integration",
+        "verification: npm pack --dry-run passed and includes public JS dist entrypoints",
+        "verification: npm run check:quality passed after Phase 3.1 integration",
+        "verification: Phase 3.2 GPT-5.5 validation loop approved raw CLI coupling removal and generated artifact package-surface proof",
+        "verification: raw package-boundary scan found no node_modules/devgod/src, devgod/src/index.ts, or ../src/public.ts coupling after Phase 3.2 integration",
+        "verification: focused MCP and CLI-surface tests passed with 14 tests and 0 failures after Phase 3.2 integration",
+        "verification: npm run check:quality passed after Phase 3.2 integration"
       ],
       "blocker": null
     },
     {
       "id": "2026-06-08-consuming-repo-skill-evolution-trace-mining",
       "title": "Consuming-repo skill evolution trace-mining",
-      "status": "done",
+      "status": "approved",
       "class": "docs_only",
       "depends_on": [],
       "acceptance_criteria": [
@@ -46,7 +92,7 @@
         "verification: npm run typecheck",
         "verification: npm test"
       ],
-      "blocker": null
+      "blocker": "approved for completion; local export set repaired during Phase 2.3 and awaiting explicit closeout"
     }
   ]
 }

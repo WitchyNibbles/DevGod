@@ -79,7 +79,7 @@ export function deriveTaskQueueEvidence(input: {
 }): string[] {
   const evidence = [`task packet: ${input.taskId}`];
 
-  for (const step of input.verification) {
+  for (const step of uniqueNonEmptyItems(input.verification)) {
     evidence.push(`verification: ${step}`);
   }
 

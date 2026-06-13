@@ -44,6 +44,10 @@ const shippedPackagePluginRuntimeEntries = [
   "plugins/devgod/scripts/user-prompt-submit.mjs"
 ] as const;
 
+const shippedPackagePublishedEntrypointEntries = [
+  "dist/"
+] as const;
+
 const shippedPackageOperatorScriptEntries = [
   "scripts/check-devgod-branch-name.sh",
   "scripts/check-devgod-commit-msg.sh",
@@ -84,6 +88,7 @@ const shippedPackageRuntimeSourceEntries = [
   "src/install/types.ts",
   "src/install/verify-git-guard.ts",
   "src/mcp/",
+  "src/public.ts",
   "src/runtime/",
   "src/sql/migrations/",
   "src/store/",
@@ -116,6 +121,12 @@ function listShippedPackageStaticOwnershipGroups(): CanonicalPackageOwnershipGro
       title: "Codex plugin runtime assets",
       rationale: "Plugin descriptors and hook entrypoints that power the shipped control-layer behavior.",
       entries: [...shippedPackagePluginRuntimeEntries]
+    },
+    {
+      id: "published_entrypoints",
+      title: "Published JavaScript entrypoints",
+      rationale: "Stable runtime JS entrypoints that installed consumers execute through package exports and bin metadata.",
+      entries: [...shippedPackagePublishedEntrypointEntries]
     },
     {
       id: "operator_scripts",

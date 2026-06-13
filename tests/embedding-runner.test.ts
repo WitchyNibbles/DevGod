@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEmbeddingText, runEmbeddingJobs } from "../src/index.ts";
 import type { MemoryEntryRecord } from "../src/domain/types.ts";
+import { buildEmbeddingText, runEmbeddingJobs } from "../src/runtime/embedding-runner.ts";
 import { MemoryStore } from "../src/store/memory-store.ts";
 import type { EmbeddingJobRecord } from "../src/store/types.ts";
 

@@ -2,16 +2,59 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { installDevgodIntoProject } from "../src/install/cli.ts";
-import { workflowTemplateReviewRoles } from "../src/devgod/workflow-schema.ts";
+import {
+  buildWorkflowArtifactRefExampleLines,
+  buildWorkflowSchemaArtifact,
+  getWorkflowReviewFilenameAlias,
+  renderReviewGatePolicyDocument,
+  renderTaskPacketTemplate,
+  workflowTemplateReviewRoles
+} from "../src/devgod/workflow-schema.ts";
 import { buildCoverageLedgerArtifacts } from "../src/runtime/coverage-ledger.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+test("workflow schema helpers expose stable review filenames and artifact examples", () => {
+  assert.equal(getWorkflowReviewFilenameAlias("reviewer"), "reviewer");
+  assert.equal(getWorkflowReviewFilenameAlias("qa_engineer"), "qa");
+  assert.equal(getWorkflowReviewFilenameAlias("security_reviewer"), "security");
+  assert.throws(
+    () => getWorkflowReviewFilenameAlias("planner" as never),
+    /missing review filename alias for role planner/
+  );
+
+  assert.deepEqual(buildWorkflowArtifactRefExampleLines("task-123"), [
+    "brief=.devgod/work/briefs/brief-task-123.md",
+    "plan=.devgod/work/plans/plan-task-123.md",
+    "task=.devgod/work/tasks/task-task-123.md",
+    "reviewer=.devgod/work/reviews/review-task-123-reviewer.md",
+    "qa_engineer=.devgod/work/reviews/review-task-123-qa_engineer.md",
+    "security_reviewer=.devgod/work/reviews/review-task-123-security_reviewer.md",
+    "review_exports=required | runtime_optional"
+  ]);
+});
+
+test("workflow schema renderers keep review/export policy guidance in generated documents", () => {
+  const schema = buildWorkflowSchemaArtifact();
+  assert.ok(schema.workflowArtifactRefExampleLines.includes("review_exports=required | runtime_optional"));
+  assert.ok(schema.strongerArtifactQualityGates.includes("coverage_ledger_required"));
+
+  const reviewPolicy = renderReviewGatePolicyDocument();
+  assert.match(reviewPolicy, /runtime task, review, approval, and council records are canonical truth/i);
+  assert.match(reviewPolicy, /review_exports=runtime_optional/i);
+
+  const taskPacketTemplate = renderTaskPacketTemplate();
+  assert.match(taskPacketTemplate, /## Workflow artifact refs/);
+  assert.match(taskPacketTemplate, /## Export artifact policy/);
+  assert.match(taskPacketTemplate, /## Allowed successor task scope/);
+  assert.match(taskPacketTemplate, /review_exports=runtime_optional/);
+});
 
 async function createInstalledWorkflowFixture(taskId: string, prefix: string): Promise<string> {
   const targetRoot = await mkdtemp(join(tmpdir(), prefix));
@@ -51,14 +94,15 @@ async function attachWorkflowProofStub(
   } = {}
 ): Promise<string> {
   const stubRoot = await mkdtemp(join(tmpdir(), "devgod-workflow-proof-stub-"));
-  await mkdir(join(stubRoot, "src", "admin"), { recursive: true });
+  const binPath = join(stubRoot, "dist", "bin", "devgod.js");
+  await mkdir(dirname(binPath), { recursive: true });
   await writeFile(
     join(stubRoot, "package.json"),
-    JSON.stringify({ name: "devgod", private: true, type: "module" }, null, 2) + "\n",
+    JSON.stringify({ name: "devgod", private: true, type: "module", bin: { devgod: "./dist/bin/devgod.js" } }, null, 2) + "\n",
     "utf8"
   );
   await writeFile(
-    join(stubRoot, "src", "admin", "devgod.ts"),
+    binPath,
     [
       'import { writeFileSync } from "node:fs";',
       'const args = process.argv.slice(2);',
@@ -88,6 +132,7 @@ async function attachWorkflowProofStub(
     ].join("\n"),
     "utf8"
   );
+  await chmod(binPath, 0o755);
 
   const packageJsonPath = join(targetRoot, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
@@ -110,6 +155,7 @@ async function writeLiveTaskPacket(
     qualityGates?: string[];
     verificationCommand?: string;
     omitSections?: string[];
+    emptySections?: string[];
     uiSurface?: "none" | "visual_change" | "interactive_flow";
     playwrightRequired?: boolean;
     reasoningMode?: "dual" | "strict";
@@ -125,6 +171,7 @@ async function writeLiveTaskPacket(
   const qualityGates = options?.qualityGates ?? ["product_acceptance"];
   const verificationCommand = options?.verificationCommand ?? "bash scripts/check-devgod-workflow-live.sh";
   const omitSections = new Set(options?.omitSections ?? []);
+  const emptySections = new Set(options?.emptySections ?? []);
   const uiSurface = options?.uiSurface;
   const playwrightRequired = options?.playwrightRequired;
   const reasoningMode = options?.reasoningMode;
@@ -132,6 +179,8 @@ async function writeLiveTaskPacket(
   const dependencies = options?.dependencies ?? ["- brief artifact"];
   const workflowArtifactRefs = options?.workflowArtifactRefs;
   const reviewExports = options?.reviewExports ?? "required";
+  const requiresCompletionAudit =
+    completionStandard === "specialist_verified" || qualityGates.includes("completion_audit_required");
   const workflowArtifactRefLines = [
     ...(workflowArtifactRefs?.brief ? [`brief=${workflowArtifactRefs.brief}`] : []),
     ...(workflowArtifactRefs?.plan ? [`plan=${workflowArtifactRefs.plan}`] : []),
@@ -184,6 +233,17 @@ async function writeLiveTaskPacket(
     ["### Open questions", ["- none"]],
     ["### Verification plan", [`- ${verificationCommand}`]],
     ["### Research and debug budgets", ["- researchSteps=1 debugSteps=1 reviewPasses=1 toolRetries=1"]],
+    ...(requiresCompletionAudit
+      ? ([
+          ["## Completion audit", ["`specialist_verified` work always requires `completion_audit_required` when this completion standard is used."]],
+          ["### Audit claim", ["- the touched scope is complete, clean, and actually done"]],
+          [
+            "### Audit evidence expectations",
+            ["- reviewer and QA evidence must state complete, clean, and no unresolved in-scope follow-up work"]
+          ],
+          ["### Loop-back trigger", ["- any unresolved in-scope follow-up work or stale TODO forces implementation to resume"]]
+        ] as Array<[string, string[]]>)
+      : []),
     ...(reasoningMode
       ? ([
           ["## Reasoning policy", []],
@@ -205,6 +265,7 @@ async function writeLiveTaskPacket(
 
   const content = sections
     .filter(([heading]) => !omitSections.has(heading))
+    .map(([heading, lines]) => [heading, emptySections.has(heading) ? [] : lines] as [string, string[]])
     .flatMap(([heading, lines]) => [heading, "", ...lines, ""])
     .join("\n");
 
@@ -543,6 +604,40 @@ test("check-devgod-workflow accepts a complete ACTIVE export when an explicit ta
   }
 });
 
+test("check-devgod-workflow reports idle repos clearly when no active task exists", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-IDLE-DEFAULT", "devgod-idle-default-");
+
+  try {
+    await writeFile(join(targetRoot, ".devgod", "ACTIVE"), "workflow=devgod\nstate=idle\n", "utf8");
+
+    const { stdout } = await execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot], {
+      cwd: repoRoot
+    });
+
+    assert.match(stdout, /"status":"idle"/);
+    assert.match(stdout, /Pass --task-id <task-id> to verify a specific task explicitly/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow reports completed repos clearly when no active task exists", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-COMPLETE-DEFAULT", "devgod-complete-default-");
+
+  try {
+    await writeFile(join(targetRoot, ".devgod", "ACTIVE"), "workflow=devgod\nstate=complete\n", "utf8");
+
+    const { stdout } = await execFileAsync("bash", ["scripts/check-devgod-workflow.sh", "--repo-root", targetRoot], {
+      cwd: repoRoot
+    });
+
+    assert.match(stdout, /"status":"complete"/);
+    assert.match(stdout, /Pass --task-id <task-id> to verify a specific task explicitly/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-workflow validates queue metadata when a task queue export is present", async () => {
   const taskId = "DG-QUEUE-METADATA";
   const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-queue-metadata-");
@@ -835,6 +930,36 @@ test("check-devgod-workflow-live rejects task packets missing required live sect
         cwd: targetRoot
       }),
       /missing heading ## Goal/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects repos that keep a plan but drop the required current task packet export", async () => {
+  const taskId = "DG-MISSING-TASK-PACKET";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-missing-task-packet-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId);
+    await mkdir(join(targetRoot, ".devgod", "work", "plans"), { recursive: true });
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "plans", `plan-${taskId}.md`),
+      `## Task ID\n\n\`${taskId}\`\n`,
+      "utf8"
+    );
+    await rm(join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`), { force: true });
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /live workflow requires current task artifact/
     );
   } finally {
     if (stubRoot) {
@@ -1263,6 +1388,116 @@ test("check-devgod-workflow-live rejects specialist_verified tasks without a str
         cwd: targetRoot
       }),
       /specialist_verified work requires at least one stronger artifact gate/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live rejects specialist_verified tasks without completion audit sections", async () => {
+  const taskId = "DG-LIVE-SPECIALIST-MISSING-AUDIT-SECTIONS";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-specialist-missing-audit-sections-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "specialist_verified",
+      qualityGates: [
+        "product_acceptance",
+        "completion_audit_required",
+        "reasoning_strict_required",
+        "progress_proof_required"
+      ],
+      reasoningMode: "strict",
+      omitSections: ["## Completion audit"]
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /missing heading ## Completion audit/
+    );
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+for (const heading of [
+  "## Completion audit",
+  "### Audit claim",
+  "### Audit evidence expectations",
+  "### Loop-back trigger"
+] as const) {
+  test(`check-devgod-workflow-live rejects blank content under ${heading}`, async () => {
+    const taskId = `DG-LIVE-BLANK-${heading.replace(/[^A-Z0-9]+/gi, "-").replace(/^-|-$/g, "").toUpperCase()}`;
+    const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-blank-audit-section-");
+    let stubRoot: string | undefined;
+
+    try {
+      stubRoot = await attachWorkflowProofStub(targetRoot);
+      await writeLiveTaskPacket(targetRoot, taskId, {
+        completionStandard: "specialist_verified",
+        qualityGates: [
+          "product_acceptance",
+          "completion_audit_required",
+          "reasoning_strict_required",
+          "progress_proof_required"
+        ],
+        reasoningMode: "strict",
+        emptySections: [heading]
+      });
+      for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+        await writeWorkflowReview(targetRoot, taskId, role);
+      }
+
+      const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await assert.rejects(
+        execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+          cwd: targetRoot
+        }),
+        new RegExp(`missing section content ${escapedHeading}`)
+      );
+    } finally {
+      if (stubRoot) {
+        await rm(stubRoot, { recursive: true, force: true });
+      }
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("check-devgod-workflow-live requires completion audit sections for artifact_complete tasks when the gate is enabled", async () => {
+  const taskId = "DG-LIVE-ARTIFACT-COMPLETE-AUDIT-GATE";
+  const targetRoot = await createInstalledWorkflowFixture(taskId, "devgod-live-artifact-complete-audit-gate-");
+  let stubRoot: string | undefined;
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot);
+    await writeLiveTaskPacket(targetRoot, taskId, {
+      completionStandard: "artifact_complete",
+      qualityGates: ["product_acceptance", "completion_audit_required", "progress_proof_required"],
+      emptySections: ["### Audit claim"]
+    });
+    for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+      await writeWorkflowReview(targetRoot, taskId, role);
+    }
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot
+      }),
+      /missing section content ### Audit claim/
     );
   } finally {
     if (stubRoot) {
@@ -2478,7 +2713,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
           "",
           "## Verification evidence",
           "",
-          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
+          "- completion audit completed: touched scope is complete, clean, and has no unresolved in-scope follow-up work",
           "- Runtime proof: review service recordReview review_id=rev-123 principal=github:alice",
           "- bash scripts/check-devgod-workflow.sh --task-id DG-RUNTIME-PROOF-PRESENT",
           "",
@@ -2488,7 +2723,7 @@ test("check-devgod-workflow accepts runtime_verified specialist summaries with r
           "",
           "## Quality gate evidence",
           "",
-          "- completion audit: complete, clean, no unresolved in-scope follow-up work",
+          "- completion audit completed: touched scope is complete, clean, and has no unresolved in-scope follow-up work",
           "- quality gates claimed in summary",
           "",
           "## Waiver authority",

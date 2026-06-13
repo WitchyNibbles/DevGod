@@ -129,9 +129,27 @@ task=.devgod/work/tasks/task-<task-id>.md
 reviewer=.devgod/work/reviews/review-<task-id>-reviewer.md
 qa_engineer=.devgod/work/reviews/review-<task-id>-qa_engineer.md
 security_reviewer=.devgod/work/reviews/review-<task-id>-security_reviewer.md
-review_exports=required | runtime_optional
+review_exports=runtime_optional
+
+Allowed values: `required | runtime_optional`.
 
 When `review_exports=runtime_optional`, the task must run under the runtime workflow contract and still cite release-readiness or other gate evidence in task verification artifacts or exported review summaries.
+
+Set `review_exports=required` only when the allowed write scope can actually update the referenced review artifacts; otherwise use `runtime_optional` or request the minimum safe scope expansion before execution.
+
+## Export artifact policy
+
+Task packet markdown is a required export artifact for live work and must remain present, current, and well-formed.
+
+Review markdown summaries are required when `review_exports=required`.
+
+Runtime-authenticated review authority may satisfy completion before markdown review summaries exist only when `review_exports=runtime_optional`.
+
+Required export artifacts must be present and validate under the workflow checker.
+
+`product-state.md` and `task-queue.json` are advisory export artifacts unless runtime writes or verifies them.
+
+Stale or malformed export artifacts can block release or workflow proof, but they cannot override authenticated runtime truth.
 
 ## Council review
 
@@ -223,7 +241,7 @@ For remake work, state which visible structures from the current surface are int
 
 ## Completion audit
 
-Required when `completion_audit_required` is present and recommended for all `specialist_verified` work.
+`specialist_verified` work always requires `completion_audit_required`.
 
 ### Audit claim
 

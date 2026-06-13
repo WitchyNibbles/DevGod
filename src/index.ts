@@ -41,3 +41,26 @@ export { PostgresStore } from "./store/postgres-store.ts";
 export { createHostedUiRequestHandler, startHostedUiServer } from "./ui/server.ts";
 export * from "./domain/contracts.ts";
 export * from "./domain/types.ts";
+
+type AdminModule = typeof import("./admin.ts");
+
+async function loadAdminModule(): Promise<AdminModule> {
+  return import("./admin.ts");
+}
+
+export const executeStatusCommandFromArgs: AdminModule["executeStatusCommandFromArgs"] = async (...args) => {
+  const admin = await loadAdminModule();
+  return admin.executeStatusCommandFromArgs(...args);
+};
+
+export const executeReportCommandFromArgs: AdminModule["executeReportCommandFromArgs"] = async (...args) => {
+  const admin = await loadAdminModule();
+  return admin.executeReportCommandFromArgs(...args);
+};
+
+export const executeSeedModernizationProofCommandFromArgs: AdminModule["executeSeedModernizationProofCommandFromArgs"] = async (
+  ...args
+) => {
+  const admin = await loadAdminModule();
+  return admin.executeSeedModernizationProofCommandFromArgs(...args);
+};

@@ -33,10 +33,12 @@ test("devgod autopilot guidance keeps iterating until verified completion", asyn
 });
 
 test("workflow templates encode clarification, regression, and risk-closure expectations", async () => {
+  const agents = await read("AGENTS.md");
   const intakeBrief = await read(".devgod/templates/intake-brief.md");
   const taskPacket = await read(".devgod/templates/task-packet.md");
   const reviewGate = await read(".devgod/templates/review-gate.md");
   const reviewGatePolicy = await read(".devgod/rules/review-gate-policy.md");
+  const policyPrecedence = await read(".devgod/rules/policy-precedence.md");
   const qualityMatrix = await read(".devgod/rules/task-quality-matrix.md");
   const reasoningQuality = await read(".devgod/rules/reasoning-quality.md");
 
@@ -62,12 +64,39 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(taskPacket, /## Required runtime traces/);
   assert.match(taskPacket, /## Progress proof/);
   assert.match(taskPacket, /## Workflow artifact refs/);
+  assert.match(taskPacket, /## Export artifact policy/);
+  assert.match(taskPacket, /Task packet markdown is a required export artifact/i);
+  assert.match(taskPacket, /Review markdown summaries are required when `review_exports=required`/i);
+  assert.match(taskPacket, /Runtime-authenticated review authority may satisfy completion before markdown review summaries exist only when `review_exports=runtime_optional`/i);
+  assert.match(taskPacket, /Required export artifacts must be present and validate under the workflow checker/i);
+  assert.match(taskPacket, /`product-state\.md` and `task-queue\.json` are advisory export artifacts unless runtime writes or verifies them/i);
+  assert.match(taskPacket, /Stale or malformed export artifacts can block release or workflow proof, but they cannot override authenticated runtime truth/i);
+  assert.doesNotMatch(taskPacket, /Runtime may generate or verify required task and review markdown exports/i);
   assert.match(taskPacket, /## Council review/);
   assert.match(taskPacket, /### Dissent owner/);
-  assert.match(taskPacket, /review_exports=required \| runtime_optional/);
+  assert.match(taskPacket, /review_exports=runtime_optional/);
+  assert.match(taskPacket, /Allowed values: `required \| runtime_optional`/);
+  assert.match(taskPacket, /Set `review_exports=required` only when the allowed write scope can actually update the referenced review artifacts/);
   assert.match(taskPacket, /## Playwright requirement/);
   assert.match(taskPacket, /## Browser evidence expectations/);
   assert.match(taskPacket, /## Residual risk disposition/);
+  assert.match(reviewGatePolicy, /`completion_audit_required`/);
+  assert.match(reviewGatePolicy, /runtime task, review, approval, and council records are canonical truth/i);
+  assert.match(reviewGatePolicy, /markdown task packets, markdown review summaries, `product-state\.md`, and `task-queue\.json` are export artifacts/i);
+  assert.match(reviewGatePolicy, /`review_exports=required` means markdown review summaries are required export evidence/i);
+  assert.match(reviewGatePolicy, /`review_exports=runtime_optional` means runtime-authenticated review records may satisfy completion before markdown review summaries exist/i);
+  assert.match(reviewGatePolicy, /`review_exports=runtime_optional` waives only markdown review-summary exports/i);
+  assert.match(reviewGatePolicy, /a task may declare `review_exports=required` only when its allowed write scope includes the referenced markdown review artifacts/i);
+  assert.doesNotMatch(reviewGatePolicy, /Runtime may generate or verify required task and review markdown exports/i);
+  assert.match(agents, /runtime_canonical_records=task,review,approval,council/);
+  assert.match(agents, /task_packet_export=required_live_export_present_and_valid/);
+  assert.match(agents, /review_export_optional_when=review_exports=runtime_optional/);
+  assert.match(agents, /product_state_export=advisory_unless_runtime_written_or_verified/);
+  assert.match(agents, /`review_exports=runtime_optional` under runtime authority.*waives only markdown review-summary exports/i);
+  assert.match(policyPrecedence, /authenticated runtime task, review, approval, and council records/i);
+  assert.match(policyPrecedence, /runtime-written or runtime-verified export artifacts/i);
+  assert.match(policyPrecedence, /manager-authored or generated markdown exports/i);
+  assert.match(policyPrecedence, /`product-state\.md` and `task-queue\.json` stay non-canonical unless runtime writes or verifies them/i);
 
   assert.match(qualityMatrix, /### `council_review_required`/);
   assert.match(qualityMatrix, /refactors and rewrites must preserve intended behavior/i);

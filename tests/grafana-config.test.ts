@@ -148,7 +148,7 @@ test("detectGrafanaRepoConfig distinguishes missing, partial, and managed script
           name: "fixture",
           private: true,
           scripts: {
-            "devgod:grafana:mcp": "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts"
+            "devgod:grafana:mcp": "devgod grafana-mcp"
           }
         },
         null,

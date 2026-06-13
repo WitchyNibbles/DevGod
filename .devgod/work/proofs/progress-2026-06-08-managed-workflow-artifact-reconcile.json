@@ -1,0 +1,34 @@
+{
+  "task_id": "2026-06-08-managed-workflow-artifact-reconcile",
+  "status": "approved_for_handoff",
+  "summary": "Managed workflow artifacts are reconciled, verification passed, the blocked closeout paths were added to the task scope, and the successor task was activated for continued delivery.",
+  "changed_paths": [
+    "src/devgod/workflow-schema.ts",
+    ".devgod/templates/task-packet.md",
+    ".devgod/templates/review-gate.md",
+    ".devgod/rules/review-gate-policy.md",
+    "tests/control-layer-contract.test.ts",
+    "tests/workflow-scaffold.test.ts",
+    ".devgod/work/tasks/task-2026-06-08-managed-workflow-artifact-reconcile.md",
+    ".devgod/work/tasks/task-2026-06-08-completion-audit-fixture-backfill.md",
+    ".devgod/ACTIVE",
+    ".devgod/work/task-queue.json",
+    ".devgod/work/product-state.md"
+  ],
+  "verification": [
+    {
+      "command": "npm run verify:workflow-schema",
+      "result": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-scaffold.test.ts",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Review markdown exports for 2026-06-08-managed-workflow-artifact-reconcile are still not authored; the scope blocker is removed, but explicit closeout evidence is still pending if the slice is revisited.",
+    "The installer-side scaffolding shim in src/install/cli.ts remains outside this task's original implementation scope, so downstream validation still depends on the canonical workflow-schema template change that the scaffold consumes."
+  ],
+  "blocker": null,
+  "next_recommended_task": "2026-06-08-completion-audit-fixture-backfill"
+}

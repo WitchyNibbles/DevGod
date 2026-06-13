@@ -31,9 +31,10 @@ resolve_devgod_cli() {
     return
   fi
 
-  local installed_cli="$repo_root/node_modules/devgod/src/admin/devgod.ts"
-  if [[ -f "$installed_cli" ]]; then
-    printf '%s\n' "$installed_cli"
+  local resolved_cli=""
+  resolved_cli="$(resolve_devgod_package_bin "$repo_root/node_modules/devgod")"
+  if [[ -n "$resolved_cli" ]]; then
+    printf '%s\n' "$resolved_cli"
     return
   fi
 
@@ -43,19 +44,18 @@ resolve_devgod_cli() {
     exit 1
   fi
 
-  local resolved_cli=""
   resolved_cli="$(
     node --input-type=module - "$package_json" "$repo_root" <<'EOF'
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const packageJsonPath = process.argv[2];
+const rootPackageJsonPath = process.argv[2];
 const repoRoot = process.argv[3];
-const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+const rootPackageJson = JSON.parse(readFileSync(rootPackageJsonPath, "utf8"));
 const dependency =
-  packageJson.devDependencies?.devgod ??
-  packageJson.dependencies?.devgod ??
-  packageJson.optionalDependencies?.devgod;
+  rootPackageJson.devDependencies?.devgod ??
+  rootPackageJson.dependencies?.devgod ??
+  rootPackageJson.optionalDependencies?.devgod;
 
 if (typeof dependency !== "string" || !dependency.startsWith("file:")) {
   process.exit(0);
@@ -63,8 +63,25 @@ if (typeof dependency !== "string" || !dependency.startsWith("file:")) {
 
 const rawPath = dependency.slice("file:".length);
 const resolvedRoot = path.resolve(repoRoot, rawPath);
-const cliPath = path.join(resolvedRoot, "src", "admin", "devgod.ts");
+const resolvedPackageJsonPath = path.join(resolvedRoot, "package.json");
 
+if (!existsSync(resolvedPackageJsonPath)) {
+  process.exit(0);
+}
+
+const resolvedPackageJson = JSON.parse(readFileSync(resolvedPackageJsonPath, "utf8"));
+const binEntry =
+  typeof resolvedPackageJson.bin === "string"
+    ? resolvedPackageJson.bin
+    : typeof resolvedPackageJson.bin?.devgod === "string"
+      ? resolvedPackageJson.bin.devgod
+      : null;
+
+if (!binEntry) {
+  process.exit(0);
+}
+
+const cliPath = path.resolve(resolvedRoot, binEntry);
 if (existsSync(cliPath)) {
   process.stdout.write(`${cliPath}\n`);
 }
@@ -78,6 +95,50 @@ EOF
 
   printf 'unable to resolve devgod CLI for runtime workflow proof from %s\n' "$repo_root" >&2
   exit 1
+}
+
+resolve_devgod_package_bin() {
+  local package_root="$1"
+  local package_json="$package_root/package.json"
+  if [[ ! -f "$package_json" ]]; then
+    return 0
+  fi
+
+  node --input-type=module - "$package_json" "$package_root" <<'EOF'
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
+const packageJsonPath = process.argv[2];
+const packageRoot = process.argv[3];
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+const binEntry =
+  typeof packageJson.bin === "string"
+    ? packageJson.bin
+    : typeof packageJson.bin?.devgod === "string"
+      ? packageJson.bin.devgod
+      : null;
+
+if (!binEntry) {
+  process.exit(0);
+}
+
+const cliPath = path.resolve(packageRoot, binEntry);
+if (existsSync(cliPath)) {
+  process.stdout.write(`${cliPath}\n`);
+}
+EOF
+}
+
+run_devgod_cli() {
+  local cli_path="$1"
+  shift
+
+  if [[ "$cli_path" == *.ts ]]; then
+    node --experimental-strip-types "$cli_path" "$@"
+    return
+  fi
+
+  node "$cli_path" "$@"
 }
 
 if [[ -z "$requested_task_id" ]]; then
@@ -105,7 +166,7 @@ fi
 
 devgod_cli="$(resolve_devgod_cli)"
 workflow_proof_json="$(
-  node --experimental-strip-types "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest --format json
+  run_devgod_cli "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest --format json
 )"
 
 proof_run_id="$(
@@ -119,7 +180,7 @@ EOF
 
 if [[ -n "$proof_run_id" ]]; then
   status_json="$(
-    node --experimental-strip-types "$devgod_cli" status --run-id "$proof_run_id" --format json
+    run_devgod_cli "$devgod_cli" status --run-id "$proof_run_id" --format json
   )"
   node --input-type=module - "$status_json" <<'EOF'
 const payload = JSON.parse(process.argv[2]);

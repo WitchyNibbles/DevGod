@@ -1,4 +1,6 @@
-import TOML from "@iarna/toml";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
 import {
   workflowArtifactRefHelperSummaryLine,
   workflowRequiredGateRolesPolicyLine,
@@ -20,7 +22,7 @@ product_state=project_runtime_state.product_state
 required_review_roles=reviewer,qa_engineer,security_reviewer
 release_candidate_quality_gate=release_readiness_required
 review_authority=runtime_authenticated_only
-workflow_check=node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts workflow-proof --run-id latest --task-id <task-id>
+workflow_check=devgod workflow-proof --run-id latest --task-id <task-id>
 workflow_check_scope=runtime_authority_only
 review_artifact_trust=runtime_records_only
 ci_scope=runtime_contract_and_export_regressions
@@ -138,6 +140,10 @@ interface GraphifyInstallSettings {
 }
 
 const enforcedCodexConfigKeys = ["approval_policy", "sandbox_mode"] as const;
+const require = createRequire(import.meta.url);
+function getTomlModule(): typeof import("@iarna/toml") {
+  return require("@iarna/toml") as typeof import("@iarna/toml");
+}
 
 function normalizeManagedCodexConfig(
   config: Record<string, unknown>
@@ -243,10 +249,13 @@ export function mergeCodexConfig(
   existingContent: string | undefined,
   sourceContent: string
 ): string {
+  const TOML = getTomlModule();
   const source = normalizeManagedCodexConfig(TOML.parse(sourceContent) as Record<string, unknown>);
+  const stringifyToml = (value: Record<string, unknown>): string =>
+    TOML.stringify(value as unknown as Parameters<typeof TOML.stringify>[0]);
 
   if (!existingContent || existingContent.trim().length === 0) {
-    return `${TOML.stringify(sortObjectKeys(source) as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
+    return `${stringifyToml(sortObjectKeys(source))}`.trimEnd() + "\n";
   }
 
   const target = TOML.parse(existingContent) as Record<string, unknown>;
@@ -273,7 +282,7 @@ export function mergeCodexConfig(
     return existingContent.endsWith("\n") ? existingContent : `${existingContent}\n`;
   }
 
-  return `${TOML.stringify(normalizedMerged as unknown as TOML.JsonMap)}`.trimEnd() + "\n";
+  return `${stringifyToml(normalizedMerged)}`.trimEnd() + "\n";
 }
 
 export function graphifyCodexConfigFragment(): string {
@@ -282,6 +291,272 @@ export function graphifyCodexConfigFragment(): string {
     'command = "uv"\n' +
     'args = ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]\n'
   );
+}
+
+function renderPublishedTypeScriptHookEntrypoint(): string {
+  return `import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { registerHooks, stripTypeScriptTypes } from "node:module";
+
+const packageRootUrl = new URL("../", import.meta.url);
+const packageRootPath = fileURLToPath(packageRootUrl);
+const registeredPackageRoots = new Set();
+
+export function resolveDevgodPackagePath(relativePath) {
+  return path.resolve(packageRootPath, relativePath);
+}
+
+export function registerDevgodTypeScriptHooks() {
+  const packageRootHref = pathToFileURL(\`\${packageRootPath}\${path.sep}\`).href;
+  if (registeredPackageRoots.has(packageRootHref)) {
+    return;
+  }
+
+  registerHooks({
+    load(url, context, nextLoad) {
+      if (url.startsWith(packageRootHref) && url.endsWith(".ts")) {
+        const source = readFileSync(fileURLToPath(url), "utf8");
+        return {
+          format: "module",
+          shortCircuit: true,
+          source: stripTypeScriptTypes(source, { mode: "transform", sourceUrl: url })
+        };
+      }
+
+      return nextLoad(url, context);
+    }
+  });
+
+  registeredPackageRoots.add(packageRootHref);
+}
+
+export async function importDevgodTypeScriptModule(relativePath, argv = []) {
+  registerDevgodTypeScriptHooks();
+  const targetPath = resolveDevgodPackagePath(relativePath);
+  const originalArgv = process.argv;
+  process.argv = [process.argv[0] ?? process.execPath, targetPath, ...argv];
+
+  try {
+    return await import(pathToFileURL(targetPath).href);
+  } finally {
+    process.argv = originalArgv;
+  }
+}
+`;
+}
+
+function collectReExportedNames(sourceText: string): { valueExports: string[]; typeExports: string[] } {
+  const valueExports = new Set<string>();
+  const typeExports = new Set<string>();
+
+  for (const match of sourceText.matchAll(/export\s*\{([\s\S]*?)\}\s*from\s*"[^"]+";/g)) {
+    const entries = match[1]
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    for (const entry of entries) {
+      if (entry.startsWith("type ")) {
+        typeExports.add(entry.slice("type ".length).trim());
+        continue;
+      }
+
+      valueExports.add(entry);
+    }
+  }
+
+  return {
+    valueExports: [...valueExports].sort(),
+    typeExports: [...typeExports].sort()
+  };
+}
+
+function collectLazyAdminWrapperExports(sourceText: string): string[] {
+  return [
+    ...new Set(
+      [...sourceText.matchAll(/^export const (\w+): AdminModule\["\w+"\] = async /gm)].map((match) => match[1])
+    )
+  ].sort();
+}
+
+export function collectPublishedPublicValueExports(sourceText: string): string[] {
+  const { valueExports } = collectReExportedNames(sourceText);
+  return [...new Set([...valueExports, ...collectLazyAdminWrapperExports(sourceText)])].sort();
+}
+
+export function renderPublishedIndexEntrypoint(publicSourceText: string): string {
+  const exportLines = collectPublishedPublicValueExports(publicSourceText)
+    .map((name) => `export const ${name} = publicApi.${name};`)
+    .join("\n");
+
+  return `import { importDevgodTypeScriptModule, registerDevgodTypeScriptHooks } from "./register-typescript-hooks.js";
+
+registerDevgodTypeScriptHooks();
+
+const publicApi = await importDevgodTypeScriptModule("src/public.ts");
+
+${exportLines}
+`;
+}
+
+function renderPublishedBinEntrypoint(): string {
+  return `#!/usr/bin/env node
+
+import process from "node:process";
+import { importDevgodTypeScriptModule, registerDevgodTypeScriptHooks } from "../register-typescript-hooks.js";
+
+const adminCommands = new Set([
+  "migrate",
+  "health",
+  "doctor",
+  "bootstrap-project",
+  "verify-setup",
+  "verify-live-migrations",
+  "refresh-retrieval",
+  "refresh-repo-context",
+  "repair-task-queue",
+  "run-embedding-jobs",
+  "verify-review-identity",
+  "record-review",
+  "record-council-decision",
+  "status",
+  "coverage",
+  "gaps",
+  "checkpoint",
+  "resume",
+  "workflow-proof",
+  "seed-workflow-proof",
+  "seed-modernization-proof",
+  "advance-active-task",
+  "reconcile-runtime-state",
+  "sync-runtime-exports",
+  "daemon",
+  "supervisor",
+  "supervisor-history",
+  "ops",
+  "loop",
+  "recover",
+  "index-repo-markdown",
+  "report",
+  "plan-context",
+  "export-docs",
+  "/export-docs",
+  "github-dispatch"
+]);
+
+const installCommands = new Set([
+  "init",
+  "upgrade",
+  "verify",
+  "scaffold-workflow",
+  "upgrade-reasoning-workflow",
+  "seed-happy-path-fixture"
+]);
+
+const directCommandTargets = new Map([
+  ["autopilot-status", { modulePath: "src/devgod/autopilot-status.ts", stripCommand: true }],
+  ["setup-git-guard", { modulePath: "src/install/setup-git-guard.ts", stripCommand: true }],
+  ["verify-git-guard", { modulePath: "src/install/verify-git-guard.ts", stripCommand: true }],
+  ["setup-graphify", { modulePath: "src/install/setup-graphify.ts", stripCommand: true }],
+  ["setup-graphify-codex", { modulePath: "src/install/setup-graphify-codex.ts", stripCommand: true }],
+  ["setup-local", { modulePath: "src/install/setup-local.ts", stripCommand: true }],
+  ["setup-playwright", { modulePath: "src/install/setup-playwright.ts", stripCommand: true }],
+  ["mcp", { modulePath: "src/mcp/server.ts", stripCommand: true }],
+  ["serve-ui", { modulePath: "src/ui/server.ts", stripCommand: true }],
+  ["grafana-mcp", { modulePath: "src/grafana/mcp-server.ts", stripCommand: true }]
+]);
+
+function printUsage() {
+  process.stdout.write(
+    [
+      "devgod",
+      "",
+      "Stable public CLI entrypoint for the devgod package.",
+      "",
+      "Usage:",
+      "  devgod <runtime-command> [args]",
+      "  devgod <install-command> [args]",
+      "  devgod <helper-command> [args]",
+      "",
+      "Runtime commands:",
+      "  status | coverage | gaps | checkpoint | resume | workflow-proof | seed-workflow-proof | seed-modernization-proof | advance-active-task | reconcile-runtime-state | sync-runtime-exports | daemon | supervisor | supervisor-history | ops | loop | recover | report | plan-context | export-docs | github-dispatch",
+      "  migrate | health | doctor [--repair] | bootstrap-project | verify-setup | verify-live-migrations",
+      "  verify-review-identity | record-review | record-council-decision | index-repo-markdown | refresh-retrieval | refresh-repo-context | repair-task-queue | run-embedding-jobs",
+      "",
+      "Install commands:",
+      "  init | upgrade | verify | scaffold-workflow | upgrade-reasoning-workflow | seed-happy-path-fixture",
+      "",
+      "Helper commands:",
+      "  autopilot-status | setup-git-guard | verify-git-guard | setup-graphify | setup-graphify-codex | setup-local | setup-playwright | mcp | serve-ui | grafana-mcp",
+      ""
+    ].join("\\n")
+  );
+}
+
+async function main() {
+  registerDevgodTypeScriptHooks();
+
+  const [command, ...rest] = process.argv.slice(2);
+  if (!command || command === "help" || command === "--help" || command === "-h") {
+    printUsage();
+    return;
+  }
+
+  if (adminCommands.has(command)) {
+    await importDevgodTypeScriptModule("src/admin.ts", [command, ...rest]);
+    return;
+  }
+
+  if (installCommands.has(command)) {
+    await importDevgodTypeScriptModule("src/install/cli.ts", [command, ...rest]);
+    return;
+  }
+
+  const directTarget = directCommandTargets.get(command);
+  if (directTarget) {
+    await importDevgodTypeScriptModule(directTarget.modulePath, directTarget.stripCommand ? rest : [command, ...rest]);
+    return;
+  }
+
+  throw new Error(\`Unknown devgod command: \${command}\`);
+}
+
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(message);
+  process.exitCode = 1;
+});
+`;
+}
+
+async function writePublishedPackageFile(
+  filePath: string,
+  content: string,
+  options: { executable?: boolean } = {}
+): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+  if (options.executable) {
+    await chmod(filePath, 0o755);
+  }
+}
+
+export async function writePublishedPackageEntrypoints(packageRoot: string): Promise<void> {
+  const outputRoot = path.resolve(packageRoot, "dist");
+  const publicSourcePath = path.join(packageRoot, "src", "public.ts");
+  const publicSourceText = await readFile(publicSourcePath, "utf8");
+  await writePublishedPackageFile(
+    path.join(outputRoot, "register-typescript-hooks.js"),
+    renderPublishedTypeScriptHookEntrypoint()
+  );
+  await writePublishedPackageFile(
+    path.join(outputRoot, "index.js"),
+    renderPublishedIndexEntrypoint(publicSourceText)
+  );
+  await writePublishedPackageFile(path.join(outputRoot, "bin", "devgod.js"), renderPublishedBinEntrypoint(), {
+    executable: true
+  });
 }
 
 export function playwrightCodexConfigFragment(): string {
@@ -299,7 +574,7 @@ export function grafanaCodexConfigFragment(): string {
   return (
     '[mcp_servers.grafana]\n' +
     'command = "node"\n' +
-    'args = ["--experimental-strip-types", "./node_modules/devgod/src/grafana/mcp-server.ts"]\n'
+    'args = ["./node_modules/devgod/dist/bin/devgod.js", "grafana-mcp"]\n'
   );
 }
 
@@ -362,8 +637,7 @@ export function mergePackageJson(
       ? { ...(packageJson.devDependencies as Record<string, string>) }
       : {};
 
-  const devgodEntry =
-    "node --experimental-strip-types ./node_modules/devgod/src/admin/devgod.ts";
+  const devgodEntry = "devgod";
 
   scripts["devgod"] = devgodEntry;
   scripts["devgod:migrate"] = `${devgodEntry} migrate`;
@@ -397,7 +671,7 @@ export function mergePackageJson(
   scripts["devgod:repair-task-queue"] = `${devgodEntry} repair-task-queue`;
   scripts["devgod:export-docs"] = `${devgodEntry} export-docs`;
   scripts["devgod:autopilot-status"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/devgod/autopilot-status.ts";
+    `${devgodEntry} autopilot-status`;
   scripts["devgod:github-dispatch"] = `${devgodEntry} github-dispatch --target .`;
   scripts["devgod:mcp"] = `${devgodEntry} mcp`;
   scripts["devgod:ui"] = `${devgodEntry} serve-ui`;
@@ -409,20 +683,20 @@ export function mergePackageJson(
   scripts["devgod:verify:migrations:live"] = `${devgodEntry} verify-live-migrations`;
   scripts["devgod:verify:review-identity"] = `${devgodEntry} verify-review-identity`;
   scripts["devgod:verify:git-guard"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/verify-git-guard.ts";
+    `${devgodEntry} verify-git-guard`;
   scripts["devgod:record-review"] = `${devgodEntry} record-review --input .devgod/review-action.json`;
   scripts["devgod:setup:git-guard"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-git-guard.ts";
+    `${devgodEntry} setup-git-guard`;
   scripts["devgod:setup:graphify"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify.ts";
-  scripts["devgod:setup:local"] = "node --experimental-strip-types ./node_modules/devgod/src/install/setup-local.ts";
+    `${devgodEntry} setup-graphify`;
+  scripts["devgod:setup:local"] = `${devgodEntry} setup-local`;
   scripts["devgod:setup:playwright"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts";
+    `${devgodEntry} setup-playwright`;
   scripts["devgod:verify:playwright"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-playwright.ts --verify";
+    `${devgodEntry} setup-playwright --verify`;
   scripts["devgod:graphify:build"] = "graphify extract src --out .";
   scripts["devgod:graphify:codex-full"] =
-    "node --experimental-strip-types ./node_modules/devgod/src/install/setup-graphify-codex.ts";
+    `${devgodEntry} setup-graphify-codex`;
   scripts["devgod:graphify:update"] = "graphify extract src --out .";
   scripts["devgod:graphify:watch"] = "graphify watch src";
   scripts["devgod:graphify:serve"] =
@@ -430,7 +704,7 @@ export function mergePackageJson(
 
   if (options.withGrafana) {
     scripts["devgod:grafana:mcp"] =
-      "node --experimental-strip-types ./node_modules/devgod/src/grafana/mcp-server.ts";
+      `${devgodEntry} grafana-mcp`;
   }
 
   devDependencies.devgod = prefixedFileDependency(dependencyPathFromTarget);

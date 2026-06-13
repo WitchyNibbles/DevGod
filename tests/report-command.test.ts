@@ -22,15 +22,22 @@ function isoHoursAgo(hours: number): string {
 }
 
 function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
+  const completionStandard = overrides.completionStandard ?? "specialist_verified";
+  const qualityGates: TaskPacketInput["qualityGates"] = overrides.qualityGates ?? ["product_acceptance"];
+  const normalizedQualityGates: TaskPacketInput["qualityGates"] =
+    completionStandard === "specialist_verified" && !qualityGates.includes("completion_audit_required")
+      ? [...qualityGates, "completion_audit_required"]
+      : qualityGates;
+
   return {
     taskId: overrides.taskId ?? "task-1",
     title: overrides.title ?? "Create task graph",
     ownerRole: overrides.ownerRole ?? "planner",
-    completionStandard: overrides.completionStandard ?? "specialist_verified",
+    completionStandard,
     requiredSpecialistRoles:
       overrides.requiredSpecialistRoles ??
       [((overrides.ownerRole ?? "planner") as TaskPacketInput["requiredSpecialistRoles"][number])],
-    qualityGates: overrides.qualityGates ?? ["product_acceptance"],
+    qualityGates: normalizedQualityGates,
     goal: overrides.goal ?? "Build task graph",
     inputs: overrides.inputs ?? ["intake brief"],
     outputs: overrides.outputs ?? ["task packets"],
@@ -99,6 +106,21 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
     }
   };
 }
+
+test("report taskPacket auto-adds completion audit only for specialist_verified defaults", () => {
+  const defaultPacket = taskPacket();
+  const explicitGatePacket = taskPacket({
+    qualityGates: ["product_acceptance", "completion_audit_required"]
+  });
+  const artifactCompletePacket = taskPacket({
+    completionStandard: "artifact_complete",
+    qualityGates: ["product_acceptance"]
+  });
+
+  assert.deepEqual(defaultPacket.qualityGates, ["product_acceptance", "completion_audit_required"]);
+  assert.deepEqual(explicitGatePacket.qualityGates, ["product_acceptance", "completion_audit_required"]);
+  assert.deepEqual(artifactCompletePacket.qualityGates, ["product_acceptance"]);
+});
 
 function createService(store: MemoryStore = new MemoryStore()) {
   const registeredContexts = new Map<string, ReviewActionContext>();
@@ -308,6 +330,37 @@ test("executeReportCommandFromArgs builds an evidence report with timeline and g
   assert.match(markdown, /strict tasks:/);
   assert.match(markdown, /reasoning-quality: pass/);
   assert.match(markdown, /approval_recorded task=`plan`/);
+  assert.match(markdown, /## Alerts\s+\n- none/);
+  assert.match(markdown, /## Loop History\s+\n- none/);
+});
+
+test("executeReportCommandFromArgs rejects invalid stale-after-hours values before resolving report dependencies", async () => {
+  await assert.rejects(
+    executeReportCommandFromArgs(["--run-id", "run-1", "--stale-after-hours", "bad"], {
+      getStatusSnapshot() {
+        assert.fail("report command should validate stale-after-hours before loading runtime status");
+      },
+      getExecutionPlan() {
+        assert.fail("report command should validate stale-after-hours before loading execution plans");
+      },
+      getRoutingReport() {
+        assert.fail("report command should validate stale-after-hours before loading routing data");
+      },
+      inspectRecovery() {
+        assert.fail("report command should validate stale-after-hours before loading recovery data");
+      },
+      getHandoffs() {
+        assert.fail("report command should validate stale-after-hours before loading handoffs");
+      },
+      getReviews() {
+        assert.fail("report command should validate stale-after-hours before loading reviews");
+      },
+      getApprovals() {
+        assert.fail("report command should validate stale-after-hours before loading approvals");
+      }
+    }),
+    /Invalid --stale-after-hours value: bad/
+  );
 });
 
 test("executeReportCommandFromArgs includes autonomous coverage, gap, checkpoint, and resume summaries", async () => {

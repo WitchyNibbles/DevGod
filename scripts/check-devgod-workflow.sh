@@ -436,8 +436,11 @@ extract_section_value() {
   local heading="$1"
   local path="$2"
   awk -v heading="$heading" '
+    function is_heading(line) {
+      return line ~ /^#+[[:space:]]+/
+    }
     $0 == heading { in_section=1; next }
-    in_section && /^## / { exit }
+    in_section && is_heading($0) { exit }
     in_section && NF {
       gsub(/\r/, "", $0)
       print
@@ -450,8 +453,11 @@ extract_section_block() {
   local heading="$1"
   local path="$2"
   awk -v heading="$heading" '
+    function is_heading(line) {
+      return line ~ /^#+[[:space:]]+/
+    }
     $0 == heading { in_section=1; next }
-    in_section && /^## / { exit }
+    in_section && is_heading($0) { exit }
     in_section {
       gsub(/\r/, "", $0)
       print
@@ -757,7 +763,8 @@ else
   elif [[ -n "$exported_task_id" ]]; then
     task_id="$exported_task_id"
   else
-    fail "non-active .devgod/ACTIVE requires --task-id"
+    printf '%s\n' "{\"status\":\"$active_state\",\"message\":\"devgod workflow is $active_state; no active task to verify. Pass --task-id <task-id> to verify a specific task explicitly.\"}"
+    exit 0
   fi
 fi
 
@@ -846,10 +853,12 @@ else
 fi
 
 task_completion_standard="artifact_complete"
+task_quality_gates=()
 if [[ -f "$task_file" ]]; then
   require_section_equals "## Task ID" "$task_id" "$task_file"
   task_completion_standard="$(normalize_value "$(extract_section_value "## Completion standard" "$task_file")")"
   require_allowed_value "$task_completion_standard" "$task_file" "artifact_complete" "specialist_verified"
+  mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
 
   if grep -Fq "## Workflow artifact refs" "$task_file"; then
     mapfile -t workflow_artifact_ref_keys < <(load_schema_list "workflow-artifact-ref-keys")
@@ -974,6 +983,24 @@ if [[ "$live_mode" -eq 1 ]]; then
     require_nonempty_section_block "$heading" "$task_file"
   done
 
+  if [[ "$task_completion_standard" == "specialist_verified" ]] || printf '%s\n' "${task_quality_gates[@]}" | grep -Fxq "completion_audit_required"; then
+    for heading in \
+      "## Completion audit" \
+      "### Audit claim" \
+      "### Audit evidence expectations" \
+      "### Loop-back trigger"; do
+      require_heading "$heading" "$task_file"
+    done
+
+    for heading in \
+      "## Completion audit" \
+      "### Audit claim" \
+      "### Audit evidence expectations" \
+      "### Loop-back trigger"; do
+      require_nonempty_section_block "$heading" "$task_file"
+    done
+  fi
+
   required_reviews_block="$(extract_section_block "## Required reviews" "$task_file")"
   for required_role in "${schema_review_roles[@]}"; do
     printf '%s\n' "$required_reviews_block" | grep -Fq "$required_role" ||
@@ -994,7 +1021,6 @@ if [[ "$live_mode" -eq 1 ]]; then
 fi
 
 if [[ -f "$task_file" ]]; then
-  mapfile -t task_quality_gates < <(extract_list_items "## Quality gates" "$task_file")
   task_reasoning_mode="legacy"
   task_ui_surface="none"
   task_playwright_required="false"

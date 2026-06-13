@@ -1,6 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpToolDefinitions } from "../src/mcp/tools.ts";
+
+let executableImportSequence = 0;
+const repoRootPath = fileURLToPath(new URL("../", import.meta.url));
+const serverModuleUrl = new URL("../src/mcp/server.ts", import.meta.url);
+const serverEntrypointPath = fileURLToPath(serverModuleUrl);
+const inertEntrypointPath = fileURLToPath(new URL("../src/mcp/not-server.ts", import.meta.url));
+const originalArgv1ForLibraryImport = process.argv[1];
+process.argv[1] = inertEntrypointPath;
+const serverLibraryModule = await import(serverModuleUrl.href);
+process.argv[1] = originalArgv1ForLibraryImport;
+
+async function importServerModule(mode: string): Promise<void> {
+  executableImportSequence += 1;
+  await import(`${serverModuleUrl.href}?${mode}=${executableImportSequence}`);
+  await delay(0);
+}
+
+function buildCoverageNeutralChildEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NODE_V8_COVERAGE: ""
+  };
+}
 
 test("createMcpToolDefinitions wires status, ops, loop, report, and plan-context tools", async () => {
   const calls: Array<{ tool: string; args: readonly string[] }> = [];
@@ -207,4 +235,385 @@ test("MCP tools default to summary detail and allow full detail opt-in", async (
     totalResults: 9,
     summary: ["item-1", "item-2", "item-3"]
   });
+});
+
+test("createDevgodMcpServer registers every tool with MCP metadata", async () => {
+  const { createDevgodMcpServer } = serverLibraryModule;
+  const originalRegisterTool = McpServer.prototype.registerTool;
+  const registrations: Array<{
+    name: string;
+    config: Record<string, unknown>;
+    handler: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
+  }> = [];
+
+  McpServer.prototype.registerTool = ((name: string, config: Record<string, unknown>, handler?: (input: Record<string, unknown>) => Promise<unknown>) => {
+    registrations.push({
+      name,
+      config,
+      handler
+    });
+    return undefined as never;
+  }) as unknown as typeof McpServer.prototype.registerTool;
+
+  try {
+    createDevgodMcpServer({
+      async status() {
+        return { ok: true };
+      },
+      async runtimeHealth() {
+        return { ok: true };
+      },
+      async ops() {
+        return { ok: true };
+      },
+      async loop() {
+        return { ok: true };
+      },
+      async report() {
+        return { ok: true };
+      },
+      async planContext() {
+        return { ok: true };
+      }
+    });
+  } finally {
+    McpServer.prototype.registerTool = originalRegisterTool;
+  }
+
+  assert.deepEqual(
+    registrations.map((registration) => registration.name),
+    ["devgod_status", "devgod_runtime_health", "devgod_ops", "devgod_loop", "devgod_report", "devgod_plan_context"]
+  );
+  assert.ok(
+    registrations.every(
+      (registration) =>
+        registration.config.title === registration.name &&
+        typeof registration.config.description === "string" &&
+        registration.config.description.length > 0 &&
+        typeof registration.config.inputSchema === "object" &&
+        registration.config.inputSchema !== null &&
+        Object.keys(registration.config.inputSchema as Record<string, unknown>).length > 0 &&
+        typeof registration.handler === "function"
+    )
+  );
+});
+
+test("createDevgodMcpServer registers the default runtime surfaces when runtime is omitted", async () => {
+  const { createDevgodMcpServer } = serverLibraryModule;
+  const originalRegisterTool = McpServer.prototype.registerTool;
+  const registrations: string[] = [];
+
+  McpServer.prototype.registerTool = ((name: string) => {
+    registrations.push(name);
+    return undefined as never;
+  }) as unknown as typeof McpServer.prototype.registerTool;
+
+  try {
+    createDevgodMcpServer();
+  } finally {
+    McpServer.prototype.registerTool = originalRegisterTool;
+  }
+
+  assert.deepEqual(registrations, [
+    "devgod_status",
+    "devgod_runtime_health",
+    "devgod_ops",
+    "devgod_loop",
+    "devgod_report",
+    "devgod_plan_context"
+  ]);
+});
+
+test("createDevgodMcpServer registration handlers invoke the underlying MCP tool behavior", async () => {
+  const { createDevgodMcpServer } = serverLibraryModule;
+  const originalRegisterTool = McpServer.prototype.registerTool;
+  const handlers = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>();
+
+  McpServer.prototype.registerTool = ((name: string, _config: Record<string, unknown>, handler?: (input: Record<string, unknown>) => Promise<unknown>) => {
+    if (handler) {
+      handlers.set(name, handler);
+    }
+    return undefined as never;
+  }) as unknown as typeof McpServer.prototype.registerTool;
+
+  try {
+    createDevgodMcpServer({
+      async status(args: readonly string[]) {
+        assert.deepEqual(args, ["--run-id", "run-1"]);
+        return {
+          run: { id: "run-1", status: "in_progress", updatedAt: "2026-05-20T00:00:00.000Z", taskCounts: { ready: 1 } }
+        };
+      },
+      async runtimeHealth() {
+        return { ok: true };
+      },
+      async ops() {
+        return { ok: true };
+      },
+      async loop() {
+        return { ok: true };
+      },
+      async report() {
+        return { ok: true };
+      },
+      async planContext() {
+        return { ok: true };
+      }
+    });
+  } finally {
+    McpServer.prototype.registerTool = originalRegisterTool;
+  }
+
+  const statusHandler = handlers.get("devgod_status");
+  assert.ok(statusHandler);
+  const response = await statusHandler!({ runId: "run-1" }) as {
+    content: Array<{ text: string }>;
+    structuredContent: Record<string, unknown>;
+  };
+
+  assert.deepEqual(response.content, [{ type: "text", text: "Returned the devgod status report." }]);
+  assert.deepEqual(response.structuredContent, {
+    run: {
+      id: "run-1",
+      status: "in_progress",
+      updatedAt: "2026-05-20T00:00:00.000Z",
+      taskCounts: { ready: 1 }
+    },
+    orchestration: undefined,
+    autonomous: undefined,
+    compaction: undefined,
+    reviewIdentity: undefined,
+    daemon: undefined
+  });
+});
+
+test("startDevgodMcpServer connects over stdio transport", async () => {
+  const { startDevgodMcpServer } = serverLibraryModule;
+  const originalConnect = McpServer.prototype.connect;
+  const transports: unknown[] = [];
+
+  McpServer.prototype.connect = (async (transport) => {
+    transports.push(transport);
+  }) as typeof McpServer.prototype.connect;
+
+  try {
+    await startDevgodMcpServer();
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+  }
+
+  assert.equal(transports.length, 1);
+  assert.ok(transports[0] instanceof StdioServerTransport);
+});
+
+test("startDevgodMcpServer surfaces transport connection failures", async () => {
+  const { startDevgodMcpServer } = serverLibraryModule;
+  const originalConnect = McpServer.prototype.connect;
+  const expected = new Error("stdio connect failed");
+
+  McpServer.prototype.connect = (async () => {
+    throw expected;
+  }) as typeof McpServer.prototype.connect;
+
+  try {
+    await assert.rejects(() => startDevgodMcpServer(), /stdio connect failed/);
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+  }
+});
+
+test("server executable guard starts the stdio server on the executable entrypoint path", async () => {
+  const originalConnect = McpServer.prototype.connect;
+  const originalArgv1 = process.argv[1];
+  const originalExitCode = process.exitCode;
+  const originalConsoleError = console.error;
+  const transports: unknown[] = [];
+  const messages: string[] = [];
+
+  McpServer.prototype.connect = (async (transport) => {
+    transports.push(transport);
+  }) as typeof McpServer.prototype.connect;
+  process.argv[1] = serverEntrypointPath;
+  process.exitCode = 0;
+  console.error = ((message?: unknown) => {
+    messages.push(String(message));
+  }) as typeof console.error;
+
+  try {
+    await importServerModule("exec-success");
+    assert.equal(transports.length, 1);
+    assert.ok(transports[0] instanceof StdioServerTransport);
+    assert.deepEqual(messages, []);
+    assert.equal(process.exitCode, 0);
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+    process.argv[1] = originalArgv1;
+    process.exitCode = originalExitCode;
+    console.error = originalConsoleError;
+  }
+});
+
+test("server library and executable paths run correctly in child Node processes", () => {
+  const libraryScript = [
+    "import assert from 'node:assert/strict';",
+    "import process from 'node:process';",
+    "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+    "import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';",
+    `const serverModuleSpecifier = ${JSON.stringify(serverModuleUrl.href)};`,
+    `process.argv[1] = ${JSON.stringify(inertEntrypointPath)};`,
+    "const { createDevgodMcpServer, startDevgodMcpServer } = await import(serverModuleSpecifier);",
+    "const registrations = [];",
+    "const originalRegisterTool = McpServer.prototype.registerTool;",
+    "const originalConnect = McpServer.prototype.connect;",
+    "let transport;",
+    "McpServer.prototype.registerTool = ((name) => { registrations.push(name); return undefined; });",
+    "McpServer.prototype.connect = (async (value) => { transport = value; });",
+    "try {",
+    "  createDevgodMcpServer({",
+    "    async status() { return { ok: true }; },",
+    "    async runtimeHealth() { return { ok: true }; },",
+    "    async ops() { return { ok: true }; },",
+    "    async loop() { return { ok: true }; },",
+    "    async report() { return { ok: true }; },",
+    "    async planContext() { return { ok: true }; }",
+    "  });",
+    "  await startDevgodMcpServer();",
+    "  assert.equal(registrations.length, 12);",
+    "  assert.ok(transport instanceof StdioServerTransport);",
+    "} finally {",
+    "  McpServer.prototype.registerTool = originalRegisterTool;",
+    "  McpServer.prototype.connect = originalConnect;",
+    "}"
+  ].join("\n");
+  const libraryRun = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "--eval", libraryScript],
+    {
+      cwd: repoRootPath,
+      encoding: "utf8",
+      env: buildCoverageNeutralChildEnv()
+    }
+  );
+
+  assert.equal(libraryRun.status, 0, libraryRun.stderr);
+
+  const execScript = [
+    "import assert from 'node:assert/strict';",
+    "import process from 'node:process';",
+    "import { setTimeout as delay } from 'node:timers/promises';",
+    "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+    `const serverModuleSpecifier = ${JSON.stringify(`${serverModuleUrl.href}?child-exec`)};`,
+    "const messages = [];",
+    "const originalConnect = McpServer.prototype.connect;",
+    "const originalConsoleError = console.error;",
+    "McpServer.prototype.connect = (async () => { throw new Error('child stdio failure'); });",
+    "console.error = ((message) => { messages.push(String(message)); });",
+    `process.argv[1] = ${JSON.stringify(serverEntrypointPath)};`,
+    "try {",
+    "  await import(serverModuleSpecifier);",
+    "  await delay(0);",
+    "  assert.deepEqual(messages, ['child stdio failure']);",
+    "  assert.equal(process.exitCode, 1);",
+    "} finally {",
+    "  McpServer.prototype.connect = originalConnect;",
+    "  console.error = originalConsoleError;",
+    "}"
+  ].join("\n");
+  const execRun = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "--eval", execScript],
+    {
+      cwd: repoRootPath,
+      encoding: "utf8",
+      env: buildCoverageNeutralChildEnv()
+    }
+  );
+
+  assert.equal(execRun.status, 1, execRun.stderr);
+});
+
+test("server executable guard logs Error rejections and sets exitCode", async () => {
+  const originalConnect = McpServer.prototype.connect;
+  const originalArgv1 = process.argv[1];
+  const originalExitCode = process.exitCode;
+  const originalConsoleError = console.error;
+  const messages: string[] = [];
+
+  McpServer.prototype.connect = (async () => {
+    throw new Error("broken stdio");
+  }) as typeof McpServer.prototype.connect;
+  process.argv[1] = serverEntrypointPath;
+  process.exitCode = 0;
+  console.error = ((message?: unknown) => {
+    messages.push(String(message));
+  }) as typeof console.error;
+
+  try {
+    await importServerModule("exec");
+    assert.deepEqual(messages, ["broken stdio"]);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+    process.argv[1] = originalArgv1;
+    process.exitCode = originalExitCode;
+    console.error = originalConsoleError;
+  }
+});
+
+test("server executable guard stringifies non-Error rejections", async () => {
+  const originalConnect = McpServer.prototype.connect;
+  const originalArgv1 = process.argv[1];
+  const originalExitCode = process.exitCode;
+  const originalConsoleError = console.error;
+  const messages: string[] = [];
+
+  McpServer.prototype.connect = (async () => {
+    throw "plain failure";
+  }) as typeof McpServer.prototype.connect;
+  process.argv[1] = serverEntrypointPath;
+  process.exitCode = 0;
+  console.error = ((message?: unknown) => {
+    messages.push(String(message));
+  }) as typeof console.error;
+
+  try {
+    await importServerModule("exec");
+    assert.deepEqual(messages, ["plain failure"]);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+    process.argv[1] = originalArgv1;
+    process.exitCode = originalExitCode;
+    console.error = originalConsoleError;
+  }
+});
+
+test("server module import stays inert when loaded outside the executable entrypoint path", async () => {
+  const originalConnect = McpServer.prototype.connect;
+  const originalArgv1 = process.argv[1];
+  const originalExitCode = process.exitCode;
+  const originalConsoleError = console.error;
+  const transports: unknown[] = [];
+  const messages: string[] = [];
+
+  McpServer.prototype.connect = (async (transport) => {
+    transports.push(transport);
+  }) as typeof McpServer.prototype.connect;
+  process.argv[1] = inertEntrypointPath;
+  process.exitCode = 0;
+  console.error = ((message?: unknown) => {
+    messages.push(String(message));
+  }) as typeof console.error;
+
+  try {
+    await importServerModule("library");
+    assert.deepEqual(transports, []);
+    assert.deepEqual(messages, []);
+    assert.equal(process.exitCode, 0);
+  } finally {
+    McpServer.prototype.connect = originalConnect;
+    process.argv[1] = originalArgv1;
+    process.exitCode = originalExitCode;
+    console.error = originalConsoleError;
+  }
 });

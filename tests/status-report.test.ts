@@ -1583,6 +1583,126 @@ test("executeStatusCommandFromArgs surfaces contradictory local completion claim
   }
 });
 
+test("executeStatusCommandFromArgs flags approved tasks whose exported task packet is missing while local workflow is idle", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "devgod-status-approved-export-gap-"));
+  const store = new MemoryStore();
+  const service = new DevgodCoreService(store, {
+    resolveReviewActionContext: createReviewActionContextResolver({
+      bindings: {
+        bindings: [
+          {
+            principal: { provider: "test", subject: "reviewer-actor" },
+            actors: [{ actor: "reviewer-actor", roles: ["reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "security-actor" },
+            actors: [{ actor: "security-actor", roles: ["security_reviewer"] }]
+          },
+          {
+            principal: { provider: "test", subject: "qa-actor" },
+            actors: [{ actor: "qa-actor", roles: ["qa_engineer"] }]
+          }
+        ]
+      },
+      resolveAuthenticatedPrincipal(input) {
+        return {
+          provider: "test",
+          subject: input.actor,
+          verified: true
+        };
+      }
+    })
+  });
+
+  try {
+    const run = await service.intakeRequest({
+      workspaceSlug: "team",
+      projectSlug: "devgod",
+      actor: "ceo",
+      title: "Approved export drift",
+      request: "Surface approved-task export gaps even when runtime and local workflow both look idle."
+    });
+    await service.createTaskGraph(run.id, [taskPacket({ taskId: "task-approved", allowedWriteScope: ["src/runtime"] })]);
+    await service.claimTask(run.id, "task-approved", "planner");
+    await service.submitHandoff(run.id, "task-approved", {
+      actor: "planner",
+      ownerRole: "planner",
+      completionStandard: "specialist_verified",
+      summary: "Prepared approved task.",
+      changedFiles: ["src/admin.ts"],
+      blockers: [],
+      verificationNotes: ["captured approved-task export regression"],
+      executionEvidence: ["task packet should exist but is intentionally absent locally"],
+      qualityGateEvidence: ["required reviews are recorded in runtime"],
+      contextRefs: ["brief://task-approved"]
+    });
+    await service.recordReview(run.id, "task-approved", "reviewer-actor", {
+      reviewerRole: "reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "task-approved", "security-actor", {
+      reviewerRole: "security_reviewer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+    await service.recordReview(run.id, "task-approved", "qa-actor", {
+      reviewerRole: "qa_engineer",
+      state: "passed",
+      severity: "low",
+      findings: []
+    });
+
+    const context = await store.getProjectContext({ workspaceSlug: "team", projectSlug: "devgod" });
+    assert.ok(context);
+    const runtimeState = await store.getProjectRuntimeState(context.project.id);
+    assert.ok(runtimeState);
+
+    await mkdir(path.join(directory, ".devgod", "work"), { recursive: true });
+    await writeFile(path.join(directory, ".devgod", "ACTIVE"), "workflow=devgod\nstate=idle\n", "utf8");
+    await writeFile(
+      path.join(directory, ".devgod", "work", "task-queue.json"),
+      `${JSON.stringify(runtimeState.taskQueue, null, 2)}\n`,
+      "utf8"
+    );
+
+    const report = await executeStatusCommandFromArgs(["--run-id", run.id], {
+      cwd: directory,
+      env: process.env,
+      getStatusSnapshot(runId) {
+        return service.getStatus(runId);
+      },
+      getProjectRuntimeState(projectId) {
+        return store.getProjectRuntimeState(projectId);
+      },
+      inspectGraphify: async () => graphifyObservation()
+    });
+
+    assert.equal(report.run.status, "approved");
+    assert.equal(report.integrity.localExports?.activeState, "idle");
+    assert.equal(report.integrity.status, "contradicted");
+    assert.equal(report.integrity.taskProofObligations?.status, "outstanding");
+    assert.equal(report.integrity.taskProofObligations?.tasks[0]?.taskId, "task-approved");
+    assert.equal(report.integrity.taskProofObligations?.tasks[0]?.exportState, "missing");
+    assert.match(
+      report.integrity.taskProofObligations?.tasks[0]?.artifactPath ?? "",
+      /\.devgod\/work\/tasks\/task-task-approved\.md$/
+    );
+    assert.match(
+      report.integrity.contradictions.join(" | "),
+      /local workflow export is idle while approved task task-approved still has failing exported artifact checks/i
+    );
+    assert.match(
+      report.integrity.contradictions.join(" | "),
+      /approved task task-approved is missing exported task artifact/i
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("executeStatusCommandFromArgs marks advisory continuation as operator-required when an execution plan is available", async () => {
   const service = new DevgodCoreService(new MemoryStore());
   const run = await service.intakeRequest({

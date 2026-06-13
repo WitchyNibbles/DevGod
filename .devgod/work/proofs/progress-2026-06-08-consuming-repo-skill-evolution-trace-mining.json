@@ -1,0 +1,21 @@
+{
+  "cycle": 1,
+  "proof_id": "proof-2026-06-08-consuming-repo-skill-evolution-trace-mining",
+  "phase_before": "implementation",
+  "phase_after": "verification",
+  "evidence_refs": [
+    "node --experimental-strip-types --test tests/skill-evolution.test.ts tests/vendored-skills.test.ts",
+    "npm run typecheck",
+    "npm test",
+    "git diff --check"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "task:follow-on-skill-evolution-productization",
+  "why_next": "the approved trace-mining slice is complete, so any additional work should start as a new follow-on brief"
+}
