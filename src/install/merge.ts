@@ -1,141 +1,19 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
-  workflowArtifactRefHelperSummaryLine,
-  workflowRequiredGateRolesPolicyLine,
-  workflowRuntimeOptionalReviewExportsHelperSummaryLine
-} from "../devgod/workflow-schema.ts";
+  renderManagedAgentsBlock,
+  renderManagedDotAgentsBlock
+} from "../devgod/managed-policy-renderer.ts";
 
 const AGENTS_BEGIN = "<!-- BEGIN DEVGOD MANAGED -->";
 const AGENTS_END = "<!-- END DEVGOD MANAGED -->";
 const DOT_AGENTS_BEGIN = "<!-- BEGIN DEVGOD KERNEL -->";
 const DOT_AGENTS_END = "<!-- END DEVGOD KERNEL -->";
-const workflowContractBlock = `<!-- devgod-workflow-contract:start -->
-workflow=devgod
-workflow_runtime=postgres
-active_run_pointer=project_runtime_state.active_run_id
-active_task_pointer=project_runtime_state.active_task_id
-workflow_documents=workflow_documents
-task_queue=project_runtime_state.task_queue
-product_state=project_runtime_state.product_state
-required_review_roles=reviewer,qa_engineer,security_reviewer
-release_candidate_quality_gate=release_readiness_required
-review_authority=runtime_authenticated_only
-workflow_check=devgod workflow-proof --run-id latest --task-id <task-id>
-workflow_check_scope=runtime_authority_only
-review_artifact_trust=runtime_records_only
-ci_scope=runtime_contract_and_export_regressions
-local_live_check=bash scripts/check-devgod-workflow-live.sh [--task-id <task-id>]
-<!-- devgod-workflow-contract:end -->`;
 
-const workflowRequiredGateRolesSentence = workflowRequiredGateRolesPolicyLine.slice(2);
-const workflowRequiredGateRolesFragment = workflowRequiredGateRolesSentence.replace(
-  "required task gates are ",
-  ""
-);
-const workflowArtifactRefHelperSummarySentence = workflowArtifactRefHelperSummaryLine.toLowerCase();
-const workflowRuntimeOptionalReviewExportsSentence = workflowRuntimeOptionalReviewExportsHelperSummaryLine.toLowerCase();
-
-const managedAgentsBlock = `${AGENTS_BEGIN}
-## devgod
-
-- treat \`devgod\` as implicitly invoked on every prompt unless the user explicitly opts out
-- treat substantive requests as devgod work unless the user opts out
-- use \`devgod-intake\` as the default first skill for substantive work
-
-## Workflow contract
-
-Canonical runtime contract:
-
-${workflowContractBlock}
-
-## Department Workflow
-
-- root thread is engineering manager
-- manager/root stays shallow: two inspections max before trivial handling or bounded investigation
-- clarify ambiguous intent before planning with targeted questions or explicit assumptions
-- on first ask, clarify outcome, constraints, and done criteria unless assumptions are enough
-- require Design and Architecture Council review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is trivial or inherits an approved decision
-- keep the council lean, rotating, and time-bounded with a named dissent owner
-- ${workflowArtifactRefHelperSummarySentence}
-- ${workflowRuntimeOptionalReviewExportsSentence}
-- keep \`devgod\` as the default workflow controller even when other tools are available
-- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready so agents get broader structure and spend fewer tokens before broad text scans
-- when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or unavailable, say so
-- avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
-- route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
-- use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
-- specialist/subagent roles use \`caveman\` \`ultra\` mode for every response; use \`/caveman ultra\` as the activation reference, and only the root thread that talks directly to the user may answer outside caveman
-- use runtime-backed devgod commands for proof, status, and advancement
-- substantive work completes only after ${workflowRequiredGateRolesFragment} gates plus runtime workflow proof
-
-## Autonomy Loop
-
-- for full-project or multi-phase requests, \`devgod\` must operate as a continuing delivery loop
-- the manager must not stop after intake, planning, or one implementation slice unless product-level acceptance is complete, a real blocker needs user input, verification is blocked after repair attempts, or the user asked for planning only
-- scale, latency, or item volume are not blockers by themselves when the work can be chunked, checkpointed, and resumed
-- do not wait for the user to say continue between internal tasks; keep executing until the product-level stop condition is met
-- long-running but tractable work must persist concrete progress and continue instead of stopping with a partial-summary handoff
-- after each completed task, update runtime product state, update runtime task queue, advance the active task pointer, select the next unblocked task, and continue execution
-- a completed phase is not a completed product
-
-## Git hygiene
-
-- branch from updated \`origin/main\` before task or plan work
-- default branch prefixes are \`feature/\`, \`bugfix/\`, \`hotfix/\`, \`release/\`, \`chore/\`, \`refactor/\`, \`docs/\`, \`test/\`, \`ci/\`, and \`perf/\`
-- this git-flow-style default overrides GitHub MCP naming suggestions unless a consuming repo's higher-precedence guideline says otherwise
-- in consuming repos, \`git_operator\` must not stage \`.devgod/\`, \`.agents/\`, \`.codex/\`, or \`AGENTS.md\` unless the task explicitly targets devgod/control-layer installation or maintenance
-- keep commits atomic and briefly named
-- do not use \`codex\` in branch names, commit subjects, PR titles, or PR bodies
-
-${AGENTS_END}`;
-
-const managedDotAgentsBlock = `${DOT_AGENTS_BEGIN}
-# Devgod Kernel
-
-- substantive asks default to \`devgod\` unless the user opts out
-- use \`devgod-intake\` first for substantive work
-- root thread is the manager: confirm goal, criteria, constraints, and main risk
-- manager/root gets at most two shallow inspections before trivial handling or bounded delegation
-- create or update \`.devgod/ACTIVE\` and \`.devgod/work/briefs/brief-<task-id>.md\` before moving past intake
-- default sequence: evidence -> \`solution_architect\` -> \`planner\` -> task packet -> specialist owner -> \`reviewer\`, \`qa_engineer\`, \`security_reviewer\`
-- for council-reviewed work, require a written decision packet before critique and assign one explicit dissent owner
-- task packets need \`task_id\`, owner role, completion standard, required specialists, quality gates, write scope, acceptance criteria, verification steps, required reviews, security checks, and rollback notes
-- run \`bash scripts/check-devgod-workflow.sh --task-id <task-id>\` before declaring substantive work complete
-- current task id must match \`.devgod/ACTIVE\`, the current brief, the current plan/task, and required review files
-- unresolved \`CRITICAL\` or \`HIGH\` security findings block completion
-- markdown review files are evidence summaries, not reviewer authority
-- authenticated reviewer identity and waiver authority must come from runtime policy or another authenticated principal-binding source
-- branch from updated \`origin/main\` before task or plan work and prefer \`feature/\`, \`bugfix/\`, \`hotfix/\`, \`release/\`, \`chore/\`, \`refactor/\`, \`docs/\`, \`test/\`, \`ci/\`, or \`perf/\` prefixes unless a consuming repo overrides them
-- keep \`codex\` out of branch names, commit subjects, PR titles, and PR bodies
-- package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
-- live work state belongs in \`.devgod/work/\`
-- reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there
-- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready for repo topology and cross-artifact retrieval, but do not treat it as workflow authority
-- when repo-local Grafana configuration is present, treat Grafana as advisory evidence for debugging and research; if configuration is partial or tools are unavailable, report that explicitly
-- avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
-- ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
-- use repo-local \`devgod\` skills and agents when they fit; all specialist/subagent output stays on \`caveman\` \`ultra\` mode, use \`/caveman ultra\` as the activation reference, and only the root thread that talks directly to the user may answer outside caveman
-
-Gate reminders:
-
-- substantive non-trivial work should normally use \`specialist_verified\`
-- workers must not edit \`AGENTS.md\`, \`.codex/\`, \`.agents/\`, or \`.devgod/memory/\` unless the task packet allows it
-- keep live work state in \`.devgod/work/\`; reviewed memory is not a scratchpad
-
-Council reminders:
-
-- the \`Design and Architecture Council\` is a pre-implementation quality gate for substantive roadmap and plan work
-- the council is a rotating 3-5 role panel with default seats from \`solution_architect\`, \`product_strategist\`, \`frontend_designer\` when a human-facing surface exists, and \`infra_engineer\` or \`security_reviewer\` when the main risk is operational or security-heavy
-- every council review must name a \`dissent owner\` who argues at least one serious alternative and records unresolved objections
-- the council may output \`approved\`, \`approved_with_conditions\`, \`rework_required\`, \`exception_granted\`, or \`rejected\`
-- the council may propose changes to user intent, but it must not silently override user intent without user acceptance
-
-See \`AGENTS.md\` and \`.devgod/rules/\` for the full workflow contract and policy details.
-${DOT_AGENTS_END}`;
-
-interface GraphifyInstallSettings {
+interface InstallModuleSettings {
+  withGraphify?: boolean;
+  withPlaywright?: boolean;
   withGrafana?: boolean;
 }
 
@@ -143,6 +21,9 @@ const enforcedCodexConfigKeys = ["approval_policy", "sandbox_mode"] as const;
 const require = createRequire(import.meta.url);
 function getTomlModule(): typeof import("@iarna/toml") {
   return require("@iarna/toml") as typeof import("@iarna/toml");
+}
+function getTypeScriptModule(): typeof import("typescript") {
+  return require("typescript") as typeof import("typescript");
 }
 
 function normalizeManagedCodexConfig(
@@ -180,6 +61,8 @@ function sortObjectKeys<T>(value: T): T {
 }
 
 export function mergeAgentsMd(existingContent: string | undefined): string {
+  const managedAgentsBlock = renderManagedAgentsBlock();
+
   if (!existingContent || existingContent.trim().length === 0) {
     return managedAgentsBlock;
   }
@@ -193,6 +76,8 @@ export function mergeAgentsMd(existingContent: string | undefined): string {
 }
 
 export function mergeDotAgentsMd(existingContent: string | undefined): string {
+  const managedDotAgentsBlock = renderManagedDotAgentsBlock();
+
   if (!existingContent || existingContent.trim().length === 0) {
     return `${managedDotAgentsBlock}\n`;
   }
@@ -213,13 +98,27 @@ function ensureStringArray(value: unknown, fallback: string[]): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+const managedCodexOverwriteTablePaths = new Set([
+  "mcp_servers.grafana",
+  "mcp_servers.graphify",
+  "mcp_servers.playwright",
+  "mcp_servers.playwright_vision"
+]);
+
 function mergeTomlTable(
   target: Record<string, unknown>,
-  source: Record<string, unknown>
+  source: Record<string, unknown>,
+  pathSegments: readonly string[] = []
 ): Record<string, unknown> {
   const merged = { ...target };
 
   for (const [key, value] of Object.entries(source)) {
+    const nextPath = [...pathSegments, key];
+    if (managedCodexOverwriteTablePaths.has(nextPath.join("."))) {
+      merged[key] = value;
+      continue;
+    }
+
     const targetValue = merged[key];
 
     if (targetValue === undefined) {
@@ -237,7 +136,8 @@ function mergeTomlTable(
     ) {
       merged[key] = mergeTomlTable(
         targetValue as Record<string, unknown>,
-        value as Record<string, unknown>
+        value as Record<string, unknown>,
+        nextPath
       );
     }
   }
@@ -383,6 +283,109 @@ function collectLazyAdminWrapperExports(sourceText: string): string[] {
 export function collectPublishedPublicValueExports(sourceText: string): string[] {
   const { valueExports } = collectReExportedNames(sourceText);
   return [...new Set([...valueExports, ...collectLazyAdminWrapperExports(sourceText)])].sort();
+}
+
+function sanitizePublishedDeclarationSource(
+  declarationSource: string,
+  options: { stripPublicAdminModuleAlias?: boolean } = {}
+): string {
+  let rewrittenSource = declarationSource
+    .replace(/from "(\.[^"]+)\.ts"/g, 'from "$1.js"')
+    .replace(/import\("(\.[^"]+)\.ts"\)/g, 'import("$1.js")');
+
+  if (options.stripPublicAdminModuleAlias) {
+    const safeWrapperSignature = [
+      "(",
+      "    args: readonly string[],",
+      "    options: {",
+      "        cwd?: string | undefined;",
+      "        env?: Record<string, string | undefined> | undefined;",
+      "        [key: string]: unknown;",
+      "    }",
+      ") => Promise<unknown>"
+    ].join("\n");
+
+    rewrittenSource = rewrittenSource
+      .replace(/^type AdminModule = typeof import\("\.\/admin\.js"\);\n/m, "")
+      .replace(
+        /export declare const executeStatusCommandFromArgs: (?:AdminModule\["executeStatusCommandFromArgs"\]|typeof import\("\.\/admin\.js"\)\.executeStatusCommandFromArgs);/,
+        `export declare const executeStatusCommandFromArgs: ${safeWrapperSignature};`
+      )
+      .replace(
+        /export declare const executeReportCommandFromArgs: (?:AdminModule\["executeReportCommandFromArgs"\]|typeof import\("\.\/admin\.js"\)\.executeReportCommandFromArgs);/,
+        `export declare const executeReportCommandFromArgs: ${safeWrapperSignature};`
+      )
+      .replace(
+        /export declare const executeSeedModernizationProofCommandFromArgs: (?:AdminModule\["executeSeedModernizationProofCommandFromArgs"\]|typeof import\("\.\/admin\.js"\)\.executeSeedModernizationProofCommandFromArgs);/,
+        `export declare const executeSeedModernizationProofCommandFromArgs: ${safeWrapperSignature};`
+      );
+  }
+
+  return rewrittenSource.endsWith("\n") ? rewrittenSource : `${rewrittenSource}\n`;
+}
+
+async function renderPublishedDeclarationEntrypoints(
+  packageRoot: string
+): Promise<{ rootIndexText: string; emittedFiles: Array<{ relativePath: string; content: string }> }> {
+  const ts = getTypeScriptModule();
+  const publicSourcePath = path.join(packageRoot, "src", "public.ts");
+  const emittedDeclarationRoot = path.join(packageRoot, "dist", "types");
+  const compilerOptions: import("typescript").CompilerOptions = {
+    allowImportingTsExtensions: true,
+    declaration: true,
+    emitDeclarationOnly: true,
+    exactOptionalPropertyTypes: true,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    outDir: emittedDeclarationRoot,
+    resolveJsonModule: true,
+    rootDir: path.join(packageRoot, "src"),
+    skipLibCheck: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2023,
+    types: ["node"],
+    verbatimModuleSyntax: true
+  };
+  const declarationFiles = new Map<string, string>();
+  const program = ts.createProgram([publicSourcePath], compilerOptions);
+  const emitResult = program.emit(
+    undefined,
+    (fileName, content) => {
+      if (fileName.endsWith(".d.ts")) {
+        declarationFiles.set(path.resolve(fileName), content);
+      }
+    },
+    undefined,
+    true
+  );
+
+  const diagnostics = ts.getPreEmitDiagnostics(program).concat(emitResult.diagnostics);
+  const publicDeclarationPath = path.resolve(path.join(emittedDeclarationRoot, "public.d.ts"));
+  if (emitResult.emitSkipped || !declarationFiles.has(publicDeclarationPath)) {
+    const diagnosticHost = {
+      getCanonicalFileName: (fileName: string) => fileName,
+      getCurrentDirectory: () => packageRoot,
+      getNewLine: () => "\n"
+    };
+    const renderedDiagnostics = diagnostics.length > 0
+      ? ts.formatDiagnosticsWithColorAndContext(diagnostics, diagnosticHost)
+      : "TypeScript declaration emit skipped without diagnostics.";
+    throw new Error(`Unable to generate published root declaration surface.\n${renderedDiagnostics}`);
+  }
+
+  const emittedFiles = [...declarationFiles.entries()]
+    .map(([absolutePath, content]) => ({
+      relativePath: path.relative(emittedDeclarationRoot, absolutePath).replace(/\\/g, "/"),
+      content: sanitizePublishedDeclarationSource(content, {
+        stripPublicAdminModuleAlias: absolutePath === publicDeclarationPath
+      })
+    }))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+
+  return {
+    rootIndexText: 'export * from "./types/public.js";\n',
+    emittedFiles
+  };
 }
 
 export function renderPublishedIndexEntrypoint(publicSourceText: string): string {
@@ -546,10 +549,16 @@ export async function writePublishedPackageEntrypoints(packageRoot: string): Pro
   const outputRoot = path.resolve(packageRoot, "dist");
   const publicSourcePath = path.join(packageRoot, "src", "public.ts");
   const publicSourceText = await readFile(publicSourcePath, "utf8");
+  const publicDeclarations = await renderPublishedDeclarationEntrypoints(packageRoot);
   await writePublishedPackageFile(
     path.join(outputRoot, "register-typescript-hooks.js"),
     renderPublishedTypeScriptHookEntrypoint()
   );
+  await rm(path.join(outputRoot, "types"), { recursive: true, force: true });
+  await writePublishedPackageFile(path.join(outputRoot, "index.d.ts"), publicDeclarations.rootIndexText);
+  for (const declarationFile of publicDeclarations.emittedFiles) {
+    await writePublishedPackageFile(path.join(outputRoot, "types", declarationFile.relativePath), declarationFile.content);
+  }
   await writePublishedPackageFile(
     path.join(outputRoot, "index.js"),
     renderPublishedIndexEntrypoint(publicSourceText)
@@ -580,7 +589,7 @@ export function grafanaCodexConfigFragment(): string {
 
 export function mergeGitignore(
   existingContent: string | undefined,
-  _options: GraphifyInstallSettings = {}
+  _options: InstallModuleSettings = {}
 ): string {
   const requiredLines = [".env.devgod", ".env.devgod.*", "graphify-out/"];
   const existingLines = new Set(
@@ -617,7 +626,7 @@ function prefixedFileDependency(relativePath: string): string {
 export function mergePackageJson(
   existingContent: string | undefined,
   dependencyPathFromTarget: string,
-  options: GraphifyInstallSettings = {}
+  options: InstallModuleSettings = {}
 ): string {
   const packageJson = existingContent && existingContent.trim().length > 0
     ? (JSON.parse(existingContent) as Record<string, unknown>)
@@ -687,20 +696,26 @@ export function mergePackageJson(
   scripts["devgod:record-review"] = `${devgodEntry} record-review --input .devgod/review-action.json`;
   scripts["devgod:setup:git-guard"] =
     `${devgodEntry} setup-git-guard`;
-  scripts["devgod:setup:graphify"] =
-    `${devgodEntry} setup-graphify`;
   scripts["devgod:setup:local"] = `${devgodEntry} setup-local`;
-  scripts["devgod:setup:playwright"] =
-    `${devgodEntry} setup-playwright`;
-  scripts["devgod:verify:playwright"] =
-    `${devgodEntry} setup-playwright --verify`;
-  scripts["devgod:graphify:build"] = "graphify extract src --out .";
-  scripts["devgod:graphify:codex-full"] =
-    `${devgodEntry} setup-graphify-codex`;
-  scripts["devgod:graphify:update"] = "graphify extract src --out .";
-  scripts["devgod:graphify:watch"] = "graphify watch src";
-  scripts["devgod:graphify:serve"] =
-    "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json";
+
+  if (options.withGraphify) {
+    scripts["devgod:setup:graphify"] =
+      `${devgodEntry} setup-graphify`;
+    scripts["devgod:graphify:build"] = "graphify extract src --out .";
+    scripts["devgod:graphify:codex-full"] =
+      `${devgodEntry} setup-graphify-codex`;
+    scripts["devgod:graphify:update"] = "graphify extract src --out .";
+    scripts["devgod:graphify:watch"] = "graphify watch src";
+    scripts["devgod:graphify:serve"] =
+      "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json";
+  }
+
+  if (options.withPlaywright) {
+    scripts["devgod:setup:playwright"] =
+      `${devgodEntry} setup-playwright`;
+    scripts["devgod:verify:playwright"] =
+      `${devgodEntry} setup-playwright --verify`;
+  }
 
   if (options.withGrafana) {
     scripts["devgod:grafana:mcp"] =
@@ -716,5 +731,5 @@ export function mergePackageJson(
 }
 
 export function agentsManagedBlock(): string {
-  return managedAgentsBlock;
+  return renderManagedAgentsBlock();
 }

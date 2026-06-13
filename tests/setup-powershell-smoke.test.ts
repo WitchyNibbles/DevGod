@@ -111,10 +111,19 @@ test("registerPowerShellSetupSmoke registers a skipped smoke test when prerequis
 });
 
 test("PowerShell setup script braces postgres user interpolation in the fallback database URL", async () => {
-  const script = await readFile(path.join(repoRoot, "scripts", "setup-devgod.ps1"), "utf8");
+  const script = await readFile(path.join(repoRoot, "src", "install", "setup-local.ts"), "utf8");
 
   assert.doesNotMatch(script, /postgres:\/\/\$postgresUser:/);
-  assert.match(script, /postgres:\/\/\$\{postgresUser\}:\$\(\$env:DEVGOD_POSTGRES_PASSWORD\)/);
+  assert.match(script, /postgres:\/\/\$\{encodeURIComponent\(postgresUser\)\}:\$\{encodeURIComponent\(postgresPassword\)\}/);
+  assert.match(script, /@127\.0\.0\.1:\$\{postgresPort\}\/\$\{encodeURIComponent\(postgresDatabase\)\}/);
+});
+
+test("PowerShell wrapper delegates to the TypeScript setup-local command", async () => {
+  const script = await readFile(path.join(repoRoot, "scripts", "setup-devgod.ps1"), "utf8");
+
+  assert.match(script, /npm run devgod -- setup-local/);
+  assert.doesNotMatch(script, /src\/install\/setup-local\.ts/);
+  assert.doesNotMatch(script, /Import-DevgodEnvFile|Test-DevgodSafeEnvKey|Wait-DevgodContainerHealth/);
 });
 
 const pwshAvailable = await resolvePwshAvailability(detectPwsh);

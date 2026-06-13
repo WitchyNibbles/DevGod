@@ -315,6 +315,13 @@ test("install CLI entrypoints print summaries for dry runs, drifted verify, fixt
     assert.match(dryRun.stdout, /mode: dry-run/);
     assert.match(dryRun.stdout, /Next steps:/);
 
+    const installedPackageJsonPath = path.join(installedTargetRoot, "package.json");
+    const installedPackageJson = JSON.parse(await readFile(installedPackageJsonPath, "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    delete installedPackageJson.scripts?.["devgod:verify:setup"];
+    await writeFile(installedPackageJsonPath, `${JSON.stringify(installedPackageJson, null, 2)}\n`, "utf8");
+
     const verifyFailure = await captureCliFailure(
       installCliScript,
       ["verify", "--target", installedTargetRoot],
@@ -322,7 +329,9 @@ test("install CLI entrypoints print summaries for dry runs, drifted verify, fixt
     );
     assert.match(verifyFailure.stdout, new RegExp(`devgod verify for ${installedTargetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.match(verifyFailure.stdout, /status: drifted/);
-    assert.match(verifyFailure.stdout, /Prerequisite drift:/);
+    assert.match(verifyFailure.stdout, /Modified:/);
+    assert.match(verifyFailure.stdout, /package\.json/);
+    assert.match(verifyFailure.stdout, /Optional module drift:/);
 
     const happyPathSeed = await runTypeScriptCli(
       installCliScript,

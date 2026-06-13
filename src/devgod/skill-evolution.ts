@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { validateSkillDocument } from "./vendored-skills.ts";
+import { parseSkillDocument, validateSkillDocument } from "./vendored-skills.ts";
 
 const overlaySkillsRoot = ".devgod/skills/overlay";
 const archivedSkillsRoot = ".devgod/skills/archive";
@@ -559,6 +559,11 @@ export async function generateSkillPromotionArtifacts(
   const overlayContent = await readFile(absoluteOverlaySkillPath, "utf8");
   const canonicalExists = await fileExists(absoluteCanonicalSkillPath);
   const canonicalContent = canonicalExists ? await readFile(absoluteCanonicalSkillPath, "utf8") : undefined;
+  if (canonicalContent && parseSkillDocument(canonicalContent).frontmatter.origin === "devgod-vendored-skill") {
+    throw new Error(
+      `Cannot promote overlay skill over vendored-managed canonical skill ${skillId}; update the upstream vendored source or create a separate repo-local wrapper.`
+    );
+  }
   const currentNow = nowIso(input.now);
   const promotionId = promotionIdFor(skillId, currentNow);
   const packetRelativePath = path.posix.join(skillPromotionRoot, `promotion-${promotionId}.md`);

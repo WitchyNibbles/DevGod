@@ -203,6 +203,104 @@ async function createHappyPathFixture(taskId: string): Promise<string> {
   return targetRoot;
 }
 
+async function createSourceHappyPathFixture(taskId: string): Promise<string> {
+  const targetRoot = await mkdtemp(join(tmpdir(), "devgod-source-happy-path-"));
+
+  await mkdir(join(targetRoot, ".devgod", "templates"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "playwright"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "briefs"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "tasks"), { recursive: true });
+  await mkdir(join(targetRoot, ".devgod", "work", "reviews"), { recursive: true });
+  await mkdir(join(targetRoot, "devgod"), { recursive: true });
+  await mkdir(join(targetRoot, "scripts"), { recursive: true });
+
+  await writeFile(
+    join(targetRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "source-happy-path-fixture",
+        private: true,
+        scripts: {
+          "check:happy-path": "bash scripts/check-devgod-happy-path.sh",
+          "check:workflow": "bash scripts/check-devgod-workflow.sh",
+          "verify:setup": "node verify-setup.mjs",
+          "setup:playwright": "node setup-playwright.mjs",
+          "verify:playwright": "node verify-playwright.mjs"
+        }
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  await writeFile(join(targetRoot, ".devgod", "ACTIVE"), `workflow=devgod\nstate=active\ntask_id=${taskId}\n`, "utf8");
+  await writeFile(
+    join(targetRoot, ".devgod", "templates", "workflow-schema.json"),
+    `${JSON.stringify({ workflowTemplateReviewRoles: ["reviewer", "qa_engineer", "security_reviewer"] }, null, 2)}\n`,
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "briefs", `brief-${taskId}.md`),
+    `## Task ID\n\n\`${taskId}\`\n\n## Goal\n\nSource-mode happy-path fixture.\n`,
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, ".devgod", "work", "tasks", `task-${taskId}.md`),
+    `## Task ID\n\n\`${taskId}\`\n\n## Verification steps\n\n- npm run check:happy-path\n`,
+    "utf8"
+  );
+
+  for (const role of ["reviewer", "qa_engineer", "security_reviewer"] as const) {
+    await writeFile(
+      join(targetRoot, ".devgod", "work", "reviews", `review-${taskId}-${role}.md`),
+      `## Reviewer role\n\n\`${role}\`\n\n## Decision\n\n\`pending\`\n`,
+      "utf8"
+    );
+  }
+
+  await writeFile(
+    join(targetRoot, ".devgod", "review-identity-bindings.json"),
+    '{\n  "replace": "replace-with-authenticated-user-id"\n}\n',
+    "utf8"
+  );
+  await writeFile(
+    join(targetRoot, "devgod", "review-identity-adapter.ts"),
+    "export const placeholder = \"Implement devgod/review-identity-adapter.ts\";\n",
+    "utf8"
+  );
+  await writeFile(join(targetRoot, "scripts", "check-devgod-workflow.sh"), "#!/usr/bin/env bash\n", "utf8");
+  await writeFile(join(targetRoot, "scripts", "check-devgod-workflow-live.sh"), "#!/usr/bin/env bash\n", "utf8");
+  await writeFile(join(targetRoot, ".devgod", "playwright", "mcp.json"), "{\n  \"ok\": true\n}\n", "utf8");
+  await writeFile(
+    join(targetRoot, ".devgod", "playwright", "mcp.vision.json"),
+    "{\n  \"ok\": true\n}\n",
+    "utf8"
+  );
+
+  return targetRoot;
+}
+
+test("check-devgod-happy-path accepts source-mode workflow tasks without fixture ids", async () => {
+  const taskId = "source-happy-path-pass";
+  const targetRoot = await createSourceHappyPathFixture(taskId);
+
+  try {
+    const { stdout } = await execFileWithoutCoverage("bash", ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot], {
+      cwd: repoRoot
+    });
+
+    assert.match(stdout, /happy-path mode: workflow-task/);
+    assert.match(stdout, /command surface: source/);
+    assert.doesNotMatch(stdout, /synthetic fixture check/);
+    assert.match(stdout, /retrieval advisory smoke \(derived, non-authoritative\)/);
+    assert.match(stdout, /derived retrieval baseline skipped: eval surface unavailable/);
+    assert.match(stdout, /devgod happy-path checks passed/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
 test("check-devgod-happy-path passes a synthetic fixture and reports advisory retrieval status", async () => {
   const taskId = "fixture-happy-path-pass";
   const targetRoot = await createHappyPathFixture(taskId);
@@ -214,6 +312,8 @@ test("check-devgod-happy-path passes a synthetic fixture and reports advisory re
       { cwd: repoRoot }
     );
 
+    assert.match(stdout, /happy-path mode: synthetic-fixture/);
+    assert.match(stdout, /command surface: installed/);
     assert.match(stdout, /synthetic fixture check/);
     assert.match(stdout, /retrieval advisory smoke \(derived, non-authoritative\)/);
     assert.match(stdout, /derived retrieval baseline skipped: eval surface unavailable/);
@@ -249,9 +349,43 @@ test("installed consumer fixture can seed and pass the happy-path flow without m
       { cwd: targetRoot }
     );
 
+    assert.match(stdout, /happy-path mode: synthetic-fixture/);
+    assert.match(stdout, /command surface: installed/);
     assert.match(stdout, /synthetic fixture check/);
     assert.match(stdout, /retrieval advisory smoke \(derived, non-authoritative\)/);
     assert.match(stdout, /derived retrieval baseline skipped: eval surface unavailable/);
+    assert.match(stdout, /devgod happy-path checks passed/);
+  } finally {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("installed happy-path mode wins over unrelated source-style script names", async () => {
+  const taskId = "fixture-happy-path-installed-precedence";
+  const targetRoot = await createHappyPathFixture(taskId);
+
+  try {
+    const packageJsonPath = join(targetRoot, "package.json");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      name: string;
+      private: boolean;
+      scripts?: Record<string, string>;
+    };
+    packageJson.scripts = {
+      ...packageJson.scripts,
+      "check:happy-path": "echo consumer-owned check"
+    };
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+
+    const { stdout } = await execFileWithoutCoverage(
+      "bash",
+      ["scripts/check-devgod-happy-path.sh", "--repo-root", targetRoot, "--task-id", taskId],
+      { cwd: repoRoot }
+    );
+
+    assert.match(stdout, /happy-path mode: synthetic-fixture/);
+    assert.match(stdout, /command surface: installed/);
+    assert.match(stdout, /synthetic fixture check/);
     assert.match(stdout, /devgod happy-path checks passed/);
   } finally {
     await rm(targetRoot, { recursive: true, force: true });
@@ -273,6 +407,12 @@ test("verify-installed-repo-harness can include the Grafana opt-in wiring", asyn
 
     assert.match(stdout, /installed repo harness passed/);
     assert.match(stdout, /grafana-opt-in: enabled/);
+    assert.match(stdout, /review_identity_authority: derived_only/);
+    assert.match(stdout, /graphify_authority: derived_only/);
+    assert.match(
+      stdout,
+      /runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work/
+    );
   } finally {
     await rm(stubRoot, { recursive: true, force: true });
   }
@@ -433,6 +573,12 @@ test("verify-installed-repo-harness isolates fresh target repo context and reach
     assert.match(stdout, /task: harness-proof/);
     assert.match(stdout, /profile: modernization_program/);
     assert.match(stdout, /rewrite_readiness: ready/);
+    assert.match(stdout, /review_identity_authority: derived_only/);
+    assert.match(stdout, /graphify_authority: derived_only/);
+    assert.match(
+      stdout,
+      /runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work/
+    );
   } finally {
     await rm(stubRoot, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 # Devgod Current State
 
-Status date: `2026-05-28`
+Status date: `2026-06-13`
 
 This is the plain-language snapshot of what `devgod` is today. If another document sounds broader, older, or more aspirational than this one, treat this file plus the repo itself as the current truth.
 
@@ -14,9 +14,26 @@ For new substantive asks, the current control layer now prefers a short clarific
 
 ## Runtime-proven package status
 
-The package is runtime-proven at the package level, and authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`.
+The package is runtime-proven at the package level, and the current June 12 repair closeout proof is run `d5a2b9ac-aa2d-4412-8387-578f0b849102`.
 
 That statement is about the package repo and its maintained verification state. It is not a blanket claim that every consuming repo is already operational or review-authoritative after installation.
+
+## Release-readiness snapshot
+
+Fresh package/install and runtime workflow evidence is green for the repaired core overlay:
+
+- `node --experimental-strip-types --test tests/install.test.ts tests/happy-path.test.ts` passed `120/120`
+- `bash scripts/verify-installed-repo-harness.sh` passed
+- `npm run check:happy-path` passed
+- `npm run check:quality` passed
+- `git diff --check` passed
+- the maintainer verification surface reported no `.only` tests
+- runtime proof run `d5a2b9ac-aa2d-4412-8387-578f0b849102` approved `2026-06-12-devgod-autonomous-team-repair`
+- `npm run devgod -- status --format text` reports `integrity.status` as `consistent`
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-12-devgod-autonomous-team-repair` passed
+- `bash scripts/check-devgod-workflow-live.sh --repo-root . --task-id 2026-06-12-devgod-autonomous-team-repair` passed
+
+So the current package proof proves the package boundary, installer overlay, focused installed-repo harness, and June 12 repair task workflow closeout in this checkout. It does not prove universal downstream readiness.
 
 ## Mission
 
@@ -48,6 +65,7 @@ What it does:
 - installs `.devgod/rules/` and `.devgod/templates/`
 - writes target-repo `devgod:*` scripts
 - preserves unrelated local config where possible instead of brute-force replacement
+- treats managed `.codex/config.toml` preservation as semantic: unrelated user-owned TOML values survive merges, while formatting and comments may be rewritten when managed content changes
 
 ### 2. Runtime-backed workflow state
 
@@ -202,34 +220,65 @@ Installed consuming repos own their own:
 - review identity adapter
 - project-specific policy overlays
 
-## Source repo command surface
+## Optional-module follow-ups
 
-Common commands in this package repo are:
+These should stay visible as follow-ups instead of being hidden under the core green package state:
+
+- Graphify is optional and still needs repo-local setup, indexing freshness, and task-specific proof when enabled.
+- Playwright is optional and only becomes part of a target repo's truth after that repo opts in and passes its own verification.
+- Grafana is optional and advisory; MCP connectivity does not replace workflow proof, runtime-authoritative task state, or authenticated reviews.
+
+## Command surface classification
+
+This repo intentionally keeps the source-repo and installed-repo names different:
+
+- source repo: short maintainer names for package work
+- installed repo: namespaced `devgod:*` operator scripts
+
+### Core maintainer commands
+
+The primary maintainer commands in the package repo are:
 
 ```bash
+npm test
+npm run typecheck
+npm run check:quality
+npm run install:project -- init --apply --target /absolute/path/to/project
 npm run devgod -- help
-npm run setup:local
-npm run doctor
-npm run status
-npm run ops
-npm run devgod:focus
-npm run devgod:refresh-retrieval:fast
-npm run devgod -- report --run-id latest
-npm run devgod -- coverage --run-id latest --format text
-npm run devgod -- gaps --run-id latest --format text
-npm run devgod -- checkpoint --input /absolute/path/to/checkpoint.json
-npm run devgod -- resume --run-id latest
 npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
-npm run devgod -- daemon --format text
-npm run devgod -- supervisor --format text
-npm run devgod -- supervisor-history --format text
-npm run devgod -- plan-context --query "what still matters here?"
-npm run devgod -- plan-context --query "what still matters here?" --auto-refresh-repo-context --auto-refresh-retrieval
-npm run devgod -- refresh-repo-context
-npm run export:docs
-npm run mcp
-npm run ui
 ```
+
+For admin flows such as `doctor`, `status`, `ops`, `report`, `coverage`, `gaps`, `checkpoint`, `resume`, `daemon`, and `supervisor`, the current canonical maintainer surface is `npm run devgod -- ...`.
+
+### Core installed commands
+
+A consuming repo gets operator scripts centered on:
+
+```bash
+npm run devgod:setup:local
+npm run devgod:doctor
+npm run devgod:verify:setup
+npm run devgod:status
+npm run devgod -- workflow-proof --run-id latest --task-id <task-id>
+```
+
+The repo-local package invocation is canonical for installed repos. The current `devgod:check-workflow` script is still shipped as a compatibility wrapper and migration note.
+
+### Optional module commands
+
+These stay outside the core matrix:
+
+- source repo: `mcp`, `ui`, `setup:playwright`, `verify:playwright`, `setup:graphify`, `devgod:graphify:*`
+- installed repo default: `devgod:mcp`, `devgod:ui`
+- installed with `--with-graphify`: `devgod:setup:graphify`, `devgod:graphify:*`
+- installed with `--with-playwright`: `devgod:setup:playwright`, `devgod:verify:playwright`
+- installed-with-Grafana only: `devgod:grafana:mcp`
+
+### Legacy aliases and migration notes
+
+- source-repo shims such as `setup:local`, `doctor`, `status`, `verify:setup`, and `ops` still ship for operator continuity, but new docs should prefer `install:project` or `npm run devgod -- ...`
+- installed-repo aliases such as `devgod:heal` and `devgod:focus` still ship as compatibility wrappers
+- `devgod:check-workflow` remains the legacy shell wrapper while the runtime contract points at `npm run devgod -- workflow-proof --run-id latest --task-id <task-id>`
 
 Other important source-repo scripts:
 
@@ -241,35 +290,7 @@ Other important source-repo scripts:
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
 
-## Installed repo command surface
-
-A consuming repo gets repo-local `devgod:*` scripts such as:
-
-```bash
-npm run devgod:setup:git-guard
-npm run devgod:verify:git-guard
-npm run devgod:setup:local
-npm run devgod:doctor
-npm run devgod:verify:setup
-npm run devgod:status
-npm run devgod:coverage
-npm run devgod:gaps
-npm run devgod:ops
-npm run devgod:focus
-npm run devgod:report
-npm run devgod:refresh-repo-context
-npm run devgod:repair-task-queue
-npm run devgod:loop
-npm run devgod:daemon
-npm run devgod:supervisor
-npm run devgod:supervisor-history
-npm run devgod:recover
-npm run devgod:seed-workflow-proof
-npm run devgod:seed-modernization-proof
-npm run devgod:verify:review-identity
-```
-
-The installed surface is broader than the sample above. Notable additional scripts include:
+The installed surface is broader than the core matrix above. Notable additional scripts include:
 
 - `devgod:checkpoint`
 - `devgod:resume`

@@ -6,7 +6,7 @@
 
 ## Decision
 
-`pending`
+`approved`
 
 ## Context
 
@@ -32,7 +32,7 @@ Keep markdown task/review artifacts as the main operational surface and sync run
 
 ## Rationale
 
-Option A matches the maintainer's clarified direction and the existing repo contract that runtime authority is canonical.
+Option A matches the maintainer's clarified direction and the existing repo contract that runtime authority is canonical. The final repair track keeps runtime workflow proof as the authoritative closeout gate and treats this council packet as local architecture/product/security/QA planning evidence.
 
 ## Dissent Owner
 
@@ -40,13 +40,24 @@ Option A matches the maintainer's clarified direction and the existing repo cont
 
 ## Conditions
 
-- Do not claim runtime activation until a runtime run exists for this task.
+- Runtime proof run `d5a2b9ac-aa2d-4412-8387-578f0b849102` must remain resolvable for this task.
 - Do not treat markdown review files as trusted authority without runtime registration or explicit provenance limits.
 - Do not weaken review identity, completion audit, or task proof gates to regain green status.
 - Do not remove legacy aliases without migration tests or clear replacement messages.
+- Keep optional Graphify, Playwright, Grafana, and full JS build-pipeline work in separate task packets.
 
 ## Open Findings
 
-- Phase 0 review agents returned `changes_required`.
-- Runtime run registration is missing for this new task.
-- Phase 1 implementation has not started.
+- none
+
+## Closeout Evidence
+
+- `npm run verify:release-overlay` passed after final documentation and export repair.
+- `npm run devgod -- status --format text` reports `integrity.status` as `consistent`.
+- `bash scripts/check-devgod-workflow.sh --task-id 2026-06-12-devgod-autonomous-team-repair` passed.
+- `bash scripts/check-devgod-workflow-live.sh --repo-root . --task-id 2026-06-12-devgod-autonomous-team-repair` passed.
+- Runtime proof: `d5a2b9ac-aa2d-4412-8387-578f0b849102`.
+
+## Runtime Council Scope
+
+The final runtime proof was seeded from a runtime task packet that does not include `council_review_required`; an attempted runtime council record was correctly rejected with `Task 2026-06-12-devgod-autonomous-team-repair does not require council review`. This packet therefore records local advisory design-council approval only, not a separate runtime council approval claim.

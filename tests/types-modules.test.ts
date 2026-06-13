@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  readPublishedPackageJson,
+  readPublishedTypesEntrypoint,
+  readPublishedTypesModuleRelativePath,
+  stripDotSlashPrefix
+} from "./published-package-test-helpers.ts";
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -78,12 +84,10 @@ function collectNamedExports(sourceText: string, pattern: RegExp): string[] {
   return [...new Set([...sourceText.matchAll(pattern)].map((match) => match[1]))].sort();
 }
 
-test("package.json root export map keeps the public package entrypoint pointed at the package-safe surface", async () => {
-  const packageJson = JSON.parse(await readRepoFile("package.json")) as {
-    exports?: { ".": { types?: string; default?: string } };
-  };
+test("package.json root export map keeps the published types at the package root and runtime on dist", async () => {
+  const packageJson = await readPublishedPackageJson(sourceRoot);
 
-  assert.equal(packageJson.exports?.["."].types, "./src/public.ts");
+  assert.equal(readPublishedTypesEntrypoint(packageJson), packageJson.exports?.["."].types);
   assert.equal(packageJson.exports?.["."].default, "./dist/index.js");
 });
 
@@ -100,6 +104,36 @@ test("public source barrel preserves the package-safe api and lazy admin wrapper
   assert.ok(!publicValueExports.includes("createHostedUiRequestHandler"));
   assert.match(publicSource, /type AdminModule = typeof import\("\.\/admin\.ts"\);/);
   assert.match(publicSource, /return import\("\.\/admin\.ts"\);/);
+});
+
+test("published root declaration surface stays package-safe and avoids raw TypeScript implementation imports", async () => {
+  const publishedTypesRoot = await readRepoFile(
+    stripDotSlashPrefix(readPublishedTypesEntrypoint(await readPublishedPackageJson(sourceRoot)))
+  );
+  const publishedTypes = await readRepoFile(await readPublishedTypesModuleRelativePath(sourceRoot));
+  const safeWrapperSignaturePattern =
+    /\(\s*args: readonly string\[],\s*options: \{\s*cwd\?: string \| undefined;\s*env\?: Record<string, string \| undefined> \| undefined;\s*\[key: string\]: unknown;\s*\}\s*\) => Promise<unknown>/;
+
+  assert.match(publishedTypesRoot, /^export \* from "\.\/types\/public\.js";$/m);
+  assert.match(publishedTypes, /export \{ DevgodCoreService \} from "\.\/core\/service\.js";/);
+  assert.match(
+    publishedTypes,
+    new RegExp(`export declare const executeStatusCommandFromArgs: ${safeWrapperSignaturePattern.source};`)
+  );
+  assert.match(
+    publishedTypes,
+    new RegExp(`export declare const executeReportCommandFromArgs: ${safeWrapperSignaturePattern.source};`)
+  );
+  assert.match(
+    publishedTypes,
+    new RegExp(`export declare const executeSeedModernizationProofCommandFromArgs: ${safeWrapperSignaturePattern.source};`)
+  );
+  assert.doesNotMatch(publishedTypesRoot, /\.ts"/);
+  assert.doesNotMatch(publishedTypes, /type AdminModule = typeof import/);
+  assert.doesNotMatch(publishedTypes, /\.\/admin\.js/);
+  assert.doesNotMatch(publishedTypes, /\bpg\b/);
+  assert.doesNotMatch(publishedTypes, /getStatusSnapshot/);
+  assert.doesNotMatch(publishedTypes, /\.ts"/);
 });
 
 test("install types module loads as a shipped runtime module", async () => {

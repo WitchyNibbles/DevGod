@@ -181,6 +181,61 @@ test("generateSkillPromotionArtifacts creates a review packet and diff without m
   }
 });
 
+test("generateSkillPromotionArtifacts refuses to patch vendored-managed canonical skills", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-vendored-skill-promotion-"));
+
+  try {
+    const canonicalPath = path.join(repoRoot, ".agents/skills/devgod-api-design/SKILL.md");
+    await mkdir(path.dirname(canonicalPath), { recursive: true });
+    await writeFile(
+      canonicalPath,
+      [
+        "---",
+        "name: devgod-api-design",
+        'description: "Vendored mirror of api-design: API skill"',
+        "origin: devgod-vendored-skill",
+        "upstream_skill: api-design",
+        'upstream_path: "/tmp/api-design/SKILL.md"',
+        "upstream_sha256: abc123",
+        "synced_at: 2026-06-13T00:00:00.000Z",
+        "---",
+        "",
+        "<!-- Managed by src/devgod/sync-vendored-skills.ts from api-design. -->",
+        "",
+        "# API Design",
+        "",
+        "Old vendored guidance."
+      ].join("\n"),
+      "utf8"
+    );
+
+    await writeOverlaySkillDraft({
+      repoRoot,
+      skillId: "devgod-api-design",
+      content: [
+        "---",
+        "name: devgod-api-design",
+        'description: "Overlay API design update"',
+        "---",
+        "",
+        "# API Design",
+        "",
+        "Local overlay guidance."
+      ].join("\n")
+    });
+
+    await assert.rejects(
+      generateSkillPromotionArtifacts({
+        repoRoot,
+        skillId: "devgod-api-design"
+      }),
+      /Cannot promote overlay skill over vendored-managed canonical skill devgod-api-design/
+    );
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("evaluateOverlaySkill records advisory replay results without mutating canonical skills", async () => {
   const repoRoot = await mkdtemp(path.join(os.tmpdir(), "devgod-skill-eval-"));
 

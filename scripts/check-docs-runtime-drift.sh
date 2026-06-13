@@ -138,10 +138,12 @@ for forbidden in   "It is not yet at the stronger goal described"   "autonomous.
 done
 
 grep -Fq 'runtime-proven' "$current_state_doc" || fail "current-state doc is missing runtime-proven package status"
-grep -Fq 'authoritative completion proof is run `d141baef-0f7a-40df-9aec-ac60ad9235f7`' "$current_state_doc" || fail "current-state doc lost the authoritative completion proof reference"
+grep -Fq 'current June 12 repair closeout proof is run `d5a2b9ac-aa2d-4412-8387-578f0b849102`' "$current_state_doc" || fail "current-state doc lost the current closeout proof reference"
 grep -Fq 'package-level remediation described by this redesign is now shipped' "$redesign_doc" || fail "redesign doc is missing shipped-status framing"
-grep -Fq 'As of `2026-05-20`' "$readme_doc" || fail "README status date is stale"
-grep -Fq 'runtime-proven at the package level' "$readme_doc" || fail "README is missing runtime-proven package status"
+grep -Fq 'As of `2026-06-13`' "$readme_doc" || fail "README status date is stale"
+grep -Fq 'green package/install proof plus runtime workflow closeout proof for the repaired core overlay' "$readme_doc" || fail "README is missing package/install and workflow proof status"
+grep -Fq 'focused installed-repo harness path' "$readme_doc" || fail "README is missing installed-repo harness proof boundary"
+grep -Fq 'the June 12 repair task workflow closeout in this checkout' "$readme_doc" || fail "README is missing active-task closeout proof boundary"
 grep -Fq '`coverage`' "$readme_doc" || fail "README command families are missing coverage"
 grep -Fq '`gaps`' "$readme_doc" || fail "README command families are missing gaps"
 grep -Fq '`report`' "$readme_doc" || fail "README command families are missing report"

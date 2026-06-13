@@ -7,7 +7,7 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./src/public.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
@@ -250,6 +250,79 @@
     "verify:playwright": "node --experimental-strip-types src/install/setup-playwright.ts --verify",
     "setup:graphify": "node --experimental-strip-types src/install/setup-graphify.ts",
     "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
+  },
+  "devgodCommandSurface": {
+    "namingPolicy": {
+      "sourceRepo": "This package repo intentionally keeps short maintainer script names for day-to-day package work.",
+      "installedRepo": "Consuming repos intentionally get namespaced devgod:* scripts for local operator work, and default installs stay core-only unless optional modules are explicitly enabled.",
+      "workflowProof": "The canonical workflow proof command is `npm run devgod -- workflow-proof --run-id latest --task-id <task-id>`; `devgod:check-workflow` remains a compatibility wrapper until migration coverage can rename it safely."
+    },
+    "sourceRepo": {
+      "coreMaintainer": [
+        "test",
+        "typecheck",
+        "check:quality",
+        "install:project",
+        "devgod"
+      ],
+      "optionalModules": [
+        "mcp",
+        "ui",
+        "setup:playwright",
+        "verify:playwright",
+        "setup:graphify",
+        "devgod:graphify:build",
+        "devgod:graphify:codex-full",
+        "devgod:graphify:serve",
+        "devgod:graphify:update",
+        "devgod:graphify:watch"
+      ],
+      "legacyAliases": {
+        "doctor": "Prefer `npm run devgod -- doctor` in the source repo; installed repos use `npm run devgod:doctor`.",
+        "status": "Prefer `npm run devgod -- status` in the source repo; installed repos use `npm run devgod:status`.",
+        "verify:setup": "Prefer `npm run devgod -- verify-setup` in the source repo; installed repos use `npm run devgod:verify:setup`.",
+        "setup:local": "Prefer `npm run install:project -- init --apply --target <repo>` for installation flows; installed repos use `npm run devgod:setup:local`.",
+        "ops": "Prefer `npm run devgod -- ops --format text` in fresh docs; installed repos keep `npm run devgod:focus` as the compact alias."
+      }
+    },
+    "installedRepo": {
+      "coreInstalled": [
+        "devgod:setup:local",
+        "devgod:doctor",
+        "devgod:verify:setup",
+        "devgod:status"
+      ],
+      "workflowProof": {
+        "canonicalCommand": "npm run devgod -- workflow-proof --run-id latest --task-id <task-id>",
+        "legacyAlias": "devgod:check-workflow",
+        "migrationNote": "Keep the shell wrapper until the installed script surface can rename it under test coverage."
+      },
+      "optionalModules": [
+        "devgod:mcp",
+        "devgod:ui",
+        "devgod:setup:playwright",
+        "devgod:verify:playwright",
+        "devgod:setup:graphify",
+        "devgod:graphify:build",
+        "devgod:graphify:codex-full",
+        "devgod:graphify:serve",
+        "devgod:graphify:update",
+        "devgod:graphify:watch",
+        "devgod:grafana:mcp"
+      ],
+      "optionalModuleInstallFlags": {
+        "devgod:setup:graphify": "--with-graphify",
+        "devgod:graphify:*": "--with-graphify",
+        "devgod:setup:playwright": "--with-playwright",
+        "devgod:verify:playwright": "--with-playwright",
+        "devgod:grafana:mcp": "--with-grafana"
+      },
+      "legacyAliases": {
+        "devgod:heal": "Compatibility alias for `devgod doctor --repair`.",
+        "devgod:focus": "Compatibility alias for `devgod ops --format text`.",
+        "devgod:check-workflow": "Compatibility shell wrapper for workflow proof."
+      }
+    }
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

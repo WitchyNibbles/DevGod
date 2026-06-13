@@ -90,8 +90,6 @@ node --experimental-strip-types "$repo_root/src/install/cli.ts" "${install_args[
   npm install >/dev/null
 )
 
-run_target npm run devgod:setup:playwright >/dev/null
-
 run_target npm run devgod:scaffold-workflow -- --task-id "$task_id" --force-active >/dev/null
 run_target node --experimental-strip-types --input-type=module - "$workspace_slug" "$project_slug" "$task_id" <<'EOF'
 import assert from "node:assert/strict";
@@ -339,5 +337,8 @@ printf 'project: %s\n' "$project_slug"
 printf 'task: %s\n' "$task_id"
 printf 'profile: modernization_program\n'
 printf 'rewrite_readiness: ready\n'
+printf 'review_identity_authority: derived_only\n'
+printf 'graphify_authority: derived_only\n'
+printf 'runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work\n'
 printf 'grafana-opt-in: %s\n' "$grafana_status"
 printf 'target: %s\n' "$target_root"

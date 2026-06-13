@@ -1,27 +1,30 @@
 {
-  "cycle": 1,
+  "cycle": 9,
   "proof_id": "progress-2026-06-12-devgod-autonomous-team-repair",
   "task_id": "2026-06-12-devgod-autonomous-team-repair",
   "phase_before": "clarification_pending",
-  "phase_after": "phase_3_1_public_package_boundary_passed_runtime_pending",
+  "phase_after": "runtime_workflow_verified",
   "evidence_refs": [
     "docs/plans/2026-06-12-devgod-repair-roadmap.md",
     ".devgod/work/briefs/brief-2026-06-12-devgod-autonomous-team-repair.md",
     ".devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md",
     ".devgod/work/task-queue.json",
-    ".devgod/work/product-state.md"
+    ".devgod/work/product-state.md",
+    ".devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-reviewer.md",
+    ".devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-qa_engineer.md",
+    ".devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-security_reviewer.md"
   ],
   "coverage_delta": {
     "fully_analyzed": 1
   },
   "blocking_gap_delta": {
-    "closed": 5,
-    "opened": 1
+    "closed": 8,
+    "opened": 0
   },
-  "next_target": "phase-3-2-command-setup-surface-consolidation",
-  "why_next": "Phase 3.1 stabilized the public npm package boundary; the next roadmap work is command/setup surface consolidation while runtime registration and final review closure remain pending",
-  "status": "phase_3_1_public_package_boundary_passed_runtime_blocked",
-  "summary": "Maintainer clarification has been recorded: devgod is a public package for full autonomous development-team behavior with runtime DB authority as canonical truth and downstream runtime authority by default. The repair roadmap, brief, task packet, queue, review exports, council packet, and product-state exports now point at this repair track. Phase 1 restored the maintainer quality path: idle workflow checks are intentional, stale completion-audit contract propagation is repaired, coverage passes above threshold, and `npm run check:quality` passes. Phase 2.1 defines runtime task, review, approval, and council records as canonical; markdown task packets, review summaries, product state, and task queue are export artifacts with explicit required/advisory semantics; `review_exports=runtime_optional` waives only markdown review summaries; live workflow checks now require non-empty completion-audit sections for `specialist_verified` or `completion_audit_required` tasks. Phase 2.2 adds derived approved-task proof obligations to status, surfaces missing or malformed approved task exports as contradictions when local workflow is non-active, and gives ops concrete repair and verification actions for the inspected run/task. Phase 2.3 repaired the approved `2026-06-08-consuming-repo-skill-evolution-trace-mining` export set by backfilling a current brief, task packet, structured progress proof, and runtime-verified review summaries. Phase 3.1 makes the package public, adds explicit JS `exports` and `bin` entrypoints, routes downstream installer scripts and workflow contract text through the public `devgod` command, and verifies a packed install can import `devgod` and run the bin. Runtime registration and final review-gate closure remain pending; Phase 3.2 command/setup surface consolidation is next.",
+  "next_target": "new-task-required",
+  "why_next": "The active June 12 repair task is complete; future work should start from a new task packet.",
+  "status": "complete",
+  "summary": "Maintainer clarification, gate restoration, runtime/export semantics, status contradiction repair, package boundary stabilization, command/setup consolidation, canonical renderer cleanup, optional-module boundary cleanup, downstream install hardening, release-readiness reconciliation, and runtime workflow closeout are complete for the June 12 repair task.",
   "changed_paths": [
     "docs/plans/2026-06-12-devgod-repair-roadmap.md",
     ".devgod/ACTIVE",
@@ -34,157 +37,34 @@
     ".devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-security_reviewer.md",
     ".devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md",
     ".devgod/work/task-queue.json",
-    ".devgod/work/product-state.md",
-    ".devgod/work/briefs/brief-2026-06-08-consuming-repo-skill-evolution-trace-mining.md",
-    ".devgod/work/tasks/task-2026-06-08-consuming-repo-skill-evolution-trace-mining.md",
-    ".devgod/work/proofs/progress-2026-06-08-consuming-repo-skill-evolution-trace-mining.json",
-    ".devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-reviewer.md",
-    ".devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-qa_engineer.md",
-    ".devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-security_reviewer.md",
-    "AGENTS.md",
-    ".devgod/rules/policy-precedence.md",
-    ".devgod/rules/review-gate-policy.md",
-    ".devgod/templates/task-packet.md",
-    "scripts/check-devgod-workflow.sh",
-    "src/admin.ts",
-    "src/admin/status.ts",
-    "src/admin/ops.ts",
-    "src/devgod/workflow-schema.ts",
-    ".gitignore",
-    "package.json",
-    "dist/bin/devgod.js",
-    "dist/index.js",
-    "dist/register-typescript-hooks.js",
-    "src/public.ts",
-    "src/devgod/package-surface.ts",
-    "src/install/cli.ts",
-    "src/install/merge.ts",
-    "src/evals/orchestration-baseline.ts",
-    "tests/actions.test.ts",
-    "tests/control-layer-contract.test.ts",
-    "tests/install.test.ts",
-    "tests/ops-recovery.test.ts",
-    "tests/report-command.test.ts",
-    "tests/service.test.ts",
-    "tests/status-report.test.ts",
-    "tests/types-modules.test.ts",
-    "tests/workflow-check.test.ts",
-    "tests/workflow-integrity.test.ts"
+    ".devgod/work/product-state.md"
   ],
   "verification": [
     {
-      "command": "git diff --check -- docs/plans/2026-06-12-devgod-repair-roadmap.md .devgod/ACTIVE .devgod/work/briefs/brief-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/plans/plan-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/council/dac-2026-06-12-devgod-autonomous-team-repair.md .devgod/work/proofs/progress-2026-06-12-devgod-autonomous-team-repair.json .devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-reviewer.md .devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-qa_engineer.md .devgod/work/reviews/review-2026-06-12-devgod-autonomous-team-repair-security_reviewer.md .devgod/work/task-queue.json .devgod/work/product-state.md",
+      "command": "npm run verify:release-overlay",
       "result": "passed"
     },
     {
-      "command": "npm run check:coverage",
-      "result": "passed: aggregate branches 80.08%"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/actions.test.ts tests/orchestration-eval.test.ts tests/control-layer-contract.test.ts tests/ops-recovery.test.ts",
-      "result": "passed: 45 tests, 0 failed"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/workflow-integrity.test.ts",
-      "result": "passed: 11 tests, 0 failed"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/workflow-check.test.ts tests/workflow-scaffold.test.ts",
-      "result": "passed: 45 tests, 0 failed"
-    },
-    {
-      "command": "npm run verify:workflow-schema",
-      "result": "passed: workflow schema verified after Phase 2.1 runtime/export semantics integration"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/control-layer-contract.test.ts tests/workflow-integrity.test.ts tests/workflow-check.test.ts",
-      "result": "passed: 63 tests, 0 failed after Phase 2.1 integration"
-    },
-    {
-      "command": "git diff --check -- AGENTS.md .devgod/rules/review-gate-policy.md .devgod/rules/policy-precedence.md .devgod/templates/task-packet.md src/devgod/workflow-schema.ts tests/control-layer-contract.test.ts tests/workflow-integrity.test.ts scripts/check-devgod-workflow.sh tests/workflow-check.test.ts",
-      "result": "passed"
-    },
-    {
-      "command": "npm run check:quality",
-      "result": "passed after Phase 2.1 integration: typecheck, coverage with branches 80.16%, workflow schema, agent caveman, workflow fixtures, evals, drift check, audit, package surface, vendored skills, and package dry run"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/status-report.test.ts tests/ops-recovery.test.ts tests/workflow-integrity.test.ts",
-      "result": "passed: 79 tests, 0 failed after Phase 2.2 integration"
+      "command": "npm run devgod -- seed-workflow-proof --task-id 2026-06-12-devgod-autonomous-team-repair --workspace-slug default --project-slug devgod",
+      "result": "passed: runtime proof run d5a2b9ac-aa2d-4412-8387-578f0b849102 approved the task"
     },
     {
       "command": "npm run devgod -- status --format text",
-      "result": "passed: returned runtime-authoritative approved run status plus derived integrity contradiction and taskProofObligations for stale approved trace-mining task exports; command still emits JSON under --format text"
-    },
-    {
-      "command": "git diff --check -- src/admin.ts src/admin/status.ts src/admin/ops.ts src/admin/devgod.ts tests/status-report.test.ts tests/ops-recovery.test.ts tests/workflow-integrity.test.ts",
-      "result": "passed"
-    },
-    {
-      "command": "npm run check:quality",
-      "result": "passed after Phase 2.2 integration: typecheck, coverage, workflow schema, agent caveman, workflow fixtures, evals, drift check, audit, package surface, vendored skills, and package dry run"
-    },
-    {
-      "command": "node -e \"JSON.parse(require('fs').readFileSync('.devgod/work/proofs/progress-2026-06-08-consuming-repo-skill-evolution-trace-mining.json','utf8')); console.log('json ok')\"",
-      "result": "passed"
-    },
-    {
-      "command": "git diff --check -- .devgod/work/briefs/brief-2026-06-08-consuming-repo-skill-evolution-trace-mining.md .devgod/work/tasks/task-2026-06-08-consuming-repo-skill-evolution-trace-mining.md .devgod/work/proofs/progress-2026-06-08-consuming-repo-skill-evolution-trace-mining.json .devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-reviewer.md .devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-qa_engineer.md .devgod/work/reviews/review-2026-06-08-consuming-repo-skill-evolution-trace-mining-security_reviewer.md",
-      "result": "passed"
-    },
-    {
-      "command": "bash scripts/check-devgod-workflow.sh --repo-root <temporary-export-root> --task-id 2026-06-08-consuming-repo-skill-evolution-trace-mining",
-      "result": "passed: temporary export root used a matching ACTIVE and task-queue pointer so the repaired June 8 export set could be validated without disturbing the active June 12 task"
-    },
-    {
-      "command": "bash scripts/check-devgod-workflow.sh --live --external-review-authority --repo-root <temporary-export-root> --task-id 2026-06-08-consuming-repo-skill-evolution-trace-mining",
-      "result": "passed: live-required artifact headings and review exports validated in a temporary export root"
-    },
-    {
-      "command": "npm run devgod -- status --format text",
-      "result": "passed: trace-mining taskProofObligations entry now has exportState valid with no issues; remaining contradiction is only the current June 12 active export versus the older approved runtime run"
-    },
-    {
-      "command": "bash scripts/check-devgod-workflow.sh --external-review-authority --task-id 2026-06-12-devgod-autonomous-team-repair",
-      "result": "passed: local artifact packet is structurally valid with blocked review exports"
-    },
-    {
-      "command": "rg -n 'node_modules/devgod/src/admin/devgod|devgod/src/index|from \"devgod/src|\"./src/index.ts\"|\"./src/admin/devgod.ts\"' package.json src/install tests dist src/devgod || true",
-      "result": "passed after Phase 3.1 integration: no forbidden raw package-boundary references found"
-    },
-    {
-      "command": "node --experimental-strip-types --test tests/types-modules.test.ts tests/install.test.ts",
-      "result": "passed: 70 tests, 0 failed after Phase 3.1 integration, including packed-install import and bin smoke"
-    },
-    {
-      "command": "npm run verify:package-surface",
-      "result": "passed after Phase 3.1 integration: package surface verified"
-    },
-    {
-      "command": "npm pack --dry-run",
-      "result": "passed after Phase 3.1 integration: tarball includes dist/bin/devgod.js, dist/index.js, dist/register-typescript-hooks.js, and src/public.ts"
-    },
-    {
-      "command": "npm run check:quality",
-      "result": "passed after Phase 3.1 integration: typecheck, coverage, audit, package surface, vendored skills, and package dry run"
+      "result": "passed: integrity.status consistent"
     },
     {
       "command": "bash scripts/check-devgod-workflow.sh --task-id 2026-06-12-devgod-autonomous-team-repair",
-      "result": "blocked: default runtime-authoritative check rejects blocked review exports"
+      "result": "passed"
     },
     {
       "command": "bash scripts/check-devgod-workflow-live.sh --repo-root . --task-id 2026-06-12-devgod-autonomous-team-repair",
-      "result": "changes_required: runtime has no run yet for this newly prepared task"
+      "result": "passed"
     }
   ],
   "residual_risk": [
-    "Runtime has not yet registered a run for this new task.",
-    "Required reviewer, QA, and security review exports currently record changes_required findings.",
-    "`npm run devgod -- status --format text` still emits JSON despite the text flag; this was observed as pre-existing CLI behavior outside Phase 2.2 scope.",
-    "Status proof obligations inspect approved task packet and ancillary proof files, while review-export drift is still validated by the authoritative workflow checker rather than separately surfaced in status.",
-    "The prior approved trace-mining task remains in queue history with explicit closeout risk.",
-    "Phase 3.1 stabilizes the public package boundary with JS dist entrypoints, but installed runtime commands still depend on shipped TypeScript internals through Node experimental type-stripping hooks until a full JS build pipeline lands."
+    "Optional Graphify, Playwright, and Grafana work remains out of scope for this completed core proof.",
+    "A future full JS build pipeline should preserve the same public package and runtime-authority boundaries."
   ],
   "blocker": null,
-  "next_recommended_task": "Start Phase 3.2 command/setup surface consolidation, then register runtime proof when the full active task is review-clean"
+  "next_recommended_task": "Create a new task packet for any optional module or build-pipeline follow-up."
 }

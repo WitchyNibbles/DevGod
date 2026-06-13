@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "@iarna/toml";
 import {
   agentCatalogEntries,
@@ -11,7 +12,8 @@ import {
   cavemanDirectUserFacingExceptionRoleIds,
   verifyNonUserFacingAgentCavemanContract
 } from "./caveman-policy.ts";
-import { listCatalogRepoLocalSkillPaths } from "./repo-local-skill-surface.ts";
+import { listCatalogRepoLocalSkillEntries, listCatalogRepoLocalSkillPaths } from "./repo-local-skill-surface.ts";
+import { parseSkillDocument, validateSkillDocument, vendoredSkillEntries } from "./vendored-skills.ts";
 
 export interface AgentArtifactVerificationResult {
   ok: boolean;
@@ -24,6 +26,20 @@ export interface AgentArtifactVerificationResult {
 export interface CatalogRepoLocalSkillVerificationResult {
   ok: boolean;
   missingSkillFiles: string[];
+  skillContractMismatches: string[];
+}
+
+const vendoredSkillEntriesByLocalId = new Map(
+  vendoredSkillEntries.map((entry) => [entry.localSkillId, entry])
+);
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+function normalizeManagedText(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+function shippedRepoLocalSkillAbsolutePath(relativePath: string): string {
+  return path.join(packageRoot, relativePath);
 }
 
 export async function verifyAgentCatalogArtifacts(input: {
@@ -119,19 +135,58 @@ export async function verifyCatalogRepoLocalSkills(input: {
   repoRoot: string;
   roles?: readonly AgentRoleId[] | undefined;
 }): Promise<CatalogRepoLocalSkillVerificationResult> {
-  const expectedSkillFiles = listCatalogRepoLocalSkillPaths({ roles: input.roles });
+  const expectedSkillEntries = listCatalogRepoLocalSkillEntries({ roles: input.roles });
   const missingSkillFiles: string[] = [];
+  const skillContractMismatches: string[] = [];
 
-  for (const relativePath of expectedSkillFiles) {
+  for (const entry of expectedSkillEntries) {
+    let content: string;
+    let shippedContent: string;
     try {
-      await readFile(path.join(input.repoRoot, relativePath), "utf8");
+      content = await readFile(path.join(input.repoRoot, entry.path), "utf8");
     } catch {
-      missingSkillFiles.push(relativePath);
+      missingSkillFiles.push(entry.path);
+      continue;
+    }
+    try {
+      shippedContent = await readFile(shippedRepoLocalSkillAbsolutePath(entry.path), "utf8");
+    } catch {
+      skillContractMismatches.push(`${entry.path}: missing shipped repo-local skill template`);
+      continue;
+    }
+
+    if (normalizeManagedText(content) !== normalizeManagedText(shippedContent)) {
+      skillContractMismatches.push(`${entry.path}: content drift from shipped repo-local skill template`);
+    }
+
+    const validationIssues = validateSkillDocument(content, { expectedName: entry.skillId });
+    if (validationIssues.length > 0) {
+      skillContractMismatches.push(`${entry.path}: ${validationIssues.join("; ")}`);
+      continue;
+    }
+
+    const parsed = parseSkillDocument(content);
+    if (entry.origin === "devgod_vendored") {
+      const vendoredEntry = vendoredSkillEntriesByLocalId.get(entry.skillId);
+      const hasExpectedVendoredMetadata =
+        parsed.frontmatter.origin === "devgod-vendored-skill" &&
+        parsed.frontmatter.upstream_skill === vendoredEntry?.upstreamSkillId &&
+        Boolean(parsed.frontmatter.upstream_sha256);
+      if (!hasExpectedVendoredMetadata) {
+        skillContractMismatches.push(`${entry.path}: expected vendored skill metadata`);
+      }
+      continue;
+    }
+
+    const bodyHasRepoLocalGuidance = /\b(Use|Goal|Rules|Output|When to use|Do not)\b/i.test(parsed.body);
+    if (parsed.frontmatter.origin === "devgod-vendored-skill" || !bodyHasRepoLocalGuidance) {
+      skillContractMismatches.push(`${entry.path}: expected non-vendored repo-local skill guidance`);
     }
   }
 
   return {
-    ok: missingSkillFiles.length === 0,
-    missingSkillFiles
+    ok: missingSkillFiles.length === 0 && skillContractMismatches.length === 0,
+    missingSkillFiles,
+    skillContractMismatches
   };
 }

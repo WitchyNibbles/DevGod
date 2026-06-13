@@ -49,13 +49,16 @@ This document is historical context from the pre-remediation package audit.
 `;
 
 const currentState = `runtime-proven
-authoritative completion proof is run \`d141baef-0f7a-40df-9aec-ac60ad9235f7\`
+current June 12 repair closeout proof is run \`d5a2b9ac-aa2d-4412-8387-578f0b849102\`
 `;
 const redesignState = `package-level remediation described by this redesign is now shipped
 `;
 const readmeState = `# DevGod
 
-As of \`2026-05-20\`, DevGod is runtime-proven at the package level.
+As of \`2026-06-13\`, DevGod has green package/install proof plus runtime workflow closeout proof for the repaired core overlay.
+
+This repo proves the focused installed-repo harness path.
+The current proof covers the focused installed-repo harness path and the June 12 repair task workflow closeout in this checkout.
 
 Command families include \`coverage\`, \`gaps\`, and \`report\`.
 `;

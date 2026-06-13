@@ -11,4 +11,4 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-node --experimental-strip-types src/install/cli.ts --target "$1"
+node --experimental-strip-types src/install/cli.ts init --apply --target "$1"

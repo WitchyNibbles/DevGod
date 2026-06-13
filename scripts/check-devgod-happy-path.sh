@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 requested_task_id=""
+command_surface=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,20 +63,71 @@ require_contains() {
   fi
 }
 
-printf 'synthetic fixture check\n'
-[[ "$requested_task_id" == fixture-* ]] || {
-  printf 'happy-path fixture task ids must start with fixture-: %s\n' "$requested_task_id" >&2
-  exit 1
+package_file="$repo_root/package.json"
+
+has_package_script() {
+  local script_name="$1"
+  node --input-type=module - "$package_file" "$script_name" <<'EOF' >/dev/null
+import { readFileSync } from "node:fs";
+
+const [packagePath, scriptName] = process.argv.slice(2);
+const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+const scriptValue = pkg.scripts?.[scriptName];
+
+if (typeof scriptValue !== "string" || scriptValue.trim().length === 0) {
+  process.exit(1);
 }
+EOF
+}
+
+require_package_script() {
+  local script_name="$1"
+  local error_prefix="$2"
+  has_package_script "$script_name" || {
+    printf '%s: package.json lacks %s\n' "$error_prefix" "$script_name" >&2
+    exit 1
+  }
+}
+
+if has_package_script "devgod:check:happy-path"; then
+  command_surface="installed"
+elif has_package_script "check:happy-path"; then
+  command_surface="source"
+else
+  printf 'happy-path command surface missing: package.json lacks check:happy-path or devgod:check:happy-path\n' >&2
+  exit 1
+fi
+
+synthetic_fixture_mode=0
+if [[ "$requested_task_id" == fixture-* ]]; then
+  synthetic_fixture_mode=1
+fi
+
+printf 'happy-path mode: %s\n' "$([[ "$synthetic_fixture_mode" -eq 1 ]] && printf 'synthetic-fixture' || printf 'workflow-task')"
+printf 'command surface: %s\n' "$command_surface"
+
+if [[ "$command_surface" == "source" ]]; then
+  require_package_script "check:happy-path" "source repo happy-path setup incomplete"
+  require_package_script "check:workflow" "source repo happy-path setup incomplete"
+  require_package_script "verify:setup" "source repo happy-path setup incomplete"
+else
+  require_package_script "devgod:check:happy-path" "incomplete devgod setup"
+  require_package_script "devgod:check-workflow" "incomplete devgod setup"
+  require_package_script "devgod:verify:setup" "incomplete devgod setup"
+fi
 
 require_file "$brief_file"
 require_file "$task_file"
-require_contains "$brief_file" "Synthetic install-proof only"
-require_contains "$task_file" "fixture remains synthetic and non-authoritative"
 
-if [[ -f "$active_file" ]] && grep -Fq "task_id=$requested_task_id" "$active_file"; then
-  printf 'synthetic fixture must not become the active workflow task: %s\n' "${active_file#"$repo_root"/}" >&2
-  exit 1
+if [[ "$synthetic_fixture_mode" -eq 1 ]]; then
+  printf 'synthetic fixture check\n'
+  require_contains "$brief_file" "Synthetic install-proof only"
+  require_contains "$task_file" "fixture remains synthetic and non-authoritative"
+
+  if [[ -f "$active_file" ]] && grep -Fq "task_id=$requested_task_id" "$active_file"; then
+    printf 'synthetic fixture must not become the active workflow task: %s\n' "${active_file#"$repo_root"/}" >&2
+    exit 1
+  fi
 fi
 
 mapfile -t review_roles < <(
@@ -90,62 +142,48 @@ EOF
 for role in "${review_roles[@]}"; do
   review_file="$review_dir/review-${requested_task_id}-${role}.md"
   require_file "$review_file"
-  require_contains "$review_file" '`summary_only`'
-  require_contains "$review_file" '`blocked`'
-  require_contains "$review_file" 'Synthetic install fixture only'
-  if grep -Fq 'Runtime proof:' "$review_file"; then
-    printf 'synthetic fixture review must not claim runtime proof: %s\n' "${review_file#"$repo_root"/}" >&2
-    exit 1
+
+  if [[ "$synthetic_fixture_mode" -eq 1 ]]; then
+    require_contains "$review_file" '`summary_only`'
+    require_contains "$review_file" '`blocked`'
+    require_contains "$review_file" 'Synthetic install fixture only'
+    if grep -Fq 'Runtime proof:' "$review_file"; then
+      printf 'synthetic fixture review must not claim runtime proof: %s\n' "${review_file#"$repo_root"/}" >&2
+      exit 1
+    fi
   fi
 done
 
 bindings_file="$repo_root/.devgod/review-identity-bindings.json"
 adapter_file="$repo_root/devgod/review-identity-adapter.ts"
 workflow_export_file="$repo_root/scripts/check-devgod-workflow.sh"
-package_file="$repo_root/package.json"
-playwright_config_file="$repo_root/.devgod/playwright/mcp.json"
-playwright_vision_config_file="$repo_root/.devgod/playwright/mcp.vision.json"
+workflow_live_export_file="$repo_root/scripts/check-devgod-workflow-live.sh"
 
 [[ -f "$bindings_file" ]] || {
   printf 'bad review identity bindings export: missing %s\n' "${bindings_file#"$repo_root"/}" >&2
   exit 1
 }
-require_contains "$bindings_file" 'replace-with-authenticated-user-id'
+if [[ "$synthetic_fixture_mode" -eq 1 ]]; then
+  require_contains "$bindings_file" 'replace-with-authenticated-user-id'
+fi
 
 [[ -f "$adapter_file" ]] || {
   printf 'missing review identity adapter scaffold: %s\n' "${adapter_file#"$repo_root"/}" >&2
   exit 1
 }
-require_contains "$adapter_file" 'Implement devgod/review-identity-adapter.ts'
+if [[ "$synthetic_fixture_mode" -eq 1 ]]; then
+  require_contains "$adapter_file" 'Implement devgod/review-identity-adapter.ts'
+fi
 
 [[ -f "$workflow_export_file" ]] || {
   printf 'stale install export missing: %s\n' "${workflow_export_file#"$repo_root"/}" >&2
   exit 1
 }
 
-[[ -f "$playwright_config_file" ]] || {
-  printf 'missing Playwright MCP config export: %s\n' "${playwright_config_file#"$repo_root"/}" >&2
+[[ -f "$workflow_live_export_file" ]] || {
+  printf 'stale install export missing: %s\n' "${workflow_live_export_file#"$repo_root"/}" >&2
   exit 1
 }
-
-[[ -f "$playwright_vision_config_file" ]] || {
-  printf 'missing Playwright vision MCP config export: %s\n' "${playwright_vision_config_file#"$repo_root"/}" >&2
-  exit 1
-}
-
-require_contains "$package_file" 'devgod:check:happy-path'
-if ! grep -Fq 'devgod:verify:setup' "$package_file"; then
-  printf 'incomplete devgod setup: package.json lacks devgod:verify:setup\n' >&2
-  exit 1
-fi
-if ! grep -Fq 'devgod:setup:playwright' "$package_file"; then
-  printf 'incomplete devgod setup: package.json lacks devgod:setup:playwright\n' >&2
-  exit 1
-fi
-if ! grep -Fq 'devgod:verify:playwright' "$package_file"; then
-  printf 'incomplete devgod setup: package.json lacks devgod:verify:playwright\n' >&2
-  exit 1
-fi
 
 printf 'retrieval advisory smoke (derived, non-authoritative)\n'
 retrieval_eval="$repo_root/src/evals/retrieval-memory-baseline.ts"

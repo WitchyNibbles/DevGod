@@ -9,11 +9,27 @@ import {
   renderReviewGateTemplate,
   renderTaskPacketTemplate
 } from "../src/devgod/workflow-schema.ts";
+import {
+  renderManagedAgentsBlock,
+  renderManagedDotAgentsBlock,
+  renderWorkflowContractBlock
+} from "../src/devgod/managed-policy-renderer.ts";
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function read(relativePath: string): Promise<string> {
   return readFile(path.join(sourceRoot, relativePath), "utf8");
+}
+
+function assertSemanticPolicyParity(
+  sourceText: string,
+  renderedText: string,
+  checks: Array<{ source: RegExp; rendered?: RegExp }>
+): void {
+  for (const check of checks) {
+    assert.match(sourceText, check.source);
+    assert.match(renderedText, check.rendered ?? check.source);
+  }
 }
 
 test("devgod intake guidance requires clarification and explicit assumptions", async () => {
@@ -112,6 +128,142 @@ test("workflow templates encode clarification, regression, and risk-closure expe
   assert.match(reasoningQuality, /strict is the default reasoning mode/i);
   assert.match(reasoningQuality, /dual mode is the migration bridge/i);
   assert.match(reasoningQuality, /bounded research, debug, and review budgets/i);
+});
+
+test("managed policy renderer owns installed AGENTS policy blocks", async () => {
+  const agents = renderManagedAgentsBlock();
+  const dotAgents = renderManagedDotAgentsBlock();
+  const workflowContract = renderWorkflowContractBlock();
+  const repoAgents = await read("AGENTS.md");
+  const repoDotAgents = await read(".agents.md");
+  const graphifyPolicy = await read(".devgod/rules/graphify-advisory-policy.md");
+  const debuggingSkill = await read(".agents/skills/devgod-debugging/SKILL.md");
+
+  assert.match(agents, /<!-- BEGIN DEVGOD MANAGED -->/);
+  assert.match(agents, /<!-- END DEVGOD MANAGED -->/);
+  assert.match(dotAgents, /<!-- BEGIN DEVGOD KERNEL -->/);
+  assert.match(dotAgents, /<!-- END DEVGOD KERNEL -->/);
+  assert.match(agents, /Canonical runtime contract:/);
+  assert.match(agents, /workflow_check=npm run devgod -- workflow-proof --run-id latest --task-id <task-id>/);
+  assert.match(agents, /substantive work completes only after .* gates plus runtime workflow proof/i);
+  assert.match(agents, /workflow_documents=workflow_documents/);
+  assert.match(agents, /review_artifact_trust=runtime_records_only/);
+  assert.match(agents, /caveman.*ultra/i);
+  assert.match(dotAgents, /markdown review files are evidence summaries, not reviewer authority/i);
+  assert.match(dotAgents, /authenticated reviewer identity and waiver authority/i);
+  assert.match(workflowContract, /<!-- devgod-workflow-contract:start -->/);
+  assert.match(workflowContract, /<!-- devgod-workflow-contract:end -->/);
+  assert.doesNotMatch(`${agents}\n${dotAgents}\n${workflowContract}`, /node_modules\/devgod\/src/);
+
+  assertSemanticPolicyParity(repoAgents, agents, [
+    {
+      source: /treat substantive .* asks as `devgod` work unless the user opts out/i,
+      rendered: /treat substantive requests as devgod work unless the user opts out/i
+    },
+    { source: /use `devgod-intake` as the default first skill for substantive work/i },
+    {
+      source: /require `Design and Architecture Council` review .* unless/i,
+      rendered:
+        /require Design and Architecture Council review .* unless the task is trivial or inherits an approved decision/i
+    },
+    {
+      source: /require task packets to declare explicit workflow artifact refs/i,
+      rendered: /inherited task packets must carry explicit workflow artifact refs/i
+    },
+    {
+      source: /`review_exports=runtime_optional`.*waives only markdown review-summary exports/i,
+      rendered: /use `review_exports=runtime_optional` only when runtime-authenticated review authority covers the gate/i
+    },
+    {
+      source: /substantive work completes only after `reviewer`, `qa_engineer`, and `security_reviewer` gates plus the workflow check/i,
+      rendered: /substantive work completes only after .* gates plus runtime workflow proof/i
+    },
+    {
+      source: /the manager must not stop after intake, architecture, planning, or one implementation slice unless/i,
+      rendered: /do not wait for the user to say continue/i
+    },
+    { source: /branch from updated `origin\/main` before task or plan work/i },
+    { source: /do not use `codex` in branch names, commit subjects, PR titles, or PR bodies/i },
+    {
+      source: /use the\s+local `caveman` skill in `ultra` mode/i,
+      rendered: /specialist\/subagent roles use `caveman` `ultra` mode/i
+    }
+  ]);
+
+  assertSemanticPolicyParity(repoDotAgents, dotAgents, [
+    {
+      source: /root thread is the manager: confirm goal, criteria, constraints, and main risk/i
+    },
+    {
+      source: /task packets need `task_id`, owner role, completion standard, required specialists, quality gates, write scope, acceptance criteria, verification steps, required reviews, security checks, and rollback notes/i
+    },
+    {
+      source: /run `bash scripts\/check-devgod-workflow\.sh --task-id <task-id>` before declaring substantive work complete/i
+    },
+    {
+      source: /current task id must match `.devgod\/ACTIVE`, the current brief, the current plan\/task, and required review files/i
+    },
+    {
+      source: /unresolved `CRITICAL` or `HIGH` security findings block completion/i
+    },
+    {
+      source: /markdown review files are evidence summaries, not reviewer authority/i
+    },
+    {
+      source:
+        /authenticated reviewer identity and waiver authority must come from runtime policy or another authenticated principal-binding source/i
+    },
+    {
+      source:
+        /ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes/i
+    },
+    {
+      source: /use repo-local `devgod` skills and agents when they fit/i
+    }
+  ]);
+
+  assertSemanticPolicyParity(graphifyPolicy, agents, [
+    {
+      source: /for code-file navigation in this repo and consuming repos, use Graphify first when the repo graph is ready/i,
+      rendered: /use Graphify MCP first when the repo-local graph is ready/i
+    }
+  ]);
+
+  assertSemanticPolicyParity(graphifyPolicy, dotAgents, [
+    {
+      source: /treat Graphify output as advisory retrieval evidence only/i,
+      rendered: /Graphify MCP first when the repo-local graph is ready .* but do not treat it as workflow authority/i
+    }
+  ]);
+
+  assertSemanticPolicyParity(debuggingSkill, agents, [
+    {
+      source: /When repo-local Grafana configuration is present/i,
+      rendered: /when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence/i
+    },
+    {
+      source: /do not make strong negative claims from a narrow pass/i,
+      rendered: /avoid strong negative claims from a narrow pass/i
+    }
+  ]);
+
+  assertSemanticPolicyParity(debuggingSkill, dotAgents, [
+    {
+      source: /When repo-local Grafana configuration is present/i,
+      rendered: /when repo-local Grafana configuration is present, treat Grafana as advisory evidence/i
+    },
+    {
+      source: /do not make strong negative claims from a narrow pass/i,
+      rendered: /avoid strong negative claims from a narrow pass/i
+    }
+  ]);
+});
+
+test("repo-local workflow contract matches the canonical source renderer", async () => {
+  const agents = await read("AGENTS.md");
+  const sourceContract = agents.match(/<!-- devgod-workflow-contract:start -->[\s\S]*?<!-- devgod-workflow-contract:end -->/)?.[0];
+
+  assert.equal(sourceContract, renderWorkflowContractBlock({ target: "source" }));
 });
 
 test("reasoning-quality skills call for bounded skepticism and evidence discipline", async () => {

@@ -3,9 +3,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
+export type VendoredSkillSourceKind = "core";
+
 export interface VendoredSkillEntry {
   localSkillId: string;
   upstreamSkillId: string;
+  sourceKind: VendoredSkillSourceKind;
 }
 
 export interface ResolvedVendoredSkillEntry extends VendoredSkillEntry {
@@ -26,28 +29,36 @@ export interface VendoredSkillVerificationIssue {
   problem: string;
 }
 
+function coreVendoredSkill(upstreamSkillId: string): VendoredSkillEntry {
+  return {
+    localSkillId: `devgod-${upstreamSkillId}`,
+    upstreamSkillId,
+    sourceKind: "core"
+  };
+}
+
 export const vendoredSkillEntries = [
-  { localSkillId: "devgod-agentic-engineering", upstreamSkillId: "agentic-engineering" },
-  { localSkillId: "devgod-api-design", upstreamSkillId: "api-design" },
-  { localSkillId: "devgod-article-writing", upstreamSkillId: "article-writing" },
-  { localSkillId: "devgod-backend-patterns", upstreamSkillId: "backend-patterns" },
-  { localSkillId: "devgod-database-migrations", upstreamSkillId: "database-migrations" },
-  { localSkillId: "devgod-deployment-patterns", upstreamSkillId: "deployment-patterns" },
-  { localSkillId: "devgod-docker-patterns", upstreamSkillId: "docker-patterns" },
-  { localSkillId: "devgod-documentation-lookup", upstreamSkillId: "documentation-lookup" },
-  { localSkillId: "devgod-e2e-testing", upstreamSkillId: "e2e-testing" },
-  { localSkillId: "devgod-eval-harness", upstreamSkillId: "eval-harness" },
-  { localSkillId: "devgod-frontend-patterns", upstreamSkillId: "frontend-patterns" },
-  { localSkillId: "devgod-market-research", upstreamSkillId: "market-research" },
-  { localSkillId: "devgod-mcp-server-patterns", upstreamSkillId: "mcp-server-patterns" },
-  { localSkillId: "devgod-postgres-patterns", upstreamSkillId: "postgres-patterns" },
-  { localSkillId: "devgod-search-first", upstreamSkillId: "search-first" },
-  { localSkillId: "devgod-security-review", upstreamSkillId: "security-review" },
-  { localSkillId: "devgod-security-scan", upstreamSkillId: "security-scan" },
-  { localSkillId: "devgod-strategic-compact", upstreamSkillId: "strategic-compact" },
-  { localSkillId: "devgod-tdd-workflow", upstreamSkillId: "tdd-workflow" },
-  { localSkillId: "devgod-verification-loop", upstreamSkillId: "verification-loop" },
-  { localSkillId: "devgod-web-design-guidelines", upstreamSkillId: "web-design-guidelines" }
+  coreVendoredSkill("agentic-engineering"),
+  coreVendoredSkill("api-design"),
+  coreVendoredSkill("article-writing"),
+  coreVendoredSkill("backend-patterns"),
+  coreVendoredSkill("database-migrations"),
+  coreVendoredSkill("deployment-patterns"),
+  coreVendoredSkill("docker-patterns"),
+  coreVendoredSkill("documentation-lookup"),
+  coreVendoredSkill("e2e-testing"),
+  coreVendoredSkill("eval-harness"),
+  coreVendoredSkill("frontend-patterns"),
+  coreVendoredSkill("market-research"),
+  coreVendoredSkill("mcp-server-patterns"),
+  coreVendoredSkill("postgres-patterns"),
+  coreVendoredSkill("search-first"),
+  coreVendoredSkill("security-review"),
+  coreVendoredSkill("security-scan"),
+  coreVendoredSkill("strategic-compact"),
+  coreVendoredSkill("tdd-workflow"),
+  coreVendoredSkill("verification-loop"),
+  coreVendoredSkill("web-design-guidelines")
 ] as const satisfies readonly VendoredSkillEntry[];
 
 function stripQuotes(value: string): string {
@@ -249,6 +260,12 @@ export async function verifyVendoredSkills(input?: {
     }
 
     const parsedLocal = parseSkillDocument(localContent);
+    if (parsedLocal.frontmatter.origin !== "devgod-vendored-skill") {
+      issues.push({
+        localSkillId: entry.localSkillId,
+        problem: `frontmatter origin mismatch: expected devgod-vendored-skill, got ${parsedLocal.frontmatter.origin ?? "missing"}`
+      });
+    }
     if (parsedLocal.frontmatter.upstream_skill !== entry.upstreamSkillId) {
       issues.push({
         localSkillId: entry.localSkillId,
@@ -259,6 +276,44 @@ export async function verifyVendoredSkills(input?: {
       issues.push({
         localSkillId: entry.localSkillId,
         problem: `upstream hash drift: expected ${upstreamHash}, got ${parsedLocal.frontmatter.upstream_sha256 ?? "missing"}`
+      });
+    }
+
+    const managedUpstreamPath = parsedLocal.frontmatter.upstream_path;
+    const managedSyncedAt = parsedLocal.frontmatter.synced_at;
+    if (!managedUpstreamPath) {
+      issues.push({
+        localSkillId: entry.localSkillId,
+        problem: "frontmatter upstream_path mismatch: expected managed upstream_path metadata"
+      });
+    } else if (managedUpstreamPath !== entry.sourcePath) {
+      issues.push({
+        localSkillId: entry.localSkillId,
+        problem: `frontmatter upstream_path mismatch: expected ${entry.sourcePath}, got ${managedUpstreamPath}`
+      });
+    }
+    if (!managedSyncedAt) {
+      issues.push({
+        localSkillId: entry.localSkillId,
+        problem: "frontmatter synced_at mismatch: expected managed synced_at metadata"
+      });
+    }
+
+    if (!managedUpstreamPath || !managedSyncedAt) {
+      continue;
+    }
+
+    const expectedContent = renderVendoredSkillDocument({
+      localSkillId: entry.localSkillId,
+      upstreamSkillId: entry.upstreamSkillId,
+      sourcePath: entry.sourcePath,
+      sourceContent,
+      syncedAt: managedSyncedAt
+    });
+    if (localContent.replace(/\r\n/g, "\n") !== expectedContent.replace(/\r\n/g, "\n")) {
+      issues.push({
+        localSkillId: entry.localSkillId,
+        problem: "managed render drift: local vendored skill content differs from generated mirror"
       });
     }
   }

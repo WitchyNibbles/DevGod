@@ -42,9 +42,7 @@ Typical consuming-repo commands there:
 ```bash
 npm run devgod:setup:git-guard
 npm run devgod:verify:git-guard
-npm run devgod:setup:playwright
 npm run devgod:setup:local
-npm run devgod:verify:playwright
 npm run devgod:doctor
 npm run devgod:verify:setup
 npm run devgod:status
@@ -87,7 +85,8 @@ After install, a target repo can use the shipped local bootstrap path:
 - `npm run devgod:doctor`
 - `npm run devgod:verify:setup`
 
-For UI-affecting work, the shipped browser bootstrap path is now explicit:
+For UI-affecting work, first install or upgrade the overlay with `--with-playwright`.
+Only that opt-in adds the repo-owned browser bootstrap commands:
 
 - `npm run devgod:setup:playwright`
 - `npm run devgod:verify:playwright`
@@ -140,24 +139,23 @@ The operator commands surface that selection so the repo can detect ambiguous or
 
 ## 🕸️ Graphify Repo Graph
 
-Graphify is the shipped repo-graph integration for DevGod. It is mandatory for DevGod operation, even though its retrieval output remains advisory rather than workflow authority.
-DevGod should use Graphify first for code-file navigation in this repo and consuming repos so agents get a broader structural view before opening files and can keep token usage lower.
-DevGod ships two required Graphify setup modes:
+Graphify is the shipped repo-graph integration for DevGod. It is optional advisory evidence, not core workflow authority.
+Core install, setup, and verify remain complete without a Graphify graph. When repo-graph evidence is useful, install or upgrade the overlay with `--with-graphify` to add repo-local Graphify scripts and MCP wiring.
+DevGod ships two Graphify setup modes for opted-in repos:
 
-- default mode: code-only and zero-key, building from `src/` into the repo-root `graphify-out/`
+- repo-local mode: code-only and zero-key, building from `src/` into the repo-root `graphify-out/`
 - optional full mode: mixed code-and-docs extraction driven from an active Codex session, so Graphify can use the Codex-backed model path instead of a separate Graphify API key
 
-Typical path:
+Typical opt-in path:
 
-1. install or upgrade DevGod
+1. install or upgrade DevGod with `--with-graphify`
 2. run `npm install`
-3. install Graphify with `uv tool install graphifyy` or `pipx install graphifyy`
-4. run `npm run devgod:graphify:build`
+3. run `npm run devgod:setup:graphify`
 
-The shipped Codex config uses `uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json`.
+The opt-in Codex config uses `uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json`.
 Use `npm run devgod:graphify:update` after meaningful source changes so manager and specialist agents see fresh graph-backed context.
 
-For the required full mixed-corpus alternative without separate Graphify API keys:
+For the full mixed-corpus alternative without separate Graphify API keys:
 
 1. run `npm run devgod:graphify:codex-full`
 2. follow the printed steps
@@ -165,7 +163,7 @@ For the required full mixed-corpus alternative without separate Graphify API key
 4. from an active Codex session in the repo, run `/graphify .`
 
 Use the user-level Codex install, not `graphify install --project --platform codex`, unless you intentionally want Graphify to mutate repo-local `AGENTS.md` or `.codex/hooks.json` outside DevGod's managed surface.
-DevGod verify/setup should be treated as incomplete until one of the Graphify build paths has produced `graphify-out/graph.json`.
+DevGod verify may report stale or missing Graphify evidence as optional drift, but core readiness stays governed by runtime, review identity, workflow proof, and setup verification.
 
 ## 🧱 Why the split matters
 

@@ -11,4 +11,4 @@ Set-Location $repoRoot
 
 $resolvedTarget = (Resolve-Path -LiteralPath $TargetPath).Path
 
-node --experimental-strip-types src/install/cli.ts --target $resolvedTarget
+node --experimental-strip-types src/install/cli.ts init --apply --target $resolvedTarget

@@ -4,6 +4,8 @@ export interface InstallOptions {
   sourceRoot: string;
   targetRoot: string;
   dryRun?: boolean;
+  withGraphify?: boolean;
+  withPlaywright?: boolean;
   withGrafana?: boolean;
 }
 
@@ -30,6 +32,7 @@ export interface VerifySummary {
   orphans: string[];
   policyDrift: string[];
   prerequisiteDrift: string[];
+  optionalModuleDrift: string[];
 }
 
 export interface WorkflowScaffoldOptions {

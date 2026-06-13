@@ -22,6 +22,7 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
   const npmLog = join(targetRoot, "npm.log");
   const npmEnvCapture = join(targetRoot, "npm-env.txt");
   const setupScript = join(targetRoot, "scripts", "devgod-setup.ps1");
+  const setupEntrypoint = join(sourceRoot, "src", "install", "setup-local.ts");
 
   try {
     await mkdir(binDir, { recursive: true });
@@ -86,12 +87,15 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       ")",
       'if "%~1"=="install" exit /b 0',
       'if "%~1"=="run" (',
+      '  if /i "%~2"=="devgod" if "%~3"=="--" if /i "%~4"=="setup-local" (',
+      '    "%DEVGOD_NODE_EXECUTABLE%" --experimental-strip-types "%DEVGOD_SETUP_ENTRYPOINT%"',
+      "    exit /b %ERRORLEVEL%",
+      "  )",
       '  if /i "%~2"=="devgod:setup:graphify" exit /b 0',
-      '  if /i "%~2"=="devgod:setup:git-guard" exit /b 0',
       '  if /i "%~2"=="devgod:setup:playwright" exit /b 0',
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',
-      '  if /i "%~2"=="devgod:refresh-retrieval" exit /b 0',
+      '  if /i "%~2"=="devgod:refresh-repo-context" exit /b 0',
       '  if /i "%~2"=="devgod:refresh-retrieval:fast" exit /b 0',
       '  if /i "%~2"=="devgod:verify:setup" exit /b 0',
       '  if /i "%~2"=="devgod:verify:playwright" exit /b 0',
@@ -108,21 +112,21 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
         DEVGOD_DOCKER_LOG_FILE: dockerLog,
         DEVGOD_DOCKER_COMPOSE_SENTINEL: dockerComposeSentinel,
         DEVGOD_NPM_LOG_FILE: npmLog,
-        DEVGOD_NPM_ENV_CAPTURE_FILE: npmEnvCapture
+        DEVGOD_NPM_ENV_CAPTURE_FILE: npmEnvCapture,
+        DEVGOD_NODE_EXECUTABLE: process.execPath,
+        DEVGOD_SETUP_ENTRYPOINT: setupEntrypoint
       }
     });
 
     const npmCalls = (await readFile(npmLog, "utf8")).trim().split(/\r?\n/);
     assert.deepEqual(npmCalls, [
+      "run devgod -- setup-local",
       "install",
-      "run devgod:setup:graphify",
-      "run devgod:setup:git-guard",
-      "run devgod:setup:playwright",
       "run devgod:migrate",
       "run devgod:bootstrap",
+      "run devgod:refresh-repo-context",
       "run devgod:refresh-retrieval:fast",
-      "run devgod:verify:setup",
-      "run devgod:verify:playwright"
+      "run devgod:verify:setup"
     ]);
 
     const dockerCalls = (await readFile(dockerLog, "utf8")).trim().split(/\r?\n/);

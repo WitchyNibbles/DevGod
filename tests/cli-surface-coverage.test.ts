@@ -11,9 +11,22 @@ import {
   renderPublishedIndexEntrypoint
 } from "../src/install/merge.ts";
 import { listCanonicalPackageFileEntries } from "../src/devgod/package-surface.ts";
+import {
+  listPublishedPackFixturePaths,
+  readPublishedPackageJson,
+  readPublishedTypesEntrypoint,
+  readPublishedTypesRelativePath
+} from "./published-package-test-helpers.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
+
+function packFixtureEnv(sourceRoot: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NODE_PATH: [path.join(sourceRoot, "node_modules"), process.env.NODE_PATH].filter(Boolean).join(path.delimiter)
+  };
+}
 
 async function readRepoFile(relativePath: string): Promise<string> {
   return readFile(path.join(repoRoot, relativePath), "utf8");
@@ -130,7 +143,8 @@ async function runNpmPackJsonDryRun(sourceRoot: string, options: PackFixtureStag
       ],
       {
         cwd: staged.root,
-        encoding: "utf8"
+        encoding: "utf8",
+        env: packFixtureEnv(sourceRoot)
       }
     );
 
@@ -155,14 +169,13 @@ test("published dist index wrapper stays in parity with the declared public API"
   assert.ok(!publishedWrapperSource.includes("buildEmbeddingText"));
 });
 
-test("package surface keeps src/public.ts in canonical files and staged pack output", async () => {
-  const packageJson = JSON.parse(await readRepoFile("package.json")) as {
-    files?: string[];
-  };
+test("package surface keeps src/public.ts and the published root types entry in canonical files and staged pack output", async () => {
+  const packageJson = await readPublishedPackageJson(repoRoot);
+  const publishedTypesRelativePath = await readPublishedTypesRelativePath(repoRoot);
   const canonicalEntries = listCanonicalPackageFileEntries();
   const packResult = JSON.parse(
     await runNpmPackJsonDryRun(repoRoot, {
-      intendedTrackedRelativePaths: ["src/public.ts"]
+      intendedTrackedRelativePaths: await listPublishedPackFixturePaths(repoRoot)
     })
   ) as Array<{
     files: Array<{ path: string }>;
@@ -170,7 +183,12 @@ test("package surface keeps src/public.ts in canonical files and staged pack out
   const packedFiles = new Set(packResult.flatMap((entry) => entry.files.map((file) => file.path)));
 
   assert.ok(canonicalEntries.includes("src/public.ts"));
+  assert.ok(canonicalEntries.includes("dist/"));
+  assert.match(publishedTypesRelativePath, /^dist\/.+\.d\.ts$/);
+  assert.equal(readPublishedTypesEntrypoint(packageJson), packageJson.exports?.["."].types);
   assert.ok(packageJson.files?.includes("src/public.ts"));
+  assert.ok(packageJson.files?.includes("dist/"));
+  assert.ok(packedFiles.has(publishedTypesRelativePath));
   assert.ok(packedFiles.has("src/public.ts"));
   assert.ok(packedFiles.has("dist/index.js"));
 });
