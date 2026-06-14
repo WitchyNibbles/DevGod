@@ -16,10 +16,27 @@ const cavemanContradictionPhrases = [
   "polished, compact prose for user-facing docs"
 ] as const;
 
+const rootCavemanRequiredPatterns = [
+  /root manager intermediate progress updates, .* (?:use|stay on|also use) `?caveman`? `?ultra`?/i,
+  /(?:root manager may use normal prose only|only final reports, direct questions, or ordinary user conversation (?:may )?use normal prose)/i
+] as const;
+
+const rootCavemanForbiddenPatterns = [
+  /only the root thread that talks directly to the user (?:is allowed outside that contract|may answer outside caveman)/i,
+  /root thread that talks directly to the user may answer outside caveman/i,
+  /use `caveman` for terse internal handoffs/i
+] as const;
+
 export interface CavemanContractVerificationResult {
   ok: boolean;
   missingMarkers: string[];
   contradictionPhrases: string[];
+}
+
+export interface RootCavemanPolicyVerificationResult {
+  ok: boolean;
+  missingPatterns: string[];
+  forbiddenPatterns: string[];
 }
 
 export function verifyNonUserFacingAgentCavemanContract(
@@ -33,5 +50,23 @@ export function verifyNonUserFacingAgentCavemanContract(
     ok: missingMarkers.length === 0 && contradictionPhrases.length === 0,
     missingMarkers: [...missingMarkers],
     contradictionPhrases: [...contradictionPhrases]
+  };
+}
+
+export function verifyRootCavemanPolicyContract(
+  policyText: string | undefined
+): RootCavemanPolicyVerificationResult {
+  const text = policyText ?? "";
+  const missingPatterns = rootCavemanRequiredPatterns
+    .filter((pattern) => !pattern.test(text))
+    .map((pattern) => pattern.source);
+  const forbiddenPatterns = rootCavemanForbiddenPatterns
+    .filter((pattern) => pattern.test(text))
+    .map((pattern) => pattern.source);
+
+  return {
+    ok: missingPatterns.length === 0 && forbiddenPatterns.length === 0,
+    missingPatterns: [...missingPatterns],
+    forbiddenPatterns: [...forbiddenPatterns]
   };
 }

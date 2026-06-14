@@ -99,10 +99,7 @@ A completed phase is not a completed product.
 - quality: `reviewer`, `qa_engineer`, `security_reviewer`, `tdd-guide`, `e2e-runner`, `release-readiness`
 - memory: `memory_curator`
 
-Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the
-local `caveman` skill in `ultra` mode for all specialist/subagent output; use `/caveman ultra`
-as the activation reference. Only the root thread that talks directly to the user may answer
-outside caveman.
+Prefer repo-local `devgod` skills and `.codex/agents/*.toml` roles when available. Use the local `caveman` skill in `ultra` mode for all specialist/subagent output; use `/caveman ultra` as the activation reference. Root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries use `caveman` `ultra`. The root manager may use normal prose only for final reports, direct questions, or ordinary conversation with the user.
 
 ## Design And Architecture Council
 

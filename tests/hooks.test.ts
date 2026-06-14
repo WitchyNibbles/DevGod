@@ -84,6 +84,25 @@ test("stop hook continues when an active devgod task remains and no real blocker
   assert.match(parsed.reason, /active devgod task task-hook-2 remains in progress/i);
 });
 
+test("stop hook blocks verbose active-task summaries before completion", () => {
+  const parsed = evaluateStop(
+    {
+      last_assistant_message:
+        "I inspected the policy files and I am going to update the hooks next because the current rule is only advisory."
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-test",
+      activeTaskId: "task-hook-caveman",
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.decision, "block");
+  assert.match(parsed.reason, /caveman ultra/i);
+});
+
 test("stop hook allows explicit write-scope blockers to end the loop", () => {
   const parsed = evaluateStop(
     {
@@ -275,7 +294,7 @@ test("stop hook still blocks vague blocker summaries without a concrete devgod c
 
   assert.ok(parsed);
   assert.equal(parsed.decision, "block");
-  assert.match(parsed.reason, /state the real blocker explicitly/i);
+  assert.match(parsed.reason, /caveman ultra/i);
 });
 
 test("stop hook treats transient model high-usage prompts as continueable work", () => {

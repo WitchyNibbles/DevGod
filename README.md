@@ -414,7 +414,7 @@ Use these `production-oriented package checks` as evidence about the package its
 - `npm run verify:release-overlay`
 - `npm run verify:migrations:live`
 
-All shipped `.codex/agents/*.toml` subagents are expected to stay on caveman `ultra` mode for every emitted response, with `/caveman ultra` as the activation reference. Only the root thread that talks directly to the user is allowed outside that contract.
+All shipped `.codex/agents/*.toml` subagents are expected to stay on caveman `ultra` mode for every emitted response, with `/caveman ultra` as the activation reference. Root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries also use caveman `ultra`; only final reports, direct questions, or ordinary user conversation use normal prose.
 
 The package now ships caveman as a mandatory repo-local skill and Codex plugin surface in downstream installs; it is not an optional post-install add-on.
 

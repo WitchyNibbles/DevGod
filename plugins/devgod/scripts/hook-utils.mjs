@@ -959,6 +959,56 @@ export function shouldHoldStop(lastAssistantMessage) {
   return !(hasExplicitBlockerVerb && hasExplicitDevgodBlockerCause);
 }
 
+export function isCavemanUltraShape(message) {
+  if (typeof message !== "string") {
+    return false;
+  }
+
+  const lines = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2 || lines.length > 8) {
+    return false;
+  }
+
+  const labelPattern = /^(?:role|goal|done|risk|blk|next|need|gate|fail|file|test):\s+\S.{0,80}$/;
+  return lines.every((line) => labelPattern.test(line));
+}
+
+export function isAllowedRootProseMessage(message) {
+  if (typeof message !== "string" || message.trim().length === 0) {
+    return false;
+  }
+
+  if (
+    blockerMessagePatterns.some((pattern) => pattern.test(message)) ||
+    (explicitBlockerVerbPatterns.some((pattern) => pattern.test(message)) &&
+      explicitDevgodBlockerCausePatterns.some((pattern) => pattern.test(message))) ||
+    (explicitExternalWaitBlockerVerbPatterns.some((pattern) => pattern.test(message)) &&
+      explicitExternalWaitCausePatterns.some((pattern) => pattern.test(message)))
+  ) {
+    return true;
+  }
+
+  return (
+    /\?$/.test(message.trim()) ||
+    /\b(final|summary|complete|completed|done|implemented|changed|verification|tests?|remaining|follow[- ]?up)\b/i.test(message)
+  );
+}
+
+export function shouldBlockForCavemanUltra(message) {
+  if (isCavemanUltraShape(message)) {
+    return false;
+  }
+
+  if (isAllowedRootProseMessage(message)) {
+    return false;
+  }
+
+  return true;
+}
+
 export function buildAdditionalContext(eventName, additionalContext) {
   return {
     hookSpecificOutput: {

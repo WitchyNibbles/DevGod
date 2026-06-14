@@ -43,7 +43,8 @@ Goal: ship the smallest clean increment without bypassing gates.
 - no broad status essays
 - summarize only what changes a decision
 - keep evidence concrete: file, risk, behavior, test
-- only the root thread that talks directly to the user may answer outside caveman
+- root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries use caveman `ultra`
+- root manager may use normal prose only for final reports, direct questions, or ordinary conversation with the user
 
 ## Done bar
 

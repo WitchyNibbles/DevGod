@@ -16,6 +16,7 @@ import {
   isVerificationCommand,
   parseApplyPatchTargets,
   persistHookBlockerState,
+  shouldBlockForCavemanUltra,
   shouldHoldStop
 } from "./hook-utils.mjs";
 
@@ -252,6 +253,13 @@ export function evaluateStop(payload, context) {
   const hookBlockerState =
     context.hookBlockerState && typeof context.hookBlockerState === "object" ? context.hookBlockerState : undefined;
   const activeTaskId = context.activeTaskId ?? context.queueCurrentTaskId;
+  if (activeTaskId && shouldBlockForCavemanUltra(lastAssistantMessage)) {
+    return {
+      decision: "block",
+      reason: `active devgod task ${activeTaskId} produced verbose intermediate output; use caveman ultra for progress, coordination, handoffs, or visible reasoning summaries`
+    };
+  }
+
   if (hookBlockerState && activeTaskId && hookBlockerState.activeTaskId === activeTaskId) {
     if (stopHookActive) {
       return undefined;

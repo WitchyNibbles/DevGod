@@ -16,7 +16,7 @@ Default target: 4-6 lines. Hard cap: 8 lines unless a task explicitly needs more
 
 Switch: `/caveman lite|full|ultra`
 
-Devgod specialist default: `/caveman ultra`
+Devgod specialist and manager-intermediate default: `/caveman ultra`
 
 ## Use for
 
@@ -25,10 +25,11 @@ Devgod specialist default: `/caveman ultra`
 - review findings
 - QA and security gate notes
 - progress updates inside long tasks
+- root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries
 
 ## Do not use for
 
-- user-facing final answers unless the user asks for it
+- user-facing final answers, direct questions, or ordinary conversation unless the user asks for it
 - prose docs meant for humans to read later
 - legal, compliance, or customer-facing text where nuance matters
 

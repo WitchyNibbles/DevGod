@@ -381,7 +381,8 @@ test("mergeAgentsMd appends and is idempotent", () => {
   assert.match(first, /do not use `codex` in branch names, commit subjects, PR titles, or PR bodies/i);
   assert.match(first, /caveman.*ultra/i);
   assert.match(first, /\/caveman ultra/i);
-  assert.match(first, /root thread that talks directly to the user/i);
+  assert.match(first, /root manager intermediate progress updates, .* stay on `caveman` `ultra`/i);
+  assert.match(first, /root manager may use normal prose only for final reports, direct questions, or ordinary conversation/i);
   assert.doesNotMatch(first, /scrum_master/);
   assert.doesNotMatch(first, /test_director/);
   assert.doesNotMatch(first, /devgod:codex/);
@@ -407,7 +408,8 @@ test("mergeDotAgentsMd appends and is idempotent", () => {
   assert.match(first, /keep `codex` out of branch names, commit subjects, PR titles, and PR bodies/i);
   assert.match(first, /caveman.*ultra/i);
   assert.match(first, /\/caveman ultra/i);
-  assert.match(first, /root thread that talks directly to the user/i);
+  assert.match(first, /root manager intermediate progress updates, .* use `caveman` `ultra`/i);
+  assert.match(first, /only final reports, direct questions, or ordinary user conversation may use normal prose/i);
   assert.equal(managedBlock, renderManagedDotAgentsBlock());
   assert.equal(first, second);
 });

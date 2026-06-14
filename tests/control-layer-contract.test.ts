@@ -149,6 +149,11 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
   assert.match(agents, /workflow_documents=workflow_documents/);
   assert.match(agents, /review_artifact_trust=runtime_records_only/);
   assert.match(agents, /caveman.*ultra/i);
+  assert.match(
+    agents,
+    /root manager may use normal prose only for final reports, direct questions, or ordinary conversation/i
+  );
+  assert.match(agents, /root manager intermediate progress updates, .* stay on `caveman` `ultra`/i);
   assert.match(dotAgents, /markdown review files are evidence summaries, not reviewer authority/i);
   assert.match(dotAgents, /authenticated reviewer identity and waiver authority/i);
   assert.match(workflowContract, /<!-- devgod-workflow-contract:start -->/);
@@ -187,6 +192,14 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
     {
       source: /use the\s+local `caveman` skill in `ultra` mode/i,
       rendered: /specialist\/subagent roles use `caveman` `ultra` mode/i
+    },
+    {
+      source: /root manager may use normal prose only for final reports, direct questions, or ordinary conversation/i,
+      rendered: /root manager may use normal prose only for final reports, direct questions, or ordinary conversation/i
+    },
+    {
+      source: /root manager intermediate progress updates, .* use `caveman` `ultra`/i,
+      rendered: /root manager intermediate progress updates, .* stay on `caveman` `ultra`/i
     }
   ]);
 
@@ -202,6 +215,10 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
     },
     {
       source: /current task id must match `.devgod\/ACTIVE`, the current brief, the current plan\/task, and required review files/i
+    },
+    {
+      source: /root manager intermediate progress updates, .* use `caveman` `ultra`/i,
+      rendered: /root manager intermediate progress updates, .* use `caveman` `ultra`/i
     },
     {
       source: /unresolved `CRITICAL` or `HIGH` security findings block completion/i
@@ -225,7 +242,7 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
   assertSemanticPolicyParity(graphifyPolicy, agents, [
     {
       source: /for code-file navigation in this repo and consuming repos, use Graphify first when the repo graph is ready/i,
-      rendered: /use Graphify MCP first when the repo-local graph is ready/i
+      rendered: /use Graphify MCP first for code navigation when the repo-local graph is ready/i
     }
   ]);
 

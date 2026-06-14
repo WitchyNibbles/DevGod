@@ -42,4 +42,4 @@ Default chain:
 - `qa_engineer`
 - `planner`
 
-Use caveman `ultra` mode for specialist handoffs and specialist-facing notes; reference `/caveman ultra` as the activation command. Only the root thread that talks directly to the user may answer outside caveman.
+Use caveman `ultra` mode for specialist handoffs, specialist-facing notes, manager intermediate progress updates, internal coordination, and visible reasoning summaries; reference `/caveman ultra` as the activation command. The root manager may use normal prose only for final reports, direct questions, or ordinary conversation with the user.

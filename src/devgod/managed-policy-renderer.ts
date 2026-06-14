@@ -92,8 +92,8 @@ ${renderWorkflowContractBlock({ target: "installed" })}
 
 ## Department Workflow
 
-- root thread is engineering manager
-- manager/root stays shallow: two inspections max before trivial handling or bounded investigation
+- root thread is manager
+- manager/root stays shallow: two inspections before trivial handling or bounded investigation
 - clarify ambiguous intent before planning with targeted questions or explicit assumptions
 - on first ask, clarify outcome, constraints, and done criteria unless assumptions are enough
 - require Design and Architecture Council review for substantive roadmap, governance, architecture-significant, or user-flow-heavy plan work unless the task is trivial or inherits an approved decision
@@ -101,12 +101,14 @@ ${renderWorkflowContractBlock({ target: "installed" })}
 - ${workflowArtifactRefHelperSummarySentence}
 - ${workflowRuntimeOptionalReviewExportsSentence}
 - keep \`devgod\` as the default workflow controller even when other tools are available
-- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready so agents get broader structure and spend fewer tokens before broad text scans
+- use Graphify MCP first for code navigation when the repo-local graph is ready
 - when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or unavailable, say so
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
 - route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
 - use \`git_operator\` for staging, commit slicing, and commit-message prep when git work is required
-- specialist/subagent roles use \`caveman\` \`ultra\` mode for every response; use \`/caveman ultra\` as the activation reference, and only the root thread that talks directly to the user may answer outside caveman
+- specialist/subagent roles use \`caveman\` \`ultra\` mode for every response; use \`/caveman ultra\` as activation reference
+- root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries stay on \`caveman\` \`ultra\`
+- root manager may use normal prose only for final reports, direct questions, or ordinary conversation
 - use runtime-backed devgod commands for proof, status, and advancement
 - substantive work completes only after ${workflowRequiredGateRolesFragment} gates plus runtime workflow proof
 
@@ -158,7 +160,8 @@ export function renderManagedDotAgentsBlock(): string {
 - when repo-local Grafana configuration is present, treat Grafana as advisory evidence for debugging and research; if configuration is partial or tools are unavailable, report that explicitly
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
 - ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes
-- use repo-local \`devgod\` skills and agents when they fit; all specialist/subagent output stays on \`caveman\` \`ultra\` mode, use \`/caveman ultra\` as the activation reference, and only the root thread that talks directly to the user may answer outside caveman
+- use repo-local \`devgod\` skills and agents when they fit; all specialist/subagent output stays on \`caveman\` \`ultra\` mode, use \`/caveman ultra\` as the activation reference, and only final reports, direct questions, or ordinary user conversation may use normal prose
+- root manager intermediate progress updates, internal coordination, handoffs, and visible reasoning summaries use \`caveman\` \`ultra\`
 
 Gate reminders:
 

@@ -245,6 +245,11 @@ test("verify-agent-caveman-contract CLI reports both drift and success paths", a
   try {
     await mkdir(path.join(brokenRepoRoot, ".codex", "agents"), { recursive: true });
     await writeFile(
+      path.join(brokenRepoRoot, "AGENTS.md"),
+      "Only the root thread that talks directly to the user may answer outside caveman.\n",
+      "utf8"
+    );
+    await writeFile(
       path.join(brokenRepoRoot, ".codex", "agents", "backend-engineer.toml"),
       [
         'name = "wrong_backend_role"',
@@ -258,6 +263,7 @@ test("verify-agent-caveman-contract CLI reports both drift and success paths", a
     assert.match(failure.stderr, /missing agent artifact:/);
     assert.match(failure.stderr, /agent metadata drift:/);
     assert.match(failure.stderr, /agent caveman drift:/);
+    assert.match(failure.stderr, /policy caveman drift:/);
 
     const success = await runTypeScriptCli(verifyAgentCavemanScript, [], { cwd: repoRoot });
     assert.match(success.stdout, /agent caveman contract verified in/);
