@@ -1,2 +1,5 @@
 workflow=devgod
-state=complete
+state=idle
+task_id=
+brief=
+mode=complete

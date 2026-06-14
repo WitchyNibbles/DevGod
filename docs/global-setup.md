@@ -137,34 +137,6 @@ Consuming repos can define multiple named review backends in one reviewed adapte
 
 The operator commands surface that selection so the repo can detect ambiguous or incomplete review trust before relying on recorded approvals.
 
-## 🕸️ Graphify Repo Graph
-
-Graphify is the shipped repo-graph integration for DevGod. It is optional advisory evidence, not core workflow authority.
-Core install, setup, and verify remain complete without a Graphify graph. When repo-graph evidence is useful, install or upgrade the overlay with `--with-graphify` to add repo-local Graphify scripts and MCP wiring.
-DevGod ships two Graphify setup modes for opted-in repos:
-
-- repo-local mode: code-only and zero-key, building from `src/` into the repo-root `graphify-out/`
-- optional full mode: mixed code-and-docs extraction driven from an active Codex session, so Graphify can use the Codex-backed model path instead of a separate Graphify API key
-
-Typical opt-in path:
-
-1. install or upgrade DevGod with `--with-graphify`
-2. run `npm install`
-3. run `npm run devgod:setup:graphify`
-
-The opt-in Codex config uses `uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json`.
-Use `npm run devgod:graphify:update` after meaningful source changes so manager and specialist agents see fresh graph-backed context.
-
-For the full mixed-corpus alternative without separate Graphify API keys:
-
-1. run `npm run devgod:graphify:codex-full`
-2. follow the printed steps
-3. register Graphify with Codex at the user level if needed: `graphify install --platform codex`
-4. from an active Codex session in the repo, run `/graphify .`
-
-Use the user-level Codex install, not `graphify install --project --platform codex`, unless you intentionally want Graphify to mutate repo-local `AGENTS.md` or `.codex/hooks.json` outside DevGod's managed surface.
-DevGod verify may report stale or missing Graphify evidence as optional drift, but core readiness stays governed by runtime, review identity, workflow proof, and setup verification.
-
 ## 🧱 Why the split matters
 
 - global instructions are high blast-radius

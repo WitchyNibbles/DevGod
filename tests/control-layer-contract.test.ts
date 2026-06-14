@@ -136,7 +136,6 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
   const workflowContract = renderWorkflowContractBlock();
   const repoAgents = await read("AGENTS.md");
   const repoDotAgents = await read(".agents.md");
-  const graphifyPolicy = await read(".devgod/rules/graphify-advisory-policy.md");
   const debuggingSkill = await read(".agents/skills/devgod-debugging/SKILL.md");
 
   assert.match(agents, /<!-- BEGIN DEVGOD MANAGED -->/);
@@ -236,20 +235,6 @@ test("managed policy renderer owns installed AGENTS policy blocks", async () => 
     },
     {
       source: /use repo-local `devgod` skills and agents when they fit/i
-    }
-  ]);
-
-  assertSemanticPolicyParity(graphifyPolicy, agents, [
-    {
-      source: /for code-file navigation in this repo and consuming repos, use Graphify first when the repo graph is ready/i,
-      rendered: /use Graphify MCP first for code navigation when the repo-local graph is ready/i
-    }
-  ]);
-
-  assertSemanticPolicyParity(graphifyPolicy, dotAgents, [
-    {
-      source: /treat Graphify output as advisory retrieval evidence only/i,
-      rendered: /Graphify MCP first when the repo-local graph is ready .* but do not treat it as workflow authority/i
     }
   ]);
 

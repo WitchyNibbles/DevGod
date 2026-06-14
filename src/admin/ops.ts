@@ -44,22 +44,6 @@ export function buildOperatorDashboardReport(input: {
     alerts.push(`review identity not live-ready: ${input.status.reviewIdentity.notes.join("; ")}`);
   }
 
-  if (input.status.graphify.state === "stale") {
-    alerts.push("graphify repo graph is stale");
-  }
-
-  if (input.status.graphify.state === "unconfigured") {
-    alerts.push("graphify is mandatory but not configured");
-  }
-
-  if (input.status.graphify.state === "missing_graph") {
-    alerts.push("graphify is mandatory but no repo graph has been built");
-  }
-
-  if (input.status.graphify.state === "invalid_graph") {
-    alerts.push("graphify is mandatory but the graph artifact is invalid");
-  }
-
   if (input.status.integrity.status === "contradicted") {
     alerts.push(...input.status.integrity.contradictions.map((item) => `workflow integrity: ${item}`));
     nextActions.push(
@@ -228,25 +212,6 @@ export function buildOperatorDashboardReport(input: {
       break;
   }
 
-  if (
-    input.status.graphify.state === "unconfigured" &&
-    input.status.graphify.recommendedSetupCommand
-  ) {
-    nextActions.push(input.status.graphify.recommendedSetupCommand);
-  }
-  if (
-    input.status.graphify.state === "stale" &&
-    input.status.graphify.recommendedUpdateCommand
-  ) {
-    nextActions.push(input.status.graphify.recommendedUpdateCommand);
-  }
-  if (
-    input.status.graphify.state === "missing_graph" &&
-    input.status.graphify.recommendedBuildCommand
-  ) {
-    nextActions.push(input.status.graphify.recommendedBuildCommand);
-  }
-
   for (const recommendation of input.routing.recommendations) {
     const hasReasoningWarning = recommendation.rationale.some((rationale) =>
       rationale.startsWith("reasoning-quality: ")
@@ -288,14 +253,7 @@ export function formatOperatorDashboardReport(report: OperatorDashboardReport): 
   lines.push(`safe-recovery-actions: ${report.recovery.summary.safeActions}`);
   lines.push(`execution-directive: ${report.executionPlan.directive.kind}`);
   lines.push(`next-ready: ${report.status.orchestration.nextTaskIds.join(", ") || "none"}`);
-  lines.push(`graphify: ${report.status.graphify.state}`);
   lines.push(`integrity: ${report.status.integrity.status}`);
-  if (report.status.graphify.configuredScopes.length > 0) {
-    lines.push(`graphify-config: ${report.status.graphify.configuredScopes.join(", ")}`);
-  }
-  if (report.status.graphify.graphUpdatedAt) {
-    lines.push(`graphify-updated-at: ${report.status.graphify.graphUpdatedAt}`);
-  }
   if (report.status.daemon.continuation) {
     lines.push(
       `daemon-continuation: ${report.status.daemon.continuation.state} ${report.status.daemon.continuation.executionMode} ${report.status.daemon.continuation.targetId ?? "unknown-target"} owner=${report.status.daemon.continuation.wakeOwner ?? "unknown"} provider=${report.status.daemon.continuation.provider ?? "unknown"}`

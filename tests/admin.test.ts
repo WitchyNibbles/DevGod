@@ -10781,20 +10781,6 @@ test("executeStatusCommandFromArgs reports integrity drift from local completion
           liveTrustReady: true,
           notes: []
         }),
-        inspectGraphify: async () => ({
-          authorityLabel: "derived_only",
-          state: "ready",
-          configured: true,
-          configuredScopes: ["project"],
-          configPaths: [path.join(directory, ".codex", "config.toml")],
-          graphBuilt: true,
-          graphRoot: directory,
-          graphPath: path.join(directory, ".graphify", "graph.json"),
-          wikiPath: path.join(directory, ".graphify", "wiki.md"),
-          graphUpdatedAt: "2026-06-12T00:00:00.000Z",
-          headCommit: "abc123",
-          notes: []
-        }),
         getStatusSnapshot(candidateRunId) {
           return service.getStatus(candidateRunId);
         },
@@ -10954,20 +10940,6 @@ test("executeOpsCommandFromArgs surfaces integrity alerts and repair actions fro
           bindingsPath: path.join(directory, ".devgod", "review-identity-bindings.json"),
           bindingsUseShippedTemplate: false,
           liveTrustReady: true,
-          notes: []
-        }),
-        inspectGraphify: async () => ({
-          authorityLabel: "derived_only",
-          state: "ready",
-          configured: true,
-          configuredScopes: ["project"],
-          configPaths: [path.join(directory, ".codex", "config.toml")],
-          graphBuilt: true,
-          graphRoot: directory,
-          graphPath: path.join(directory, ".graphify", "graph.json"),
-          wikiPath: path.join(directory, ".graphify", "wiki.md"),
-          graphUpdatedAt: "2026-06-12T00:00:00.000Z",
-          headCommit: "abc123",
           notes: []
         }),
         getStatusSnapshot(candidateRunId) {

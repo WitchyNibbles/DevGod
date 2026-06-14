@@ -43,16 +43,17 @@ The active milestone is `2026-06-12-devgod-autonomous-team-repair`: align `devgo
 - relaxed stop-hook completion handling so authoritative terminal queue state ends completed tasks without transcript-specific completion wording
 - completed Phase 4 command and setup surface consolidation locally, including Phase 4.2 thin-wrapper setup flow hardening
 - completed Phase 5 canonical policy/template rendering locally, including Phase 5.1 managed-text rendering and Phase 5.2 skill/agent surface deduplication
-- completed Phase 6 local core-vs-optional boundary cleanup so Graphify, Playwright, and Grafana stay follow-up modules instead of core proof blockers
+- completed Phase 6 local core-vs-optional boundary cleanup so optional integrations stay follow-up modules instead of core proof blockers
 - completed Phase 7 downstream install contract hardening locally; focused regressions passed and a GPT-5.5 audit closed with no findings
+- added a realistic code-only repo-graph retrieval benchmark; current local evidence does not support making the removed integration a hard runtime requirement
 
 ## Current Task
 
-`2026-06-12-devgod-autonomous-team-repair` is complete. Phases 1 through 8 are recorded, package/install gates are green, runtime proof run `d5a2b9ac-aa2d-4412-8387-578f0b849102` approved the task, and the required reviewer, QA, and security exports are runtime-verified approvals.
+No active task is queued in this checkout. The repo-graph integration removal is complete in the current shipped surface.
 
 ## Next Task
 
-No active task is queued in this checkout. Future work should start from a new task packet, with optional Graphify, Playwright, Grafana, and full JS build-pipeline work treated as separate follow-up scopes.
+No active task is queued in this checkout. Future work should start from a new task packet, with optional Playwright, Grafana, and full JS build-pipeline work treated as separate follow-up scopes.
 
 ## Blockers
 
@@ -66,7 +67,6 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 - runtime status and exported queue semantics are intentionally different: runtime tasks may remain `approved` while the exported local queue records them as `done` after closeout
 - local markdown status surfaces are now explicitly derived/export evidence, status/ops surface approved-task export contradictions, and the stale `2026-06-08-consuming-repo-skill-evolution-trace-mining` exports have been repaired; review-export drift is still surfaced through workflow checks rather than a separate status subsection
 - Phase 3.2 stabilizes the public npm boundary through JS `dist` entrypoints and removes raw `node_modules/devgod/src` CLI coupling from new managed templates, while installed runtime commands still load shipped TypeScript internals through Node experimental type-stripping hooks until a full JS build pipeline exists
-- Graphify remains an optional follow-up surface and still needs repo-local setup plus freshness proof when enabled
 - Playwright remains an optional follow-up surface and is only proven in target repos that opt in and pass their own Playwright verification
 - Grafana remains an optional advisory surface and should not be conflated with core workflow proof or runtime-authoritative task state
 
@@ -128,6 +128,11 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 - `npm test` passed with 693 passing, 0 failing, 1 skipped
 - `node --experimental-strip-types --test tests/skill-evolution.test.ts tests/vendored-skills.test.ts` passed after the trace-mining slice
 - `npm run typecheck` passed after the trace-mining slice
+- the now-removed repo-graph retrieval benchmark previously passed its focused benchmark tests
+- `node --experimental-strip-types --test tests/install.test.ts` passed after adding the now-removed repo-graph benchmark to the shipped package surface
+- `npm run typecheck` passed after adding the now-removed repo-graph benchmark
+- the now-removed repo-graph benchmark produced the prior 3/5 coverage, 0.88x median-reduction result
+- `npm run typecheck` passed after removing the repo-graph integration from shipped source, installer, status, docs, and tests
 - `npm test` passed with 700 passing, 0 failing, 1 skipped after the trace-mining slice
 - `git diff --check` passed after the trace-mining slice
 - `npm run check:quality` passed, including coverage, workflow fixture verification, `npm audit`, and package dry run

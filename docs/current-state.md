@@ -224,7 +224,6 @@ Installed consuming repos own their own:
 
 These should stay visible as follow-ups instead of being hidden under the core green package state:
 
-- Graphify is optional and still needs repo-local setup, indexing freshness, and task-specific proof when enabled.
 - Playwright is optional and only becomes part of a target repo's truth after that repo opts in and passes its own verification.
 - Grafana is optional and advisory; MCP connectivity does not replace workflow proof, runtime-authoritative task state, or authenticated reviews.
 
@@ -268,9 +267,8 @@ The repo-local package invocation is canonical for installed repos. The current 
 
 These stay outside the core matrix:
 
-- source repo: `mcp`, `ui`, `setup:playwright`, `verify:playwright`, `setup:graphify`, `devgod:graphify:*`
+- source repo: `mcp`, `ui`, `setup:playwright`, `verify:playwright`
 - installed repo default: `devgod:mcp`, `devgod:ui`
-- installed with `--with-graphify`: `devgod:setup:graphify`, `devgod:graphify:*`
 - installed with `--with-playwright`: `devgod:setup:playwright`, `devgod:verify:playwright`
 - installed-with-Grafana only: `devgod:grafana:mcp`
 

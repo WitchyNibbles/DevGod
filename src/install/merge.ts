@@ -12,7 +12,6 @@ const DOT_AGENTS_BEGIN = "<!-- BEGIN DEVGOD KERNEL -->";
 const DOT_AGENTS_END = "<!-- END DEVGOD KERNEL -->";
 
 interface InstallModuleSettings {
-  withGraphify?: boolean;
   withPlaywright?: boolean;
   withGrafana?: boolean;
 }
@@ -100,7 +99,6 @@ function ensureStringArray(value: unknown, fallback: string[]): string[] {
 
 const managedCodexOverwriteTablePaths = new Set([
   "mcp_servers.grafana",
-  "mcp_servers.graphify",
   "mcp_servers.playwright",
   "mcp_servers.playwright_vision"
 ]);
@@ -183,14 +181,6 @@ export function mergeCodexConfig(
   }
 
   return `${stringifyToml(normalizedMerged)}`.trimEnd() + "\n";
-}
-
-export function graphifyCodexConfigFragment(): string {
-  return (
-    '[mcp_servers.graphify]\n' +
-    'command = "uv"\n' +
-    'args = ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]\n'
-  );
 }
 
 function renderPublishedTypeScriptHookEntrypoint(): string {
@@ -461,8 +451,6 @@ const directCommandTargets = new Map([
   ["autopilot-status", { modulePath: "src/devgod/autopilot-status.ts", stripCommand: true }],
   ["setup-git-guard", { modulePath: "src/install/setup-git-guard.ts", stripCommand: true }],
   ["verify-git-guard", { modulePath: "src/install/verify-git-guard.ts", stripCommand: true }],
-  ["setup-graphify", { modulePath: "src/install/setup-graphify.ts", stripCommand: true }],
-  ["setup-graphify-codex", { modulePath: "src/install/setup-graphify-codex.ts", stripCommand: true }],
   ["setup-local", { modulePath: "src/install/setup-local.ts", stripCommand: true }],
   ["setup-playwright", { modulePath: "src/install/setup-playwright.ts", stripCommand: true }],
   ["mcp", { modulePath: "src/mcp/server.ts", stripCommand: true }],
@@ -491,7 +479,7 @@ function printUsage() {
       "  init | upgrade | verify | scaffold-workflow | upgrade-reasoning-workflow | seed-happy-path-fixture",
       "",
       "Helper commands:",
-      "  autopilot-status | setup-git-guard | verify-git-guard | setup-graphify | setup-graphify-codex | setup-local | setup-playwright | mcp | serve-ui | grafana-mcp",
+      "  autopilot-status | setup-git-guard | verify-git-guard | setup-local | setup-playwright | mcp | serve-ui | grafana-mcp",
       ""
     ].join("\\n")
   );
@@ -591,7 +579,7 @@ export function mergeGitignore(
   existingContent: string | undefined,
   _options: InstallModuleSettings = {}
 ): string {
-  const requiredLines = [".env.devgod", ".env.devgod.*", "graphify-out/"];
+  const requiredLines = [".env.devgod", ".env.devgod.*"];
   const existingLines = new Set(
     (existingContent ?? "")
       .split(/\r?\n/)
@@ -697,18 +685,6 @@ export function mergePackageJson(
   scripts["devgod:setup:git-guard"] =
     `${devgodEntry} setup-git-guard`;
   scripts["devgod:setup:local"] = `${devgodEntry} setup-local`;
-
-  if (options.withGraphify) {
-    scripts["devgod:setup:graphify"] =
-      `${devgodEntry} setup-graphify`;
-    scripts["devgod:graphify:build"] = "graphify extract src --out .";
-    scripts["devgod:graphify:codex-full"] =
-      `${devgodEntry} setup-graphify-codex`;
-    scripts["devgod:graphify:update"] = "graphify extract src --out .";
-    scripts["devgod:graphify:watch"] = "graphify watch src";
-    scripts["devgod:graphify:serve"] =
-      "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json";
-  }
 
   if (options.withPlaywright) {
     scripts["devgod:setup:playwright"] =

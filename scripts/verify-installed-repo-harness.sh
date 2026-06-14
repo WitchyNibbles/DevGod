@@ -152,21 +152,6 @@ const reviewIdentity = async () => ({
   notes: ["installed harness fixture uses an in-memory review adapter"]
 });
 
-const graphify = async () => ({
-  authorityLabel: "derived_only",
-  state: "unconfigured",
-  configured: false,
-  configuredScopes: [],
-  configPaths: [],
-  graphBuilt: false,
-  graphRoot: join(cwd, "graphify-out"),
-  graphPath: join(cwd, "graphify-out", "graph.json"),
-  wikiPath: join(cwd, "graphify-out", "index.md"),
-  recommendedBuildCommand: "npm run devgod:graphify:build",
-  recommendedUpdateCommand: "npm run devgod:graphify:update",
-  notes: ["installed harness fixture does not require a Graphify graph artifact"]
-});
-
 const projectContext = await store.ensureProjectContext({
   workspaceSlug,
   projectSlug,
@@ -266,8 +251,7 @@ const status = await executeStatusCommandFromArgs([], {
   getStatusSnapshot(runId) {
     return service.getStatus(runId);
   },
-  inspectReviewIdentity: reviewIdentity,
-  inspectGraphify: graphify
+  inspectReviewIdentity: reviewIdentity
 });
 
 const report = await executeReportCommandFromArgs(["--format", "json"], {
@@ -300,8 +284,7 @@ const report = await executeReportCommandFromArgs(["--format", "json"], {
   getApprovals(runId, activeTaskId) {
     return store.getApprovals(runId, activeTaskId);
   },
-  inspectReviewIdentity: reviewIdentity,
-  inspectGraphify: graphify
+  inspectReviewIdentity: reviewIdentity
 });
 
 assert.ok(status.tasks.byStatus.approved.includes(taskId));
@@ -338,7 +321,6 @@ printf 'task: %s\n' "$task_id"
 printf 'profile: modernization_program\n'
 printf 'rewrite_readiness: ready\n'
 printf 'review_identity_authority: derived_only\n'
-printf 'graphify_authority: derived_only\n'
 printf 'runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work\n'
 printf 'grafana-opt-in: %s\n' "$grafana_status"
 printf 'target: %s\n' "$target_root"

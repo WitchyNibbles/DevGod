@@ -1,11 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-import { inspectGraphifyStatus } from "../src/admin/graphify.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "../src/admin/ops.ts";
 import {
   buildPlanningContextReport,
@@ -13,8 +10,6 @@ import {
   searchLocalWorkflowArtifacts
 } from "../src/admin/planning-context.ts";
 import { dbInternals, withClient, withClientUsing } from "../src/admin/db.ts";
-
-const execFileAsync = promisify(execFile);
 
 function makeStatus(overrides: Record<string, unknown> = {}) {
   return {
@@ -35,14 +30,6 @@ function makeStatus(overrides: Record<string, unknown> = {}) {
       notes: [],
       selectedBackend: "devgod_local_seed",
       availableBackends: ["devgod_local_seed"]
-    },
-    graphify: {
-      state: "ready",
-      configuredScopes: [],
-      graphUpdatedAt: undefined,
-      recommendedSetupCommand: "npm run devgod:graphify:codex-full",
-      recommendedBuildCommand: "npm run devgod:graphify:build",
-      recommendedUpdateCommand: "npm run devgod:graphify:update"
     },
     integrity: {
       status: "clean",
@@ -100,19 +87,6 @@ function makeExecutionPlan(overrides: Record<string, unknown> = {}) {
     },
     ...overrides
   } as any;
-}
-
-async function createGraphifyRepo(prefix: string) {
-  const repoRoot = await mkdtemp(path.join(tmpdir(), prefix));
-  const homeDirectory = await mkdtemp(path.join(tmpdir(), `${prefix}home-`));
-  await mkdir(path.join(repoRoot, ".codex"), { recursive: true });
-  await writeFile(
-    path.join(repoRoot, ".codex", "config.toml"),
-    '[mcp_servers.graphify]\ncommand = "python3"\nargs = ["-m", "graphify.serve", "graphify-out/graph.json"]\n',
-    "utf8"
-  );
-  await mkdir(path.join(repoRoot, "graphify-out"), { recursive: true });
-  return { repoRoot, homeDirectory };
 }
 
 test("db internals parse dotenv, loopback targets, and command prefixes defensively", () => {
@@ -476,13 +450,6 @@ test("buildPlanningContextReport truncates long previews for markdown-safe summa
 test("buildOperatorDashboardReport covers stale metadata, review dispatches, and deduplicated follow-up actions", () => {
   const report = buildOperatorDashboardReport({
     status: makeStatus({
-      graphify: {
-        state: "missing_graph",
-        configuredScopes: [],
-        recommendedBuildCommand: "npm run devgod:graphify:build",
-        recommendedSetupCommand: "npm run devgod:graphify:codex-full",
-        recommendedUpdateCommand: "npm run devgod:graphify:update"
-      },
       integrity: {
         status: "clean",
         contradictions: [],
@@ -568,7 +535,6 @@ test("buildOperatorDashboardReport covers stale metadata, review dispatches, and
     })
   });
 
-  assert.match(report.alerts.join(" "), /graphify is mandatory but no repo graph has been built/);
   assert.match(report.alerts.join(" "), /stale workflow seed failure metadata: task-1/);
   assert.match(report.alerts.join(" "), /integrity repair applied: runtime_reconcile via runtime reconcile command/);
   assert.match(report.alerts.join(" "), /stale review queue: task-1/);
@@ -588,7 +554,6 @@ test("buildOperatorDashboardReport covers stale metadata, review dispatches, and
   assert.match(report.nextActions.join(" "), /apply CLI scheduler request: \.devgod\/cli-request\.json/);
   assert.match(report.nextActions.join(" "), /supervisor follow-up: request missing reviewers/);
   assert.match(report.nextActions.join(" "), /request reviewer for task-1/);
-  assert.match(report.nextActions.join(" "), /npm run devgod:graphify:build/);
   assert.match(report.nextActions.join(" "), /strengthen reasoning evidence for task-1/);
   assert.equal(report.nextActions.filter((action) => action === "supervisor follow-up: request missing reviewers").length, 1);
 });
@@ -646,11 +611,6 @@ test("formatOperatorDashboardReport renders optional operational sections", () =
     authorityLabel: "derived_only",
     runId: "run-9",
     status: makeStatus({
-      graphify: {
-        state: "stale",
-        configuredScopes: ["project", "user"],
-        graphUpdatedAt: "2026-06-13T12:00:00.000Z"
-      },
       integrity: {
         status: "contradicted",
         contradictions: ["queue drift", "proof drift"],
@@ -710,8 +670,6 @@ test("formatOperatorDashboardReport renders optional operational sections", () =
   assert.match(formatted, /^Run run-9/m);
   assert.match(formatted, /review-backend: devgod_local_seed/);
   assert.match(formatted, /available-backends: devgod_local_seed/);
-  assert.match(formatted, /graphify-config: project, user/);
-  assert.match(formatted, /graphify-updated-at: 2026-06-13T12:00:00.000Z/);
   assert.match(formatted, /daemon-continuation: blocked operator_required unknown-target owner=unknown provider=unknown/);
   assert.match(formatted, /daemon-supervisor: blocked review_gap missing review evidence/);
   assert.match(formatted, /daemon-supervisor-history-view: run:run-9 returned=4 filtered=3 retained=2 truncated=yes/);
@@ -719,76 +677,4 @@ test("formatOperatorDashboardReport renders optional operational sections", () =
   assert.match(formatted, /integrity-contradictions:\n- queue drift\n- proof drift/);
   assert.match(formatted, /alerts:\n- first alert/);
   assert.match(formatted, /next-actions:\n- first action/);
-});
-
-test("inspectGraphifyStatus rejects non-object graph payloads and invalid gitdir pointers", async () => {
-  const invalidGraphRepo = await createGraphifyRepo("devgod-graphify-array-");
-  const invalidGitDirRepo = await createGraphifyRepo("devgod-graphify-invalid-gitdir-");
-
-  try {
-    await mkdir(path.join(invalidGraphRepo.repoRoot, ".git", "refs", "heads"), { recursive: true });
-    await writeFile(path.join(invalidGraphRepo.repoRoot, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
-    await writeFile(
-      path.join(invalidGraphRepo.repoRoot, ".git", "refs", "heads", "main"),
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
-      "utf8"
-    );
-    await writeFile(path.join(invalidGraphRepo.repoRoot, "graphify-out", "graph.json"), "null\n", "utf8");
-
-    const invalidGraph = await inspectGraphifyStatus({
-      cwd: invalidGraphRepo.repoRoot,
-      homeDirectory: invalidGraphRepo.homeDirectory
-    });
-
-    assert.equal(invalidGraph.state, "invalid_graph");
-    assert.match(invalidGraph.notes.join(" "), /graph\.json must contain a JSON object/);
-
-    await writeFile(path.join(invalidGitDirRepo.repoRoot, ".git"), "not a gitdir pointer\n", "utf8");
-    await writeFile(path.join(invalidGitDirRepo.repoRoot, "graphify-out", "graph.json"), '{"nodes":[],"edges":[]}\n', "utf8");
-
-    const invalidGitDir = await inspectGraphifyStatus({
-      cwd: invalidGitDirRepo.repoRoot,
-      homeDirectory: invalidGitDirRepo.homeDirectory
-    });
-
-    assert.equal(invalidGitDir.state, "head_unavailable");
-    assert.match(invalidGitDir.notes.join(" "), /HEAD could not be resolved/);
-  } finally {
-    await rm(invalidGraphRepo.repoRoot, { recursive: true, force: true });
-    await rm(invalidGraphRepo.homeDirectory, { recursive: true, force: true });
-    await rm(invalidGitDirRepo.repoRoot, { recursive: true, force: true });
-    await rm(invalidGitDirRepo.homeDirectory, { recursive: true, force: true });
-  }
-});
-
-test("inspectGraphifyStatus treats deleted indexed files newer than the graph as stale", async () => {
-  const { repoRoot, homeDirectory } = await createGraphifyRepo("devgod-graphify-deleted-stale-");
-
-  try {
-    await execFileAsync("git", ["init", "-b", "main"], { cwd: repoRoot });
-    await execFileAsync("git", ["config", "user.email", "devgod@example.com"], { cwd: repoRoot });
-    await execFileAsync("git", ["config", "user.name", "Devgod"], { cwd: repoRoot });
-    await mkdir(path.join(repoRoot, "src"), { recursive: true });
-    await writeFile(path.join(repoRoot, "src", "index.ts"), "export const version = 1;\n", "utf8");
-    await writeFile(path.join(repoRoot, "src", "old.ts"), "export const removed = true;\n", "utf8");
-    await execFileAsync("git", ["add", "src/index.ts", "src/old.ts"], { cwd: repoRoot });
-    await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoRoot });
-    await writeFile(path.join(repoRoot, "graphify-out", "graph.json"), '{"nodes":[],"edges":[]}\n', "utf8");
-
-    const graphPath = path.join(repoRoot, "graphify-out", "graph.json");
-    const oldDate = new Date("2024-01-01T00:00:00.000Z");
-    await utimes(graphPath, oldDate, oldDate);
-    await rm(path.join(repoRoot, "src", "old.ts"));
-
-    const result = await inspectGraphifyStatus({
-      cwd: repoRoot,
-      homeDirectory
-    });
-
-    assert.equal(result.state, "stale");
-    assert.match(result.notes.join(" "), /behind the current repo snapshot/);
-  } finally {
-    await rm(repoRoot, { recursive: true, force: true });
-    await rm(homeDirectory, { recursive: true, force: true });
-  }
 });

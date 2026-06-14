@@ -43,7 +43,6 @@ import {
 } from "./admin/planning-context.ts";
 import { dispatchGithubWorkItem } from "./admin/github-dispatch.ts";
 import { buildOperatorDashboardReport, formatOperatorDashboardReport } from "./admin/ops.ts";
-import { inspectGraphifyStatus, type GraphifyStatusObservation } from "./admin/graphify.ts";
 import {
   buildOperatorStatusReport,
   type DaemonContinuationStatusObservation,
@@ -838,7 +837,6 @@ interface ExecuteStatusCommandOptions {
   cwd?: string | undefined;
   env?: EnvShape | undefined;
   inspectReviewIdentity?: (() => Promise<ReviewIdentityStatusObservation>) | undefined;
-  inspectGraphify?: (() => Promise<GraphifyStatusObservation>) | undefined;
   findLatestRun?: ((workspaceSlug: string, projectSlug: string) => Promise<{ id: string } | undefined>) | undefined;
   getStatusSnapshot: (runId: string) => Promise<RunStatusSnapshot>;
   getExecutionPlan?: ((runId: string, staleAfterHours: number) => Promise<RunExecutionPlan>) | undefined;
@@ -854,7 +852,6 @@ interface ExecuteDoctorCommandOptions extends ExecuteStatusCommandOptions {
     projectId: string
   ) => Promise<RuntimeProjectRegistrationRecord | undefined>;
   pathExists?: ((candidatePath: string) => Promise<boolean>) | undefined;
-  inspectGraphify?: (() => Promise<GraphifyStatusObservation>) | undefined;
 }
 
 interface DoctorCheckObservation {
@@ -5674,11 +5671,6 @@ export async function executeStatusCommandFromArgs(
         cwd: options.cwd,
         env
       });
-  const graphify = options.inspectGraphify
-    ? await options.inspectGraphify()
-    : await inspectGraphifyStatus({
-        cwd: options.cwd
-      });
   const [snapshot, executionPlan] = await Promise.all([
     options.getStatusSnapshot(runId),
     options.getExecutionPlan ? options.getExecutionPlan(runId, staleAfterDays * 24) : Promise.resolve(undefined)
@@ -5753,7 +5745,6 @@ export async function executeStatusCommandFromArgs(
     daemonHandoff,
     daemonSupervisor,
     reviewIdentity,
-    graphify,
     integrity: runtimeState
       ? {
           authorityLabel: "derived_only",

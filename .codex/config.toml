@@ -17,10 +17,6 @@ plugin_hooks = true
 max_threads = 8
 max_depth = 2
 
-[mcp_servers.graphify]
-command = "uv"
-args = ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]
-
 [mcp_servers.playwright]
 command = "npx"
 args = ["--yes", "@playwright/mcp@latest", "--config", ".devgod/playwright/mcp.json"]

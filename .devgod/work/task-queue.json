@@ -3,6 +3,31 @@
   "current_task_id": null,
   "tasks": [
     {
+      "id": "2026-06-14-graphify-realistic-benchmarks",
+      "title": "Realistic local code-only Graphify retrieval benchmark",
+      "status": "done",
+      "class": "prototype_slice",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "benchmark compares Graphify-first retrieval against rg/manual candidate retrieval",
+        "benchmark validates required evidence-file coverage",
+        "benchmark reports token proxy, precision, elapsed time, and recommendation",
+        "generated graph artifacts are not committed"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/graphify-retrieval-benchmark.test.ts tests/cli-surface-coverage.test.ts",
+        "node --experimental-strip-types --test tests/install.test.ts",
+        "npm run typecheck",
+        "npm run benchmark:graphify-retrieval -- --format markdown"
+      ],
+      "evidence": [
+        "source: src/evals/graphify-retrieval-benchmark.ts",
+        "tests: tests/graphify-retrieval-benchmark.test.ts",
+        "benchmark result: 3/5 coverage cases passed, median reduction 0.88x, 0/5 Graphify wins"
+      ],
+      "blocker": null
+    },
+    {
       "id": "2026-06-12-devgod-autonomous-team-repair",
       "title": "Autonomous-team repair track through package/install hardening, optional-surface boundary cleanup, release-readiness reconciliation, and runtime workflow closeout",
       "status": "done",
@@ -25,7 +50,7 @@
         "package-surface tests validate the generated dist index artifact and staged pack output instead of only in-memory renderer output",
         "Phase 4.2 setup flow consolidation keeps shell and PowerShell wrappers aligned with the TypeScript install/setup behavior",
         "Phase 5.1 and Phase 5.2 keep managed policy text, vendored skills, and repo-local skill surfaces on canonical renderers or sync paths",
-        "Phase 6 keeps optional Graphify, Playwright, and Grafana surfaces visible as follow-ups instead of required core proof",
+        "Phase 6 keeps optional integrations visible as follow-ups instead of required core proof",
         "Phase 7 proves the downstream core overlay contract with focused install/happy-path regressions and the installed-repo harness",
         "Phase 8 docs and queue state distinguish package proof from runtime/workflow closeout truth",
         "runtime workflow proof is registered for the active June 12 repair task",

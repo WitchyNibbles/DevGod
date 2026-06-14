@@ -101,7 +101,6 @@ ${renderWorkflowContractBlock({ target: "installed" })}
 - ${workflowArtifactRefHelperSummarySentence}
 - ${workflowRuntimeOptionalReviewExportsSentence}
 - keep \`devgod\` as the default workflow controller even when other tools are available
-- use Graphify MCP first for code navigation when the repo-local graph is ready
 - when repo-local Grafana configuration is present, use Grafana logs as broader debugging and research evidence; if config is partial or unavailable, say so
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis first
 - route evidence to \`solution_architect\`, then \`planner\`, then specialist owner
@@ -156,7 +155,6 @@ export function renderManagedDotAgentsBlock(): string {
 - package owns \`src/\`, \`scripts/\`, \`.agents/\`, \`.codex/\`, \`.devgod/rules/\`, and \`.devgod/templates/\`
 - live work state belongs in \`.devgod/work/\`
 - reviewed memory in \`.devgod/memory/\` is canonical; retrieval is advisory; never store secrets there
-- for code-file navigation in this repo and consuming repos, use Graphify MCP first when the repo-local graph is ready for repo topology and cross-artifact retrieval, but do not treat it as workflow authority
 - when repo-local Grafana configuration is present, treat Grafana as advisory evidence for debugging and research; if configuration is partial or tools are unavailable, report that explicitly
 - avoid strong negative claims from a narrow pass; gather broader evidence or test an alternate hypothesis before concluding no other cases exist
 - ask before deploys, auth changes, secret rotation, destructive data operations, global config changes outside this repo, or durable memory policy changes

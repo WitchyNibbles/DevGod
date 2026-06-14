@@ -119,27 +119,6 @@ function reasoningQualityBlock(
   };
 }
 
-function graphifyObservation(
-  overrides: Partial<import("../src/admin/graphify.ts").GraphifyStatusObservation> = {}
-): import("../src/admin/graphify.ts").GraphifyStatusObservation {
-  return {
-    authorityLabel: "derived_only",
-    state: "unconfigured",
-    configured: false,
-    configuredScopes: [],
-    configPaths: [],
-    graphBuilt: false,
-    graphRoot: "/repo/graphify-out",
-    graphPath: "/repo/graphify-out/graph.json",
-    wikiPath: "/repo/graphify-out/index.md",
-    recommendedSetupCommand: "npm run devgod:graphify:codex-full",
-    recommendedBuildCommand: "npm run devgod:graphify:build",
-    recommendedUpdateCommand: "npm run devgod:graphify:update",
-    notes: ["graphify MCP config was not detected in project or user Codex config"],
-    ...overrides
-  };
-}
-
 function deriveActorRole(actor: string): ReviewActionContext["actorRole"] {
   if (actor === "reviewer-actor") {
     return "reviewer";
@@ -318,17 +297,6 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
         liveTrustReady: false,
         notes: ["adapter module not configured"]
       }),
-      inspectGraphify: async () =>
-        graphifyObservation({
-          state: "stale",
-          configured: true,
-          configuredScopes: ["project"],
-          configPaths: ["/repo/.codex/config.toml"],
-          graphBuilt: true,
-          graphUpdatedAt: "2026-05-01T00:00:00.000Z",
-          headCommit: "def456",
-          notes: ["graphify graph is behind the current repo snapshot"]
-        }),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -349,9 +317,7 @@ test("executeOpsCommandFromArgs surfaces stalled-task alerts and recovery next a
 
   assert.equal(result.format, "json");
   assert.match(result.report.alerts.join(" "), /stalled task: plan/);
-  assert.match(result.report.alerts.join(" "), /graphify repo graph is stale/);
   assert.match(result.report.nextActions.join(" "), /recover reset-task:plan/);
-  assert.match(result.report.nextActions.join(" "), /devgod:graphify:update/);
 });
 
 test("executeRecoverCommandFromArgs applies safe recovery to requeue stalled work", async () => {
@@ -492,7 +458,6 @@ test("executeOpsCommandFromArgs surfaces reasoning warnings for complete runs", 
       liveTrustReady: true,
       notes: []
     }),
-    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -542,17 +507,6 @@ test("executeOpsCommandFromArgs resolves latest runs and can return text output"
       liveTrustReady: true,
       notes: []
     }),
-    inspectGraphify: async () =>
-      graphifyObservation({
-        state: "ready",
-        configured: true,
-        configuredScopes: ["project"],
-        configPaths: ["/repo/.codex/config.toml"],
-        graphBuilt: true,
-        graphUpdatedAt: "2026-05-06T00:00:00.000Z",
-        headCommit: "abc123",
-        notes: ["graphify repo context is ready"]
-      }),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -627,7 +581,6 @@ test("executeOpsCommandFromArgs surfaces workflow integrity contradictions as al
         liveTrustReady: true,
         notes: []
       }),
-      inspectGraphify: async () => graphifyObservation(),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -736,7 +689,6 @@ test("executeOpsCommandFromArgs gives concrete repair guidance for approved-task
         liveTrustReady: true,
         notes: []
       }),
-      inspectGraphify: async () => graphifyObservation(),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
@@ -1542,7 +1494,6 @@ test("executeOpsCommandFromArgs surfaces continue_analysis guidance when autonom
       liveTrustReady: true,
       notes: []
     }),
-    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -1667,7 +1618,6 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
       liveTrustReady: true,
       notes: []
     }),
-    inspectGraphify: async () => graphifyObservation(),
     getStatusSnapshot(runId) {
       return service.getStatus(runId);
     },
@@ -1710,8 +1660,7 @@ test("executeOpsCommandFromArgs surfaces operator-required continuation guidance
     )
   );
   assert.deepEqual(result.report.nextActions, [
-    "operator intervention required: operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)",
-    "npm run devgod:graphify:codex-full"
+    "operator intervention required: operator input is required for advisory continuation target artifact:resume from progress_proof (proof-1)"
   ]);
 });
 
@@ -1765,7 +1714,6 @@ test("executeOpsCommandFromArgs surfaces blocked daemon continuation state even 
         liveTrustReady: true,
         notes: []
       }),
-      inspectGraphify: async () => graphifyObservation(),
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },

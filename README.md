@@ -221,7 +221,6 @@ npm run install:project -- init --apply --target /absolute/path/to/project
 To add optional module wiring during install:
 
 ```bash
-npm run install:project -- init --apply --target /absolute/path/to/project --with-graphify
 npm run install:project -- init --apply --target /absolute/path/to/project --with-playwright
 npm run install:project -- init --apply --target /absolute/path/to/project --with-grafana
 ```
@@ -240,8 +239,6 @@ npm run devgod:verify:setup
 Only when the corresponding optional module was installed:
 
 ```bash
-npm run devgod:setup:graphify
-npm run devgod:graphify:codex-full
 npm run devgod:setup:playwright
 npm run devgod:verify:playwright
 ```
@@ -249,9 +246,8 @@ npm run devgod:verify:playwright
 Important:
 
 - installed repos get the `devgod:*` script names
-- installed repos default to the core script surface only; Graphify and Playwright repo wiring are opt-in
+- installed repos default to the core script surface only; Playwright repo wiring is opt-in
 - this source repo uses shorter package-maintainer names like `setup:local`, `doctor`, and `status`
-- `--with-graphify` adds Graphify MCP wiring plus repo-local Graphify setup scripts
 - `--with-playwright` adds Playwright MCP profiles plus repo-local Playwright setup scripts
 - `--with-grafana` adds Grafana MCP wiring only; it does not install Grafana
 - UI-affecting tasks rely on Playwright only when the repo explicitly opts into the Playwright module during install
@@ -301,21 +297,13 @@ npm run mcp
 npm run ui
 npm run setup:playwright
 npm run verify:playwright
-npm run setup:graphify
-npm run devgod:graphify:build
-npm run devgod:graphify:codex-full
-npm run devgod:graphify:serve
-npm run devgod:graphify:update
-npm run devgod:graphify:watch
 npm run devgod:mcp
 npm run devgod:ui
 npm run devgod:setup:playwright
 npm run devgod:verify:playwright
-npm run devgod:setup:graphify
 npm run devgod:grafana:mcp
 ```
 
-Installed repos only get `devgod:setup:graphify` plus `devgod:graphify:*` when install uses `--with-graphify`.
 Installed repos only get `devgod:setup:playwright` plus `devgod:verify:playwright` when install uses `--with-playwright`.
 `devgod:grafana:mcp` only appears when installation opts into Grafana wiring with `--with-grafana`.
 
@@ -381,7 +369,6 @@ Grafana logs are advisory evidence for debugging and research. They do not repla
 
 ### Optional Module Follow-Ups
 
-- Graphify remains opt-in and still needs repo-local setup plus freshness proof when a consuming repo enables it.
 - Playwright remains opt-in and should only be treated as ready in a target repo after that repo installs the module and passes its own Playwright verification.
 - Grafana wiring is optional, advisory, and separate from the core release gate; it should not be hidden under the core green package proof.
 

@@ -45,7 +45,6 @@
     ".agents/skills/devgod-frontend-taste/SKILL.md",
     ".agents/skills/devgod-frontend-patterns/SKILL.md",
     ".agents/skills/devgod-git-operator/SKILL.md",
-    ".agents/skills/devgod-graphify/SKILL.md",
     ".agents/skills/devgod-infra-ops/SKILL.md",
     ".agents/skills/devgod-intake/SKILL.md",
     ".agents/skills/devgod-market-research/SKILL.md",
@@ -172,8 +171,6 @@
     "src/install/cli.ts",
     "src/install/git-guard.ts",
     "src/install/merge.ts",
-    "src/install/setup-graphify.ts",
-    "src/install/setup-graphify-codex.ts",
     "src/install/setup-playwright.ts",
     "src/install/setup-git-guard.ts",
     "src/install/setup-local.ts",
@@ -237,18 +234,11 @@
     "verify:release-overlay": "bash scripts/verify-release-overlay.sh",
     "verify:migrations:live": "node --experimental-strip-types src/admin/devgod.ts verify-live-migrations",
     "verify:review-identity": "node --experimental-strip-types src/admin/devgod.ts verify-review-identity",
-    "devgod:graphify:build": "graphify extract src --out .",
-    "devgod:graphify:codex-full": "node --experimental-strip-types src/install/setup-graphify-codex.ts",
-    "devgod:graphify:serve": "uv tool run --from graphifyy python -m graphify.serve graphify-out/graph.json",
-    "devgod:graphify:update": "graphify extract src --out .",
-    "devgod:graphify:watch": "graphify watch src",
-    "devgod:setup:graphify": "node --experimental-strip-types ./src/install/setup-graphify.ts",
     "record:review": "node --experimental-strip-types src/admin/devgod.ts record-review --input .devgod/review-action.json",
     "mcp": "node --experimental-strip-types src/admin/devgod.ts mcp",
     "ui": "node --experimental-strip-types src/admin/devgod.ts serve-ui",
     "setup:playwright": "node --experimental-strip-types src/install/setup-playwright.ts",
     "verify:playwright": "node --experimental-strip-types src/install/setup-playwright.ts --verify",
-    "setup:graphify": "node --experimental-strip-types src/install/setup-graphify.ts",
     "setup:local": "node --experimental-strip-types src/install/setup-local.ts"
   },
   "devgodCommandSurface": {
@@ -269,13 +259,7 @@
         "mcp",
         "ui",
         "setup:playwright",
-        "verify:playwright",
-        "setup:graphify",
-        "devgod:graphify:build",
-        "devgod:graphify:codex-full",
-        "devgod:graphify:serve",
-        "devgod:graphify:update",
-        "devgod:graphify:watch"
+        "verify:playwright"
       ],
       "legacyAliases": {
         "doctor": "Prefer `npm run devgod -- doctor` in the source repo; installed repos use `npm run devgod:doctor`.",
@@ -302,17 +286,9 @@
         "devgod:ui",
         "devgod:setup:playwright",
         "devgod:verify:playwright",
-        "devgod:setup:graphify",
-        "devgod:graphify:build",
-        "devgod:graphify:codex-full",
-        "devgod:graphify:serve",
-        "devgod:graphify:update",
-        "devgod:graphify:watch",
         "devgod:grafana:mcp"
       ],
       "optionalModuleInstallFlags": {
-        "devgod:setup:graphify": "--with-graphify",
-        "devgod:graphify:*": "--with-graphify",
         "devgod:setup:playwright": "--with-playwright",
         "devgod:verify:playwright": "--with-playwright",
         "devgod:grafana:mcp": "--with-grafana"

@@ -6,7 +6,6 @@ export const repoLocalSkillIdPrefixes = ["devgod-", "anthropic-", "superpowers-"
 export const alwaysShippedRepoLocalSkillIds = [
   "caveman",
   "devgod-autopilot",
-  "devgod-graphify",
   "devgod-repair-loop"
 ] as const;
 

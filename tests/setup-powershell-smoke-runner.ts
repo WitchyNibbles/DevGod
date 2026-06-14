@@ -91,7 +91,6 @@ export async function runPowerShellSetupSmoke(): Promise<void> {
       '    "%DEVGOD_NODE_EXECUTABLE%" --experimental-strip-types "%DEVGOD_SETUP_ENTRYPOINT%"',
       "    exit /b %ERRORLEVEL%",
       "  )",
-      '  if /i "%~2"=="devgod:setup:graphify" exit /b 0',
       '  if /i "%~2"=="devgod:setup:playwright" exit /b 0',
       '  if /i "%~2"=="devgod:migrate" exit /b 0',
       '  if /i "%~2"=="devgod:bootstrap" exit /b 0',

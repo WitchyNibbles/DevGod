@@ -99,27 +99,6 @@ function taskPacket(overrides: Partial<TaskPacketInput> = {}): TaskPacketInput {
   };
 }
 
-function graphifyObservation(
-  overrides: Partial<import("../src/admin/graphify.ts").GraphifyStatusObservation> = {}
-): import("../src/admin/graphify.ts").GraphifyStatusObservation {
-  return {
-    authorityLabel: "derived_only",
-    state: "unconfigured",
-    configured: false,
-    configuredScopes: [],
-    configPaths: [],
-    graphBuilt: false,
-    graphRoot: "/repo/graphify-out",
-    graphPath: "/repo/graphify-out/graph.json",
-    wikiPath: "/repo/graphify-out/index.md",
-    recommendedSetupCommand: "npm run devgod:graphify:codex-full",
-    recommendedBuildCommand: "npm run devgod:graphify:build",
-    recommendedUpdateCommand: "npm run devgod:graphify:update",
-    notes: ["graphify MCP config was not detected in project or user Codex config"],
-    ...overrides
-  };
-}
-
 function runtimeRegistration(overrides: Partial<RuntimeProjectRegistrationRecord> = {}): RuntimeProjectRegistrationRecord {
   return {
     projectId: overrides.projectId ?? "project:team:devgod",
@@ -169,7 +148,6 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
       liveTrustReady: false,
       notes: ["adapter module not configured"]
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 0,
     now: "2100-01-01T00:00:00.000Z"
   });
@@ -200,7 +178,6 @@ test("buildOperatorStatusReport labels authoritative and derived sections clearl
     /run-level workflow proof may still be valid, but no autonomous continuation target is active/
   );
   assert.equal(report.reviewIdentity.liveTrustReady, false);
-  assert.equal(report.graphify.state, "unconfigured");
   assert.deepEqual(report.reviewIdentity.notes, ["adapter module not configured"]);
 });
 
@@ -335,7 +312,6 @@ test("buildOperatorStatusReport exposes autonomous coverage and resume guidance 
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-15T10:07:00.000Z"
   });
@@ -404,7 +380,6 @@ test("buildOperatorStatusReport reflects generated code-backed understanding inv
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T12:32:00.000Z"
   });
@@ -489,7 +464,6 @@ test("buildOperatorStatusReport surfaces code-backed inventory gaps from ambiguo
         liveTrustReady: true,
         notes: []
       },
-      graphify: graphifyObservation(),
       staleAfterDays: 1,
       now: "2026-05-20T16:02:00.000Z"
     });
@@ -565,7 +539,6 @@ test("buildOperatorStatusReport makes expanded standard-delivery gaps and profil
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T15:01:00.000Z"
   });
@@ -709,7 +682,6 @@ test("buildOperatorStatusReport surfaces runtime trace registry summaries and mi
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     now: "2026-05-20T13:12:00.000Z"
   });
 
@@ -843,7 +815,6 @@ test("buildOperatorStatusReport explains withheld rewrite readiness when invento
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-20T16:21:00.000Z"
   });
@@ -950,7 +921,6 @@ test("buildOperatorStatusReport counts invariants toward rewrite comprehension c
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:01:00.000Z"
   });
@@ -1027,7 +997,6 @@ test("buildOperatorStatusReport exposes duplicate family counts and centralizati
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:21:00.000Z"
   });
@@ -1125,7 +1094,6 @@ test("buildOperatorStatusReport exposes architecture and migration evidence coun
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T11:48:00.000Z"
   });
@@ -1229,7 +1197,6 @@ test("buildOperatorStatusReport surfaces missing modernization artifact classes 
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     staleAfterDays: 1,
     now: "2026-05-21T10:01:00.000Z"
   });
@@ -1301,7 +1268,6 @@ test("buildOperatorStatusReport surfaces operational checkpoint compaction and s
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     now: "2026-05-20T13:44:00.000Z"
   });
 
@@ -1386,7 +1352,6 @@ test("buildOperatorStatusReport surfaces external eval posture and explicit revi
       liveTrustReady: true,
       notes: []
     },
-    graphify: graphifyObservation(),
     now: "2026-05-20T14:04:00.000Z"
   });
 
@@ -1452,14 +1417,6 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGraphify: async () =>
-        graphifyObservation({
-          state: "missing_graph",
-          configured: true,
-          configuredScopes: ["project"],
-          configPaths: [path.join(directory, ".codex/config.toml")],
-          notes: ["graphify MCP is configured but this repo graph has not been built yet"]
-        })
     });
 
     assert.equal(report.run.id, run.id);
@@ -1469,7 +1426,6 @@ test("executeStatusCommandFromArgs parses flags and reports env-derived review i
     assert.deepEqual(report.reviewIdentity.availableBackends, []);
     assert.equal(report.reviewIdentity.bindingsPresent, true);
     assert.equal(report.reviewIdentity.liveTrustReady, false);
-    assert.equal(report.graphify.state, "missing_graph");
     assert.match(
       report.reviewIdentity.notes.join(" "),
       /still contains shipped placeholder values/
@@ -1508,11 +1464,9 @@ test("executeStatusCommandFromArgs degrades malformed bindings into a derived wa
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.reviewIdentity.liveTrustReady, false);
-    assert.equal(report.graphify.state, "unconfigured");
     assert.match(report.reviewIdentity.notes.join(" "), /bindings file is invalid and cannot be trusted/);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -1570,7 +1524,6 @@ test("executeStatusCommandFromArgs surfaces contradictory local completion claim
       getProjectRuntimeState(projectId) {
         return store.getProjectRuntimeState(projectId);
       },
-      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.integrity.status, "contradicted");
@@ -1677,7 +1630,6 @@ test("executeStatusCommandFromArgs flags approved tasks whose exported task pack
       getProjectRuntimeState(projectId) {
         return store.getProjectRuntimeState(projectId);
       },
-      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.run.status, "approved");
@@ -1796,7 +1748,6 @@ test("executeStatusCommandFromArgs marks advisory continuation as operator-requi
         }
       });
     },
-    inspectGraphify: async () => graphifyObservation()
   });
 
   assert.equal(report.autonomous.resume.executionMode, "operator_required");
@@ -1886,7 +1837,6 @@ test("executeStatusCommandFromArgs exposes daemon continuation status when local
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.daemon.continuation?.state, "blocked");
@@ -2065,7 +2015,6 @@ test("executeStatusCommandFromArgs exposes daemon supervisor state with action h
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGraphify: async () => graphifyObservation()
     });
 
     assert.equal(report.daemon.supervisor?.state, "blocked");
@@ -2141,7 +2090,6 @@ test("executeStatusCommandFromArgs exposes daemon supervisor state with action h
         getStatusSnapshot(runId) {
           return service.getStatus(runId);
         },
-        inspectGraphify: async () => graphifyObservation()
       }
     );
     assert.deepEqual(allRunsReport.daemon.supervisor?.history, [
@@ -2229,17 +2177,6 @@ test("executeStatusCommandFromArgs reports multi-backend review adapters and req
       getStatusSnapshot(runId) {
         return service.getStatus(runId);
       },
-      inspectGraphify: async () =>
-        graphifyObservation({
-          state: "ready",
-          configured: true,
-          configuredScopes: ["user"],
-          configPaths: [path.join(directory, ".codex/config.toml")],
-          graphBuilt: true,
-          graphUpdatedAt: "2026-05-06T00:00:00.000Z",
-          headCommit: "abc123",
-          notes: ["graphify repo context is ready"]
-        })
     });
 
     assert.deepEqual(report.reviewIdentity.availableBackends, ["one", "two"]);
@@ -2295,7 +2232,6 @@ test("executeDoctorCommandFromArgs fails when a bootstrapped project has no runt
     getProjectRuntimeRegistration(projectId) {
       return store.getProjectRuntimeRegistration(projectId);
     },
-    inspectGraphify: async () => graphifyObservation(),
     inspectReviewIdentity: async () => ({
       authorityLabel: "derived_only",
       adapterConfigured: false,
@@ -2469,7 +2405,6 @@ test("executeDoctorCommandFromArgs reports repo-path mismatch and missing review
       getProjectRuntimeRegistration(projectId) {
         return store.getProjectRuntimeRegistration(projectId);
       },
-      inspectGraphify: async () => graphifyObservation(),
       inspectReviewIdentity: async () => ({
         authorityLabel: "derived_only",
         adapterConfigured: true,

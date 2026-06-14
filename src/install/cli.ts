@@ -6,7 +6,6 @@ import process from "node:process";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
 import {
   grafanaCodexConfigFragment,
-  graphifyCodexConfigFragment,
   mergeAgentsMd,
   mergeDotAgentsMd,
   mergeCodexConfig,
@@ -16,7 +15,6 @@ import {
 } from "./merge.ts";
 import { listCatalogRepoLocalSkillPaths } from "../devgod/repo-local-skill-surface.ts";
 import { verifyNonUserFacingAgentCavemanContract } from "../devgod/caveman-policy.ts";
-import { inspectGraphifyStatus } from "../admin/graphify.ts";
 import {
   buildWorkflowReviewArtifactRelativePaths,
   workflowReviewActorRoles,
@@ -81,7 +79,6 @@ interface ParsedInstallCommand {
   command: "init" | "upgrade";
   dryRun: boolean;
   targetArg: string;
-  withGraphify?: boolean;
   withPlaywright?: boolean;
   withGrafana?: boolean;
 }
@@ -176,9 +173,9 @@ export default createReviewPrincipalAdapter(async () => {
 
 function usage(): never {
   throw new Error(
-    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-graphify] [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-graphify] [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
-      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-graphify] [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
+    "Usage: node --experimental-strip-types src/install/cli.ts --dry-run [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts init (--apply | --dry-run) [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
+      "   or: node --experimental-strip-types src/install/cli.ts upgrade (--apply | --dry-run) [--with-playwright] [--with-grafana] --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts verify --target <path> | <path>\n" +
       "   or: node --experimental-strip-types src/install/cli.ts scaffold-workflow --target <path> --task-id <task-id> [--force] [--force-active]\n" +
       "   or: node --experimental-strip-types src/install/cli.ts seed-happy-path-fixture --target <path> --task-id fixture-<name> [--force]\n" +
@@ -190,7 +187,6 @@ function buildNextSteps(
   command: "init" | "upgrade",
   mode: InstallMode,
   options: {
-    withGraphify: boolean;
     withPlaywright: boolean;
     withGrafana: boolean;
   }
@@ -202,12 +198,6 @@ function buildNextSteps(
         "Resolve any conflicts before applying the upgrade.",
         "Rerun in apply mode to write the planned managed-file updates.",
         "After apply, run npm install and then npm run devgod:setup:local for core runtime setup.",
-        options.withGraphify
-          ? "Optional module: run npm run devgod:setup:graphify when you want Graphify repo-graph evidence."
-          : "Optional module: rerun upgrade with --with-graphify to add Graphify repo-graph setup commands and MCP wiring.",
-        options.withGraphify
-          ? "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path."
-          : "Optional module: after enabling Graphify, run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path.",
         options.withPlaywright
           ? "Optional module: run npm run devgod:setup:playwright and npm run devgod:verify:playwright when you need Playwright-backed UI workflow proof."
           : "Optional module: rerun upgrade with --with-playwright to add Playwright MCP profiles and setup commands for UI workflow proof.",
@@ -221,12 +211,6 @@ function buildNextSteps(
     return [
       "Review any backups under .devgod/install-backups/ if you changed managed files locally.",
       "Run npm install, then npm run devgod:setup:local for core runtime setup.",
-      options.withGraphify
-        ? "Optional module: run npm run devgod:setup:graphify when you want Graphify repo-graph evidence."
-        : "Optional module: rerun upgrade with --with-graphify to add Graphify repo-graph setup commands and MCP wiring.",
-      options.withGraphify
-        ? "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path."
-        : "Optional module: after enabling Graphify, run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path.",
       options.withPlaywright
         ? "Optional module: run npm run devgod:setup:playwright and npm run devgod:verify:playwright when you need Playwright-backed UI workflow proof."
         : "Optional module: rerun upgrade with --with-playwright to add Playwright MCP profiles and setup commands for UI workflow proof.",
@@ -244,12 +228,6 @@ function buildNextSteps(
         "Rerun in apply mode to write changes.",
         "After apply, run npm install in the target project.",
         "After npm install, run npm run devgod:setup:local for core runtime setup.",
-        options.withGraphify
-          ? "Optional module: run npm run devgod:setup:graphify when you want Graphify repo-graph evidence."
-          : "Optional module: rerun init with --with-graphify to add Graphify repo-graph setup commands and MCP wiring.",
-        options.withGraphify
-          ? "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path."
-          : "Optional module: after enabling Graphify, run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path.",
         options.withPlaywright
           ? "Optional module: run npm run devgod:setup:playwright and npm run devgod:verify:playwright when you need Playwright-backed UI workflow proof."
           : "Optional module: rerun init with --with-playwright to add Playwright MCP profiles and setup commands for UI workflow proof.",
@@ -264,12 +242,6 @@ function buildNextSteps(
     "cd into the target project",
     "npm install",
     "Run npm run devgod:setup:local for core runtime setup.",
-    options.withGraphify
-      ? "Optional module: run npm run devgod:setup:graphify when you want Graphify repo-graph evidence."
-      : "Optional module: rerun init with --with-graphify to add Graphify repo-graph setup commands and MCP wiring.",
-    options.withGraphify
-      ? "Optional: run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path."
-      : "Optional module: after enabling Graphify, run npm run devgod:graphify:codex-full only when you want the broader mixed code-and-docs Graphify path.",
     options.withPlaywright
       ? "Optional module: run npm run devgod:setup:playwright and npm run devgod:verify:playwright when you need Playwright-backed UI workflow proof."
       : "Optional module: rerun init with --with-playwright to add Playwright MCP profiles and setup commands for UI workflow proof.",
@@ -869,7 +841,6 @@ async function buildManifest(
 async function buildInstallPlan(
   sourceRoot: string,
   options: {
-    withGraphify?: boolean;
     withPlaywright?: boolean;
     withGrafana?: boolean;
   } = {}
@@ -896,7 +867,6 @@ async function buildInstallPlan(
     !Array.isArray(sourceConfigTable.mcp_servers)
       ? { ...(sourceConfigTable.mcp_servers as Record<string, unknown>) }
       : {};
-  delete mcpServers.graphify;
   delete mcpServers.playwright;
   delete mcpServers.playwright_vision;
   delete mcpServers.grafana;
@@ -905,9 +875,6 @@ async function buildInstallPlan(
   let codexConfigSource = `${stringifyToml(sourceConfigTable as Parameters<typeof stringifyToml>[0])}`.trimEnd() + "\n";
   if (options.withPlaywright) {
     codexConfigSource = mergeCodexConfig(codexConfigSource, playwrightCodexConfigFragment());
-  }
-  if (options.withGraphify) {
-    codexConfigSource = mergeCodexConfig(codexConfigSource, graphifyCodexConfigFragment());
   }
   if (options.withGrafana) {
     codexConfigSource = mergeCodexConfig(codexConfigSource, grafanaCodexConfigFragment());
@@ -945,7 +912,6 @@ async function buildInstallPlan(
           currentContent,
           dependencyPath,
           {
-            ...(options.withGraphify ? { withGraphify: true } : {}),
             ...(options.withPlaywright ? { withPlaywright: true } : {}),
             ...(options.withGrafana ? { withGrafana: true } : {})
           }
@@ -984,25 +950,6 @@ async function buildInstallPlan(
 async function detectInstalledGrafana(targetRoot: string): Promise<boolean> {
   const detection = await detectGrafanaRepoConfig(targetRoot);
   return detection.configured || detection.codex.hasGrafanaMcp || detection.packageJson.hasManagedScript;
-}
-
-async function detectInstalledGraphify(targetRoot: string): Promise<boolean> {
-  const [codexConfig, packageJsonContent] = await Promise.all([
-    readFileIfExists(path.join(targetRoot, ".codex", "config.toml")),
-    readFileIfExists(path.join(targetRoot, "package.json"))
-  ]);
-
-  const packageJson = packageJsonContent
-    ? (JSON.parse(packageJsonContent) as { scripts?: Record<string, string> })
-    : undefined;
-  const scripts = packageJson?.scripts ?? {};
-
-  return (
-    codexConfig?.includes("[mcp_servers.graphify]") === true ||
-    typeof scripts["devgod:setup:graphify"] === "string" ||
-    typeof scripts["devgod:graphify:build"] === "string" ||
-    typeof scripts["devgod:graphify:codex-full"] === "string"
-  );
 }
 
 async function detectInstalledPlaywright(targetRoot: string): Promise<boolean> {
@@ -1093,9 +1040,8 @@ function parseInstallCommand(command: "init" | "upgrade", args: string[]): Parse
     dryRun: hasDryRun,
     targetArg: resolveCliTarget(
       args,
-      new Set(["--dry-run", "--apply", "--with-graphify", "--with-playwright", "--with-grafana"])
+      new Set(["--dry-run", "--apply", "--with-playwright", "--with-grafana"])
     ),
-    ...(args.includes("--with-graphify") ? { withGraphify: true } : {}),
     ...(args.includes("--with-playwright") ? { withPlaywright: true } : {}),
     ...(args.includes("--with-grafana") ? { withGrafana: true } : {})
   };
@@ -1206,12 +1152,11 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
     if (
       commandArgs.includes("--apply") ||
       commandArgs.includes("--dry-run") ||
-      commandArgs.includes("--with-graphify") ||
       commandArgs.includes("--with-playwright") ||
       commandArgs.includes("--with-grafana")
     ) {
       throw new Error(
-        "verify does not support --apply, --dry-run, --with-graphify, --with-playwright, or --with-grafana."
+        "verify does not support --apply, --dry-run, --with-playwright, or --with-grafana."
       );
     }
 
@@ -1248,9 +1193,8 @@ export function parseCliArgs(rawArgs: string[]): ParsedCliArgs {
     dryRun: true,
     targetArg: resolveCliTarget(
       rawArgs,
-      new Set(["--dry-run", "--with-graphify", "--with-playwright", "--with-grafana"])
+      new Set(["--dry-run", "--with-playwright", "--with-grafana"])
     ),
-    ...(rawArgs.includes("--with-graphify") ? { withGraphify: true } : {}),
     ...(rawArgs.includes("--with-playwright") ? { withPlaywright: true } : {}),
     ...(rawArgs.includes("--with-grafana") ? { withGrafana: true } : {})
   };
@@ -1425,7 +1369,6 @@ async function buildLegacyInstallManifest(
   sourceRoot: string,
   targetRoot: string,
   options: {
-    withGraphify?: boolean;
     withPlaywright?: boolean;
     withGrafana?: boolean;
   } = {}
@@ -1475,7 +1418,6 @@ async function loadInstallManifestOrBackfill(
   sourceRoot: string,
   targetRoot: string,
   options: {
-    withGraphify?: boolean;
     withPlaywright?: boolean;
     withGrafana?: boolean;
   } = {}
@@ -1502,7 +1444,6 @@ async function buildManagedUpgradePlan(
   targetRoot: string,
   manifest: InstallManifest,
   options: {
-    withGraphify?: boolean;
     withPlaywright?: boolean;
     withGrafana?: boolean;
   } = {}
@@ -1553,21 +1494,19 @@ export async function installDevgodIntoProject(options: InstallOptions): Promise
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
-  const withGraphify = options.withGraphify ?? (await detectInstalledGraphify(targetRoot));
   const withPlaywright = options.withPlaywright ?? (await detectInstalledPlaywright(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const summary = createInstallSummary(mode, buildNextSteps("init", mode, {
-    withGraphify,
     withPlaywright,
     withGrafana
   }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const plannedWrites: PlannedWrite[] = [];
 
-  for (const entry of await buildInstallPlan(sourceRoot, { withGraphify, withPlaywright, withGrafana })) {
+  for (const entry of await buildInstallPlan(sourceRoot, { withPlaywright, withGrafana })) {
     const plannedWrite = resolveInstallAction(await resolvePlanEntry(entry, targetRoot));
     plannedWrites.push(plannedWrite);
     if (plannedWrite.action === "conflict") {
@@ -1590,25 +1529,21 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
   const targetRoot = path.resolve(options.targetRoot);
   const mode: InstallMode = options.dryRun ? "dry-run" : "apply";
   const dryRun = mode === "dry-run";
-  const withGraphify = options.withGraphify ?? (await detectInstalledGraphify(targetRoot));
   const withPlaywright = options.withPlaywright ?? (await detectInstalledPlaywright(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const summary = createInstallSummary(mode, buildNextSteps("upgrade", mode, {
-    withGraphify,
     withPlaywright,
     withGrafana
   }));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const { existingManifest, manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot, {
-    withGraphify,
     withPlaywright,
     withGrafana
   });
   const { orphans, plannedWrites } = await buildManagedUpgradePlan(sourceRoot, targetRoot, manifest, {
-    withGraphify,
     withPlaywright,
     withGrafana
   });
@@ -1647,19 +1582,16 @@ export async function upgradeDevgodInProject(options: InstallOptions): Promise<I
 export async function verifyDevgodInstall(options: InstallOptions): Promise<VerifySummary> {
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetRoot = path.resolve(options.targetRoot);
-  const repoHasGraphifySurface = await detectInstalledGraphify(targetRoot);
-  const withGraphify = options.withGraphify ?? repoHasGraphifySurface;
   const withPlaywright = options.withPlaywright ?? (await detectInstalledPlaywright(targetRoot));
   const withGrafana = options.withGrafana ?? (await detectInstalledGrafana(targetRoot));
 
   assertTargetRoot(sourceRoot, targetRoot);
 
   const { manifest } = await loadInstallManifestOrBackfill(sourceRoot, targetRoot, {
-    withGraphify,
     withPlaywright,
     withGrafana
   });
-  const planEntries = await buildInstallPlan(sourceRoot, { withGraphify, withPlaywright, withGrafana });
+  const planEntries = await buildInstallPlan(sourceRoot, { withPlaywright, withGrafana });
   const plannedTargets = new Set(planEntries.map((entry) => entry.target));
 
   const missing: string[] = [];
@@ -1709,51 +1641,6 @@ export async function verifyDevgodInstall(options: InstallOptions): Promise<Veri
     if (inspection.exists || inspection.invalidReason) {
       orphans.push(record.target);
     }
-  }
-
-  const graphify = await inspectGraphifyStatus({ cwd: targetRoot });
-  const graphifyConfiguredFromUserScopeOnly =
-    graphify.configuredScopes.length > 0 && graphify.configuredScopes.every((scope) => scope === "user");
-  const repoGraphifyOptInGuidance =
-    "rerun the devgod install or upgrade flow with --with-graphify to add repo-local Graphify setup commands and MCP wiring";
-
-  if (!graphify.configured) {
-    optionalModuleDrift.push(
-      repoHasGraphifySurface
-        ? "graphify optional module is not configured; run npm run devgod:setup:graphify when repo-graph evidence is needed"
-        : `graphify optional module is not configured in this repo; ${repoGraphifyOptInGuidance} when repo-graph evidence is needed`
-    );
-  }
-  switch (graphify.state) {
-    case "missing_graph":
-      optionalModuleDrift.push(
-        repoHasGraphifySurface
-          ? "graphify optional module is configured, but graphify-out/graph.json has not been built; run npm run devgod:setup:graphify, npm run devgod:graphify:build, or npm run devgod:graphify:codex-full"
-          : graphifyConfiguredFromUserScopeOnly
-            ? `graphify optional module is configured from user scope only, but this repo does not have DevGod Graphify helper scripts; ${repoGraphifyOptInGuidance}, or refresh Graphify from the user-level setup outside the core install`
-            : `graphify optional module is configured, but this repo does not have DevGod Graphify helper scripts; ${repoGraphifyOptInGuidance}, or refresh Graphify from the existing setup outside the core install`
-      );
-      break;
-    case "invalid_graph":
-      optionalModuleDrift.push(
-        repoHasGraphifySurface
-          ? "graphify optional module graphify-out/graph.json is invalid; rebuild it with npm run devgod:setup:graphify, npm run devgod:graphify:build, or the Codex-backed full-graph path"
-          : graphifyConfiguredFromUserScopeOnly
-            ? `graphify optional module graphify-out/graph.json is invalid, but this repo does not have DevGod Graphify helper scripts; ${repoGraphifyOptInGuidance}, or rebuild Graphify from the user-level setup outside the core install`
-            : `graphify optional module graphify-out/graph.json is invalid, but this repo does not have DevGod Graphify helper scripts; ${repoGraphifyOptInGuidance}, or rebuild Graphify from the existing setup outside the core install`
-      );
-      break;
-    case "unconfigured":
-      if (graphify.graphBuilt) {
-        optionalModuleDrift.push(
-          repoHasGraphifySurface
-            ? "graphify optional module graph artifacts exist without MCP configuration; run npm run devgod:setup:graphify to refresh wiring"
-            : `graphify optional module graph artifacts exist without MCP configuration, and this repo does not have DevGod Graphify helper scripts; ${repoGraphifyOptInGuidance} when repo-local wiring is needed`
-        );
-      }
-      break;
-    default:
-      break;
   }
 
   return {
@@ -2650,7 +2537,6 @@ async function main() {
         sourceRoot,
         targetRoot,
         dryRun: parsedArgs.dryRun,
-        ...(parsedArgs.withGraphify !== undefined ? { withGraphify: parsedArgs.withGraphify } : {}),
         ...(parsedArgs.withPlaywright !== undefined ? { withPlaywright: parsedArgs.withPlaywright } : {}),
         ...(parsedArgs.withGrafana !== undefined ? { withGrafana: parsedArgs.withGrafana } : {})
       })
@@ -2658,7 +2544,6 @@ async function main() {
         sourceRoot,
         targetRoot,
         dryRun: parsedArgs.dryRun,
-        ...(parsedArgs.withGraphify !== undefined ? { withGraphify: parsedArgs.withGraphify } : {}),
         ...(parsedArgs.withPlaywright !== undefined ? { withPlaywright: parsedArgs.withPlaywright } : {}),
         ...(parsedArgs.withGrafana !== undefined ? { withGrafana: parsedArgs.withGrafana } : {})
       });

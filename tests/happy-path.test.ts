@@ -408,7 +408,6 @@ test("verify-installed-repo-harness can include the Grafana opt-in wiring", asyn
     assert.match(stdout, /installed repo harness passed/);
     assert.match(stdout, /grafana-opt-in: enabled/);
     assert.match(stdout, /review_identity_authority: derived_only/);
-    assert.match(stdout, /graphify_authority: derived_only/);
     assert.match(
       stdout,
       /runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work/
@@ -574,7 +573,6 @@ test("verify-installed-repo-harness isolates fresh target repo context and reach
     assert.match(stdout, /profile: modernization_program/);
     assert.match(stdout, /rewrite_readiness: ready/);
     assert.match(stdout, /review_identity_authority: derived_only/);
-    assert.match(stdout, /graphify_authority: derived_only/);
     assert.match(
       stdout,
       /runtime_authority: in-memory fixture proof; replace with authenticated runtime review evidence for live work/
