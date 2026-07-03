@@ -850,6 +850,13 @@ export interface ComprehensionSummary {
   missingEvidence: string[];
 }
 
+export interface ContextPressureRecord {
+  level: "normal" | "warning" | "critical";
+  ratio: number;
+  threshold: number;
+  summary: string;
+}
+
 export interface PhaseReadinessRecord {
   phase: AnalysisPhase;
   status: PhaseReadinessStatus;
@@ -863,6 +870,7 @@ export interface PhaseReadinessRecord {
   staleCheckpoint?: boolean | undefined;
   executionEpoch?: number | undefined;
   retryBudgetRemaining?: number | undefined;
+  contextPressure?: ContextPressureRecord | undefined;
 }
 
 export interface AutonomousExecutionState {

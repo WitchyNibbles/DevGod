@@ -27,6 +27,7 @@ import type {
   MigrationStrategy,
   ParityRequirementRecord,
   ParityRequirementStatus,
+  ContextPressureRecord,
   PhaseReadinessRecord,
   ProgressProofRecord,
   RuntimeTraceRecord,
@@ -1025,6 +1026,33 @@ export function computePhaseReadiness(
     (state.retryBudgetRemaining !== undefined && state.retryBudgetRemaining <= 0 ? 0.2 : 0) +
     ((state.phase === "final_verification" || state.phase === "done") && state.progressProofs.length === 0 ? 0.1 : 0);
 
+  const criticalCoverageGap = state.phase === "final_verification" || state.phase === "done"
+    ? Math.max(0, (state.manifest?.thresholds?.criticalItemCoverage ?? 0.8) - summary.criticalItemCoverage)
+    : 0;
+  const coverageDeficit = Math.min(1, criticalCoverageGap * 2.5);
+  const traceDeficit = Math.min(1, Math.max(0, (state.manifest?.thresholds?.runtimeTraceCoverage ?? 0.75) - summary.runtimeTraceCoverage) * 2.5);
+  const lateFinalProofPenalty = state.progressProofs.length === 0 && state.phase !== "final_verification" && state.phase === "done" ? 0.15 : 0;
+  const noProofInFinalVerification = (state.phase === "final_verification" || state.phase === "done") && state.progressProofs.length === 0;
+  const ratio = noProofInFinalVerification ? 1 : Math.min(1, coverageDeficit + traceDeficit + lateFinalProofPenalty);
+  const level: ContextPressureRecord["level"] = noProofInFinalVerification
+    ? "critical"
+    : ratio >= 0.85
+      ? "critical"
+      : "warning";
+  const contextPressure =
+    noProofInFinalVerification || ratio >= 0.7
+      ? {
+          level,
+          ratio,
+          threshold: 0.7,
+          summary: noProofInFinalVerification
+            ? "final proof exceeds context pressure; complete a resumability handoff before approval"
+            : ratio >= 0.85
+              ? "checkpoint evidence density is critically low; preserve the current handoff context before advancing"
+              : "checkpoint evidence density is rising; preserve the current handoff context before advancing",
+        }
+      : undefined;
+
   return {
     phase: state.phase,
     status: reasons.length === 0 ? "ready" : "blocked",
@@ -1037,7 +1065,8 @@ export function computePhaseReadiness(
     latestCheckpointId: latestCheckpoint?.checkpointId,
     staleCheckpoint,
     executionEpoch: state.executionEpoch,
-    retryBudgetRemaining: state.retryBudgetRemaining
+    retryBudgetRemaining: state.retryBudgetRemaining,
+    contextPressure
   };
 }
 
@@ -1102,6 +1131,15 @@ export function collectAutonomousExecutionBlockers(
     snapshot.comprehensionSummary?.rewriteReadiness === "blocked"
   ) {
     blockers.push("rewrite recommendation blocked: critical repo-understanding threshold not met");
+  }
+
+  const hasFinalProofBlockers =
+    blockers.some((blocker) =>
+      /progress proof required but none is valid|checkpoint\/resume required but no checkpoint is recorded|memory compaction required/i.test(blocker)
+    ) && (state.phase === "final_verification" || state.phase === "done");
+
+  if (hasFinalProofBlockers) {
+    blockers.push("final proof requires a resumability handoff before approval");
   }
 
   return [...new Set(blockers)];

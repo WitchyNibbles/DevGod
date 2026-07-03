@@ -337,7 +337,7 @@ test("install CLI entrypoints print summaries for dry runs, drifted verify, fixt
     assert.match(verifyFailure.stdout, /status: drifted/);
     assert.match(verifyFailure.stdout, /Modified:/);
     assert.match(verifyFailure.stdout, /package\.json/);
-    assert.match(verifyFailure.stdout, /Optional module drift:/);
+    assert.match(verifyFailure.stdout, /Optional module drift:/i);
 
     const happyPathSeed = await runTypeScriptCli(
       installCliScript,

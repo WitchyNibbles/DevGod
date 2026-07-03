@@ -1,0 +1,67 @@
+{
+  "cycle": 1,
+  "proof_id": "progress-DG-013-workflow-gates-and-completion-enforcement",
+  "task_id": "DG-013-workflow-gates-and-completion-enforcement",
+  "phase_before": "implementation",
+  "phase_after": "validation",
+  "evidence_refs": [
+    ".devgod/work/briefs/brief-DG-013-workflow-gates-and-completion-enforcement.md",
+    ".devgod/work/tasks/task-DG-013-workflow-gates-and-completion-enforcement.md",
+    "src/runtime/autonomous-execution.ts",
+    "src/runtime/workflow-gates.ts",
+    "src/core/service.ts",
+    "tests/service.test.ts",
+    "tests/status-report.test.ts",
+    "tests/workflow-integrity.test.ts",
+    "tests/workflow-check.test.ts",
+    "tests/workflow-gates.test.ts",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-reviewer.md",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-security_reviewer.md"
+  ],
+  "coverage_delta": {
+    "validated": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "DG-014-context-pressure-and-handoff-foundation",
+  "why_next": "DG-013 makes terminal workflow outcomes and completion-proof enforcement explicit; the next work is the context-pressure and handoff foundation.",
+  "status": "complete",
+  "summary": "DG-013 extracts explicit workflow-gate terminal outcome classification, hardens final verification and done readiness against misaligned progress proof state, wires terminal-outcome rationale into service planning, and adds focused workflow, service, status, integrity, and workflow-check regression coverage.",
+  "changed_paths": [
+    ".devgod/ACTIVE",
+    ".devgod/work/briefs/brief-DG-013-workflow-gates-and-completion-enforcement.md",
+    ".devgod/work/tasks/task-DG-013-workflow-gates-and-completion-enforcement.md",
+    ".devgod/work/task-queue.json",
+    ".devgod/work/product-state.md",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-reviewer.md",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-013-workflow-gates-and-completion-enforcement-security_reviewer.md",
+    ".devgod/work/proofs/progress-DG-013-workflow-gates-and-completion-enforcement.json",
+    "src/runtime/autonomous-execution.ts",
+    "src/runtime/workflow-gates.ts",
+    "src/core/service.ts",
+    "tests/service.test.ts",
+    "tests/status-report.test.ts",
+    "tests/workflow-integrity.test.ts",
+    "tests/workflow-check.test.ts",
+    "tests/workflow-gates.test.ts"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/workflow-gates.test.ts tests/service.test.ts tests/status-report.test.ts tests/workflow-integrity.test.ts tests/workflow-check.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Context-pressure, handoff, child-job, and debate enforcement still remain later roadmap slices after this bounded workflow-gates cut."
+  ],
+  "blocker": null,
+  "next_recommended_task": "Start DG-014-context-pressure-and-handoff-foundation to extend the explicit workflow model beyond terminal completion gates."
+}

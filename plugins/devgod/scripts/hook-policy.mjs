@@ -61,9 +61,27 @@ function isAllowedTaskTarget(target, context) {
   );
 }
 
+function runtimeAuthorityRequiresFailClosed(context) {
+  return context?.runtimeAuthority?.configured === true && context?.runtimeAuthority?.mode === "unavailable";
+}
+
 export function evaluatePreToolUse(payload, context) {
   const toolName = payload?.tool_name;
   const command = extractToolCommand(payload);
+
+  if (runtimeAuthorityRequiresFailClosed(context)) {
+    if (toolName === "apply_patch") {
+      return buildPreToolDeny(
+        "runtime authority is unavailable; local exports cannot grant write scope for active-task edits"
+      );
+    }
+
+    if (toolName === "Bash" && !isReadOnlyBashCommand(command)) {
+      return buildPreToolDeny(
+        "runtime authority is unavailable; only read-only inspection is allowed until runtime truth is reachable"
+      );
+    }
+  }
 
   if (toolName === "apply_patch") {
     const targets = parseApplyPatchTargets(command);
@@ -112,6 +130,12 @@ export function evaluatePreToolUse(payload, context) {
 
 export function evaluatePermissionRequest(payload, context) {
   const command = extractToolCommand(payload);
+
+  if (runtimeAuthorityRequiresFailClosed(context) && !isReadOnlyBashCommand(command)) {
+    return buildPermissionDeny(
+      "runtime authority is unavailable; do not request write permissions while local exports are derived-only"
+    );
+  }
 
   if (isDestructiveCommand(command)) {
     return buildPermissionDeny("destructive approval request blocked by devgod policy");
@@ -175,6 +199,9 @@ export function evaluatePostToolUse(payload, context) {
 
 export function evaluateSessionStart(payload, context) {
   const lines = [];
+  if (runtimeAuthorityRequiresFailClosed(context)) {
+    lines.push("runtime authority unavailable: local ACTIVE and queue exports are derived-only");
+  }
   if (context.activeTaskId) {
     lines.push(`devgod active task: ${context.activeTaskId}`);
   }
@@ -216,6 +243,9 @@ export function evaluateUserPromptSubmit(payload, context) {
   }
 
   const lines = [];
+  if (runtimeAuthorityRequiresFailClosed(context)) {
+    lines.push("runtime authority unavailable: treat local workflow exports as evidence only");
+  }
   if (context.activeTaskId) {
     lines.push(`active devgod task: ${context.activeTaskId}`);
   }

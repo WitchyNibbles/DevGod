@@ -775,6 +775,187 @@ test("hook context reports authority mismatch when queue and ACTIVE disagree", a
   }
 });
 
+test("hook context does not trust local active exports when runtime authority is configured but unavailable", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "devgod-hook-runtime-unavailable-"));
+
+  try {
+    await mkdir(join(repoRoot, ".devgod", "work", "tasks"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".env.devgod"),
+      [
+        "DEVGOD_CORE_DATABASE_URL=postgres://127.0.0.1:1/devgod_test?connect_timeout=1",
+        "DEVGOD_WORKSPACE_SLUG=team",
+        "DEVGOD_PROJECT_SLUG=devgod"
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "ACTIVE"),
+      "task_id=task-stale\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "task-queue.json"),
+      JSON.stringify(
+        {
+          project_status: "in_progress",
+          current_task_id: "task-stale",
+          tasks: [{ id: "task-stale", status: "in_progress" }]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await writeFile(
+      join(repoRoot, ".devgod", "work", "tasks", "task-task-stale.md"),
+      [
+        "# Task Packet",
+        "",
+        "## Allowed write scope",
+        "",
+        "- `src/runtime`",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = await readActiveTaskContext({ repoRoot });
+
+    assert.equal(context.activeTaskId, undefined);
+    assert.equal(context.queueCurrentTaskId, undefined);
+    assert.deepEqual(context.allowedWriteScope, []);
+    assert.deepEqual(context.authorityMismatches, [
+      {
+        kind: "runtime_authority_unavailable",
+        localActiveTaskId: "task-stale",
+        localQueueCurrentTaskId: "task-stale"
+      }
+    ]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("pre-tool-use hook blocks write attempts when runtime authority is configured but unavailable", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "apply_patch",
+      tool_input: {
+        command: ["*** Begin Patch", "*** Update File: src/runtime/example.ts", "+changed", "*** End Patch"].join("\n")
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-runtime-unavailable",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined,
+      runtimeAuthority: {
+        mode: "unavailable",
+        configured: true
+      },
+      authorityMismatches: [
+        {
+          kind: "runtime_authority_unavailable",
+          localActiveTaskId: "task-stale",
+          localQueueCurrentTaskId: "task-stale"
+        }
+      ]
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /runtime authority.*unavailable/i);
+});
+
+test("pre-tool-use hook blocks write-like Bash when runtime authority is configured but unavailable", () => {
+  const parsed = evaluatePreToolUse(
+    {
+      tool_name: "Bash",
+      tool_input: {
+        command: "touch src/runtime/example.ts"
+      }
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-runtime-unavailable",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined,
+      runtimeAuthority: {
+        mode: "unavailable",
+        configured: true
+      },
+      authorityMismatches: [
+        {
+          kind: "runtime_authority_unavailable",
+          localActiveTaskId: "task-stale",
+          localQueueCurrentTaskId: "task-stale"
+        }
+      ]
+    }
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /runtime authority.*unavailable/i);
+});
+
+test("session-start hook surfaces runtime-authority outages even without an active task", () => {
+  const parsed = evaluateSessionStart(
+    {},
+    {
+      repoRoot: "/tmp/devgod-hook-runtime-unavailable",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined,
+      runtimeAuthority: {
+        mode: "unavailable",
+        configured: true
+      },
+      authorityMismatches: [
+        {
+          kind: "runtime_authority_unavailable",
+          localActiveTaskId: "task-stale",
+          localQueueCurrentTaskId: "task-stale"
+        }
+      ]
+    }
+  );
+
+  assert.ok(parsed);
+  assert.match(parsed.hookSpecificOutput?.additionalContext ?? "", /runtime authority unavailable/i);
+});
+
+test("user-prompt-submit hook surfaces runtime-authority outages when no active task can be trusted", () => {
+  const parsed = evaluateUserPromptSubmit(
+    {
+      prompt: "show me the current task"
+    },
+    {
+      repoRoot: "/tmp/devgod-hook-runtime-unavailable",
+      activeTaskId: undefined,
+      allowedWriteScope: [],
+      queueCurrentTaskId: undefined,
+      runtimeAuthority: {
+        mode: "unavailable",
+        configured: true
+      },
+      authorityMismatches: [
+        {
+          kind: "runtime_authority_unavailable",
+          localActiveTaskId: "task-stale",
+          localQueueCurrentTaskId: "task-stale"
+        }
+      ]
+    }
+  );
+
+  assert.ok(parsed);
+  assert.match(parsed.hookSpecificOutput?.additionalContext ?? "", /runtime authority unavailable/i);
+});
+
 test("stop hook allows exit when hook context already proves an authority mismatch blocker", () => {
   const parsed = evaluateStop(
     {

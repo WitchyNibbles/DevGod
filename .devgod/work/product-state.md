@@ -25,7 +25,7 @@ Make `devgod` a runtime-authoritative public package that makes Codex behave lik
 
 ## Current Milestone
 
-The active milestone is `2026-06-12-devgod-autonomous-team-repair`: align `devgod` to the clarified autonomous-team product target and begin with gate restoration under runtime DB authority.
+The active milestone is the `2026-06-20 agentic-company-loop roadmap`: convert the existing runtime substrate into an enforced manager-led, specialist-driven, resumable company-loop execution model.
 
 ## Completed Milestones
 
@@ -46,18 +46,19 @@ The active milestone is `2026-06-12-devgod-autonomous-team-repair`: align `devgo
 - completed Phase 6 local core-vs-optional boundary cleanup so optional integrations stay follow-up modules instead of core proof blockers
 - completed Phase 7 downstream install contract hardening locally; focused regressions passed and a GPT-5.5 audit closed with no findings
 - added a realistic code-only repo-graph retrieval benchmark; current local evidence does not support making the removed integration a hard runtime requirement
+- completed `DG-011`, `DG-012`, `DG-013`, and `DG-014` of the June 20 roadmap, covering the company-kernel contract, phase-readiness selection, workflow-gates enforcement, and the first typed handoff/context-pressure continuity foundation
 
 ## Current Task
 
-No active task is queued in this checkout. The repo-graph integration removal is complete in the current shipped surface.
+No active task is queued in this checkout. `2026-07-02-active-md-vs-db-authority-fix` is complete locally after hardening runtime-managed authority so hooks and live workflow proof no longer select active work from `.devgod/ACTIVE` or local queue exports when runtime DB authority is configured.
 
 ## Next Task
 
-No active task is queued in this checkout. Future work should start from a new task packet, with optional Playwright, Grafana, and full JS build-pipeline work treated as separate follow-up scopes.
+Resume `DG-015-delegation-and-debate-foundation` after the active-state authority repair closes and verification is green.
 
 ## Blockers
 
-No product-direction or workflow closeout blocker remains for the June 12 repair task. Optional module enablement and the future full JS build pipeline remain explicit follow-up scopes, not blockers for this completed task.
+No blocker currently prevents roadmap continuation. Optional module enablement, the future full JS build pipeline, and later company-loop slices remain explicit follow-up scopes rather than blockers for the completed `DG-014` slice.
 
 ## Reasoning Debt
 
@@ -69,6 +70,7 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 - Phase 3.2 stabilizes the public npm boundary through JS `dist` entrypoints and removes raw `node_modules/devgod/src` CLI coupling from new managed templates, while installed runtime commands still load shipped TypeScript internals through Node experimental type-stripping hooks until a full JS build pipeline exists
 - Playwright remains an optional follow-up surface and is only proven in target repos that opt in and pass their own Playwright verification
 - Grafana remains an optional advisory surface and should not be conflated with core workflow proof or runtime-authoritative task state
+- the current context-pressure model is intentionally bounded and runtime-derived; later slices may replace it with richer Codex-native telemetry once those adapters exist
 
 ## Verification Summary
 
@@ -126,6 +128,9 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 - `node --experimental-strip-types --test tests/install.test.ts` passed
 - `npm run typecheck` passed
 - `npm test` passed with 693 passing, 0 failing, 1 skipped
+- `node --experimental-strip-types --test tests/contracts.test.ts tests/progress-proof.test.ts` passed for `DG-014-context-pressure-and-handoff-foundation`
+- `node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts tests/workflow-check.test.ts` passed for `DG-014-context-pressure-and-handoff-foundation`
+- `bash scripts/check-devgod-workflow.sh --task-id DG-014-context-pressure-and-handoff-foundation` passed after reconciling `.devgod/ACTIVE` to the current workflow export contract
 - `node --experimental-strip-types --test tests/skill-evolution.test.ts tests/vendored-skills.test.ts` passed after the trace-mining slice
 - `npm run typecheck` passed after the trace-mining slice
 - the now-removed repo-graph retrieval benchmark previously passed its focused benchmark tests
@@ -176,6 +181,7 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 - GPT-5.5 closed the Phase 7 downstream install contract audit with no findings
 - earlier June 7 and June 8 slice approvals remain recorded in their respective `.devgod/work/reviews/` artifacts
 - active June 12 reviewer, QA, and security exports are runtime-verified approvals tied to runtime proof run `d5a2b9ac-aa2d-4412-8387-578f0b849102`
+- `DG-014-context-pressure-and-handoff-foundation` reviewer, QA, and security exports are present locally and record `runtime_verified` approval for the bounded continuity foundation slice
 - reviewer approval recorded in `.devgod/work/reviews/review-2026-06-08-devgod-consistency-repair-roadmap-reviewer.md`
 - QA approval recorded in `.devgod/work/reviews/review-2026-06-08-devgod-consistency-repair-roadmap-qa_engineer.md`
 - security approval recorded in `.devgod/work/reviews/review-2026-06-08-devgod-consistency-repair-roadmap-security_reviewer.md`
@@ -209,4 +215,4 @@ No product-direction or workflow closeout blocker remains for the June 12 repair
 
 ## Last Updated
 
-2026-06-13
+2026-07-02

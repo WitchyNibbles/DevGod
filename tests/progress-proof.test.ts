@@ -631,6 +631,56 @@ test("collectAutonomousExecutionBlockers aggregates missing proof checkpoint and
   );
 });
 
+test("collectAutonomousExecutionBlockers emits a resumability handoff blocker for final proof failures", () => {
+  const state: AutonomousExecutionState = {
+    enabled: true,
+    profile: "modernization_program",
+    phase: "final_verification",
+    manifest: {
+      runId: "run-resumability",
+      profile: "modernization_program",
+      requiredCategories: [],
+      thresholds: {
+        criticalItemCoverage: 0.9,
+        criticalItemValidation: 0.75,
+        callsiteCoverage: 0.85,
+        runtimeTraceCoverage: 0.85
+      }
+    },
+    coverageItems: [
+      {
+        id: "service:resumability",
+        category: "services",
+        state: "validated",
+        criticality: "critical",
+        sources: ["src/core/service.ts:1"],
+        callsiteCount: 2,
+        callsitesAnalyzed: 2,
+        runtimeTraced: true,
+        businessRules: ["rely on runtime checkpoint"],
+        evidenceRefs: ["src/core/service.ts:1"],
+        verificationRefs: ["tests/progress-proof.test.ts"],
+        lastUpdatedAt: "2026-05-20T10:55:00.000Z"
+      }
+    ],
+    gaps: [],
+    checkpoints: [],
+    progressProofs: [],
+    understandingMaps: [],
+    runtimeTraces: [],
+    pendingInvestigations: [],
+    executionEpoch: 2,
+    updatedAt: "2026-05-20T10:56:00.000Z"
+  };
+
+  const blockers = collectAutonomousExecutionBlockers(
+    state,
+    [createTaskRecord(["progress_proof_required", "checkpoint_resume_required"])]
+  );
+
+  assert.match(blockers.join("\n"), /final proof requires a resumability handoff before approval/i);
+});
+
 test("modernization_program blockers capture invalid manifest, missing proof state, and blocked rewrite readiness", () => {
   const state: AutonomousExecutionState = {
     enabled: true,

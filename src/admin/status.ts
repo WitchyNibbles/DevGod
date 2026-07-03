@@ -475,11 +475,22 @@ export function buildOperatorStatusReport(input: {
   daemonContinuation?: DaemonContinuationStatusObservation | undefined;
   daemonHandoff?: DaemonOperatorHandoffObservation | undefined;
   daemonSupervisor?: DaemonSupervisorStatusObservation | undefined;
-  reviewIdentity: ReviewIdentityStatusObservation;
+  reviewIdentity?: ReviewIdentityStatusObservation | undefined;
   integrity?: OperatorStatusReport["integrity"] | undefined;
   now?: string | undefined;
   staleAfterDays?: number | undefined;
 }): OperatorStatusReport {
+  const reviewIdentity: ReviewIdentityStatusObservation = input.reviewIdentity ?? {
+    authorityLabel: "derived_only",
+    adapterConfigured: false,
+    adapterExists: false,
+    availableBackends: [],
+    bindingsPresent: false,
+    bindingsPath: "",
+    bindingsUseShippedTemplate: false,
+    liveTrustReady: false,
+    notes: ["review identity observation was not provided"]
+  };
   const byStatus = emptyTaskBuckets();
   const traceRegistrySummary = input.snapshot.autonomousExecution
     ? buildRuntimeTraceRegistry(input.snapshot.autonomousExecution.state, { now: input.now })
@@ -591,7 +602,7 @@ export function buildOperatorStatusReport(input: {
       handoff: input.daemonHandoff,
       supervisor: input.daemonSupervisor
     },
-    reviewIdentity: input.reviewIdentity,
+    reviewIdentity,
     integrity: input.integrity ?? {
       authorityLabel: "derived_only",
       status: "unavailable",
