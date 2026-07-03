@@ -1,7 +1,80 @@
 {
-  "project_status": "done",
+  "project_status": "ready",
   "current_task_id": null,
   "tasks": [
+    {
+      "id": "2026-07-02-active-md-vs-db-authority-fix",
+      "title": "Runtime-authoritative active state repair for ACTIVE vs DB drift",
+      "status": "done",
+      "class": "prototype_slice",
+      "depends_on": [],
+      "acceptance_criteria": [
+        "runtime-managed hooks no longer select active work from local exports when runtime authority is configured",
+        "live workflow proof resolves the active task from runtime authority before local exports",
+        "focused regressions cover runtime-configured authority outages and stale export drift"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/hooks.test.ts tests/workflow-check.test.ts",
+        "git diff --check"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-2026-07-02-active-md-vs-db-authority-fix.md",
+        "task packet: .devgod/work/tasks/task-2026-07-02-active-md-vs-db-authority-fix.md",
+        "verification: node --experimental-strip-types --test tests/hooks.test.ts",
+        "verification: node --experimental-strip-types --test tests/workflow-check.test.ts",
+        "verification: git diff --check"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "DG-015-delegation-and-debate-foundation",
+      "title": "Bounded delegation and debate foundation on top of the typed continuity contract",
+      "status": "pending",
+      "class": "prototype_slice",
+      "depends_on": [
+        "DG-014-context-pressure-and-handoff-foundation"
+      ],
+      "acceptance_criteria": [
+        "runtime defines bounded child-job and contradiction/debate foundation records without widening into full automation",
+        "parent-child ownership and unresolved-child blocking are explicit in runtime state",
+        "follow-on operator and workflow surfaces can consume the new delegation truth without transcript dependence"
+      ],
+      "verification": [
+        "planned after intake and task packet activation"
+      ],
+      "evidence": [
+        "roadmap: docs/plans/2026-06-20-devgod-agentic-company-loop-roadmap.md",
+        "dependency: DG-014 continuity foundation complete"
+      ],
+      "blocker": null
+    },
+    {
+      "id": "DG-014-context-pressure-and-handoff-foundation",
+      "title": "Typed handoff storage, bounded context-pressure posture, and final-proof resumability enforcement",
+      "status": "done",
+      "class": "prototype_slice",
+      "depends_on": [
+        "DG-013-workflow-gates-and-completion-enforcement"
+      ],
+      "acceptance_criteria": [
+        "handoffs persist explicit kind metadata and optional bounded context-pressure details",
+        "autonomous readiness and status/report surfaces expose derived context-pressure posture",
+        "final verification and done are blocked for checkpoint-resume tasks when resumability handoff evidence is missing"
+      ],
+      "verification": [
+        "node --experimental-strip-types --test tests/contracts.test.ts tests/progress-proof.test.ts tests/service.test.ts tests/status-report.test.ts tests/workflow-check.test.ts",
+        "git diff --check",
+        "bash scripts/check-devgod-workflow.sh --task-id DG-014-context-pressure-and-handoff-foundation"
+      ],
+      "evidence": [
+        "brief: .devgod/work/briefs/brief-DG-014-context-pressure-and-handoff-foundation.md",
+        "task packet: .devgod/work/tasks/task-DG-014-context-pressure-and-handoff-foundation.md",
+        "checkpoint: .devgod/work/checkpoints/checkpoint-DG-014-context-pressure-and-handoff-foundation.md",
+        "reviews: .devgod/work/reviews/review-DG-014-context-pressure-and-handoff-foundation-reviewer.md, .devgod/work/reviews/review-DG-014-context-pressure-and-handoff-foundation-qa_engineer.md, .devgod/work/reviews/review-DG-014-context-pressure-and-handoff-foundation-security_reviewer.md",
+        "proof: .devgod/work/proofs/progress-DG-014-context-pressure-and-handoff-foundation.json"
+      ],
+      "blocker": null
+    },
     {
       "id": "2026-06-14-graphify-realistic-benchmarks",
       "title": "Realistic local code-only Graphify retrieval benchmark",
@@ -81,30 +154,7 @@
         "brief: .devgod/work/briefs/brief-2026-06-12-devgod-autonomous-team-repair.md",
         "task packet: .devgod/work/tasks/task-2026-06-12-devgod-autonomous-team-repair.md",
         "maintainer clarification: 2026-06-12 autonomous-team definition",
-        "verification: npm run check:quality passed during Phase 1 gate restoration",
-        "verification: npm run verify:workflow-schema passed after Phase 2.1 runtime/export semantics integration",
-        "verification: focused Phase 2.1 tests passed with 63 tests and 0 failures",
-        "verification: focused Phase 2.2 tests passed with 79 tests and 0 failures",
-        "verification: repaired trace-mining export set passed artifact and live external-review checks in a temporary export root",
-        "verification: no forbidden raw package-boundary references remain in package, install, test, dist, or src/devgod surfaces",
-        "verification: focused package-boundary tests passed with 70 tests and 0 failures",
-        "verification: npm run verify:package-surface passed after Phase 3.1 integration",
-        "verification: npm pack --dry-run passed and includes public JS dist entrypoints",
-        "verification: Phase 3.2 GPT-5.5 validation loop approved raw CLI coupling removal and generated artifact package-surface proof",
-        "verification: raw package-boundary scan found no node_modules/devgod/src, devgod/src/index.ts, or ../src/public.ts coupling after Phase 3.2 integration",
-        "verification: focused MCP and CLI-surface tests passed with 14 tests and 0 failures after Phase 3.2 integration",
-        "verification: Phase 4.2 setup flow consolidation completed locally",
-        "verification: Phase 5.1 managed policy/template rendering completed locally",
-        "verification: Phase 5.2 vendored skill and repo-local skill deduplication completed locally",
-        "verification: Phase 6 core-vs-optional module boundary cleanup completed locally",
-        "verification: node --experimental-strip-types --test tests/install.test.ts tests/happy-path.test.ts passed 120/120 during Phase 7",
-        "verification: bash scripts/verify-installed-repo-harness.sh passed during Phase 7",
-        "verification: npm run check:happy-path passed during Phase 7",
-        "verification: npm run verify:release-overlay passed after Phase 8 drift repair",
-        "runtime proof: d5a2b9ac-aa2d-4412-8387-578f0b849102 approved 2026-06-12-devgod-autonomous-team-repair",
-        "verification: npm run devgod -- status --format text reports integrity.status consistent after runtime proof",
-        "verification: bash scripts/check-devgod-workflow.sh --task-id 2026-06-12-devgod-autonomous-team-repair passed after review export repair",
-        "verification: bash scripts/check-devgod-workflow-live.sh --repo-root . --task-id 2026-06-12-devgod-autonomous-team-repair passed after runtime proof"
+        "runtime proof: d5a2b9ac-aa2d-4412-8387-578f0b849102 approved 2026-06-12-devgod-autonomous-team-repair"
       ],
       "blocker": null
     },

@@ -104,11 +104,11 @@ async function attachWorkflowProofStub(
   await writeFile(
     binPath,
     [
-      'import { writeFileSync } from "node:fs";',
+      'import { appendFileSync } from "node:fs";',
       'const args = process.argv.slice(2);',
       'const logPath = process.env.DEVGOD_WORKFLOW_PROOF_ARGS_LOG;',
       'if (logPath) {',
-      '  writeFileSync(logPath, args.join(" "), "utf8");',
+      '  appendFileSync(logPath, `${args.join(" ")}\\n`, "utf8");',
       '}',
       'if (args[0] === "status") {',
       `  if (${JSON.stringify(options.statusExitCode ?? 0)} !== 0) {`,
@@ -771,6 +771,109 @@ test("check-devgod-workflow-live accepts CRLF active files", async () => {
     await execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
       cwd: targetRoot
     });
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live resolves the proof task from runtime authority before stale ACTIVE", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-STALE-ACTIVE", "devgod-live-runtime-authority-");
+  let stubRoot: string | undefined;
+  const logPath = join(targetRoot, "workflow-proof-args.log");
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot, {
+      statusStdout: JSON.stringify({
+        integrity: {
+          status: "consistent",
+          contradictions: [],
+          runtimeState: {
+            activeTaskId: "DG-RUNTIME-AUTH"
+          }
+        }
+      })
+    });
+    await writeFile(
+      join(targetRoot, ".env.devgod"),
+      [
+        "DEVGOD_CORE_DATABASE_URL=postgres://127.0.0.1:1/devgod_test?connect_timeout=1",
+        "DEVGOD_WORKSPACE_SLUG=team",
+        "DEVGOD_PROJECT_SLUG=devgod"
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    await writeFile(
+      join(targetRoot, ".devgod", "ACTIVE"),
+      "task_id=DG-STALE-ACTIVE\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot,
+        env: {
+          ...process.env,
+          DEVGOD_WORKFLOW_PROOF_ARGS_LOG: logPath
+        }
+      }),
+      /local ACTIVE export disagrees with runtime active task/i
+    );
+
+    const loggedArgs = await readFile(logPath, "utf8");
+    assert.match(loggedArgs, /\bworkflow-proof\b/);
+    assert.match(loggedArgs, /--task-id DG-RUNTIME-AUTH\b/);
+    assert.doesNotMatch(loggedArgs, /--task-id DG-STALE-ACTIVE\b/);
+  } finally {
+    if (stubRoot) {
+      await rm(stubRoot, { recursive: true, force: true });
+    }
+    await rm(targetRoot, { recursive: true, force: true });
+  }
+});
+
+test("check-devgod-workflow-live fails closed when runtime authority is configured but status cannot be read", async () => {
+  const targetRoot = await createInstalledWorkflowFixture("DG-STALE-ACTIVE", "devgod-live-runtime-status-fail-");
+  let stubRoot: string | undefined;
+  const logPath = join(targetRoot, "workflow-proof-args.log");
+
+  try {
+    stubRoot = await attachWorkflowProofStub(targetRoot, {
+      statusExitCode: 1,
+      statusStderr: "status unavailable"
+    });
+    await writeFile(
+      join(targetRoot, ".env.devgod"),
+      [
+        "DEVGOD_CORE_DATABASE_URL=postgres://127.0.0.1:1/devgod_test?connect_timeout=1",
+        "DEVGOD_WORKSPACE_SLUG=team",
+        "DEVGOD_PROJECT_SLUG=devgod"
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    await writeFile(
+      join(targetRoot, ".devgod", "ACTIVE"),
+      "task_id=DG-STALE-ACTIVE\nworkflow=devgod\nstate=active\n",
+      "utf8"
+    );
+
+    await assert.rejects(
+      execFileAsync("bash", ["scripts/check-devgod-workflow-live.sh", "--repo-root", targetRoot], {
+        cwd: targetRoot,
+        env: {
+          ...process.env,
+          DEVGOD_WORKFLOW_PROOF_ARGS_LOG: logPath
+        }
+      }),
+      /runtime authority is configured but live status could not be resolved/i
+    );
+
+    const loggedArgs = await readFile(logPath, "utf8");
+    assert.match(loggedArgs, /^status --run-id latest --format json/m);
+    assert.doesNotMatch(loggedArgs, /^workflow-proof /m);
   } finally {
     if (stubRoot) {
       await rm(stubRoot, { recursive: true, force: true });

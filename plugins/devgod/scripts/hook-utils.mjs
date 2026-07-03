@@ -498,7 +498,10 @@ async function readRuntimeAuthorityContext(resolvedRepoRoot) {
     process.env.DEVGOD_PROJECT_SLUG || dotEnv.DEVGOD_PROJECT_SLUG;
 
   if (!connectionString || !workspaceSlug || !projectSlug) {
-    return undefined;
+    return {
+      mode: "unconfigured",
+      configured: false
+    };
   }
 
   let client;
@@ -506,7 +509,10 @@ async function readRuntimeAuthorityContext(resolvedRepoRoot) {
     const pgModule = await import("pg");
     const Client = pgModule.Client ?? pgModule.default?.Client;
     if (!Client) {
-      return undefined;
+      return {
+        mode: "unavailable",
+        configured: true
+      };
     }
 
     client = new Client({ connectionString });
@@ -526,7 +532,10 @@ async function readRuntimeAuthorityContext(resolvedRepoRoot) {
 
     const row = result.rows[0];
     if (!row) {
-      return undefined;
+      return {
+        mode: "unavailable",
+        configured: true
+      };
     }
 
     const activeTaskId =
@@ -541,11 +550,16 @@ async function readRuntimeAuthorityContext(resolvedRepoRoot) {
           : undefined;
 
     return {
+      mode: "available",
+      configured: true,
       activeTaskId,
       queueCurrentTaskId
     };
   } catch {
-    return undefined;
+    return {
+      mode: "unavailable",
+      configured: true
+    };
   } finally {
     if (client) {
       try {
@@ -572,15 +586,25 @@ export async function readActiveTaskContext(options = {}) {
     continuationIntent: undefined,
     hookBlockerState: undefined,
     queueCurrentTaskId: undefined,
+    runtimeAuthority: {
+      mode: "unconfigured",
+      configured: false
+    },
     authorityMismatches: []
   };
   const runtimeContext = await readRuntimeAuthorityContext(resolvedRepoRoot);
   let activeFileTaskId;
   let activeFileState;
   let queueHasAuthoritativePointer = false;
+  let localQueueCurrentTaskId;
   let queueTaskStatusById = new Map();
 
-  if (runtimeContext) {
+  context.runtimeAuthority = {
+    mode: runtimeContext.mode,
+    configured: runtimeContext.configured
+  };
+
+  if (runtimeContext.mode === "available") {
     context.queueCurrentTaskId = runtimeContext.queueCurrentTaskId;
     context.activeTaskId =
       runtimeContext.activeTaskId ??
@@ -622,9 +646,9 @@ export async function readActiveTaskContext(options = {}) {
         queueHasAuthoritativePointer = true;
         const currentTaskId = parsed.current_task_id;
         if (typeof currentTaskId === "string" && currentTaskId.trim().length > 0) {
-          context.queueCurrentTaskId = currentTaskId.trim();
+          localQueueCurrentTaskId = currentTaskId.trim();
         } else if (currentTaskId === null) {
-          context.queueCurrentTaskId = null;
+          localQueueCurrentTaskId = null;
         }
       }
       if (Array.isArray(parsed?.tasks)) {
@@ -650,39 +674,50 @@ export async function readActiveTaskContext(options = {}) {
   }
 
   if (
-    typeof context.queueCurrentTaskId === "string" &&
-    terminalTaskStatuses.has(queueTaskStatusById.get(context.queueCurrentTaskId) ?? "")
+    typeof localQueueCurrentTaskId === "string" &&
+    terminalTaskStatuses.has(queueTaskStatusById.get(localQueueCurrentTaskId) ?? "")
   ) {
-    context.queueCurrentTaskId = null;
+    localQueueCurrentTaskId = null;
   }
 
-  if (queueHasAuthoritativePointer) {
-    if (runtimeContext === undefined) {
+  if (runtimeContext.mode === "unconfigured") {
+    context.queueCurrentTaskId = localQueueCurrentTaskId;
+    if (queueHasAuthoritativePointer) {
       context.activeTaskId =
-        typeof context.queueCurrentTaskId === "string" ? context.queueCurrentTaskId : undefined;
-    }
-  } else if (activeFileTaskId && activeFileState !== "complete" && activeFileState !== "done") {
-    if (runtimeContext === undefined) {
+        typeof localQueueCurrentTaskId === "string" ? localQueueCurrentTaskId : undefined;
+    } else if (activeFileTaskId && activeFileState !== "complete" && activeFileState !== "done") {
       context.activeTaskId = activeFileTaskId;
     }
   }
 
   if (
-    activeFileTaskId &&
-    activeFileState === "active" &&
-    queueHasAuthoritativePointer &&
-    context.queueCurrentTaskId !== undefined &&
-    activeFileTaskId !== context.queueCurrentTaskId
+    runtimeContext.mode === "unavailable" &&
+    (activeFileTaskId || localQueueCurrentTaskId !== undefined)
   ) {
     context.authorityMismatches.push({
-      kind: "active_file_conflicts_with_queue",
-      activeFileTaskId,
-      queueCurrentTaskId: context.queueCurrentTaskId
+      kind: "runtime_authority_unavailable",
+      localActiveTaskId: activeFileTaskId,
+      localQueueCurrentTaskId
     });
   }
 
   if (
-    runtimeContext &&
+    runtimeContext.mode === "unconfigured" &&
+    activeFileTaskId &&
+    activeFileState === "active" &&
+    queueHasAuthoritativePointer &&
+    localQueueCurrentTaskId !== undefined &&
+    activeFileTaskId !== localQueueCurrentTaskId
+  ) {
+    context.authorityMismatches.push({
+      kind: "active_file_conflicts_with_queue",
+      activeFileTaskId,
+      queueCurrentTaskId: localQueueCurrentTaskId
+    });
+  }
+
+  if (
+    runtimeContext.mode === "available" &&
     runtimeContext.activeTaskId !== undefined &&
     runtimeContext.queueCurrentTaskId !== undefined &&
     runtimeContext.activeTaskId !== runtimeContext.queueCurrentTaskId

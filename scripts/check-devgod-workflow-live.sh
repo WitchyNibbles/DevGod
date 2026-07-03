@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 requested_task_id=""
+runtime_authoritative_task_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -141,6 +142,110 @@ run_devgod_cli() {
   node "$cli_path" "$@"
 }
 
+runtime_authority_configured() {
+  [[ -n "${DEVGOD_CORE_DATABASE_URL:-}" && -n "${DEVGOD_WORKSPACE_SLUG:-}" && -n "${DEVGOD_PROJECT_SLUG:-}" ]] && return 0
+  [[ -f "$repo_root/.env.devgod" ]] || return 1
+
+  node --input-type=module - "$repo_root/.env.devgod" <<'EOF' >/dev/null
+import { readFileSync } from "node:fs";
+
+const dotEnv = readFileSync(process.argv[2], "utf8");
+const values = new Map();
+for (const rawLine of dotEnv.split(/\r?\n/)) {
+  const line = rawLine.trim();
+  if (!line || line.startsWith("#")) {
+    continue;
+  }
+  const separator = line.indexOf("=");
+  if (separator === -1) {
+    continue;
+  }
+  values.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+}
+
+if (
+  values.has("DEVGOD_CORE_DATABASE_URL") &&
+  values.has("DEVGOD_WORKSPACE_SLUG") &&
+  values.has("DEVGOD_PROJECT_SLUG")
+) {
+  process.exit(0);
+}
+
+process.exit(1);
+EOF
+}
+
+resolve_runtime_task_context() {
+  local cli_path="$1"
+  local status_json=""
+
+  if ! status_json="$(run_devgod_cli "$cli_path" status --run-id latest --format json 2>/dev/null)"; then
+    return 1
+  fi
+
+  node --input-type=module - "$status_json" <<'EOF'
+const payload = JSON.parse(process.argv[2]);
+const runtimeState =
+  payload?.integrity && typeof payload.integrity === "object"
+    ? payload.integrity.runtimeState
+    : undefined;
+const activeTaskId =
+  typeof runtimeState?.activeTaskId === "string" && runtimeState.activeTaskId.length > 0
+    ? runtimeState.activeTaskId
+    : "";
+const projectStatus =
+  typeof runtimeState?.projectStatus === "string" && runtimeState.projectStatus.length > 0
+    ? runtimeState.projectStatus
+    : "";
+
+process.stdout.write(
+  JSON.stringify({
+    activeTaskId,
+    projectStatus
+  })
+);
+EOF
+}
+
+devgod_cli="$(resolve_devgod_cli)"
+
+if [[ -z "$requested_task_id" ]] && runtime_authority_configured; then
+  if ! runtime_context="$(resolve_runtime_task_context "$devgod_cli")"; then
+    printf 'runtime authority is configured but live status could not be resolved; do not fall back to local ACTIVE\n' >&2
+    exit 1
+  fi
+
+  if [[ -n "$runtime_context" ]]; then
+    runtime_task_id="$(
+      node --input-type=module - "$runtime_context" <<'EOF'
+const payload = JSON.parse(process.argv[2]);
+if (typeof payload?.activeTaskId === "string" && payload.activeTaskId.length > 0) {
+  process.stdout.write(`${payload.activeTaskId}\n`);
+}
+EOF
+    )"
+    runtime_project_status="$(
+      node --input-type=module - "$runtime_context" <<'EOF'
+const payload = JSON.parse(process.argv[2]);
+if (typeof payload?.projectStatus === "string" && payload.projectStatus.length > 0) {
+  process.stdout.write(`${payload.projectStatus}\n`);
+}
+EOF
+    )"
+
+    if [[ -n "$runtime_task_id" ]]; then
+      requested_task_id="$runtime_task_id"
+      runtime_authoritative_task_id="$runtime_task_id"
+    elif [[ "$runtime_project_status" == "idle" || "$runtime_project_status" == "complete" || "$runtime_project_status" == "done" || "$runtime_project_status" == "approved" ]]; then
+      printf '%s\n' "{\"status\":\"$runtime_project_status\",\"message\":\"devgod workflow is $runtime_project_status; no active task to verify. Pass --task-id <task-id> to verify a specific task explicitly.\"}"
+      exit 0
+    else
+      printf 'runtime authority is configured but returned no active task or terminal status; do not fall back to local ACTIVE\n' >&2
+      exit 1
+    fi
+  fi
+fi
+
 if [[ -z "$requested_task_id" ]]; then
   active_file="$repo_root/.devgod/ACTIVE"
   [[ -f "$active_file" ]] || {
@@ -164,7 +269,6 @@ if [[ -z "$requested_task_id" ]]; then
   }
 fi
 
-devgod_cli="$(resolve_devgod_cli)"
 workflow_proof_json="$(
   run_devgod_cli "$devgod_cli" workflow-proof --task-id "$requested_task_id" --run-id latest --format json
 )"
@@ -208,6 +312,17 @@ if (seedFailure?.recoveryState === "stale_metadata") {
   process.exit(1);
 }
 EOF
+fi
+
+if [[ -n "$runtime_authoritative_task_id" && -f "$repo_root/.devgod/ACTIVE" ]]; then
+  local_active_task_id="$(awk -F= '$1 == "task_id" { print $2; exit }' "$repo_root/.devgod/ACTIVE")"
+  local_active_task_id="${local_active_task_id%$'\r'}"
+  if [[ -n "$local_active_task_id" && "$local_active_task_id" != "$runtime_authoritative_task_id" ]]; then
+    printf 'local ACTIVE export disagrees with runtime active task: local=%s runtime=%s\n' \
+      "$local_active_task_id" "$runtime_authoritative_task_id" >&2
+    printf 'repair local exports from runtime authority before relying on markdown workflow state\n' >&2
+    exit 1
+  fi
 fi
 
 bash "$repo_root/scripts/check-devgod-workflow.sh" --live --external-review-authority --repo-root "$repo_root" --task-id "$requested_task_id"

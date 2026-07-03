@@ -1,0 +1,67 @@
+{
+  "cycle": 1,
+  "proof_id": "progress-DG-011-company-kernel-contract",
+  "task_id": "DG-011-company-kernel-contract",
+  "phase_before": "planning",
+  "phase_after": "implementation",
+  "evidence_refs": [
+    ".devgod/work/briefs/brief-DG-011-company-kernel-contract.md",
+    ".devgod/work/tasks/task-DG-011-company-kernel-contract.md",
+    "src/domain/types.ts",
+    "src/devgod/workflow-schema.ts",
+    ".devgod/templates/workflow-schema.json",
+    "docs/devgod-agent-team.md",
+    "tests/company-kernel-contract.test.ts",
+    "tests/control-layer-contract.test.ts",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-reviewer.md",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-security_reviewer.md"
+  ],
+  "coverage_delta": {
+    "fully_analyzed": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "DG-012-phase-readiness-engine",
+  "why_next": "DG-011 completed the additive company-kernel contract; the next work is runtime consumption of that contract.",
+  "status": "complete",
+  "summary": "DG-011 adds the additive company-loop kernel contract, exported schema surface, operator-facing authority docs, review summaries, authority helpers, invariant validator, and focused happy-path plus negative-path coverage.",
+  "changed_paths": [
+    ".devgod/ACTIVE",
+    ".devgod/work/briefs/brief-DG-011-company-kernel-contract.md",
+    ".devgod/work/tasks/task-DG-011-company-kernel-contract.md",
+    ".devgod/work/task-queue.json",
+    ".devgod/work/product-state.md",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-reviewer.md",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-011-company-kernel-contract-security_reviewer.md",
+    ".devgod/work/proofs/progress-DG-011-company-kernel-contract.json",
+    "src/domain/types.ts",
+    "src/devgod/workflow-schema.ts",
+    ".devgod/templates/workflow-schema.json",
+    "docs/devgod-agent-team.md",
+    "tests/company-kernel-contract.test.ts",
+    "tests/control-layer-contract.test.ts"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/company-kernel-contract.test.ts tests/control-layer-contract.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "npm run verify:workflow-schema",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "The company-loop kernel contract is still additive; later runtime slices must consume it without weakening authority boundaries."
+  ],
+  "blocker": null,
+  "next_recommended_task": "Start DG-012-phase-readiness-engine to wire the company-loop kernel contract into runtime transition logic."
+}

@@ -1,0 +1,69 @@
+{
+  "cycle": 1,
+  "proof_id": "progress-DG-012-phase-readiness-engine",
+  "task_id": "DG-012-phase-readiness-engine",
+  "phase_before": "implementation",
+  "phase_after": "validation",
+  "evidence_refs": [
+    ".devgod/work/briefs/brief-DG-012-phase-readiness-engine.md",
+    ".devgod/work/tasks/task-DG-012-phase-readiness-engine.md",
+    "src/domain/types.ts",
+    "src/runtime/autonomous-execution.ts",
+    "src/core/service.ts",
+    "docs/devgod-agent-team.md",
+    "tests/company-kernel-contract.test.ts",
+    "tests/company-phase-readiness.test.ts",
+    "tests/service.test.ts",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-reviewer.md",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-security_reviewer.md"
+  ],
+  "coverage_delta": {
+    "validated": 1
+  },
+  "blocking_gap_delta": {
+    "closed": 1,
+    "opened": 0
+  },
+  "next_target": "DG-013-workflow-gates-and-completion-enforcement",
+  "why_next": "DG-012 made company-loop selection and readiness active in runtime state; the next work is broader workflow-gates and completion enforcement.",
+  "status": "complete",
+  "summary": "DG-012 wires additive company-loop run-profile and coverage-target selection into autonomous runtime state, defaults non-trivial work to engineering-company semantics, blocks missing selection data, enforces minimum coverage-target strength by profile, and adds focused readiness plus service regression coverage.",
+  "changed_paths": [
+    ".devgod/ACTIVE",
+    ".devgod/work/briefs/brief-DG-012-phase-readiness-engine.md",
+    ".devgod/work/tasks/task-DG-012-phase-readiness-engine.md",
+    ".devgod/work/task-queue.json",
+    ".devgod/work/product-state.md",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-reviewer.md",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-qa_engineer.md",
+    ".devgod/work/reviews/review-DG-012-phase-readiness-engine-security_reviewer.md",
+    ".devgod/work/proofs/progress-DG-012-phase-readiness-engine.json",
+    "src/domain/types.ts",
+    "src/runtime/autonomous-execution.ts",
+    "src/core/service.ts",
+    "docs/devgod-agent-team.md",
+    "tests/company-kernel-contract.test.ts",
+    "tests/company-phase-readiness.test.ts",
+    "tests/service.test.ts"
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types --test tests/company-kernel-contract.test.ts tests/company-phase-readiness.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "node --experimental-strip-types --test tests/service.test.ts tests/status-report.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "residual_risk": [
+    "Broader workflow-gates and terminal-state enforcement still remain follow-on work after this bounded readiness slice."
+  ],
+  "blocker": null,
+  "next_recommended_task": "Start the broader workflow-gates and completion-enforcement slice after DG-012."
+}
